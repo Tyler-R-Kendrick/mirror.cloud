@@ -273,6 +273,9 @@ func (e *Engine) invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		return nil, err
 	}
 	if op.Select != nil {
+		if err := ev.evalSelectLets(op); err != nil {
+			return nil, err
+		}
 		if fault := ev.checkRequires(op, true); fault != nil {
 			return nil, fault
 		}

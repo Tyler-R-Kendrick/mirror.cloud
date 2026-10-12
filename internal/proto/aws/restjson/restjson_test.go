@@ -307,6 +307,22 @@ func TestRESTJSONDecodeEncodeAndFault(t *testing.T) {
 	if w.Code != 200 || strings.Contains(w.Body.String(), `"_list"`) || !strings.Contains(w.Body.String(), `"domain":"ex.test"`) {
 		t.Fatalf("hs list encode %d %s", w.Code, w.Body.String())
 	}
+	// `_object` is the body itself, and a null is the body `null`.
+	for _, c := range []struct {
+		out  any
+		want string
+	}{
+		{map[string]any{"type": "object", "x": 1}, `{"type":"object","x":1}`},
+		{nil, `null`},
+	} {
+		w = httptest.NewRecorder()
+		if err := codec.Encode(hs, &model.Operation{Name: "GetSchema"}, w, &spi.Response{Output: map[string]any{"_object": c.out}}); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != 200 || strings.TrimSpace(w.Body.String()) != c.want {
+			t.Fatalf("open object %v: %d %q, want %q", c.out, w.Code, w.Body.String(), c.want)
+		}
+	}
 	w = httptest.NewRecorder()
 	if err := codec.Encode(hs, &model.Operation{Name: "CreateDomain"}, w, &spi.Response{Output: map[string]any{"domain": "ex.test", "status": "active"}}); err != nil {
 		t.Fatal(err)
@@ -508,6 +524,27 @@ func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
 		// Declared by the authored supplement (specs/vercel/api-extra.json),
 		// which the vendor's emulator serves from one handler as v7.
 		{http.MethodGet, "/v6/deployments", "GetDeploymentsV6"},
+		// Declared as alternate addresses (specs/vercel/clients.json): the
+		// versions around the document's that clients were written against.
+		// Each is named, so each is served; none is a stripped version.
+		{http.MethodPost, "/v1/projects", "CreateProject"},
+		// Client-observed (vercel CLI 63.1.2): some spell an address with no
+		// version at all, or with the old /now/ segment.
+		{http.MethodGet, "/v9/projects", "GetProjects"},
+		{http.MethodGet, "/projects/app/custom-environments", "GetProjectsByIdOrNameCustomEnvironments"},
+		{http.MethodDelete, "/projects/app", "DeleteProject"},
+		{http.MethodGet, "/teams/team_1", "GetTeam"},
+		{http.MethodGet, "/v3/now/deployments/dpl_1/events", "GetDeploymentEvents"},
+		{http.MethodPost, "/now/deployments/app-1.vercel.app/aliases", "AssignAlias"},
+		{http.MethodGet, "/v3/now/aliases", "ListAliases"},
+		{http.MethodGet, "/now/aliases/www.example.com", "GetAlias"},
+		{http.MethodDelete, "/now/aliases/als_1", "DeleteAlias"},
+		{http.MethodGet, "/v11/deployments/dpl_1/builds", "GetDeploymentBuilds"},
+		{http.MethodGet, "/v9/projects/app/env", "FilterProjectEnvs"},
+		{http.MethodGet, "/v8/projects/app/env", "FilterProjectEnvs"},
+		{http.MethodGet, "/v10/projects/app/domains", "GetProjectDomains"},
+		{http.MethodGet, "/v1/edge-config", "GetEdgeConfigs"},
+		{http.MethodGet, "/v1/global-config", "GetEdgeConfigs"},
 	} {
 		req := httptest.NewRequest(test.method, "http://api.vercel.com"+test.path, nil)
 		op, err := (Codec{}).Route(vercel, req)
@@ -515,15 +552,17 @@ func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
 			t.Fatalf("%s %s: op %v err %v, want %s", test.method, test.path, op, err, test.want)
 		}
 	}
-	// The three the pack answered at a version the document does not serve,
-	// and one arbitrary version to show the stripping is really gone. The
-	// fourth, /v6/deployments, left this list when the authored supplement
-	// declared it -- the vendor's emulator serves it, so it is served.
+	// What the pack answered at a version nothing declares, and arbitrary
+	// versions to show the stripping is really gone. /v6/deployments left this
+	// list when the authored supplement declared it, and the env and domain
+	// listings at /v9 and /v10 when the alternate addresses named them: a version
+	// is served because someone wrote it down, never because it was a version.
 	for _, test := range []struct{ method, path string }{
-		{http.MethodGet, "/v9/projects"},
-		{http.MethodGet, "/v9/projects/app/env"},
-		{http.MethodGet, "/v10/projects/app/domains"},
+		{http.MethodGet, "/v7/projects"},
+		{http.MethodGet, "/v7/projects/app/env"},
+		{http.MethodGet, "/v7/projects/app/domains"},
 		{http.MethodGet, "/v99/projects"},
+		{http.MethodGet, "/v2/edge-config"},
 	} {
 		req := httptest.NewRequest(test.method, "http://api.vercel.com"+test.path, nil)
 		op, err := (Codec{}).Route(vercel, req)
@@ -562,5 +601,44 @@ func TestStructuredPayloadStillDecodesAsAStructure(t *testing.T) {
 	}
 	if _, ok := decoded.Input["CreateApplicationRequest"].(map[string]any); !ok {
 		t.Fatalf("structured payload arrived as %T: %#v", decoded.Input["CreateApplicationRequest"], decoded.Input)
+	}
+}
+
+// TestAnObjectOrListBodyIsDecodedByWhatItIs holds the codec's half of a oneOf
+// with an array arm. Vercel's variable create takes one variable or an array of
+// them; the array lands under the payload member and the object is splatted
+// across the input as it always was, so neither form costs the other.
+func TestAnObjectOrListBodyIsDecodedByWhatItIs(t *testing.T) {
+	svc := generatedModel(t, "vercel.api")
+	op := svc.OperationByName("CreateProjectEnv")
+	if op == nil {
+		t.Fatal("vercel.api has no CreateProjectEnv")
+	}
+	decode := func(body string) map[string]any {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodPost, "/v10/projects/app/env", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		req, err := Codec{}.Decode(svc, op, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return req.Input
+	}
+
+	list := decode(`[{"key":"A","value":"1","type":"plain","target":["production"]},{"key":"B"}]`)
+	body, ok := list["body"].([]any)
+	if !ok || len(body) != 2 {
+		t.Fatalf("an array body = %#v, want the two elements under body", list)
+	}
+	if _, splat := list["key"]; splat {
+		t.Errorf("an array body was also splatted across the input: %#v", list)
+	}
+
+	one := decode(`{"key":"A","value":"1","type":"plain","target":["production"]}`)
+	if one["key"] != "A" || one["body"] != nil {
+		t.Errorf("an object body = %#v, want its members on the input", one)
+	}
+	if empty := decode(``); empty["body"] != nil {
+		t.Errorf("no body = %#v", empty)
 	}
 }

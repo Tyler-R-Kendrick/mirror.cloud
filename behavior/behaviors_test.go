@@ -3,8 +3,10 @@ package behaviors_test
 import (
 	"compress/gzip"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/behavior"
@@ -143,5 +145,39 @@ func TestEveryBundleOnDiskIsEmbedded(t *testing.T) {
 	}
 	if found != len(embedded) {
 		t.Errorf("%d bundles on disk, %d embedded", found, len(embedded))
+	}
+}
+
+// TestEveryBundleFileOnDiskIsEmbedded is the second half of the guard above,
+// for a bundle that spans files. The loader merges every YAML document under a
+// service's directory, so a file the //go:embed pattern misses does not break
+// a build or a validation: the operations in it are simply not served, and the
+// model's other operations keep answering as if it had never been written.
+func TestEveryBundleFileOnDiskIsEmbedded(t *testing.T) {
+	found := 0
+	err := filepath.WalkDir(".", func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || filepath.Ext(path) != ".yaml" {
+			return nil
+		}
+		// Bundles live at <provider>/<service>/; nothing at the top of the
+		// tree and nothing outside a service directory is one.
+		if len(strings.Split(filepath.ToSlash(path), "/")) < 3 {
+			return nil
+		}
+		found++
+		if _, err := fs.Stat(behaviors.FS(), filepath.ToSlash(path)); err != nil {
+			t.Errorf("%s is on disk but not embedded; the //go:embed pattern in behaviors.go "+
+				"covers <provider>/<service>/service.yaml and <provider>/<service>/ops/*.yaml only", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found == 0 {
+		t.Fatal("no bundle files found on disk; this test would pass vacuously")
 	}
 }

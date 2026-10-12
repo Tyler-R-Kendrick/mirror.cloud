@@ -100,22 +100,25 @@ func TestConcurrentDynamoDBTTLExpirationCountsOnce(t *testing.T) {
 	p := dynamodb.New(deps)
 	ctx := context.Background()
 	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
-	call := func(operation string, input map[string]any) *spi.Response {
+	call := func(t testing.TB, operation string, input map[string]any) *spi.Response {
+		t.Helper()
 		response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: operation, Input: input})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return response
 	}
-	call("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
-	call("UpdateTimeToLive", map[string]any{"TableName": "T", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
-	// Many gated rounds: one round rarely lines two scans up on the same item.
-	for round := range 50 {
-		call("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": strconv.Itoa(round)}, "ttl": map[string]any{"N": "-1"}}})
-		counts := make(chan int, 32)
+	putExpired := func(t testing.TB, key string) {
+		call(t, "PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": key}, "ttl": map[string]any{"N": "-1"}}})
+	}
+	// expireTogether releases `scans` ExpireItems at once and returns how many
+	// deletions they report between them.
+	expireTogether := func(t testing.TB, deps spi.Deps, scans int) int {
+		t.Helper()
+		counts := make(chan int, scans)
 		start := make(chan struct{})
 		var wg sync.WaitGroup
-		for range 32 {
+		for range scans {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -134,10 +137,36 @@ func TestConcurrentDynamoDBTTLExpirationCountsOnce(t *testing.T) {
 		for count := range counts {
 			total += count
 		}
-		if total != 1 {
-			t.Fatalf("round %d: concurrent expiration count %d", round, total)
-		}
+		return total
 	}
+	call(t, "CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
+	call(t, "UpdateTimeToLive", map[string]any{"TableName": "T", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
+
+	// The race is a scan that listed an item, lost it to another scan, and
+	// counted it anyway. That needs every scan to list before any deletes, which
+	// free-running goroutines reach in a few percent of rounds, so a test that
+	// waits for it by luck passes against a scan that has lost the recheck. The
+	// gate makes it the only possible order.
+	const scans = 4
+	if !t.Run("every scan lists the item before any deletes it", func(t *testing.T) {
+		putExpired(t, "gated")
+		gate := newListGate(t, "items:T", scans)
+		if total := expireTogether(t, gate.wrap(deps), scans); total != 1 {
+			t.Fatalf("%d scans listed one expired item before any deleted it, and between them reported %d deletions, want 1", scans, total)
+		}
+	}) {
+		return // the stress rounds below only add time to a failure already explained
+	}
+
+	// And free-running, for the interleavings the gate does not choose.
+	t.Run("free running", func(t *testing.T) {
+		for round := range 50 {
+			putExpired(t, strconv.Itoa(round))
+			if total := expireTogether(t, deps, 32); total != 1 {
+				t.Fatalf("round %d: concurrent expiration count %d", round, total)
+			}
+		}
+	})
 }
 
 func TestConcurrentDynamoDBPartiQLTransactions(t *testing.T) {

@@ -1,0 +1,94 @@
+{
+  "client": "vercel CLI 63.1.2 (node v22.22.0, linux x64)",
+  "observed": "client-observed: recorded by a proxy between the real CLI and a running emulator, walking test/vercel-clients/cli-journey.sh (the project, deploy and ls steps) from a directory holding one index.html (the CLI's agent detection off). Never compared with api.vercel.com.",
+  "steps": [
+    {
+      "name": "project add",
+      "note": "POST /v1/projects: the document declares /v11",
+      "request": {
+        "method": "POST",
+        "path": "/v1/projects",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"name\":\"cli-journey\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "name",
+          "accountId"
+        ],
+        "equals": {
+          "name": "cli-journey"
+        }
+      },
+      "capture": {
+        "projectId": "id"
+      }
+    },
+    {
+      "name": "deploy",
+      "request": {
+        "method": "POST",
+        "path": "/v13/deployments?skipAutoDetectionConfirmation=1",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json",
+          "accept": "application/json, application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"env\":{},\"build\":{\"env\":{}},\"name\":\"cli-journey\",\"project\":\"{{projectId}}\",\"meta\":{},\"target\":\"production\",\"projectSettings\":{\"sourceFilesOutsideRootDirectory\":true,\"rootDirectory\":null},\"source\":\"cli\",\"version\":2,\"files\":[{\"file\":\"index.html\",\"data\":\"PCFkb2N0eXBlIGh0bWw+PGgxPmNsaTwvaDE+Cg==\",\"encoding\":\"base64\",\"mode\":33188}]}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "url",
+          "readyState"
+        ],
+        "equals": {
+          "readyState": "QUEUED"
+        }
+      },
+      "capture": {
+        "deploymentId": "id",
+        "deploymentHost": "url"
+      }
+    },
+    {
+      "name": "ls",
+      "note": "a personal account is addressed by the user's own id as ?teamId=",
+      "request": {
+        "method": "GET",
+        "path": "/v6/deployments?limit=20&projectId={{projectId}}&teamId=usr_000000000000",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "deployments.0.uid",
+          "deployments.0.url",
+          "deployments.0.projectId"
+        ]
+      }
+    }
+  ]
+}

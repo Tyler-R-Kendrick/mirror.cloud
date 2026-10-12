@@ -1,0 +1,591 @@
+{
+  "client": "vercel CLI 63.1.2 (node v22.22.0, linux x64)",
+  "observed": "client-observed: recorded by a proxy between the real CLI and a running emulator, walking test/vercel-clients/cli-journey.sh from a directory holding one index.html (the CLI's agent detection off). Never compared with api.vercel.com.",
+  "steps": [
+    {
+      "name": "whoami",
+      "request": {
+        "method": "GET",
+        "path": "/v2/user",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "user.id",
+          "user.username"
+        ]
+      }
+    },
+    {
+      "name": "project add",
+      "note": "POST /v1/projects: the document declares /v11",
+      "request": {
+        "method": "POST",
+        "path": "/v1/projects",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"name\":\"cli-journey\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "name",
+          "accountId"
+        ],
+        "equals": {
+          "name": "cli-journey"
+        }
+      },
+      "capture": {
+        "projectId": "id"
+      }
+    },
+    {
+      "name": "link: teams",
+      "request": {
+        "method": "GET",
+        "path": "/v1/teams",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "teams"
+        ]
+      }
+    },
+    {
+      "name": "link: project by name",
+      "request": {
+        "method": "GET",
+        "path": "/v9/projects/cli-journey",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "accountId"
+        ]
+      }
+    },
+    {
+      "name": "link: project by id",
+      "request": {
+        "method": "GET",
+        "path": "/v9/projects/{{projectId}}",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "name"
+        ]
+      }
+    },
+    {
+      "name": "env add: custom environments",
+      "note": "an unversioned address",
+      "request": {
+        "method": "GET",
+        "path": "/projects/{{projectId}}/custom-environments",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "environments"
+        ]
+      }
+    },
+    {
+      "name": "env add: list",
+      "request": {
+        "method": "GET",
+        "path": "/v10/projects/{{projectId}}/env?source=vercel-cli%3Aenv%3Aadd",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "envs",
+          "pagination"
+        ]
+      }
+    },
+    {
+      "name": "env add",
+      "request": {
+        "method": "POST",
+        "path": "/v10/projects/{{projectId}}/env",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"type\":\"sensitive\",\"key\":\"API_URL\",\"value\":\"https://api.example.test\",\"target\":[\"production\"],\"visibility\":\"secret\"}"
+      },
+      "want": {
+        "status": 201,
+        "members": [
+          "created.id",
+          "created.key"
+        ],
+        "equals": {
+          "created.key": "API_URL"
+        }
+      }
+    },
+    {
+      "name": "env ls",
+      "request": {
+        "method": "GET",
+        "path": "/v10/projects/{{projectId}}/env?source=vercel-cli%3Aenv%3Als",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "envs.0.id",
+          "envs.0.key"
+        ]
+      }
+    },
+    {
+      "name": "deploy",
+      "request": {
+        "method": "POST",
+        "path": "/v13/deployments?skipAutoDetectionConfirmation=1",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json",
+          "accept": "application/json, application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"env\":{},\"build\":{\"env\":{}},\"name\":\"cli-journey\",\"project\":\"{{projectId}}\",\"meta\":{},\"target\":\"production\",\"projectSettings\":{\"sourceFilesOutsideRootDirectory\":true,\"rootDirectory\":null},\"source\":\"cli\",\"version\":2,\"files\":[{\"file\":\"index.html\",\"data\":\"PCFkb2N0eXBlIGh0bWw+PGgxPmNsaTwvaDE+Cg==\",\"encoding\":\"base64\",\"mode\":33188}]}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "url",
+          "readyState"
+        ],
+        "equals": {
+          "readyState": "QUEUED"
+        }
+      },
+      "capture": {
+        "deploymentId": "id",
+        "deploymentHost": "url"
+      }
+    },
+    {
+      "name": "deploy: events",
+      "note": "the CLI polls the build's events at /v3/now/...",
+      "request": {
+        "method": "GET",
+        "path": "/v3/now/deployments/{{deploymentId}}/events?direction=forward&follow=1&format=lines",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200
+      }
+    },
+    {
+      "name": "deploy: poll while building",
+      "advance": "1s",
+      "request": {
+        "method": "GET",
+        "path": "/v13/deployments/{{deploymentId}}",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "readyState"
+        ]
+      }
+    },
+    {
+      "name": "deploy: poll until ready",
+      "advance": "2s",
+      "request": {
+        "method": "GET",
+        "path": "/v13/deployments/{{deploymentId}}",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "equals": {
+          "readyState": "READY",
+          "aliasAssigned": "true"
+        }
+      }
+    },
+    {
+      "name": "alias set",
+      "note": "the deployment is named by its URL, host only, at an unversioned /now/ address",
+      "request": {
+        "method": "POST",
+        "path": "/now/deployments/{{deploymentHost}}/aliases",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"alias\":\"cli-journey-alias.vercel.app\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "uid",
+          "alias"
+        ],
+        "equals": {
+          "alias": "cli-journey-alias.vercel.app"
+        }
+      }
+    },
+    {
+      "name": "ls",
+      "note": "a personal account is addressed by the user's own id as ?teamId=",
+      "request": {
+        "method": "GET",
+        "path": "/v6/deployments?limit=20&projectId={{projectId}}&teamId=usr_000000000000",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "deployments.0.uid",
+          "deployments.0.url"
+        ]
+      }
+    },
+    {
+      "name": "ls: the team lookup",
+      "note": "a personal account's id is not a team; the answer is Vercel's 404 envelope and the CLI goes on",
+      "request": {
+        "method": "GET",
+        "path": "/teams/usr_000000000000?teamId=usr_000000000000",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 404,
+        "members": [
+          "error.code"
+        ]
+      }
+    },
+    {
+      "name": "project ls",
+      "note": "`vercel project ls` reads /v9/projects; the document declares /v10",
+      "request": {
+        "method": "GET",
+        "path": "/v9/projects?limit=20",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "projects.0.id",
+          "projects.0.name",
+          "pagination"
+        ]
+      }
+    },
+    {
+      "name": "alias ls",
+      "request": {
+        "method": "GET",
+        "path": "/v3/now/aliases?limit=20",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "aliases.0.alias"
+        ]
+      }
+    },
+    {
+      "name": "alias rm: look the alias up",
+      "note": "an unversioned /now/ address",
+      "request": {
+        "method": "GET",
+        "path": "/now/aliases/cli-journey-alias.vercel.app",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "uid",
+          "alias"
+        ],
+        "equals": {
+          "alias": "cli-journey-alias.vercel.app"
+        }
+      },
+      "capture": {
+        "aliasId": "uid"
+      }
+    },
+    {
+      "name": "alias rm",
+      "note": "the alias id is captured from the lookup",
+      "request": {
+        "method": "DELETE",
+        "path": "/now/aliases/{{aliasId}}",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "equals": {
+          "status": "SUCCESS"
+        }
+      }
+    },
+    {
+      "name": "inspect: deployment by URL",
+      "note": "a deployment is read by its host as well as its id",
+      "request": {
+        "method": "GET",
+        "path": "/v13/deployments/{{deploymentHost}}",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "url",
+          "readyState"
+        ],
+        "equals": {
+          "id": "{{deploymentId}}"
+        }
+      }
+    },
+    {
+      "name": "inspect: builds",
+      "note": "`vercel inspect` asks for a version 2 deployment's builds; the document does not list the address",
+      "request": {
+        "method": "GET",
+        "path": "/v11/deployments/{{deploymentId}}/builds",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "builds"
+        ]
+      }
+    },
+    {
+      "name": "remove: project by name",
+      "request": {
+        "method": "GET",
+        "path": "/v9/projects/cli-journey",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id"
+        ]
+      }
+    },
+    {
+      "name": "remove",
+      "note": "an unversioned DELETE; the CLI treats a 404 as already removed",
+      "request": {
+        "method": "DELETE",
+        "path": "/projects/{{projectId}}",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 204
+      }
+    },
+    {
+      "name": "remove: gone",
+      "request": {
+        "method": "GET",
+        "path": "/v9/projects/{{projectId}}",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 404
+      }
+    }
+  ]
+}

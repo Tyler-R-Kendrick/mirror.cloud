@@ -94,10 +94,25 @@ type Service struct {
 	// seven-service change hides the seven, and this repository has already
 	// landed a regeneration that rewrote twenty-nine models nobody was looking
 	// at.
-	Hosts      []string `json:",omitempty"`
-	Operations []Operation
-	Shapes     map[string]Shape // shape ID -> shape
-	Source     SourceRef
+	Hosts []string `json:",omitempty"`
+	// RouteAliases are alternate addresses a fragment asks for on operations
+	// another fragment declared. They are how an authored supplement says "this
+	// operation is also served at /v9/..." without restating the operation:
+	// fusion folds each into its operation's HTTP.AltURIs and clears the list,
+	// so a generated model never carries one. Omitted when empty for the reason
+	// Hosts is.
+	RouteAliases []RouteAlias `json:",omitempty"`
+	// ShapeMembers are members a fragment adds to structures another fragment
+	// declared. A vendored document is pinned bytes and a client generated from
+	// a later revision of the vendor's API may require a member the pinned one
+	// never listed (the Vercel SDK reads `duration` off every deployment);
+	// the supplement says so here, with the source that establishes it, and
+	// fusion folds each onto its shape and clears the list. Omitted when empty
+	// for the reason Hosts is.
+	ShapeMembers []ShapeMember `json:",omitempty"`
+	Operations   []Operation
+	Shapes       map[string]Shape // shape ID -> shape
+	Source       SourceRef
 }
 
 // Operation is one RPC or REST method on a Service.
@@ -121,6 +136,30 @@ type HTTPBinding struct {
 	Method string // "POST", "GET", ...
 	URI    string // e.g. "/{Bucket}/{Key+}"; "/" for RPC-style protocols
 	Code   int    // success status code
+	// AltURIs are further addresses the same operation answers at, same method,
+	// same labels. A vendor that versions its paths keeps serving the old
+	// versions of an endpoint after the document moves on, and a client written
+	// against one is not wrong: Vercel's own CLI creates projects at /v9 while
+	// the document says /v11. The canonical URI stays URI -- it is what the
+	// document declares and what generated clients send -- and these are the
+	// authored extras, each added through a RouteAlias so its source is on
+	// record. Omitted when empty so a model with none is byte-identical.
+	AltURIs []string `json:",omitempty"`
+}
+
+// RouteAlias asks for URI to be served by the operation named Operation, in the
+// service it is declared for. See Service.RouteAliases.
+type RouteAlias struct {
+	Operation string
+	URI       string
+}
+
+// ShapeMember asks for Name to be a member of the structure Shape in the
+// service it is declared for. See Service.ShapeMembers.
+type ShapeMember struct {
+	Shape  string
+	Name   string
+	Member Member
 }
 
 // Pagination describes token-based paging members.
@@ -304,6 +343,23 @@ func (s *Service) ScalarBody(shapeID string) bool {
 	return false
 }
 
+// OpenObjectBody reports whether a shape is a JSON object the document leaves
+// open: a structure that declares no members, or a map, whose keys are the
+// caller's. Vercel's Edge Config schema is the first -- the answer is whatever
+// JSON schema was uploaded -- and the remote cache's digest-to-metadata answer
+// is the second. A shape like that has nothing for an output expression to
+// name, so a bundle that answers one says that the body is the object itself.
+func (s *Service) OpenObjectBody(shapeID string) bool {
+	if s == nil {
+		return false
+	}
+	shape, ok := s.Shapes[shapeID]
+	if !ok {
+		return false
+	}
+	return shape.Kind == KindMap || (shape.Kind == KindStructure && len(shape.Members) == 0)
+}
+
 // PayloadMember names the input member an operation binds to the whole request
 // body, when that member is an opaque body rather than a structure. The second
 // result is false when the operation has no such member.
@@ -329,6 +385,29 @@ func (s *Service) PayloadMember(op *Operation) (string, bool) {
 func (s *Service) ListPayloadMember(op *Operation) (string, bool) {
 	return s.payloadMember(op, func(id string) bool {
 		return s.Shapes[id].Kind == KindList
+	})
+}
+
+// UnionListPayloadMember names the input member an operation binds to the whole
+// request body when that member is a union with an array arm: a document that
+// says "one object, or a list of them" with a oneOf. Vercel's variable create is
+// that shape -- one variable, or an array of them to make several at once.
+//
+// The union is not a list, so ListPayloadMember does not claim it, and it is not
+// a structure either, so the codec cannot just splat it: which it is depends on
+// the bytes. The codec asks here and then looks at them.
+func (s *Service) UnionListPayloadMember(op *Operation) (string, bool) {
+	return s.payloadMember(op, func(id string) bool {
+		shape, ok := s.Shapes[id]
+		if !ok || shape.Kind != KindUnion {
+			return false
+		}
+		for _, arm := range shape.Members {
+			if opt, ok := s.Shapes[arm.Shape]; ok && opt.Kind == KindList {
+				return true
+			}
+		}
+		return false
 	})
 }
 

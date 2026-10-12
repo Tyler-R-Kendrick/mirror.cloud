@@ -238,6 +238,41 @@ func (p Pattern) match(parts []string, query url.Values, bind bool) (map[string]
 	return bound, true
 }
 
+// Addresses lists every pattern an operation answers at: the URI the
+// specification declares, then the alternates a supplement added.
+func Addresses(op *model.Operation) []string {
+	if op.HTTP.URI == "" {
+		return nil
+	}
+	if len(op.HTTP.AltURIs) == 0 {
+		return []string{op.HTTP.URI}
+	}
+	return append([]string{op.HTTP.URI}, op.HTTP.AltURIs...)
+}
+
+// Bind reports the path labels a request binds against any address of op. It is
+// what a codec calls to read the labels of an operation the router already
+// chose, so a request that arrived at an alternate address binds the same way
+// as one that arrived at the canonical one.
+func Bind(op *model.Operation, escapedPath string, query url.Values) (map[string]string, bool) {
+	for _, uri := range Addresses(op) {
+		if bound, ok := Compile(uri).Match(escapedPath, query); ok {
+			return bound, true
+		}
+	}
+	return nil, false
+}
+
+// Claims reports whether any address of op matches the request path and query.
+func Claims(op *model.Operation, parts []string, query url.Values) bool {
+	for _, uri := range Addresses(op) {
+		if uri != "/" && Compile(uri).Claims(parts, query) {
+			return true
+		}
+	}
+	return false
+}
+
 // Match finds the operation a request addresses. It returns the operation, the
 // path labels it bound, and whether anything matched at all.
 //
@@ -248,6 +283,12 @@ func (p Pattern) match(parts []string, query url.Values, bind bool) (map[string]
 // then a non-greedy pattern over a greedy one. Operation name breaks a
 // remaining tie, so the choice does not depend on the order the model happens
 // to list operations in.
+//
+// An alternate address competes on the same terms as the canonical one. The
+// document's address wins a tie against another operation's alternate only by
+// the name rule, which is deliberate: a tie between two operations at one
+// address is a mistake in the supplement, and the test that measures the
+// bundle for them (TestAlternateAddressesDoNotCollide) is what reports it.
 func Match(svc *model.Service, r *http.Request) (*model.Operation, map[string]string, bool) {
 	type candidate struct {
 		op    *model.Operation
@@ -258,15 +299,17 @@ func Match(svc *model.Service, r *http.Request) (*model.Operation, map[string]st
 	query := r.URL.Query()
 	for i := range svc.Operations {
 		op := &svc.Operations[i]
-		if op.HTTP.URI == "" || !strings.EqualFold(op.HTTP.Method, r.Method) {
+		if !strings.EqualFold(op.HTTP.Method, r.Method) {
 			continue
 		}
-		p := Compile(op.HTTP.URI)
-		bound, ok := p.Match(r.URL.EscapedPath(), query)
-		if !ok {
-			continue
+		for _, uri := range Addresses(op) {
+			p := Compile(uri)
+			bound, ok := p.Match(r.URL.EscapedPath(), query)
+			if !ok {
+				continue
+			}
+			found = append(found, candidate{op: op, bound: bound, p: p})
 		}
-		found = append(found, candidate{op: op, bound: bound, p: p})
 	}
 	if len(found) == 0 {
 		return nil, nil, false

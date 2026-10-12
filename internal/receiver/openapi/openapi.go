@@ -82,6 +82,24 @@ type document struct {
 	// api-keys lifecycle, the OAuth token exchange) can only be authored.
 	// Fusion merges the two at operation level with provenance intact.
 	MirrorService string `json:"x-mirror-service"`
+	// MirrorAliases is `x-mirror-aliases`: further addresses for operations
+	// declared elsewhere -- by the vendored document this one supplements. A
+	// vendor that versions its paths keeps serving the old versions of an
+	// endpoint, and clients written against them are not wrong; the vendored
+	// document lists only the newest. Each entry names the operation, the
+	// addresses, and where the claim comes from (`source`), which the receiver
+	// requires so that an alias cannot be added without saying why. They leave
+	// as Service.RouteAliases and fusion folds them into the operations.
+	MirrorAliases []aliasEntry `json:"x-mirror-aliases"`
+	// MirrorMembers is `x-mirror-members`: members this document adds to
+	// structures declared elsewhere -- by the vendored document it
+	// supplements. A client generated from a later revision of the vendor's
+	// API can require a member the pinned document never listed, and the
+	// answer has to carry it for that client to read anything. Each entry
+	// names the shape, the members (as JSON schemas) and the source that
+	// establishes the claim, which is required for the reason an alias's is.
+	// They leave as Service.ShapeMembers and fusion folds them onto the shapes.
+	MirrorMembers []memberEntry `json:"x-mirror-members"`
 	Servers       []struct {
 		URL string `json:"url"`
 	} `json:"servers"`
@@ -118,6 +136,23 @@ type requestBodyObject struct {
 type responseObject struct {
 	Ref     string               `json:"$ref"`
 	Content map[string]mediaType `json:"content"`
+}
+
+// aliasEntry is one element of `x-mirror-aliases`.
+type aliasEntry struct {
+	Operation string   `json:"operation"`
+	URIs      []string `json:"uris"`
+	// Source says what establishes the claim: a client observed calling it, a
+	// vendor changelog. Required, because the alias is the one place the model
+	// is wider than the document and the width has to be accounted for.
+	Source string `json:"source"`
+}
+
+// memberEntry is one element of `x-mirror-members`.
+type memberEntry struct {
+	Shape   string            `json:"shape"`
+	Members map[string]schema `json:"members"`
+	Source  string            `json:"source"`
 }
 
 type operation struct {
@@ -336,6 +371,27 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 					Source:     src,
 				})
 			}
+		}
+	}
+	for i, a := range doc.MirrorAliases {
+		if a.Operation == "" || len(a.URIs) == 0 || strings.TrimSpace(a.Source) == "" {
+			return nil, fmt.Errorf("openapi: %s: x-mirror-aliases[%d] needs an operation, uris and a source", src.Path, i)
+		}
+		for _, uri := range a.URIs {
+			svc.RouteAliases = append(svc.RouteAliases, model.RouteAlias{Operation: a.Operation, URI: base + templated(uri)})
+		}
+	}
+	for i, m := range doc.MirrorMembers {
+		if m.Shape == "" || len(m.Members) == 0 || strings.TrimSpace(m.Source) == "" {
+			return nil, fmt.Errorf("openapi: %s: x-mirror-members[%d] needs a shape, members and a source", src.Path, i)
+		}
+		for _, name := range sortedKeys(m.Members) {
+			sch := m.Members[name]
+			svc.ShapeMembers = append(svc.ShapeMembers, model.ShapeMember{
+				Shape:  m.Shape,
+				Name:   name,
+				Member: model.Member{Shape: sh.resolve("Supplement."+m.Shape+"."+name, sch), Doc: sch.Description},
+			})
 		}
 	}
 	// Paths are walked in name order and methods in a fixed order, so the same

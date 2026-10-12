@@ -1,0 +1,391 @@
+schema: bir/1
+service: vercel.api
+
+# Edge Config: a small key-value store an application reads at the edge, and the
+# control plane that creates it, fills it and hands out the tokens that read it.
+#
+# The vendored document spells the routes /v1/global-config, which is what the
+# product was called; the API a client calls is /v1/edge-config (the document's
+# own descriptions say so). Both address the one store (specs/vercel/clients.json).
+#
+# Only the control plane is here. The data plane a running application reads
+# through, edge-config.vercel.com with a token, is another host and another
+# product, and is not served.
+#
+# What is not exact, so nobody has to find out: the digest is a hash of the
+# config's id and a revision that moves with every change to its items, not of the
+# items themselves; the sizes are the length of each value's JSON; the error codes
+# on a rejected change are this bundle's, as the document names the statuses and
+# not the codes; and a config's schema is stored and returned, never enforced
+# against its items.
+
+resources:
+  edge_config:
+    collection: vedgecfg
+    key: id
+    id:
+      input_members: [edgeConfigId]
+    record:
+      id: id
+
+  # Parent-scoped: each config's items are their own collection, keyed by the
+  # item's key.
+  edge_config_item:
+    collection: "vecitem:{edge_config.id}"
+    parent: edge_config
+    id:
+      derive: "('edgeConfigItemKey' in input && input.edgeConfigItemKey != null) ? string(input.edgeConfigItemKey) : ''"
+
+  # Keyed by the token itself, which is how a token is looked up; its id is what a
+  # list shows and a delete may name instead.
+  edge_config_token:
+    collection: "vectok:{edge_config.id}"
+    parent: edge_config
+    id:
+      derive: "('token' in input && input.token != null) ? string(input.token) : ''"
+
+operations:
+  GetEdgeConfigs:
+    list:
+      resource: edge_config
+      member: _list
+    output:
+      _list: >
+        sortBy(items, 'seq', true).map(c, {
+          'id': c.id, 'slug': c.slug, 'ownerId': c.ownerId, 'createdBy': c.createdBy,
+          'createdAt': c.createdAt, 'updatedAt': c.updatedAt,
+          'digest': sha256hex(string(c.id) + ':' + string(c.rev)),
+          'itemCount': c.itemCount, 'sizeInBytes': c.sizeInBytes})
+
+  CreateEdgeConfig:
+    let:
+      userId: "'usr_' + (identity.project != '' ? identity.project : identity.account)"
+      slug: "('slug' in input && input.slug != null) ? string(input.slug) : ''"
+      # The items the config starts with, one entry per key.
+      seed: "('items' in input && input.items != null) ? input.items.map(k, {'key': string(k), 'value': input.items[k]}) : []"
+      bytes: "sum(seed.map(e, blen(toJSON(e.value))))"
+    require:
+      - cond: "slug.matches('^[A-Za-z][A-Za-z0-9_-]{0,63}$')"
+        error: BadRequest
+        message: "The slug must start with a letter and contain only letters, numbers, hyphens and underscores"
+      - { cond: "seed.all(e, e.key.matches('^[A-Za-z0-9_-]{1,256}$'))", error: BadRequest, message: "An item key may contain only letters, numbers, hyphens and underscores" }
+    effects:
+      - generate: { bind: cid, kind: hex, bytes: 32 }
+      - put:
+          resource: edge_config
+          key: "'ecfg_' + fx.cid"
+          record:
+            id: "'ecfg_' + fx.cid"
+            slug: "slug"
+            ownerId: "identity.account != identity.project ? identity.account : userId"
+            createdBy: "userId"
+            createdAt: "now_ms"
+            updatedAt: "now_ms"
+            rev: "1"
+            itemCount: "size(seed)"
+            sizeInBytes: "bytes"
+            seq: { counter: "vedgecfg" }
+      - put:
+          resource: edge_config_item
+          for_each: seed
+          key: "string(item.key)"
+          record:
+            key: "string(item.key)"
+            value: "item.value"
+            description: "''"
+            edgeConfigId: "'ecfg_' + fx.cid"
+            size: "blen(toJSON(item.value))"
+            createdAt: "now_ms"
+            updatedAt: "now_ms"
+            seq: { counter: "vecitem" }
+      # Last, so the answer is the config: every write rebinds `rec`.
+      - patch:
+          resource: edge_config
+          key: "'ecfg_' + fx.cid"
+          record:
+            id: id
+            updatedAt: "now_ms"
+    output: &edge_config
+      id: rec.id
+      slug: rec.slug
+      ownerId: rec.ownerId
+      createdBy: rec.createdBy
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+      digest: "sha256hex(string(rec.id) + ':' + string(rec.rev))"
+      itemCount: rec.itemCount
+      sizeInBytes: rec.sizeInBytes
+
+  GetEdgeConfig:
+    reads:
+      rec: { resource: edge_config }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Edge Config not found" }
+    output: *edge_config
+
+  UpdateEdgeConfig:
+    reads:
+      cfg: { resource: edge_config }
+    require:
+      - { cond: cfg_found, error: NotFound, message: "Edge Config not found" }
+      - cond: "'slug' in input && input.slug != null && string(input.slug).matches('^[A-Za-z][A-Za-z0-9_-]{0,63}$')"
+        error: BadRequest
+        message: "The slug must start with a letter and contain only letters, numbers, hyphens and underscores"
+    effects:
+      - patch:
+          resource: edge_config
+          record:
+            id: id
+            slug: "string(input.slug)"
+            updatedAt: "now_ms"
+    output: *edge_config
+
+  DeleteEdgeConfig:
+    reads:
+      cfg: { resource: edge_config }
+    require:
+      - { cond: cfg_found, error: NotFound, message: "Edge Config not found" }
+    effects:
+      - delete: { resource: edge_config_item, where: "true" }
+      - delete: { resource: edge_config_token, where: "true" }
+      - delete: { resource: edge_config }
+
+  # --- Items ---------------------------------------------------------------
+
+  GetEdgeConfigItems:
+    reads:
+      cfg: { resource: edge_config }
+    require:
+      - { cond: cfg_found, error: NotFound, message: "Edge Config not found" }
+    list:
+      resource: edge_config_item
+      member: _list
+    output:
+      _list: >
+        sortBy(items, 'seq', false).map(i, merge({
+          'key': i.key, 'value': i.value, 'edgeConfigId': i.edgeConfigId,
+          'createdAt': i.createdAt, 'updatedAt': i.updatedAt},
+          i.description != '' ? {'description': i.description} : {}))
+
+  GetEdgeConfigItem:
+    reads:
+      cfg: { resource: edge_config }
+      rec: { resource: edge_config_item }
+    require:
+      - { cond: cfg_found, error: NotFound, message: "Edge Config not found" }
+      - { cond: rec_found, error: NotFound, message: "Edge Config item not found" }
+    output:
+      key: rec.key
+      value: rec.value
+      description: "rec.description != '' ? dyn(rec.description) : null"
+      edgeConfigId: rec.edgeConfigId
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+    omit_null: [description]
+
+  # A change is all or nothing: a request with one operation that cannot apply
+  # changes nothing, and says which. The operations apply to the items as they
+  # stand when the request arrives, so a key may appear once.
+  PatchEdgeConfigItems:
+    reads:
+      cfg: { resource: edge_config }
+    select:
+      binding: existing
+      resource: edge_config_item
+    let:
+      ops: "('items' in input && input.items != null) ? input.items : []"
+      # Everything from here reads the items that exist, so it waits for them.
+      keys: "existing.map(e, e.key)"
+      newOps: "ops.filter(o, (o.operation == 'create' || o.operation == 'upsert') && !(o.key in keys))"
+      updOps: "ops.filter(o, o.operation == 'update' || (o.operation == 'upsert' && o.key in keys))"
+      updKeys: "updOps.map(o, o.key)"
+      delKeys: "ops.filter(o, o.operation == 'delete').map(o, o.key)"
+      clash: "ops.filter(o, o.operation == 'create' && o.key in keys)"
+      missing: "ops.filter(o, (o.operation == 'update' || o.operation == 'delete') && !(o.key in keys))"
+      survivors: "existing.filter(e, !(e.key in delKeys) && !(e.key in updKeys))"
+      count: "size(survivors) + size(updOps) + size(newOps)"
+      bytes: >
+        sum(survivors.map(e, e.size))
+          + sum(updOps.map(o, 'value' in o ? blen(toJSON(o.value)) : (existing.exists(e, e.key == o.key) ? existing.filter(e, e.key == o.key)[0].size : 0)))
+          + sum(newOps.map(o, 'value' in o ? blen(toJSON(o.value)) : 4))
+    require:
+      - { cond: cfg_found, error: NotFound, message: "Edge Config not found" }
+      - { cond: "size(ops) > 0", error: BadRequest, message: "items must name at least one change" }
+      - { cond: "ops.all(o, 'operation' in o && o.operation in ['create', 'update', 'upsert', 'delete'])", error: BadRequest, message: "operation must be create, update, upsert or delete" }
+      - { cond: "ops.all(o, 'key' in o && o.key != null && string(o.key).matches('^[A-Za-z0-9_-]{1,256}$'))", error: BadRequest, message: "An item key may contain only letters, numbers, hyphens and underscores, up to 256" }
+      - { cond: "ops.all(o, o.operation == 'delete' || (o.operation == 'create' ? 'value' in o : ('value' in o || 'description' in o)))", error: BadRequest, message: "An item needs a value (or, to update it, a description)" }
+      - { cond: "ops.all(o, !('description' in o) || o.description == null || size(string(o.description)) <= 512)", error: BadRequest, message: "A description may be up to 512 characters" }
+      - { cond: "ops.all(o, size(ops.filter(p, p.key == o.key)) == 1)", error: BadRequest, message: "A key may appear once in a request" }
+      - cond: "size(clash) == 0"
+        error: Conflict
+        message_expr: "'Edge Config item `' + string(clash[0].key) + '` already exists'"
+      - cond: "size(missing) == 0"
+        error: NotFound
+        message_expr: "'Edge Config item `' + string(missing[0].key) + '` was not found'"
+    effects:
+      - put:
+          resource: edge_config_item
+          for_each: newOps
+          key: "string(item.key)"
+          record:
+            key: "string(item.key)"
+            value: "('value' in item) ? item.value : null"
+            description: "('description' in item && item.description != null) ? string(item.description) : ''"
+            edgeConfigId: "string(cfg.id)"
+            size: "('value' in item) ? blen(toJSON(item.value)) : 4"
+            createdAt: "now_ms"
+            updatedAt: "now_ms"
+            seq: { counter: "vecitem" }
+      - patch:
+          resource: edge_config_item
+          for_each: updOps
+          key: "string(item.key)"
+          record:
+            updatedAt: "now_ms"
+      - patch:
+          resource: edge_config_item
+          for_each: updOps
+          when: "'value' in item"
+          key: "string(item.key)"
+          record:
+            value: "item.value"
+            size: "blen(toJSON(item.value))"
+      - patch:
+          resource: edge_config_item
+          for_each: updOps
+          when: "'description' in item"
+          key: "string(item.key)"
+          record:
+            description: "item.description == null ? '' : string(item.description)"
+      - delete:
+          resource: edge_config_item
+          where: "item.key in delKeys"
+      # Last, so `rec` is the config.
+      - patch:
+          resource: edge_config
+          key: "string(cfg.id)"
+          record:
+            id: id
+            updatedAt: "now_ms"
+            rev: "int(cfg.rev) + 1"
+            itemCount: "count"
+            sizeInBytes: "bytes"
+    output:
+      status: "'ok'"
+
+  # --- Schema --------------------------------------------------------------
+
+  GetEdgeConfigSchema:
+    reads:
+      rec: { resource: edge_config }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Edge Config not found" }
+    output:
+      # The body is the schema itself, or null while there is none.
+      _object: "('schemaDefinition' in rec) ? rec.schemaDefinition : null"
+
+  PatchEdgeConfigSchema:
+    reads:
+      cfg: { resource: edge_config }
+    require:
+      - { cond: cfg_found, error: NotFound, message: "Edge Config not found" }
+      - { cond: "'definition' in input && input.definition != null && type(input.definition) == map", error: BadRequest, message: "definition must be a JSON schema object" }
+    effects:
+      - patch:
+          resource: edge_config
+          key: "string(cfg.id)"
+          record:
+            id: id
+            schemaDefinition: "input.definition"
+    output:
+      _object: rec.schemaDefinition
+
+  DeleteEdgeConfigSchema:
+    reads:
+      cfg: { resource: edge_config }
+    require:
+      - { cond: cfg_found, error: NotFound, message: "Edge Config not found" }
+    effects:
+      - patch:
+          resource: edge_config
+          key: "string(cfg.id)"
+          record:
+            id: id
+            schemaDefinition: "null"
+
+  # --- Tokens --------------------------------------------------------------
+
+  CreateEdgeConfigToken:
+    reads:
+      cfg: { resource: edge_config }
+    let:
+      label: "('label' in input && input.label != null) ? string(input.label) : ''"
+    require:
+      - { cond: cfg_found, error: NotFound, message: "Edge Config not found" }
+      - { cond: "label != '' && size(label) <= 52", error: BadRequest, message: "A token label is required, up to 52 characters" }
+    effects:
+      # Two draws: the token a client reads with, and the id it is managed by.
+      - generate: { bind: tk, kind: hex, bytes: 32 }
+      - generate: { bind: tid, kind: hex, bytes: 32 }
+      - put:
+          resource: edge_config_token
+          key: >
+            substr(fx.tk, 0, 8) + '-' + substr(fx.tk, 8, 12) + '-' + substr(fx.tk, 12, 16) + '-' + substr(fx.tk, 16, 20) + '-' + substr(fx.tk, 20, 32)
+          record:
+            token: >
+              substr(fx.tk, 0, 8) + '-' + substr(fx.tk, 8, 12) + '-' + substr(fx.tk, 12, 16) + '-' + substr(fx.tk, 16, 20) + '-' + substr(fx.tk, 20, 32)
+            id: >
+              substr(fx.tid, 0, 8) + '-' + substr(fx.tid, 8, 12) + '-' + substr(fx.tid, 12, 16) + '-' + substr(fx.tid, 16, 20) + '-' + substr(fx.tid, 20, 32)
+            label: "label"
+            edgeConfigId: "string(cfg.id)"
+            createdAt: "now_ms"
+            seq: { counter: "vectok" }
+    output:
+      token: rec.token
+      id: rec.id
+
+  GetEdgeConfigTokens:
+    reads:
+      cfg: { resource: edge_config }
+    require:
+      - { cond: cfg_found, error: NotFound, message: "Edge Config not found" }
+    list:
+      resource: edge_config_token
+      member: _list
+    output:
+      # The full token is shown once, at creation; a listing shows the masked form.
+      _list: >
+        sortBy(items, 'seq', false).map(t, {
+          'partialToken': substr(t.token, 0, 3) + '********', 'label': t.label, 'id': t.id,
+          'edgeConfigId': t.edgeConfigId, 'createdAt': t.createdAt})
+
+  GetEdgeConfigToken:
+    reads:
+      cfg: { resource: edge_config }
+      rec: { resource: edge_config_token }
+    require:
+      - { cond: cfg_found, error: NotFound, message: "Edge Config not found" }
+      - { cond: rec_found, error: NotFound, message: "Edge Config token not found" }
+    output:
+      partialToken: "substr(rec.token, 0, 3) + '********'"
+      label: rec.label
+      id: rec.id
+      edgeConfigId: rec.edgeConfigId
+      createdAt: rec.createdAt
+      # Deprecated by the document and still returned by this route.
+      token: rec.token
+
+  # Tokens go by the token itself or by its id; either list may be sent.
+  DeleteEdgeConfigTokens:
+    reads:
+      cfg: { resource: edge_config }
+    let:
+      tokens: "('tokens' in input && input.tokens != null) ? input.tokens : []"
+      ids: "('ids' in input && input.ids != null) ? input.ids : []"
+    require:
+      - { cond: cfg_found, error: NotFound, message: "Edge Config not found" }
+      - { cond: "size(tokens) + size(ids) > 0", error: BadRequest, message: "tokens or ids is required" }
+    effects:
+      - delete:
+          resource: edge_config_token
+          where: "item.token in tokens || item.id in ids"

@@ -43,6 +43,9 @@ type Server struct {
 	mocks     map[string]*mock.Pack
 	version   string
 	advertise string
+
+	// vercelLimit is the rate limit the Vercel control route arms.
+	vercelLimit vercelLimiter
 }
 
 // New constructs a server.
@@ -107,7 +110,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Expect") == "100-continue" {
 		w.WriteHeader(http.StatusContinue)
 	}
-	if strings.HasPrefix(r.URL.Path, "/_mirror/") {
+	if strings.HasPrefix(r.URL.Path, "/_mirror/") && !s.vercelControlOperation(r) {
 		s.diag(w, r)
 		return
 	}
@@ -164,6 +167,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	id := identity.Parse(r, s.cfg.DefaultAccount, s.cfg.DefaultRegion, s.deps.Clock.Now())
+	if svc != nil && svc.ID == vercelService && s.vercelPrologue(w, r, &id, svc, rid) {
+		return
+	}
 	if identity.Expired(id) {
 		if svc != nil && svc.ID == "aws.s3" {
 			fields := map[string]any{"ServerTime": s.deps.Clock.Now().UTC().Format(time.RFC3339)}
@@ -448,7 +454,11 @@ func (s *Server) demux(r *http.Request) *model.Service {
 	// must not ParseForm — that consumes the object body.
 	s3PUT := r.Method == http.MethodPut && r.Header.Get("X-Amz-Target") == ""
 	gcsBody := strings.Contains(r.URL.Path, "/storage/") || strings.Contains(r.URL.Path, "/upload/")
-	if !s3PUT && !gcsBody && !chunked && strings.Contains(ct, "application/x-www-form-urlencoded") {
+	// A file Vercel is being sent names itself by digest, and its body is the
+	// file whatever Content-Type the client put on it: curl --data-binary says
+	// form-urlencoded, and parsing that would eat the upload.
+	vercelFile := r.Header.Get("x-vercel-digest") != ""
+	if !s3PUT && !gcsBody && !vercelFile && !chunked && strings.Contains(ct, "application/x-www-form-urlencoded") {
 		_ = r.ParseForm()
 	}
 	action := r.URL.Query().Get("Action")
@@ -667,6 +677,8 @@ func (s *Server) diag(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(204)
+	case s.cfg.VercelFaults && r.URL.Path == vercelControlPrefix+"rate-limit":
+		s.vercelRateLimit(w, r)
 	case r.URL.Path == "/_mirror/reset" && r.Method == http.MethodPost:
 		_ = s.deps.Store.Close()
 		w.WriteHeader(204)

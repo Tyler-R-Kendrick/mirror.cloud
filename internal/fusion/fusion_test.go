@@ -34,3 +34,114 @@ func TestFusePrecedence(t *testing.T) {
 		t.Fatalf("want verified, got %s", ping.Confidence)
 	}
 }
+
+func TestFuseFoldsRouteAliasesOntoTheirOperations(t *testing.T) {
+	doc := []model.Service{{
+		ID: "vendor.api",
+		Operations: []model.Operation{
+			{Name: "CreateThing", Confidence: model.ConfDeclared, HTTP: model.HTTPBinding{Method: "POST", URI: "/v11/things"}},
+			{Name: "GetThing", Confidence: model.ConfDeclared, HTTP: model.HTTPBinding{Method: "GET", URI: "/v9/things/{idOrName}"}},
+		},
+	}}
+	extra := func(aliases ...model.RouteAlias) []model.Service {
+		return []model.Service{{ID: "vendor.api", RouteAliases: aliases}}
+	}
+	fuse := func(in ...[]model.Service) (model.Bundle, error) {
+		b, _, err := Fuse(context.Background(), model.Provider("vendor"), in)
+		return b, err
+	}
+
+	// The supplement may come first or last, and the operation keeps the
+	// document's address as its own.
+	for _, order := range [][]int{{0, 1}, {1, 0}} {
+		parts := [][]model.Service{doc, extra(
+			model.RouteAlias{Operation: "CreateThing", URI: "/v9/things"},
+			model.RouteAlias{Operation: "CreateThing", URI: "/v10/things"},
+			model.RouteAlias{Operation: "GetThing", URI: "/v9/things/{idOrName}"}, // the document's own address, repeated
+		)}
+		b, err := fuse(parts[order[0]], parts[order[1]])
+		if err != nil {
+			t.Fatal(err)
+		}
+		svc := b.Services[0]
+		if svc.RouteAliases != nil {
+			t.Fatalf("aliases survived fusion: %v", svc.RouteAliases)
+		}
+		got := svc.OperationByName("CreateThing").HTTP
+		if got.URI != "/v11/things" || len(got.AltURIs) != 2 || got.AltURIs[0] != "/v10/things" || got.AltURIs[1] != "/v9/things" {
+			t.Fatalf("CreateThing bound as %+v", got)
+		}
+		if alts := svc.OperationByName("GetThing").HTTP.AltURIs; len(alts) != 0 {
+			t.Fatalf("an alias repeating the document's address was recorded: %v", alts)
+		}
+	}
+
+	if _, err := fuse(doc, extra(model.RouteAlias{Operation: "NoSuchOp", URI: "/v9/x"})); err == nil {
+		t.Error("an alias naming no operation was accepted")
+	}
+	// Two operations at one address is a guess the router would make by name.
+	if _, err := fuse(doc, extra(model.RouteAlias{Operation: "CreateThing", URI: "/v11/things"}, model.RouteAlias{Operation: "GetThing", URI: "/v11/things"})); err != nil {
+		t.Errorf("same address, different methods is not a collision: %v", err)
+	}
+	collide := [][]model.Service{{{
+		ID: "vendor.api",
+		Operations: []model.Operation{
+			{Name: "A", Confidence: model.ConfDeclared, HTTP: model.HTTPBinding{Method: "GET", URI: "/v1/x/{a}"}},
+			{Name: "B", Confidence: model.ConfDeclared, HTTP: model.HTTPBinding{Method: "GET", URI: "/v2/x/{b}"}},
+		},
+	}}, extra(model.RouteAlias{Operation: "B", URI: "/v1/x/{b}"})}
+	if _, err := fuse(collide...); err == nil {
+		t.Error("an alias landing on another operation's address was accepted")
+	}
+}
+
+func TestFuseFoldsShapeMembersOntoTheirShapes(t *testing.T) {
+	doc := []model.Service{{
+		ID: "vendor.api",
+		Shapes: map[string]model.Shape{
+			"Thing":       {ID: "Thing", Kind: model.KindStructure, Members: map[string]model.Member{"id": {Shape: "String"}}},
+			"Either":      {ID: "Either", Kind: model.KindUnion, Members: map[string]model.Member{"option0": {Shape: "Thing"}}},
+			"String":      {ID: "String", Kind: model.KindString},
+			"Scalar":      {ID: "Scalar", Kind: model.KindString},
+			"ThingTiming": {ID: "ThingTiming", Kind: model.KindStructure},
+		},
+	}}
+	extra := func(members ...model.ShapeMember) []model.Service {
+		return []model.Service{{ID: "vendor.api", ShapeMembers: members}}
+	}
+	fuse := func(parts ...[]model.Service) (model.Bundle, error) {
+		b, _, err := Fuse(context.Background(), model.ProviderAWS, parts)
+		return b, err
+	}
+
+	for _, order := range [][2]int{{0, 1}, {1, 0}} {
+		parts := [][]model.Service{doc, extra(model.ShapeMember{Shape: "Thing", Name: "duration", Member: model.Member{Shape: "ThingTiming"}})}
+		b, err := fuse(parts[order[0]], parts[order[1]])
+		if err != nil {
+			t.Fatal(err)
+		}
+		svc := b.Services[0]
+		if svc.ShapeMembers != nil {
+			t.Fatalf("members survived fusion: %v", svc.ShapeMembers)
+		}
+		got := svc.Shapes["Thing"].Members
+		if len(got) != 2 || got["duration"].Shape != "ThingTiming" || got["id"].Shape != "String" {
+			t.Fatalf("Thing has %+v", got)
+		}
+	}
+
+	// A union's variants are structures of their own; the union itself may
+	// not be told it has a member the variants lack.
+	if _, err := fuse(doc, extra(model.ShapeMember{Shape: "NoSuchShape", Name: "x", Member: model.Member{Shape: "String"}})); err == nil {
+		t.Error("a member for a shape nobody declares was accepted")
+	}
+	if _, err := fuse(doc, extra(model.ShapeMember{Shape: "String", Name: "x", Member: model.Member{Shape: "String"}})); err == nil {
+		t.Error("a member for a shape that is not a structure was accepted")
+	}
+	if _, err := fuse(doc, extra(model.ShapeMember{Shape: "Thing", Name: "id", Member: model.Member{Shape: "Scalar"}})); err == nil {
+		t.Error("a member the shape already declares was accepted")
+	}
+	if _, err := fuse(doc, extra(model.ShapeMember{Shape: "Thing", Name: "x", Member: model.Member{Shape: "NoSuchShape"}})); err == nil {
+		t.Error("a member of a shape nobody declares was accepted")
+	}
+}

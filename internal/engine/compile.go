@@ -2,6 +2,7 @@ package engine
 
 import (
 	"crypto/md5"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -129,6 +130,12 @@ func runtimeFuncs() []cel.EnvOption {
 		cel.Function("md5hex", cel.Overload("md5hex_1", []*cel.Type{str}, str,
 			cel.UnaryBinding(func(v ref.Val) ref.Val {
 				sum := md5.Sum([]byte(fmt.Sprint(v.Value())))
+				return types.String(hex.EncodeToString(sum[:]))
+			}))),
+
+		cel.Function("sha1hex", cel.Overload("sha1hex_1", []*cel.Type{str}, str,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				sum := sha1.Sum([]byte(fmt.Sprint(v.Value())))
 				return types.String(hex.EncodeToString(sum[:]))
 			}))),
 
@@ -299,6 +306,20 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 
+		// compact drops the members whose value is null. See the declaration in
+		// internal/bir/celenv.go for why a record stores a null at all.
+		cel.Function("compact", cel.Overload("compact_1", []*cel.Type{dyn}, dyn,
+			cel.UnaryBinding(func(m ref.Val) ref.Val {
+				src, _ := fromCEL(m).(map[string]any)
+				out := map[string]any{}
+				for k, v := range src {
+					if v != nil {
+						out[k] = v
+					}
+				}
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+
 		// merge layers maps left to right, which is how a service states
 		// "defaults, then what was stored, then what was set".
 		cel.Function("merge", cel.Overload("merge_2", []*cel.Type{dyn, dyn}, dyn,
@@ -411,6 +432,31 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.DefaultTypeAdapter.NativeToValue(append(out, list[start:end]...))
 			}))),
 
+		// sortBy orders records by one member: numbers numerically, everything
+		// else by its text, and a record without the member after every record
+		// with it. The sort is stable, so records that tie keep the order the
+		// store listed them in, which is what keeps an answer reproducible.
+		cel.Function("sortBy", cel.Overload("sortBy_3", []*cel.Type{dyn, str, cel.BoolType}, dyn,
+			cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+				list, _ := fromCEL(args[0]).([]any)
+				key := fmt.Sprint(args[1].Value())
+				desc, _ := args[2].Value().(bool)
+				out := append([]any(nil), list...)
+				sort.SliceStable(out, func(i, j int) bool {
+					a, aok := sortKey(out[i], key)
+					b, bok := sortKey(out[j], key)
+					switch {
+					case !aok || !bok:
+						return aok && !bok
+					case desc:
+						return lessSortKey(b, a)
+					default:
+						return lessSortKey(a, b)
+					}
+				})
+				return types.DefaultTypeAdapter.NativeToValue(out)
+			}))),
+
 		cel.Function("lastSegment", cel.Overload("lastSegment_2", []*cel.Type{str, str}, str,
 			cel.BinaryBinding(func(s, sep ref.Val) ref.Val {
 				parts := strings.Split(fmt.Sprint(s.Value()), fmt.Sprint(sep.Value()))
@@ -422,6 +468,13 @@ func runtimeFuncs() []cel.EnvOption {
 		cel.Function("lower", cel.Overload("lower_1", []*cel.Type{str}, str,
 			cel.UnaryBinding(func(s ref.Val) ref.Val {
 				return types.String(asciiLower(fmt.Sprint(s.Value())))
+			}))),
+
+		// apexOf answers the registrable part of a hostname. See the
+		// declaration in internal/bir/celenv.go and apex.go for its limits.
+		cel.Function("apexOf", cel.Overload("apexOf_1", []*cel.Type{str}, str,
+			cel.UnaryBinding(func(s ref.Val) ref.Val {
+				return types.String(apexOf(fmt.Sprint(s.Value())))
 			}))),
 
 		// upper is the same fold the other way. See the declaration in
@@ -865,4 +918,27 @@ func asciiLower(s string) string {
 		}
 	}
 	return string(out)
+}
+
+// sortKey reads the member sortBy orders a record by.
+func sortKey(rec any, key string) (any, bool) {
+	m, ok := rec.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return nil, false
+	}
+	return v, true
+}
+
+// lessSortKey orders two members: both numbers numerically, otherwise by text.
+func lessSortKey(a, b any) bool {
+	if x, ok := toFloat(a); ok {
+		if y, ok := toFloat(b); ok {
+			return x < y
+		}
+	}
+	return fmt.Sprint(a) < fmt.Sprint(b)
 }

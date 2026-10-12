@@ -50,7 +50,7 @@ S3 terraform refresh reads (`GetBucketAcl`, CORS, encryption, …) return the em
 
 Hosted bind (`--bind 0.0.0.0:4566`) prints a banner: there is no authentication; do not expose the process to untrusted networks.
 
-See [docs/SUPPORT.md](docs/SUPPORT.md) (generated; do not hand-edit), [docs/DAY2.md](docs/DAY2.md), [docs/EXTENDING.md](docs/EXTENDING.md).
+See [docs/SUPPORT.md](docs/SUPPORT.md) (generated; do not hand-edit), [docs/DAY2.md](docs/DAY2.md), [docs/EXTENDING.md](docs/EXTENDING.md), and for deploying through the Vercel API, [docs/VERCEL.md](docs/VERCEL.md).
 
 ## Documents
 

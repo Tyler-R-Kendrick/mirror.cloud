@@ -24,7 +24,14 @@ import (
 // absent directory is indistinguishable from a provider with no bundles.
 // TestEveryBundleOnDiskIsEmbedded is the guard.
 //
-//go:embed */*/service.yaml
+// A bundle is service.yaml and, once it outgrows one file, the operation rules
+// in ops/*.yaml beside it (docs/BEHAVIOR_IR.md §3). The loader merges every
+// document under the directory, so splitting a bundle changes nothing about how
+// it is served; TestEveryBundleFileOnDiskIsEmbedded is the guard for the
+// second half of the pattern, because a file the pattern misses is not a build
+// error either.
+//
+//go:embed */*/service.yaml */*/ops/*.yaml
 var files embed.FS
 
 // FS exposes the embedded bundles for tools that want to walk them.

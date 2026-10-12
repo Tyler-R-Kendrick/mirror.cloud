@@ -36,6 +36,26 @@ func (s *Seeded) next() []byte {
 	return sum[:]
 }
 
+// Position is how many blocks of the stream have been drawn. A process that
+// restarts from a snapshot resumes here, because starting over would draw the
+// identifiers it already handed out: the stream is a function of the seed and
+// the count, so two runs of one seed agree only if the count survives.
+func (s *Seeded) Position() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ctr
+}
+
+// Resume moves the stream to a position taken from Position. It only moves
+// forward: a snapshot older than the process must not rewind it.
+func (s *Seeded) Resume(position uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if position > s.ctr {
+		s.ctr = position
+	}
+}
+
 func (s *Seeded) Intn(n int) int {
 	if n <= 0 {
 		return 0

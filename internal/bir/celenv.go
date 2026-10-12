@@ -75,6 +75,10 @@ func celFuncs() []cel.EnvOption {
 		binaryDyn("messageSize", str, dyn, cel.IntType),
 		unaryDyn("md5MessageAttributes", dyn, str),
 		unaryDyn("sha256hex", str, str),
+		// sha1hex is the digest Vercel's file API names a file by: a deployment
+		// refers to an uploaded file by the SHA-1 of its bytes, and an inlined
+		// file has to be hashed to be stored under the same name.
+		unaryDyn("sha1hex", str, str),
 		// b64urlhex decodes a hex string and base64url-encodes it without
 		// padding. PKCE's S256 is base64url(sha256(verifier)), so the
 		// challenge check is b64urlhex(sha256hex(verifier)) == challenge.
@@ -104,6 +108,11 @@ func celFuncs() []cel.EnvOption {
 		// trim is strings.TrimSpace: the oracle trims a team slug before it
 		// stores it, and CEL has no whitespace handling at all.
 		unaryDyn("trim", str, str),
+		// apexOf is the registrable part of a hostname: example.com for
+		// www.example.com. Vercel answers every domain with its apexName, and
+		// the only way to write it in CEL is to restate a list of public
+		// suffixes at every use.
+		unaryDyn("apexOf", str, str),
 
 		// Value helpers. coalesce takes the first non-empty argument, which is
 		// how behavior data expresses a documented default without branching.
@@ -148,6 +157,11 @@ func celFuncs() []cel.EnvOption {
 		// Untag* and every "defaults, then stored, then set" attribute merge
 		// needs one of these.
 		binaryDyn("without", dyn, dyn, dyn),
+		// compact drops the members of a map whose value is null. A document
+		// that makes a member optional without making it nullable (every
+		// Vercel check's conclusion, until the check finishes) wants it absent,
+		// and a record that stores "not yet" as null would otherwise answer it.
+		unaryDyn("compact", dyn, dyn),
 		binaryDyn("merge", dyn, dyn, dyn),
 		// rollup turns a list of records into a map: element[key] ->
 		// element[value]. The map-shaped answer to a list-shaped store (Secrets
@@ -161,6 +175,11 @@ func celFuncs() []cel.EnvOption {
 		// slicing at all, and cursor pagination -- take the page after this
 		// position, keep the first limit entries -- is slicing.
 		ternaryDyn("slice", dyn, num, num, dyn),
+		// sortBy orders a list of records by one member, descending when the
+		// third argument is true. CEL has no sort at all, and a listing the
+		// store returns in key order (the keys are random identifiers) is
+		// not the order a client asked for: Vercel lists newest first.
+		ternaryDyn("sortBy", dyn, str, cel.BoolType, dyn),
 
 		// Provider-shaped helpers. These are string manipulation, not provider
 		// logic: the engine stays free of service names.

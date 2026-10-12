@@ -17,93 +17,6 @@ provenance: authored
 missing_input_error: BadRequest
 
 resources:
-  project:
-    collection: vproj
-    # The identifier carries a prj_ prefix, so the record member rather than
-    # the raw generated id is the store key.
-    key: id
-    id:
-      # No `generate` here. Both operations that create a project draw the id
-      # as an effect and pass it as the key, because two writes need the same
-      # one; a resource generate beside that would draw a SECOND id per create
-      # and throw it away. That is invisible in an answer and not invisible in
-      # a recording: the two sides read the same seeded Rand, so a wasted draw
-      # moves every later identifier, and the store sorts a listing by key --
-      # so a discarded draw reorders a list.
-      # The document calls the label `idOrName` because the real API accepts
-      # either, and the pack's lookup did too -- it tried the key, then the
-      # name index, then the id the index pointed at. Addressing by id is what
-      # this resolves; addressing by name goes through project_name below.
-      input_members: [idOrName]
-    record:
-      # Input-independent, because a write re-evaluates every member here:
-      # UpdateProject patches this resource, and `name`/`framework` read from
-      # `input` would answer the update's body (or fail on its absence) rather
-      # than the project's. Both live on the create effects instead, which is
-      # where the request that knows them runs.
-      id: "'prj_' + id"
-      accountId: "identity.account"
-      createdAt: "int(now) * 1000"
-      updatedAt: "int(now) * 1000"
-
-  # Project names are unique, and the pack enforced that with a second row in
-  # the SAME collection keyed `name:<name>`, skipped when listing. It is a
-  # separate collection here for the reasons Cloudflare's title index is: a
-  # listing should not have to know which of its rows are really an index, and
-  # a project actually named `name:something` was indistinguishable from one.
-  project_name:
-    collection: vprojname
-    id:
-      # Total: evaluated wherever the resource is addressed, so a request
-      # carrying neither member must yield an empty key rather than an
-      # evaluation error. `idOrName` first, because a get and a delete name the
-      # project that way and a create names it `name`.
-      derive: >
-        ('idOrName' in input && input.idOrName != null) ? string(input.idOrName)
-          : (('name' in input && input.name != null) ? string(input.name) : '')
-
-  env:
-    # Parent-scoped: each project's variables are their own collection, as the
-    # pack's `<project id>/<env id>` key prefix was.
-    collection: "venv:{project.id}"
-    parent: project
-    key: id
-    id:
-      generate: { kind: hex, bytes: 10 }
-      input_members: [id]
-    record:
-      # Input-independent for the same reason the project's is: EditProjectEnv
-      # patches this resource, and `key`/`value`/`type`/`target` read from
-      # `input` would reset to their defaults on any edit that omits them.
-      # They live on the create effect instead.
-      id: "'env_' + id"
-
-  domain:
-    collection: "vdom:{project.id}"
-    parent: project
-    id:
-      # `name` on the add, `domain` on the get/update/remove/verify: the two
-      # labels name the same record. input_members is tried first and an add
-      # carries no `domain`, so it still falls through to the derive.
-      input_members: [domain]
-      derive: "('name' in input && input.name != null) ? string(input.name) : ''"
-    record:
-      name: id
-      apexName: id
-      # No projectId here: a parent-scoped resource's record cannot see its
-      # parent, which binds for the collection template and not in this scope.
-      # The two operations that answer a domain project it from their own read
-      # of the project, which is the same value by construction -- a domain
-      # lives in its project's collection.
-      #
-      # The pack verified on add; the vendor's own emulator does not -- a
-      # domain is unverified until the verify route runs. The differential
-      # corpus (test/behavior/vercel/oracle) records the difference and the
-      # oracle wins it.
-      verified: "false"
-      createdAt: "int(now) * 1000"
-      updatedAt: "int(now) * 1000"
-
   custom_environment:
     collection: "vcenv:{project.id}"
     parent: project
@@ -144,93 +57,6 @@ resources:
         ('environmentSlugOrId' in input && input.environmentSlugOrId != null) ? string(input.environmentSlugOrId)
           : (('slug' in input && input.slug != null) ? string(input.slug) : '')
 
-  deployment:
-    collection: vdeploy
-    # Keyed on uid, which is what the record carries; see the note below.
-    key: uid
-    id:
-      # No `generate`, for the reason the project has none, and with a second:
-      # a deployment costs TWO draws, the id and the six random bytes in its
-      # hostname, and they have to be drawn in that order. A resource generate
-      # cannot express the second at all.
-      # A get names it `idOrUrl` and a delete names it `id`; the first member
-      # the request carries is the one that addresses it.
-      input_members: [idOrUrl, id]
-    record:
-      # `uid` is the key itself, spelled `id` because that is what a record
-      # calls its own key. The one writer passes the key explicitly -- it has
-      # to, since the value is drawn by an effect and a record sees `input` and
-      # `id` but never `fx` -- and this carries it into the record, which is
-      # where the validator requires the key member to be set.
-      #
-      # `uid` and not `id`: the listed deployment's item shape declares uid,
-      # where the single-deployment response declares id. The pack stored both
-      # with the same value, which an unprojected list cannot do -- the record
-      # IS the item, so every member it carries has to be one the item shape
-      # declares. The two operations that answer `id` project it from here.
-      #
-      # Input-independent, as the project's is: CancelDeployment patches this
-      # resource, and `name` read from `input` would fail on a request that
-      # does not carry one. It lives on the create effect instead.
-      #
-      # readyState/state are views over __state. A create is born QUEUED;
-      # start_build (+1s) moves to BUILDING, finish_build (+2s) to READY.
-      # Cancel is reachable from QUEUED or BUILDING before finish_build.
-      uid: id
-      createdAt: "int(now) * 1000"
-      created: "int(now) * 1000"
-      type: "'LAMBDAS'"
-    views:
-      readyState: "string(rec.__state)"
-      state: "string(rec.__state)"
-    statechart:
-      initial: QUEUED
-      states:
-        QUEUED:
-          timers:
-            - { deadline: start_build, target: BUILDING }
-          on:
-            CANCEL: [{ target: CANCELED }]
-        BUILDING:
-          timers:
-            - { deadline: finish_build, target: READY }
-          on:
-            CANCEL: [{ target: CANCELED }]
-            FAIL: [{ target: ERROR }]
-        READY: {}
-        CANCELED: {}
-        ERROR: {}
-
-  # A team is an account fixture: the vendored document has no create for one
-  # (POST /v2/teams exists only in emulate's routes), so nothing here writes
-  # one and a listing answers whatever records exist -- initially none. The
-  # record is patch-safe: PatchTeam re-evaluates it, so it carries only what
-  # an update may legitimately refresh.
-  team:
-    collection: vteam
-    key: id
-    id:
-      input_members: [teamId]
-    record:
-      id: id
-      updatedAt: "int(now) * 1000"
-
-  # A membership row per invited address, keyed team:email so a repeat invite
-  # to the same address is the conflict the oracle answers. Writes and reads
-  # all carry explicit keys, so there is nothing to derive from a request.
-  team_member:
-    collection: vteammem
-    id:
-      derive: "''"
-
-
-  # The one caller. The pack answered a fixed identity and patches move it;
-  # the singleton keeps the overrides so GetAuthUser, the patch and userinfo
-  # read the same answer.
-  user:
-    collection: vuser
-    singleton: current
-
   # An API key's id and its token are both minted at create; the token is the
   # secret answer, the id is how a delete addresses the row.
   api_key:
@@ -250,150 +76,6 @@ resources:
     id:
       derive: "''"
 
-  # Teams are addressed by id or by slug, the way the oracle's
-  # resolveTeamByIdOrSlug accepts both: the index answers which.
-  team_slug:
-    collection: vteamslug
-    id:
-      derive: "''"
-
-  # A deployment's alias rows, written by CreateDeployment the way emulate
-  # writes them (one per deployment, the deployment's own URL). Keyed off the
-  # deployment id; the list filters on the record's deploymentId, so the key
-  # is never derived from a request.
-  deployment_alias:
-    collection: vdepalias
-    id:
-      derive: "''"
-
-  # Hostname → uid so GetAlias can resolve idOrAlias either as the store key
-  # or as the alias string the document's path label allows.
-  deployment_alias_by_alias:
-    collection: vdepaliasby
-    id:
-      derive: >
-        ('alias' in input && input.alias != null && string(input.alias) != '') ? string(input.alias)
-          : (('idOrAlias' in input && input.idOrAlias != null) ? string(input.idOrAlias) : '')
-    record:
-      uid: "''"
-      deploymentId: "''"
-
-  # A deployment's build events, written by CreateDeployment (created,
-  # building, ready -- the three the oracle pushes) and CancelDeployment. The
-  # key is the deployment id plus a serial suffix so one flat collection holds
-  # every deployment's events in per-deployment order.
-  deployment_event:
-    collection: vdevent
-    id:
-      derive: "''"
-
-  # A deployment's file descriptors, from the create body's `files`. Keyed
-  # deployment id plus digest; the list filters on the record's deploymentId.
-  deployment_file:
-    collection: vdfile
-    id:
-      derive: "''"
-
-  # An uploaded file's registration, keyed by its digest -- which is how both
-  # writers name it: UploadFile carries it as the digest header, a deployment
-  # create as each file entry's `sha`.
-  file:
-    collection: vfile
-    id:
-      derive: >
-        ('x-vercel-digest' in input && input['x-vercel-digest'] != null) ? string(input['x-vercel-digest'])
-          : (('x-now-digest' in input && input['x-now-digest'] != null) ? string(input['x-now-digest']) : '')
-    record:
-      digest: id
-      contentType: "'application/octet-stream'"
-
-  # CI/CD: deployment checks (v1), project checks / check-runs (v2), remote
-  # cache artifacts, rolling release, and runtime logs. Nothing here calls a
-  # real builder or GitHub; the records are the API surface.
-  check:
-    collection: "vcheck:{deployment.id}"
-    parent: deployment
-    key: id
-    id:
-      generate: { kind: hex, bytes: 8 }
-      input_members: [checkId]
-    record:
-      id: "'chk_' + id"
-      name: "('name' in input && input.name != null) ? string(input.name) : 'check'"
-      status: "'registered'"
-      conclusion: "null"
-      createdAt: "int(now) * 1000"
-      updatedAt: "int(now) * 1000"
-
-  project_check:
-    collection: "vpcheck:{project.id}"
-    parent: project
-    key: id
-    id:
-      generate: { kind: hex, bytes: 8 }
-      input_members: [checkId]
-    record:
-      # No status: the list item shape has none, and an unprojected list is the
-      # record. Name/id/timestamps are what Create/Get/Update project.
-      id: "'pchk_' + id"
-      name: "('name' in input && input.name != null) ? string(input.name) : 'check'"
-      createdAt: "int(now) * 1000"
-      updatedAt: "int(now) * 1000"
-
-  check_run:
-    collection: "vcheckrun:{deployment.id}"
-    parent: deployment
-    key: id
-    id:
-      generate: { kind: hex, bytes: 8 }
-      input_members: [checkRunId]
-    record:
-      id: "'crun_' + id"
-      status: "'registered'"
-      conclusion: "null"
-      createdAt: "int(now) * 1000"
-      updatedAt: "int(now) * 1000"
-
-  artifact:
-    collection: vartifact
-    key: hash
-    id:
-      input_members: [hash]
-      derive: "('hash' in input && input.hash != null) ? string(input.hash) : ''"
-    record:
-      hash: id
-      size: "('Content-Length' in input && input['Content-Length'] != null) ? int(input['Content-Length']) : 0"
-      duration: "0"
-      createdAt: "int(now) * 1000"
-
-  rolling_release_config:
-    collection: "vrrcfg:{project.id}"
-    parent: project
-    singleton: config
-    record:
-      target: "'production'"
-      stages: "[]"
-      updatedAt: "int(now) * 1000"
-
-  rolling_release:
-    collection: "vrr:{project.id}"
-    parent: project
-    singleton: active
-    record:
-      state: "'ACTIVE'"
-      startedAt: "int(now) * 1000"
-      approvedStage: "0"
-
-  runtime_log:
-    collection: "vrlog:{deployment.id}"
-    parent: deployment
-    id:
-      derive: "''"
-    record:
-      message: "''"
-      timestamp: "int(now) * 1000"
-
-
 errors:
   BadRequest:
     code: bad_request
@@ -405,6 +87,33 @@ errors:
     fault: client
   Conflict:
     code: conflict
+    http: 409
+    fault: client
+  # A deployment that names files nobody uploaded. The code and the `missing`
+  # list in the envelope are what every Vercel client uploads by.
+  MissingFiles:
+    code: missing_files
+    http: 400
+    fault: client
+  # A variable that already exists for the same key, target and branch. Vercel's
+  # CLI reads the code to ask whether to overwrite, and the envelope carries the
+  # key and targets it conflicts on.
+  EnvConflict:
+    code: ENV_CONFLICT
+    http: 409
+    fault: client
+  # Domains. The document names the statuses and not the codes; these are the
+  # codes this bundle chose, and the quirks say so.
+  InvalidDomain:
+    code: invalid_domain
+    http: 400
+    fault: client
+  DomainAlreadyInUse:
+    code: domain_already_in_use
+    http: 409
+    fault: client
+  DomainAlreadyExists:
+    code: domain_already_exists
     http: 409
     fault: client
   # The oracle's invite route answers a second 409 under its own code; the
@@ -435,696 +144,11 @@ errors:
     fault: client
 
 operations:
-  GetAuthUser:
-    # The fixed identity the pack answered, now read through the user
-    # singleton so UpdateAuthUser's patch moves the answer.
-    reads:
-      u: { resource: user }
-    output:
-      user: >
-        {
-          'id': 'usr_' + identity.account,
-          'email': (u_found && 'email' in u) ? u.email : 'test@mirror.cloud',
-          'name': (u_found && 'name' in u) ? u.name : 'Mirror',
-          'username': 'test'
-        }
-
-  CreateProject:
-    reads:
-      taken: { resource: project_name }
-    require:
-      # `cond` is a precondition: the error fires when it does NOT hold. The
-      # document marks `name` required, so a request omitting it entirely fails
-      # the engine's model check before reaching here -- same code and status,
-      # different wording, which is the quirk below. This rule is what answers
-      # a name that is present and empty, which the model check permits.
-      - { cond: "'name' in input && input.name != null && string(input.name) != ''", error: BadRequest, message: "Project name is required" }
-      - { cond: "!taken_found", error: Conflict, message: "A project with the same name already exists." }
-    effects:
-      # The id is drawn first, because both writes need the same one and
-      # neither can borrow it from the other: inside a write effect's record,
-      # `id` is THAT resource's own key -- for the index that is the project's
-      # name, so `'prj_' + id` there indexes `prj_web`, a key no project has.
-      # A generate effect binds under `fx` and rebinds neither `rec` nor `id`.
-      - generate: { bind: pid, kind: hex, bytes: 12 }
-      # The index is written first, and the order still matters: every write
-      # effect rebinds `rec`, and the output projects the project from it.
-      # Reversing these answers with the index row.
-      - put:
-          resource: project_name
-          record:
-            project: "'prj_' + fx.pid"
-      - create:
-          resource: project
-          key: "'prj_' + fx.pid"
-          record:
-            id: "'prj_' + fx.pid"
-            # `name` and `framework` live here rather than on the resource:
-            # the resource record must stay input-independent because
-            # UpdateProject's patch re-evaluates it.
-            name: "string(input.name)"
-            framework: "('framework' in input && input.framework != null) ? input.framework : null"
-    output:
-      id: rec.id
-      name: rec.name
-      accountId: rec.accountId
-      createdAt: rec.createdAt
-      updatedAt: rec.updatedAt
-      framework: rec.framework
-
-  GetProjects:
-    list: { resource: project, member: projects }
-    output:
-      # Projected rather than raw since the protection-bypass work: a project
-      # record may carry the bypass map, which the listed item shape does not
-      # declare, and an unprojected list would answer it (and fail the loader's
-      # record-members check). The projection is exactly the members every
-      # create establishes, so the answer is unchanged.
-      projects: "items.map(i, {'id': i.id, 'name': i.name, 'accountId': i.accountId, 'createdAt': i.createdAt, 'updatedAt': i.updatedAt, 'framework': ('framework' in i) ? i.framework : null})"
-      # The pack answered `pagination.count` and nothing else. The listing is
-      # unpaginated -- see the quirk -- so every project is on the one page.
-      pagination: "{'count': size(items)}"
-
-  GetProject:
-    reads:
-      # Two reads, not three, and in this order because reads resolve in
-      # dependency order and `by_name` sorts first: the index answers whether
-      # `idOrName` is a name, and the project read prefers what it found over
-      # the raw input. The pack did the same lookup in Go -- key, then name
-      # index, then the id the index pointed at.
-      #
-      # One read of `project` rather than one per spelling, because a
-      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
-      # resolves against whichever read of `project` ran last, so two of them
-      # make a child's collection depend on alphabetical order. That is how the
-      # environment and domain operations failed to see a project addressed by
-      # name at all.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      id: proj.id
-      name: proj.name
-      accountId: proj.accountId
-      createdAt: proj.createdAt
-      updatedAt: proj.updatedAt
-      framework: proj.framework
-
-  DeleteProject:
-    reads:
-      # Two reads, not three, and in this order because reads resolve in
-      # dependency order and `by_name` sorts first: the index answers whether
-      # `idOrName` is a name, and the project read prefers what it found over
-      # the raw input. The pack did the same lookup in Go -- key, then name
-      # index, then the id the index pointed at.
-      #
-      # One read of `project` rather than one per spelling, because a
-      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
-      # resolves against whichever read of `project` ran last, so two of them
-      # make a child's collection depend on alphabetical order. That is how the
-      # environment and domain operations failed to see a project addressed by
-      # name at all.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - delete:
-          resource: project
-          key: "string(proj.id)"
-      # Keyed off the stored record, not the request: a delete may address the
-      # project by id and never carry its name.
-      - delete:
-          resource: project_name
-          key: "string(proj.name)"
-          missing: ignore
-
-  FilterProjectEnvs:
-    reads:
-      # Two reads, not three, and in this order because reads resolve in
-      # dependency order and `by_name` sorts first: the index answers whether
-      # `idOrName` is a name, and the project read prefers what it found over
-      # the raw input. The pack did the same lookup in Go -- key, then name
-      # index, then the id the index pointed at.
-      #
-      # One read of `project` rather than one per spelling, because a
-      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
-      # resolves against whichever read of `project` ran last, so two of them
-      # make a child's collection depend on alphabetical order. That is how the
-      # environment and domain operations failed to see a project addressed by
-      # name at all.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    # No `pagination`. The document declares the member, but the pack answered
-    # it only from the two unscoped listings -- projects and deployments -- and
-    # not from the two scoped ones. A member the document permits and the pack
-    # never sent is not evidence of anything, so it is not sent.
-    list: { resource: env, member: envs }
-
-  CreateProjectEnv:
-    reads:
-      # Two reads, not three, and in this order because reads resolve in
-      # dependency order and `by_name` sorts first: the index answers whether
-      # `idOrName` is a name, and the project read prefers what it found over
-      # the raw input. The pack did the same lookup in Go -- key, then name
-      # index, then the id the index pointed at.
-      #
-      # One read of `project` rather than one per spelling, because a
-      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
-      # resolves against whichever read of `project` ran last, so two of them
-      # make a child's collection depend on alphabetical order. That is how the
-      # environment and domain operations failed to see a project addressed by
-      # name at all.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: "'key' in input && input.key != null && string(input.key) != ''", error: BadRequest, message: "Env key is required" }
-    effects:
-      # `key`, `value`, `type` and `target` live here rather than on the
-      # resource: the resource record must stay input-independent because
-      # EditProjectEnv's patch re-evaluates it.
-      - create:
-          resource: env
-          record:
-            key: "string(input.key)"
-            value: "('value' in input && input.value != null) ? string(input.value) : ''"
-            type: "('type' in input && input.type != null) ? string(input.type) : 'encrypted'"
-            target: >
-              ('target' in input && input.target != null) ? input.target
-                : ['production', 'preview', 'development']
-    output:
-      # The document declares {created, failed} for this operation where the
-      # pack answered the variable itself -- see the quirk.
-      created: rec
-      failed: "[]"
-
-  RemoveProjectEnv:
-    reads:
-      # Two reads, not three, and in this order because reads resolve in
-      # dependency order and `by_name` sorts first: the index answers whether
-      # `idOrName` is a name, and the project read prefers what it found over
-      # the raw input. The pack did the same lookup in Go -- key, then name
-      # index, then the id the index pointed at.
-      #
-      # One read of `project` rather than one per spelling, because a
-      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
-      # resolves against whichever read of `project` ran last, so two of them
-      # make a child's collection depend on alphabetical order. That is how the
-      # environment and domain operations failed to see a project addressed by
-      # name at all.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      variable: { resource: env }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: variable_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - delete: { resource: env }
-
-  GetProjectDomains:
-    reads:
-      # Two reads, not three, and in this order because reads resolve in
-      # dependency order and `by_name` sorts first: the index answers whether
-      # `idOrName` is a name, and the project read prefers what it found over
-      # the raw input. The pack did the same lookup in Go -- key, then name
-      # index, then the id the index pointed at.
-      #
-      # One read of `project` rather than one per spelling, because a
-      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
-      # resolves against whichever read of `project` ran last, so two of them
-      # make a child's collection depend on alphabetical order. That is how the
-      # environment and domain operations failed to see a project addressed by
-      # name at all.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    # No `pagination`, for the reason FilterProjectEnvs has none.
-    list: { resource: domain, member: domains }
-    output:
-      # The listed record carries no projectId -- see the resource -- so the
-      # projection puts it back, which an unprojected list could not do.
-      domains: "items.map(i, merge(i, {'projectId': proj.id}))"
-
-  AddProjectDomain:
-    reads:
-      # Two reads, not three, and in this order because reads resolve in
-      # dependency order and `by_name` sorts first: the index answers whether
-      # `idOrName` is a name, and the project read prefers what it found over
-      # the raw input. The pack did the same lookup in Go -- key, then name
-      # index, then the id the index pointed at.
-      #
-      # One read of `project` rather than one per spelling, because a
-      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
-      # resolves against whichever read of `project` ran last, so two of them
-      # make a child's collection depend on alphabetical order. That is how the
-      # environment and domain operations failed to see a project addressed by
-      # name at all.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: "'name' in input && input.name != null && string(input.name) != ''", error: BadRequest, message: "Domain name is required" }
-    effects:
-      - put: { resource: domain }
-    output:
-      name: rec.name
-      apexName: rec.apexName
-      projectId: proj.id
-      verified: rec.verified
-      createdAt: rec.createdAt
-      updatedAt: rec.updatedAt
-
-  CreateDeployment:
-    reads:
-      # A deployment names its project by name, and creates it when there is
-      # none. The index answers whether there is.
-      by_name: { resource: project_name, key: "('project' in input && input.project != null) ? string(input.project) : (('name' in input && input.name != null) ? string(input.name) : '')" }
-    require:
-      - { cond: "'name' in input && input.name != null && string(input.name) != ''", error: BadRequest, message: "Deployment name is required" }
-    effects:
-      # Three draws, in this order, because that is the order the pack drew
-      # them and the recording gates every identifier after them: the project
-      # id ONLY when there is no project, then the deployment id, then the six
-      # bytes in the hostname. A generate effect binds under `fx` and rebinds
-      # neither `rec` nor `id`, where every write effect rebinds both -- and a
-      # generate carrying `when` does not draw at all when the guard is false,
-      # which is what keeps a deployment into an existing project costing two
-      # draws rather than three.
-      - generate: { bind: newproj, kind: hex, bytes: 12, when: "!by_name_found" }
-      - generate: { bind: depid, kind: hex, bytes: 16 }
-      - generate: { bind: host, kind: hex, bytes: 6 }
-      - put:
-          resource: project_name
-          when: "!by_name_found"
-          record:
-            project: "'prj_' + fx.newproj"
-      - create:
-          resource: project
-          key: "'prj_' + fx.newproj"
-          when: "!by_name_found"
-          record:
-            id: "'prj_' + fx.newproj"
-            name: "('project' in input && input.project != null) ? string(input.project) : string(input.name)"
-            # A deployment create carries no framework; the member stays null,
-            # which is what the resource record answered for it before the
-            # member moved onto the creates.
-            framework: "null"
-      # The sub-resource rows the oracle writes beside a deployment: one alias
-      # (the deployment's own URL), three build events, and a file descriptor
-      # per entry in the body's `files`, each with its digest registered. None
-      # of these draws -- the alias id reuses the deployment's draw and the
-      # event keys are serials -- so the recorded draw sequence is untouched.
-      - put:
-          resource: deployment_alias
-          key: "'als_' + fx.depid"
-          record:
-            uid: "'als_' + fx.depid"
-            alias: "string(input.name) + '-' + fx.host + '.vercel.app'"
-            deploymentId: "'dpl_' + fx.depid"
-            projectId: "by_name_found ? string(by_name.project) : 'prj_' + fx.newproj"
-      - put:
-          resource: deployment_alias_by_alias
-          key: "string(input.name) + '-' + fx.host + '.vercel.app'"
-          record:
-            uid: "'als_' + fx.depid"
-            deploymentId: "'dpl_' + fx.depid"
-      - put:
-          resource: deployment_event
-          key: "'dpl_' + fx.depid + ':1'"
-          record:
-            deploymentId: "'dpl_' + fx.depid"
-            type: "'created'"
-            payload: "{'text': 'Deployment created'}"
-            date: "int(now) * 1000"
-            serial: "'1'"
-      - put:
-          resource: deployment_event
-          key: "'dpl_' + fx.depid + ':2'"
-          record:
-            deploymentId: "'dpl_' + fx.depid"
-            type: "'building'"
-            payload: "{'text': 'Building'}"
-            date: "int(now) * 1000"
-            serial: "'2'"
-      - put:
-          resource: deployment_event
-          key: "'dpl_' + fx.depid + ':3'"
-          record:
-            deploymentId: "'dpl_' + fx.depid"
-            type: "'ready'"
-            payload: "{'text': 'Deployment ready'}"
-            date: "int(now) * 1000"
-            serial: "'3'"
-      # An entry the oracle skips -- no path or no digest -- is skipped here
-      # too, and the two writes share the guard so they never disagree.
-      - put:
-          resource: file
-          for_each: "('files' in input && input.files != null) ? input.files : []"
-          key: "string(item.sha)"
-          when: "'sha' in item && item.sha != null && string(item.sha) != '' && 'file' in item && item.file != null && string(item.file) != ''"
-          record:
-            size: "('size' in item && item.size != null) ? int(item.size) : 0"
-      - put:
-          resource: deployment_file
-          for_each: "('files' in input && input.files != null) ? input.files : []"
-          key: "'dpl_' + fx.depid + ':' + string(item.sha)"
-          when: "'sha' in item && item.sha != null && string(item.sha) != '' && 'file' in item && item.file != null && string(item.file) != ''"
-          record:
-            uid: "'f_' + string(item.sha)"
-            deploymentId: "'dpl_' + fx.depid"
-            name: "string(item.file)"
-            type: "'file'"
-            mode: "420"
-            contentType: "'application/octet-stream'"
-      - create:
-          resource: deployment
-          key: "'dpl_' + fx.depid"
-          # Born QUEUED; start_build at +1s, finish_build at +2s so BUILDING
-          # is observable between advances and CANCEL still works from there.
-          # Create answer stays QUEUED until the clock moves; cancel is
-          # reachable before start_build. Advance(2s) settles to READY.
-          state: "'QUEUED'"
-          deadline: { name: start_build, after: "seconds(1)" }
-          record:
-            # `name` lives here rather than on the resource, because the
-            # resource record must stay input-independent: CancelDeployment's
-            # patch re-evaluates it.
-            name: "string(input.name)"
-            # Six random bytes in the hostname, which is what makes two
-            # deployments of one project addressable apart.
-            url: "string(input.name) + '-' + fx.host + '.vercel.app'"
-            projectId: "by_name_found ? string(by_name.project) : 'prj_' + fx.newproj"
-      - patch:
-          resource: deployment
-          key: "'dpl_' + fx.depid"
-          deadline: { name: finish_build, after: "seconds(2)" }
-          record:
-            uid: id
-    output:
-      # `id` from `uid`, because the record is also the listed item and the
-      # item shape declares uid where this response declares id.
-      id: rec.uid
-      name: rec.name
-      url: rec.url
-      projectId: rec.projectId
-      readyState: "string(rec.__state)"
-      type: rec.type
-      createdAt: rec.createdAt
-
-  GetDeployments:
-    list: { resource: deployment, member: deployments }
-    output:
-      # Projected: the raw row carries __state/__deadlines, and readyState is
-      # a view. Listing must match GetDeployment after the same settle.
-      deployments: >
-        items.map(i, {'uid': i.uid, 'name': i.name, 'url': i.url,
-          'projectId': i.projectId, 'readyState': string(i.__state),
-          'state': string(i.__state), 'type': i.type,
-          'createdAt': i.createdAt, 'created': i.created})
-      pagination: "{'count': size(items)}"
-
-  GetDeployment:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      id: dep.uid
-      name: dep.name
-      url: dep.url
-      projectId: dep.projectId
-      readyState: "string(dep.__state)"
-      type: dep.type
-      createdAt: dep.createdAt
-
-  DeleteDeployment:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      # Cascade: aliases/events/files plus CI/CD children scoped under this
-      # deployment (checks, check-runs, runtime logs).
-      - delete: { resource: deployment_alias_by_alias, where: "item.deploymentId == string(dep.uid)" }
-      - delete: { resource: deployment_alias, where: "item.deploymentId == string(dep.uid)" }
-      - delete: { resource: deployment_event, where: "item.deploymentId == string(dep.uid)" }
-      - delete: { resource: deployment_file, where: "item.deploymentId == string(dep.uid)" }
-      - delete: { resource: check, where: "true" }
-      - delete: { resource: check_run, where: "true" }
-      - delete: { resource: runtime_log, where: "true" }
-      - delete: { resource: deployment }
-    output:
-      uid: dep.uid
-      state: "'DELETED'"
-
-  # The twelve below have no pack behind them: the pack never served them, so
+  # The ones below have no pack behind them: the pack never served them, so
   # there was nothing to transcribe. Each is written from the document alone
   # -- its path, its declared response members, its status -- and keeps to the
   # state the fourteen above establish. Where the document is thin the
   # behavior is minimal and `quirks` says so.
-
-  UpdateProject:
-    reads:
-      # The same by_name-then-project pair every project-scoped operation
-      # here resolves: `idOrName` may be the key or the name the index holds.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      # A rename collides with whatever already holds the new name. The index
-      # derive would answer for `idOrName` rather than the new name, so the
-      # key is explicit.
-      taken:
-        resource: project_name
-        key: "('name' in input && input.name != null) ? string(input.name) : ''"
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: "!('name' in input) || input.name == null || string(input.name) != ''", error: BadRequest, message: "Project name is required" }
-      - { cond: "!taken_found || string(input.name) == string(proj.name)", error: Conflict, message: "A project with the same name already exists." }
-    effects:
-      # The old name is freed and the new one claimed only when the name
-      # actually moves; renaming to the current name is not a collision with
-      # itself. `id` in the patch's record is the key the read resolved --
-      # without the explicit member the resource record would prefix it a
-      # second time and the row would move.
-      - delete:
-          resource: project_name
-          key: "string(proj.name)"
-          when: "'name' in input && input.name != null && string(input.name) != string(proj.name)"
-      - put:
-          resource: project_name
-          key: "string(input.name)"
-          when: "'name' in input && input.name != null && string(input.name) != string(proj.name)"
-          record:
-            project: "string(proj.id)"
-      - patch:
-          resource: project
-          # Explicit key: the read resolved the id (possibly through the name
-          # index), and without this the write re-resolves from
-          # `input.idOrName` -- the NAME -- and merges against the wrong row.
-          key: "string(proj.id)"
-          record:
-            id: id
-            name: "('name' in input && input.name != null) ? string(input.name) : string(proj.name)"
-            framework: "('framework' in input) ? input.framework : proj.framework"
-    output:
-      id: rec.id
-      name: rec.name
-      accountId: rec.accountId
-      createdAt: rec.createdAt
-      updatedAt: rec.updatedAt
-      framework: rec.framework
-
-  EditProjectEnv:
-    reads:
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      variable: { resource: env }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: variable_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: "!('key' in input) || input.key == null || string(input.key) != ''", error: BadRequest, message: "Env key is required" }
-    effects:
-      # One patch, every member falling back to what the read found: a member
-      # the request did not carry keeps its value. `id` is explicit for the
-      # reason UpdateProject's is.
-      - patch:
-          resource: env
-          # Explicit key, as UpdateProject's: here `input.id` happens to be
-          # the store key already, but the write should address the record the
-          # operation read, not re-derive one from the request.
-          key: "string(variable.id)"
-          record:
-            id: id
-            key: "('key' in input && input.key != null) ? string(input.key) : string(variable.key)"
-            value: "('value' in input && input.value != null) ? string(input.value) : string(variable.value)"
-            type: "('type' in input && input.type != null) ? string(input.type) : string(variable.type)"
-            target: "('target' in input && input.target != null) ? input.target : variable.target"
-    output:
-      id: rec.id
-      key: rec.key
-      value: rec.value
-      type: rec.type
-      target: rec.target
-
-  GetProjectDomain:
-    reads:
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      dom: { resource: domain }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      name: dom.name
-      apexName: dom.apexName
-      projectId: proj.id
-      verified: dom.verified
-      createdAt: dom.createdAt
-      updatedAt: dom.updatedAt
-      # The three an update can set are null until one does: the shape
-      # declares them optional, and an add does not establish them.
-      gitBranch: "('gitBranch' in dom) ? dom.gitBranch : null"
-      redirect: "('redirect' in dom) ? dom.redirect : null"
-      redirectStatusCode: "('redirectStatusCode' in dom) ? dom.redirectStatusCode : null"
-
-  UpdateProjectDomain:
-    reads:
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      dom: { resource: domain }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      # The unconditional patch refreshes updatedAt and guarantees `rec` for
-      # the output; each conditional one stores a member only when the request
-      # carried it, so an absent member stays absent from the record rather
-      # than becoming null -- the same split CodeCommit's repository
-      # description needed.
-      - patch:
-          resource: domain
-          record:
-            updatedAt: "int(now) * 1000"
-      - patch:
-          resource: domain
-          when: "'gitBranch' in input"
-          record:
-            gitBranch: "input.gitBranch"
-      - patch:
-          resource: domain
-          when: "'redirect' in input"
-          record:
-            redirect: "input.redirect"
-      - patch:
-          resource: domain
-          when: "'redirectStatusCode' in input"
-          record:
-            redirectStatusCode: "input.redirectStatusCode"
-    output:
-      name: rec.name
-      apexName: rec.apexName
-      projectId: proj.id
-      verified: rec.verified
-      createdAt: rec.createdAt
-      updatedAt: rec.updatedAt
-      gitBranch: "('gitBranch' in rec) ? rec.gitBranch : null"
-      redirect: "('redirect' in rec) ? rec.redirect : null"
-      redirectStatusCode: "('redirectStatusCode' in rec) ? rec.redirectStatusCode : null"
-
-  RemoveProjectDomain:
-    reads:
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      dom: { resource: domain }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - delete: { resource: domain }
-    # No output: the response shape declares no members. `removeRedirects` is
-    # accepted and read by nothing -- there are no redirects to remove.
-
-  VerifyProjectDomain:
-    reads:
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      dom: { resource: domain }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      # Verification moves the flag: unverified from creation, verified here.
-      - patch:
-          resource: domain
-          record:
-            verified: "true"
-            updatedAt: "int(now) * 1000"
-    output:
-      name: rec.name
-      apexName: rec.apexName
-      projectId: proj.id
-      verified: rec.verified
-      createdAt: rec.createdAt
-      updatedAt: rec.updatedAt
-      gitBranch: "('gitBranch' in rec) ? rec.gitBranch : null"
-      redirect: "('redirect' in rec) ? rec.redirect : null"
-      redirectStatusCode: "('redirectStatusCode' in rec) ? rec.redirectStatusCode : null"
 
   CreateCustomEnvironment:
     reads:
@@ -1325,242 +349,6 @@ operations:
   # written from the document's shapes and the oracle's route behavior; where
   # the two disagree the document wins and `quirks` says so.
 
-  GetTeams:
-    # Teams are account fixtures and nothing here creates one -- the vendored
-    # document has no POST /v2/teams -- so this lists whatever records exist,
-    # initially none. Unpaginated, as GetProjects is.
-    list: { resource: team, member: teams }
-    output:
-      pagination: "{'count': size(items), 'next': null, 'prev': null}"
-
-  GetTeam:
-    reads:
-      by_slug: { resource: team_slug, key: "string(input.teamId)" }
-      team:
-        resource: team
-        key: "by_slug_found ? string(by_slug.team) : string(input.teamId)"
-    require:
-      - { cond: team_found, error: NotFound, message: "Team not found" }
-    output:
-      # The oracle's formatTeam subset. Every member beyond the key is
-      # guarded: a fixture row carries only what a patch has written.
-      id: team.id
-      slug: "('slug' in team) ? team.slug : null"
-      name: "('name' in team) ? team.name : null"
-      avatar: "('avatar' in team) ? team.avatar : null"
-      description: "('description' in team) ? team.description : null"
-      creatorId: "('creatorId' in team) ? team.creatorId : null"
-      createdAt: "('createdAt' in team) ? team.createdAt : null"
-      updatedAt: "('updatedAt' in team) ? team.updatedAt : null"
-      membership: "('membership' in team) ? team.membership : {'confirmed': true, 'role': 'OWNER'}"
-      billing: "('billing' in team) ? team.billing : {'plan': 'hobby', 'period': null, 'trial': null, 'cancelation': null, 'addons': null}"
-      resourceConfig: "('resourceConfig' in team) ? team.resourceConfig : {'nodeType': 'standard', 'concurrentBuilds': 1}"
-      stagingPrefix: "('stagingPrefix' in team) ? team.stagingPrefix : ''"
-
-  PatchTeam:
-    reads:
-      by_slug: { resource: team_slug, key: "string(input.teamId)" }
-      team:
-        resource: team
-        key: "by_slug_found ? string(by_slug.team) : string(input.teamId)"
-    require:
-      - { cond: team_found, error: NotFound, message: "Team not found" }
-    effects:
-      # The unconditional patch refreshes updatedAt and guarantees `rec` for
-      # the output; each conditional one stores a member only when the request
-      # carried it -- UpdateProjectDomain's split. A null description clears
-      # the member, as the oracle's does. The document declares some thirty
-      # more members on the update; the oracle honors only these four, so only
-      # these are stored.
-      - patch:
-          resource: team
-          record:
-            id: id
-      - patch:
-          resource: team
-          when: "'name' in input && input.name != null"
-          record:
-            name: "string(input.name)"
-      - patch:
-          resource: team
-          when: "'slug' in input && input.slug != null"
-          record:
-            slug: "string(input.slug)"
-      - patch:
-          resource: team
-          when: "'description' in input"
-          record:
-            description: "input.description"
-      - patch:
-          resource: team
-          when: "'avatar' in input"
-          record:
-            avatar: "input.avatar"
-    output:
-      id: rec.id
-      slug: "('slug' in rec) ? rec.slug : null"
-      name: "('name' in rec) ? rec.name : null"
-      avatar: "('avatar' in rec) ? rec.avatar : null"
-      description: "('description' in rec) ? rec.description : null"
-      creatorId: "('creatorId' in rec) ? rec.creatorId : null"
-      createdAt: "('createdAt' in rec) ? rec.createdAt : null"
-      updatedAt: "('updatedAt' in rec) ? rec.updatedAt : null"
-      membership: "('membership' in rec) ? rec.membership : {'confirmed': true, 'role': 'OWNER'}"
-      billing: "('billing' in rec) ? rec.billing : {'plan': 'hobby', 'period': null, 'trial': null, 'cancelation': null, 'addons': null}"
-      resourceConfig: "('resourceConfig' in rec) ? rec.resourceConfig : {'nodeType': 'standard', 'concurrentBuilds': 1}"
-      stagingPrefix: "('stagingPrefix' in rec) ? rec.stagingPrefix : ''"
-
-  InviteUserToTeam:
-    reads:
-      team: { resource: team }
-      # The document's body is a list of {email, role, projects}; the oracle's
-      # is a single {uid|email, role}. The 409 check names the first entry, as
-      # the single-entry request every client of the oracle sends.
-      member:
-        resource: team_member
-        key: >
-          ('body' in input && input.body != null && size(input.body) > 0
-            && 'email' in input.body[0] && input.body[0].email != null)
-            ? string(input.teamId) + ':' + string(input.body[0].email) : ''
-    require:
-      - { cond: team_found, error: NotFound, message: "Team not found" }
-      - { cond: "'body' in input && input.body != null && size(input.body) > 0", error: BadRequest, message: "Provide uid or email" }
-      - { cond: "'email' in input.body[0] && input.body[0].email != null && string(input.body[0].email) != ''", error: BadRequest, message: "Provide uid or email" }
-      # The oracle's four roles, not the document's eight: the oracle 400s the
-      # rest, and the model check does not enforce the enum.
-      - { cond: "!('role' in input.body[0]) || input.body[0].role == null || ['OWNER', 'MEMBER', 'DEVELOPER', 'VIEWER'].exists(r, r == string(input.body[0].role))", error: BadRequest, message: "Invalid role" }
-      - { cond: "!member_found", error: MemberAlreadyExists, message: "User is already a member of this team" }
-    effects:
-      - put:
-          resource: team_member
-          for_each: input.body
-          key: "string(input.teamId) + ':' + string(item.email)"
-          record:
-            teamId: "string(input.teamId)"
-            email: "string(item.email)"
-            # There is no user store to resolve an email against, so the uid
-            # is derived deterministically from the address rather than drawn
-            # -- and the oracle's 404 for an unknown user cannot fire.
-            uid: "'usr_' + substr(md5hex(string(item.email)), 0, 20)"
-            username: "string(item.email)"
-            role: "('role' in item && item.role != null) ? string(item.role) : 'MEMBER'"
-            confirmed: "true"
-            joinedFrom: "'email'"
-    output:
-      # The last row written, which for the single-entry body is the only one.
-      email: rec.email
-      role: rec.role
-      uid: rec.uid
-      username: rec.username
-
-  ListDeploymentAliases:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    list:
-      resource: deployment_alias
-      member: aliases
-      filter: "item.deploymentId == string(dep.uid)"
-    output:
-      # The oracle answers {uid, alias, deploymentId, projectId}; the
-      # document's item shape declares uid and alias but neither id, so the
-      # projection answers the two a reader of the document can rely on. The
-      # document also requires a `created` the oracle never sends; it is
-      # omitted, as the oracle omits it.
-      aliases: "items.map(a, {'uid': a.uid, 'alias': a.alias})"
-
-  GetDeploymentEvents:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    list:
-      resource: deployment_event
-      member: _list
-      filter: "item.deploymentId == string(dep.uid)"
-    output:
-      # The store orders by key, which is serial order; the oracle's default
-      # direction is backward -- newest first -- so the projection reverses.
-      # `direction`, `limit` and the rest are accepted and read by nothing,
-      # as GetProjects' pagination members are.
-      _list: "indices(items).map(i, items[size(items) - 1 - i]).map(e, {'type': e.type, 'payload': e.payload, 'date': e.date, 'serial': e.serial})"
-
-  ListDeploymentFiles:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      # The tree's root node carries a drawn uid, as the oracle's does.
-      - generate: { bind: root, kind: hex, bytes: 10 }
-    list:
-      resource: deployment_file
-      member: _list
-      filter: "item.deploymentId == string(dep.uid)"
-    output:
-      # The document answers a bare FileTree array where the oracle wraps the
-      # same tree in {files: [...]}; the document wins, as it does everywhere
-      # here. The tree is flat -- paths are not split into directory nodes the
-      # way the oracle splits them -- which `quirks` records.
-      _list: >
-        [{'uid': 'file_' + fx.root, 'name': '/', 'type': 'directory', 'mode': 16877, 'contentType': null,
-          'children': items.map(f, {'uid': f.uid, 'name': f.name, 'type': 'file', 'mode': f.mode, 'contentType': f.contentType, 'children': []})}]
-
-  CancelDeployment:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      # Cancel is legal only while the chart is still in QUEUED or BUILDING.
-      # A create answer is QUEUED; after the clock advances, get/list settle to
-      # READY and cancel answers 400 -- which is what the oracle corpus hits.
-      - { cond: "dep.__state == 'QUEUED' || dep.__state == 'BUILDING'", error: BadRequest, message: "Deployment cannot be canceled in its current state" }
-    effects:
-      - put:
-          resource: deployment_event
-          key: "string(dep.uid) + ':canceled'"
-          record:
-            deploymentId: "string(dep.uid)"
-            type: "'canceled'"
-            payload: "{'text': 'Deployment canceled'}"
-            date: "int(now) * 1000"
-            serial: "string(int(now) * 1000)"
-      - send_event:
-          resource: deployment
-          key: "string(dep.uid)"
-          event: CANCEL
-      # Rebind rec after send_event (which loads its own copy) and stamp canceledAt.
-      - patch:
-          resource: deployment
-          key: "string(dep.uid)"
-          record:
-            uid: id
-            canceledAt: "int(now) * 1000"
-    output:
-      id: rec.uid
-      name: rec.name
-      url: rec.url
-      projectId: rec.projectId
-      readyState: "string(rec.__state)"
-      type: rec.type
-      createdAt: rec.createdAt
-      canceledAt: "('canceledAt' in rec) ? rec.canceledAt : int(now) * 1000"
-
-  UploadFile:
-    require:
-      - { cond: "('x-vercel-digest' in input && input['x-vercel-digest'] != null && string(input['x-vercel-digest']) != '') || ('x-now-digest' in input && input['x-now-digest'] != null && string(input['x-now-digest']) != '')", error: BadRequest, message: "Missing x-vercel-digest header" }
-    effects:
-      # A re-upload of a known digest merges where the oracle keeps the first
-      # registration; the quirk records it.
-      - put:
-          resource: file
-          record:
-            size: "('Content-Length' in input && input['Content-Length'] != null) ? int(input['Content-Length']) : 0"
-    # No output: the document's 200 is a oneOf of {urls: [...]} and an empty
-    # object, and the oracle answers a bare empty array, which is neither. The
-    # empty object is the one arm the model can serialize.
-
   ListPromoteAliases:
     reads:
       # The label is spelled `projectId`, as RequestPromote's is, so the index
@@ -1635,7 +423,7 @@ operations:
             protectionBypass: >
               merge(('protectionBypass' in rec && rec.protectionBypass != null) ? rec.protectionBypass : {},
                 {('secret' in input.generate && input.generate.secret != null) ? string(input.generate.secret) : fx.pbs:
-                  {'createdAt': int(now) * 1000, 'createdBy': 'usr_' + identity.account, 'scope': 'automation-bypass',
+                  {'createdAt': int(now) * 1000, 'createdBy': 'usr_' + (identity.project != '' ? identity.project : identity.account), 'scope': 'automation-bypass',
                    'note': ('note' in input.generate && input.generate.note != null) ? input.generate.note : null}})
       - patch:
           resource: project
@@ -1657,7 +445,7 @@ operations:
             protectionBypass: >
               merge(without(rec.protectionBypass, [string(input.revoke.secret)]),
                 {fx.resec: merge(rec.protectionBypass[string(input.revoke.secret)],
-                  {'createdAt': int(now) * 1000, 'createdBy': 'usr_' + identity.account})})
+                  {'createdAt': int(now) * 1000, 'createdBy': 'usr_' + (identity.project != '' ? identity.project : identity.account)})})
       - patch:
           resource: project
           key: "string(proj.id)"
@@ -1677,139 +465,10 @@ operations:
   # oracle enforces it (401 without a Bearer), where the older operations
   # above predate that and stay open -- the asymmetry is recorded in quirks.
 
-  CreateTeam:
-    reads:
-      clash: { resource: team_slug, key: "('slug' in input && input.slug != null) ? trim(string(input.slug)) : ''" }
-    require:
-      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
-      - { cond: "trim(string(input.slug)) != ''", error: BadRequest, message: "Missing required field: slug" }
-      - { cond: "!clash_found", error: TeamSlugAlreadyExists, message: "A team with this slug already exists" }
-    effects:
-      - generate: { bind: tid, kind: hex, bytes: 8 }
-      # The creator is the first member, so the member listing of a fresh
-      # team is not empty. Written first, because `rec` for the output is the
-      # LAST write's record and the output is the team's.
-      - put:
-          resource: team_member
-          key: "'team_' + fx.tid + ':test'"
-          record:
-            team: "'team_' + fx.tid"
-            uid: "'usr_' + identity.account"
-            username: "'test'"
-            email: "'test@mirror.cloud'"
-            role: "'OWNER'"
-      - put:
-          resource: team_slug
-          key: "trim(string(input.slug))"
-          record:
-            team: "'team_' + fx.tid"
-      - put:
-          resource: team
-          key: "'team_' + fx.tid"
-          record:
-            id: "'team_' + fx.tid"
-            slug: "trim(string(input.slug))"
-            name: "('name' in input && input.name != null && trim(string(input.name)) != '') ? trim(string(input.name)) : trim(string(input.slug))"
-            creatorId: "'usr_' + identity.account"
-            createdAt: "int(now) * 1000"
-            updatedAt: "int(now) * 1000"
-            membership: "{'confirmed': true, 'role': 'OWNER'}"
-    output:
-      id: rec.id
-      slug: rec.slug
-      name: rec.name
-      creatorId: rec.creatorId
-      createdAt: rec.createdAt
-      updatedAt: rec.updatedAt
-      membership: "{'confirmed': true, 'role': 'OWNER'}"
-
-  ListTeamMembers:
-    reads:
-      by_slug: { resource: team_slug, key: "string(input.teamId)" }
-      team:
-        resource: team
-        key: "by_slug_found ? string(by_slug.team) : string(input.teamId)"
-    require:
-      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
-      - { cond: team_found, error: NotFound, message: "Team not found" }
-    select:
-      binding: members
-      resource: team_member
-      filter: "string(item.team) == string(team.id)"
-    output:
-      members: "members.map(m, {'uid': string(m.uid), 'username': string(m.username), 'email': string(m.email), 'role': string(m.role)})"
-      pagination: "{'count': size(members), 'next': null, 'prev': null}"
-
-  UpdateAuthUser:
-    require:
-      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
-    reads:
-      u: { resource: user }
-    effects:
-      # The base patch binds rec to the record as it stands, so the output
-      # reads the post-write answer even when the body named neither member.
-      - patch:
-          resource: user
-          record: {}
-      - patch:
-          resource: user
-          when: "'name' in input"
-          record:
-            name: "input.name == null ? '' : string(input.name)"
-      - patch:
-          resource: user
-          when: "'email' in input"
-          record:
-            email: "input.email == null ? '' : string(input.email)"
-    output:
-      user: >
-        {
-          'id': 'usr_' + identity.account,
-          'email': ('email' in rec) ? rec.email : 'test@mirror.cloud',
-          'name': ('name' in rec) ? rec.name : 'Mirror',
-          'username': 'test'
-        }
-
   GetRegistration:
     # The oracle's constant: registration is closed.
     output:
       registration: "false"
-
-  GetDeploymentsV6:
-    # The v6 listing is the v7 listing: the oracle serves both versions from
-    # one handler, and the vendored document declares only v7.
-    list: { resource: deployment, member: deployments }
-    output:
-      deployments: >
-        items.map(i, {'uid': i.uid, 'name': i.name, 'url': i.url,
-          'projectId': i.projectId, 'readyState': string(i.__state),
-          'state': string(i.__state), 'type': i.type,
-          'createdAt': i.createdAt, 'created': i.created})
-      pagination: "{'count': size(items)}"
-
-  GetProjectEnv:
-    reads:
-      # The project's two-spelling resolution, the same as every other env
-      # operation: the parent scope names project.id, which nothing resolves
-      # unless the project is read.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      v: { resource: env }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: v_found, error: NotFound, message: "Environment Variable not found" }
-    output:
-      id: v.id
-      key: "('key' in v) ? v.key : null"
-      value: "('value' in v) ? v.value : null"
-      type: "('type' in v) ? v.type : null"
-      target: "('target' in v) ? v.target : null"
-      createdAt: "('createdAt' in v) ? v.createdAt : null"
-      updatedAt: "('updatedAt' in v) ? v.updatedAt : null"
 
   CreateApiKey:
     require:
@@ -1935,7 +594,7 @@ operations:
       - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: Unauthorized, message: "Authentication required" }
       - { cond: tok_found, error: Unauthorized, message: "Authentication required" }
     output:
-      sub: "'usr_' + identity.account"
+      sub: "'usr_' + (identity.project != '' ? identity.project : identity.account)"
       email: "(u_found && 'email' in u) ? u.email : 'test@mirror.cloud'"
       name: "(u_found && 'name' in u) ? u.name : 'Mirror'"
       preferred_username: "'test'"
@@ -1943,64 +602,6 @@ operations:
       picture: "''"
 
   # --- CI/CD surface beyond emulate's 52 routes ---
-
-  AssignAlias:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: "'alias' in input && input.alias != null && string(input.alias) != ''", error: BadRequest, message: "Alias is required" }
-    effects:
-      - generate: { bind: als, kind: hex, bytes: 10 }
-      - put:
-          resource: deployment_alias_by_alias
-          key: "string(input.alias)"
-          record:
-            uid: "'als_' + fx.als"
-            deploymentId: "string(dep.uid)"
-      - put:
-          resource: deployment_alias
-          key: "'als_' + fx.als"
-          record:
-            uid: "'als_' + fx.als"
-            alias: "string(input.alias)"
-            deploymentId: "string(dep.uid)"
-            projectId: "string(dep.projectId)"
-            protectionBypass: "{}"
-    output:
-      uid: rec.uid
-      alias: rec.alias
-
-  ListAliases:
-    list: { resource: deployment_alias, member: aliases }
-    output:
-      pagination: "{'count': size(items), 'next': null, 'prev': null}"
-
-  GetAlias:
-    reads:
-      # by_alias before found: reads resolve in name order when equally ready,
-      # and the key expression of found needs by_alias_found already bound.
-      by_alias: { resource: deployment_alias_by_alias, key: "string(input.idOrAlias)" }
-      found:
-        resource: deployment_alias
-        key: "by_alias_found ? string(by_alias.uid) : string(input.idOrAlias)"
-    require:
-      - { cond: found_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      uid: found.uid
-      alias: found.alias
-      deploymentId: found.deploymentId
-
-  DeleteAlias:
-    reads:
-      als: { resource: deployment_alias, key: "string(input.aliasId)" }
-    require:
-      - { cond: als_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - delete: { resource: deployment_alias_by_alias, key: "string(als.alias)", missing: ignore }
-      - delete: { resource: deployment_alias, key: "string(als.uid)" }
-    output:
-      status: "'SUCCESS'"
 
   PatchUrlProtectionBypass:
     reads:
@@ -2015,14 +616,6 @@ operations:
             uid: id
             protectionBypass: "('protectionBypass' in input && input.protectionBypass != null) ? input.protectionBypass : {}"
     # Document declares an empty response.
-    output: {}
-
-  GetDeploymentFileContents:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    # Empty body: UploadFile stores size only. Quirk: contents are not retained.
     output: {}
 
   RequestRollback:
@@ -2048,7 +641,12 @@ operations:
           record:
             id: id
             productionDeploymentId: "string(dep.uid)"
-            rollbackDescription: "''"
+            # A rollback begins undescribed; the update-description route says why.
+            rollbackDescription:
+              userId: "'usr_' + (identity.project != '' ? identity.project : identity.account)"
+              username: "'test'"
+              description: "''"
+              createdAt: "now_ms"
     output: {}
 
   UpdateProjectsByProjectIdRollbackByDeploymentIdUpdateDescription:
@@ -2063,422 +661,19 @@ operations:
             : (('projectId' in input && input.projectId != null) ? string(input.projectId) : '')
     require:
       - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: "!('description' in input) || input.description == null || size(string(input.description)) <= 250", error: BadRequest, message: "A rollback description is limited to 250 characters" }
     effects:
       - patch:
           resource: project
           key: "string(proj.id)"
           record:
             id: id
-            rollbackDescription: "('description' in input && input.description != null) ? string(input.description) : ''"
+            rollbackDescription:
+              userId: "'usr_' + (identity.project != '' ? identity.project : identity.account)"
+              username: "'test'"
+              description: "('description' in input && input.description != null) ? string(input.description) : ''"
+              createdAt: "now_ms"
     output: {}
-
-  CreateCheck:
-    reads:
-      dep:
-        resource: deployment
-        key: "string(input.deploymentId)"
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - create: { resource: check }
-    output:
-      id: rec.id
-      name: rec.name
-      status: rec.status
-      createdAt: rec.createdAt
-
-  GetAllChecks:
-    reads:
-      dep: { resource: deployment, key: "string(input.deploymentId)" }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    list:
-      resource: check
-      member: checks
-    output: {}
-
-  GetCheck:
-    reads:
-      dep: { resource: deployment, key: "string(input.deploymentId)" }
-      chk: { resource: check }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      id: chk.id
-      name: chk.name
-      status: chk.status
-      conclusion: chk.conclusion
-
-  UpdateCheck:
-    reads:
-      dep: { resource: deployment, key: "string(input.deploymentId)" }
-      chk: { resource: check }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - patch:
-          resource: check
-          record:
-            id: id
-            status: "('status' in input && input.status != null) ? string(input.status) : chk.status"
-            conclusion: "('conclusion' in input && input.conclusion != null) ? input.conclusion : chk.conclusion"
-            updatedAt: "int(now) * 1000"
-    output:
-      id: rec.id
-      status: rec.status
-      conclusion: rec.conclusion
-
-  RerequestCheck:
-    reads:
-      dep: { resource: deployment, key: "string(input.deploymentId)" }
-      chk: { resource: check }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - patch:
-          resource: check
-          record:
-            id: id
-            status: "'registered'"
-            conclusion: "null"
-            updatedAt: "int(now) * 1000"
-    output: {}
-
-  ListProjectChecks:
-    reads:
-      by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    list: { resource: project_check, member: checks }
-    output: {}
-
-  CreateProjectCheck:
-    reads:
-      by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - create: { resource: project_check }
-    output:
-      id: rec.id
-      name: rec.name
-      createdAt: rec.createdAt
-      updatedAt: rec.updatedAt
-
-  GetProjectCheck:
-    reads:
-      by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
-      chk: { resource: project_check }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      id: chk.id
-      name: chk.name
-      createdAt: chk.createdAt
-      updatedAt: chk.updatedAt
-
-  UpdateProjectCheck:
-    reads:
-      by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
-      chk: { resource: project_check }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - patch:
-          resource: project_check
-          record:
-            id: id
-            name: "('name' in input && input.name != null) ? string(input.name) : chk.name"
-            updatedAt: "int(now) * 1000"
-    output:
-      id: rec.id
-      name: rec.name
-      updatedAt: rec.updatedAt
-
-  DeleteProjectCheck:
-    reads:
-      by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
-      chk: { resource: project_check }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - delete: { resource: project_check }
-
-  ListCheckRuns:
-    reads:
-      by_name: { resource: project_name, key: "string(input.projectIdOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.projectIdOrName)"
-      chk: { resource: project_check }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: chk_found, error: NotFound, message: "The requested resource was not found." }
-    # No separate run store for project checks yet; rerequest is a status flip.
-    output:
-      runs: "[]"
-
-  ListDeploymentCheckRuns:
-    reads:
-      dep: { resource: deployment, key: "string(input.deploymentId)" }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    list: { resource: check_run, member: runs }
-    output: {}
-
-  CreateDeploymentCheckRun:
-    reads:
-      dep: { resource: deployment, key: "string(input.deploymentId)" }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - create: { resource: check_run }
-    output:
-      id: rec.id
-      status: rec.status
-
-  GetDeploymentCheckRun:
-    reads:
-      dep: { resource: deployment, key: "string(input.deploymentId)" }
-      run: { resource: check_run }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: run_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      id: run.id
-      status: run.status
-      conclusion: run.conclusion
-
-  UpdateDeploymentCheckRun:
-    reads:
-      dep: { resource: deployment, key: "string(input.deploymentId)" }
-      run: { resource: check_run }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: run_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - patch:
-          resource: check_run
-          record:
-            id: id
-            status: "('status' in input && input.status != null) ? string(input.status) : run.status"
-            conclusion: "('conclusion' in input && input.conclusion != null) ? input.conclusion : run.conclusion"
-            updatedAt: "int(now) * 1000"
-    output:
-      id: rec.id
-      status: rec.status
-      conclusion: rec.conclusion
-
-  UploadArtifact:
-    effects:
-      - put: { resource: artifact }
-    output:
-      urls: "[string(rec.hash)]"
-
-  DownloadArtifact:
-    reads:
-      art: { resource: artifact }
-    require:
-      - { cond: art_found, error: NotFound, message: "The requested resource was not found." }
-    # Bytes are not retained; empty blob body.
-    output:
-      _raw: "''"
-
-  ArtifactExists:
-    reads:
-      art: { resource: artifact }
-    require:
-      - { cond: art_found, error: NotFound, message: "The requested resource was not found." }
-    output: {}
-
-  ArtifactQuery:
-    # Document answers digest→metadata for requested hashes. Map-shaped
-    # root output from a filtered list is not expressible yet; empty map
-    # is the honest stub (Upload/Exists/Download cover the store itself).
-    output: {}
-
-  Status:
-    output:
-      status: "'enabled'"
-
-  RecordEvents:
-    output: {}
-
-  DeleteAllArtifacts:
-    effects:
-      - delete: { resource: artifact, where: "true" }
-    output:
-      deletedCount: deleted_count
-
-  GetRollingReleaseConfig:
-    reads:
-      by_name: { resource: project_name, key: "string(input.idOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
-      cfg: { resource: rolling_release_config }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      rollingRelease: "cfg_found ? {'target': cfg.target, 'stages': cfg.stages} : {}"
-
-  UpdateRollingReleaseConfig:
-    reads:
-      by_name: { resource: project_name, key: "string(input.idOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - put:
-          resource: rolling_release_config
-          record:
-            target: "('target' in input && input.target != null) ? string(input.target) : 'production'"
-            stages: "('stages' in input && input.stages != null) ? input.stages : []"
-            updatedAt: "int(now) * 1000"
-    output:
-      rollingRelease: "{'target': rec.target, 'stages': rec.stages}"
-
-  DeleteRollingReleaseConfig:
-    reads:
-      by_name: { resource: project_name, key: "string(input.idOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
-      cfg: { resource: rolling_release_config }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - delete: { resource: rolling_release_config, missing: ignore }
-
-  GetRollingRelease:
-    reads:
-      by_name: { resource: project_name, key: "string(input.idOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
-      rr: { resource: rolling_release }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      rollingRelease: "rr_found ? {'state': rr.state, 'startedAt': rr.startedAt, 'approvedStage': rr.approvedStage} : {}"
-
-  StartRollingRelease:
-    reads:
-      by_name: { resource: project_name, key: "string(input.idOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - put:
-          resource: rolling_release
-          record:
-            state: "'ACTIVE'"
-            startedAt: "int(now) * 1000"
-            approvedStage: "0"
-    output:
-      rollingRelease: "{'state': rec.state, 'startedAt': rec.startedAt, 'approvedStage': rec.approvedStage}"
-
-  ApproveRollingReleaseStage:
-    reads:
-      by_name: { resource: project_name, key: "string(input.idOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
-      rr: { resource: rolling_release }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: rr_found, error: NotFound, message: "No active rolling release" }
-    effects:
-      - patch:
-          resource: rolling_release
-          record:
-            state: "'ACTIVE'"
-            approvedStage: "int(rr.approvedStage) + 1"
-    output:
-      rollingRelease: "{'state': rec.state, 'startedAt': rec.startedAt, 'approvedStage': rec.approvedStage}"
-
-  CompleteRollingRelease:
-    reads:
-      by_name: { resource: project_name, key: "string(input.idOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
-      rr: { resource: rolling_release }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: rr_found, error: NotFound, message: "No active rolling release" }
-    effects:
-      - patch:
-          resource: rolling_release
-          record:
-            state: "'COMPLETED'"
-            approvedStage: "rr.approvedStage"
-    output:
-      rollingRelease: "{'state': rec.state, 'startedAt': rec.startedAt, 'approvedStage': rec.approvedStage}"
-
-  GetRollingReleaseBillingStatus:
-    reads:
-      by_name: { resource: project_name, key: "string(input.idOrName)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.idOrName)"
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      # Fixed fixture; no billing store. Recorded as a quirk.
-      availableSlots: "1"
-      enabledProjects: "[]"
-      message: "'ok'"
-      reason: "'fixture'"
-
-  GetRuntimeLogs:
-    reads:
-      by_name: { resource: project_name, key: "string(input.projectId)" }
-      proj:
-        resource: project
-        key: "by_name_found ? string(by_name.project) : string(input.projectId)"
-      dep: { resource: deployment, key: "string(input.deploymentId)" }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    # Document shapes this as one log row, not a list wrapper. Empty until a
-    # writer exists; return a stub row rather than inventing a logs member.
-    output:
-      domain: "''"
-      level: "'info'"
-      message: "''"
-      messageTruncated: "false"
-      requestMethod: "''"
-      requestPath: "''"
-      responseStatusCode: "0"
-      rowId: "''"
-      source: "'edge'"
-      timestampInMs: "int(now) * 1000"
 
 
 quirks:
@@ -2507,21 +702,92 @@ quirks:
       body gets none -- the rule is the protocol's, not this provider's.
   - operation: CreateProjectEnv
     note: >
-      Answers {created, failed} where the pack answered the variable itself at
-      the top level. The document declares those two members and the operation
-      is bulk-shaped: `created` carries what was made, `failed` what was not.
-      One variable at a time is what the pack did and what this transcribes, so
-      `failed` is always empty.
+      Answers {created, failed}, as the document declares, and 201. The pack
+      answered the variable itself at the top level, one at a time.
 
-      Answers 201, where the pack answered 200.
+      The body is one variable or an array of them. A variable that exists for
+      the same key, target and git branch is refused: a single variable with a
+      409 ENV_CONFLICT (the code the CLI reads to ask whether to overwrite, with
+      the key and targets in the envelope), a batch by listing it under
+      `failed` and making the rest. ?upsert=true updates it instead. What the
+      API shows of a value depends on the type: plain and secret as set,
+      encrypted opaque unless ?decrypt=true or the variable is addressed by id,
+      sensitive never (its digest is kept, its value is not, so a snapshot holds
+      no secret). The opaque form is a base64 document naming the digest; real
+      Vercel's is a ciphertext, which nothing a client does can tell apart.
+  - operation: FilterProjectEnvs
+    note: >
+      Lists in creation order, where the pack listed by store key (a random
+      identifier). The document does not say what order it lists in; creation
+      order is the one a snapshot can reproduce. `gitBranch` narrows to the
+      variables set for that branch and those set for none. `source`,
+      `customEnvironmentId` and `customEnvironmentSlug` are accepted and read by
+      nothing.
+  - operation: GetProjectEnv
+    note: >
+      The document declares this at /v1; the vendored fragment and the pack's
+      supplement disagreed about the version, and the supplement's /v10 is an
+      address of the same operation now, with /v9 and /v8, so a client written
+      against any of them reaches the one store. The pack's supplement answered
+      five members; the document's variable carries the rest. Addressed by id,
+      an encrypted value is shown decrypted.
   - operation: AddProjectDomain
     note: >
-      The pack answered a domain verified the moment it was added, and the
-      vendored document declares `verified` without saying what it starts as.
-      The vendor's own emulator answers false until the verify route runs --
-      better evidence than the dead pack -- so a domain is added unverified and
-      VerifyProjectDomain moves the flag. The differential corpus caught the
-      old answer (test/behavior/vercel/oracle, domains-get).
+      A domain is added unverified and carries the TXT challenge a client is
+      told to publish (`_vercel.<apex>`, `vc-domain-verify=<host>,<token>`),
+      where the pack answered it verified the moment it was added. The wording
+      and the empty challenge list once verified follow the vendor's own
+      emulator (test/behavior/vercel/oracle, domains-add). A hostname under
+      vercel.app, and one whose apex the account already holds verified, are
+      verified from the start. A hostname is lower-cased; one that is not a
+      hostname is a 400 invalid_domain; one a project already holds (this or
+      another) is a 409 domain_already_in_use. The error codes are this
+      bundle's reading of Vercel's: the document names the statuses and not the
+      codes.
+  - operation: CreateCheck
+    note: >
+      A check can be added only while the build runs (QUEUED or BUILDING), as the
+      document says, and starts registered. Its integrationId is a constant:
+      there is no integration behind it. Status, conclusion and the timestamps
+      move because a client patches them; nothing runs the check.
+  - operation: CreateDeploymentCheckRun
+    note: >
+      `checkId` names a project check, the definition the run is made from
+      (name, requires, blocks, targets, timeout, source); the run starts queued.
+      The pack and the oracle took any identifier, including a deployment check's.
+  - operation: CreateProjectCheck
+    note: >
+      A check made through the API has no integration or git provider behind it,
+      so its source is a webhook unless the request names another kind. The
+      timeout defaults to five minutes (the document sets a floor of one
+      second and no default).
+  - operation: UpdateRollingReleaseConfig
+    note: >
+      The document declares this route with no request body, so the members are
+      taken from the body whether they arrive flat or inside rollingRelease; a
+      null rollingRelease takes the configuration away. The final stage must be
+      100 percent and stages must rise.
+  - operation: StartRollingRelease
+    note: >
+      Needs configured stages and a READY canary, and moves nothing: there is no
+      traffic to split, so the stages are a state machine a client steps
+      through (approve-stage moves to the next, complete finishes and makes the
+      canary production). The answer is the document's RollingRelease object.
+  - operation: GetRollingReleaseBillingStatus
+    note: >
+      Answers the plan with no limit (unlimited_slots); there is no billing.
+  - operation: GetRuntimeLogs
+    note: >
+      Nothing serves traffic, so there is nothing to log; the stream is the
+      delimiter row that opens it.
+  - operation: UploadArtifact
+    note: >
+      The bytes are kept (base64 in the record, in memory), so an upload is what
+      the next download returns, byte for byte. The pack kept the size alone and
+      answered an empty body.
+  - operation: RecordEvents
+    note: >
+      Accepted and not kept: cache events are the client's telemetry.
   - operation: CreateDeployment
     note: >
       Creating a deployment for a project that does not exist creates the
@@ -2538,31 +804,48 @@ quirks:
       exercisable before Advance.
   - operation: UpdateProject
     note: >
-      The document's update shape declares some fifty members; the bundle
-      tracks only the ones its create establishes -- name and framework -- so
-      an update carrying buildCommand, rootDirectory or the rest is accepted
-      and dropped. No pack ever served this operation, so there is no
-      transcription to outrank; the document declares the members and says
-      nothing about which an update must honor.
+      Stores the members a project is created with and the settings a client
+      changes after (name, framework, the build, install and dev commands, the
+      root and output directories, nodeVersion, the protection settings and the
+      switches). The document declares some fifty; the rest are accepted and
+      dropped, because nothing here reads them.
   - operation: EditProjectEnv
     note: >
-      `comment`, `gitBranch` and `customEnvironmentIds` are accepted and
-      dropped: the variable record carries only what CreateProjectEnv
-      establishes (key, value, type, target), and the document declares the
-      members without saying what an edit must do with them.
+      Honors key, value, type, target, gitBranch, comment and
+      customEnvironmentIds; a member the request leaves out keeps its value. An
+      edit that would land on another variable's key, target and branch is a 409
+      ENV_CONFLICT. The pack carried only key, value, type and target. A value
+      is shown decrypted because the variable is addressed by id.
   - operation: UpdateProjectDomain
     note: >
-      The document declares a 409 for this operation without saying what
-      produces it -- redirect targets and git branches are stored verbatim,
-      so the conflict is never answered. Simplified deliberately: the shape
-      of the disagreement is known (a declared status with no declared
-      trigger), which a probe run can overturn.
+      Sets a redirect (with its status), a git branch or a custom environment;
+      a null clears one. A redirect and a git branch together are a 400, as the
+      document says, and so is a redirect to the domain itself or to something
+      that is not a hostname. Whether the redirect target is a domain of the
+      same project is not checked. The document declares a 409 for a project
+      being transferred, which nothing here produces.
   - operation: VerifyProjectDomain
     note: >
-      Answers the domain, which is already verified: true from creation --
-      the add's quirk -- so verify moves nothing. A real verify is a DNS
-      round trip that can fail; this one cannot, which follows from the
-      creation behavior rather than being a second invention.
+      Takes the TXT challenge as met: an emulator has no network to resolve it,
+      so verify cannot fail. It moves the domain, the account-wide record of the
+      hostname and the account's own record of the apex (when it holds one) to
+      verified, and the challenge list to empty. The document's 400s for a
+      missing or mismatched TXT record are never answered.
+  - operation: CreateOrTransferDomain
+    note: >
+      Adds the domain to the account unverified, with Vercel's nameservers as
+      the intended ones and none as the current ones; `method` other than add is
+      treated as add. A second add of the same name is a 409
+      domain_already_exists, a code this bundle chose: the document names the
+      status and not the code.
+  - operation: PatchDomain
+    note: >
+      Only `op: update` is served (renew, zone, custom nameservers, echMode).
+      Moving a domain out answers 400.
+  - operation: GetDomainConfig
+    note: >
+      Recommends Vercel's real A record and CNAME target. A hostname is
+      configured once a project holds it verified; there is no DNS to look at.
   - operation: CreateCustomEnvironment
     note: >
       The body's `slug` and the team-slug query share one member name in the
@@ -2612,10 +895,24 @@ quirks:
       address is the oracle's 409 member_already_exists.
   - operation: ListDeploymentAliases
     note: >
-      Answers uid and alias per row. The oracle also answers deploymentId and
-      projectId, which the document's alias item shape does not declare, and
-      the document requires a `created` the oracle never sends -- the
-      projection follows the document's shape with the oracle's membership.
+      Answers uid, alias, created, redirect and protectionBypass per row, the
+      document's item shape, oldest first. The oracle also answers deploymentId
+      and projectId, which the document's item shape does not declare. The
+      deployment's own URL is one of the rows, as the oracle writes it.
+  - operation: AssignAlias
+    note: >
+      Needs a READY deployment (a 400 otherwise, as the document says), so a
+      client polls to READY first; the pack and the oracle took one still
+      building. A hostname that already names another deployment moves, and the
+      answer carries oldDeploymentId; naming the deployment it already names is
+      a 409. Any well-formed hostname is accepted: the document's 404 for a
+      domain the account does not hold and its 403 for a missing .vercel.app
+      alias are never answered, so a deploy script does not have to add the
+      domain first. The deployment lists the hostname in its own `alias`.
+  - operation: DeleteAlias
+    note: >
+      Removes the row and the hostname's index entry, and the deployment stops
+      listing the hostname.
   - operation: GetDeploymentEvents
     note: >
       Newest first, the oracle's default direction; `direction`, `limit`,

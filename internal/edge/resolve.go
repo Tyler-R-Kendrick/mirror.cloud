@@ -375,10 +375,10 @@ func (s *Server) serviceByPath(r *http.Request) *model.Service {
 func matchesSomePath(svc *model.Service, method string, parts []string, query url.Values) bool {
 	for i := range svc.Operations {
 		op := &svc.Operations[i]
-		if op.HTTP.URI == "" || op.HTTP.URI == "/" || !strings.EqualFold(op.HTTP.Method, method) {
+		if !strings.EqualFold(op.HTTP.Method, method) {
 			continue
 		}
-		if httpuri.Compile(op.HTTP.URI).Claims(parts, query) {
+		if httpuri.Claims(op, parts, query) {
 			return true
 		}
 	}

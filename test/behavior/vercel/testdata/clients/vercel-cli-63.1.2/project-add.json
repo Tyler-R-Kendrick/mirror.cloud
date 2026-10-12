@@ -1,0 +1,60 @@
+{
+  "client": "vercel CLI 63.1.2 (node v22.22.0, linux x64)",
+  "observed": "client-observed: recorded by a proxy between the real CLI and a running emulator (vercel project add, journey cli-journey.sh). Never compared with api.vercel.com.",
+  "steps": [
+    {
+      "name": "whoami",
+      "request": {
+        "method": "GET",
+        "path": "/v2/user",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "user.id",
+          "user.username"
+        ]
+      }
+    },
+    {
+      "name": "project add",
+      "request": {
+        "method": "POST",
+        "path": "/v1/projects",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"name\":\"cli-journey\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "name",
+          "accountId"
+        ],
+        "equals": {
+          "name": "cli-journey"
+        }
+      },
+      "capture": {
+        "projectId": "id"
+      },
+      "note": "vercel 63.1.2 creates a project at POST /v1/projects, an address the vendored document does not list (it declares /v11)"
+    }
+  ]
+}

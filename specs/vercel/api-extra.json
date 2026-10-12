@@ -3,7 +3,7 @@
   "info": {
     "title": "Vercel REST API \u2014 authored supplement",
     "version": "authored",
-    "description": "Routes the vendored Vercel document never declared but the vendor's own emulator (vercel-labs/emulate, pinned in specs/vercel/emulate-inventory.json) serves: the /v1 API-key lifecycle, team creation and member listing, user patching, the registration probe, the v6 deployment listing, get-one env, and the local OAuth flow. Every cell is `authored` provenance \u2014 a reading of the oracle's packages/@emulators/vercel/src/routes/{api-keys,user,oauth,deployments,env}.ts, not of the real api.vercel.com."
+    "description": "Routes the vendored Vercel document never declared but the vendor's own emulator (vercel-labs/emulate, pinned in specs/vercel/emulate-inventory.json) serves: the /v1 API-key lifecycle, team creation and member listing, user patching, the registration probe, the v6 deployment listing, get-one env, and the local OAuth flow. Every cell is `authored` provenance \u2014 a reading of the oracle's packages/@emulators/vercel/src/routes/{api-keys,user,oauth,deployments,env}.ts, not of the real api.vercel.com. Two Edge Config listings are also here: the vendored document describes each as a single object under a sentence that says it lists, and the API answers an array, so the supplement states the array and the vendored operation of the same name yields to it."
   },
   "x-mirror-service": "vercel.api",
   "servers": [
@@ -287,48 +287,6 @@
         }
       }
     },
-    "/v10/projects/{idOrName}/env/{id}": {
-      "get": {
-        "operationId": "GetProjectEnv",
-        "parameters": [
-          {
-            "name": "idOrName",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "the variable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SupplementEnvVar"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/oauth/authorize": {
       "get": {
         "operationId": "OauthAuthorize",
@@ -518,6 +476,123 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SupplementUserinfoResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/global-config": {
+      "get": {
+        "operationId": "GetEdgeConfigs",
+        "description": "The vendored document describes the answer as one config, under the sentence 'List of all global configs.' A list of configs cannot be one config, and the API answers an array; this operation replaces the document's with the answer a client reads.",
+        "parameters": [
+          {
+            "name": "teamId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the account's Edge Configs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SupplementEdgeConfig"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/global-config/{edgeConfigId}/tokens": {
+      "get": {
+        "operationId": "GetEdgeConfigTokens",
+        "description": "As GetEdgeConfigs: the vendored document describes one token where the route lists them, and the API answers an array.",
+        "parameters": [
+          {
+            "name": "edgeConfigId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "teamId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the Edge Config's tokens",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SupplementEdgeConfigToken"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v11/deployments/{deploymentId}/builds": {
+      "get": {
+        "operationId": "GetDeploymentBuilds",
+        "description": "The builds of a deployment. The pinned document does not list it; `vercel inspect` reads it (vercel 63.1.2 asks GET /v11/deployments/{id}/builds for a version 2 deployment) and cannot print a deployment without it. Nothing builds here, so the list is empty.",
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "listed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementDeploymentBuilds"
                 }
               }
             }
@@ -738,35 +813,6 @@
           }
         }
       },
-      "SupplementEnvVar": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "key": {
-            "type": "string"
-          },
-          "value": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          },
-          "target": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "createdAt": {
-            "type": "integer"
-          },
-          "updatedAt": {
-            "type": "integer"
-          }
-        }
-      },
       "SupplementHtmlPage": {
         "type": "object",
         "properties": {
@@ -822,7 +868,184 @@
             "type": "string"
           }
         }
+      },
+      "SupplementEdgeConfig": {
+        "type": "object",
+        "required": [
+          "createdAt",
+          "digest",
+          "id",
+          "itemCount",
+          "ownerId",
+          "sizeInBytes",
+          "slug",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "ownerId": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "number"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "itemCount": {
+            "type": "number"
+          },
+          "sizeInBytes": {
+            "type": "number"
+          }
+        }
+      },
+      "SupplementEdgeConfigToken": {
+        "type": "object",
+        "required": [
+          "createdAt",
+          "edgeConfigId",
+          "id",
+          "label",
+          "partialToken"
+        ],
+        "properties": {
+          "partialToken": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "edgeConfigId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "number"
+          }
+        }
+      },
+      "SupplementDuration": {
+        "type": "object",
+        "description": "How long a deployment took, in milliseconds. Nothing builds here, so nothing is timed and the object is empty.",
+        "properties": {
+          "endTime": {
+            "type": "number"
+          },
+          "endTimeCapped": {
+            "type": "number"
+          },
+          "startTime": {
+            "type": "number"
+          },
+          "timeForBilling": {
+            "type": "number"
+          },
+          "timeToContainerExit": {
+            "type": "number"
+          },
+          "timeToContainerExitCapped": {
+            "type": "number"
+          },
+          "timeToReady": {
+            "type": "number"
+          }
+        }
+      },
+      "SupplementDeploymentBuilds": {
+        "type": "object",
+        "required": [
+          "builds"
+        ],
+        "properties": {
+          "builds": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "entrypoint": {
+                  "type": "string"
+                },
+                "readyState": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
       }
     }
-  }
+  },
+  "x-mirror-members": [
+    {
+      "shape": "CreateDeploymentResponse.oneOf0",
+      "members": {
+        "duration": {
+          "$ref": "#/components/schemas/SupplementDuration"
+        }
+      },
+      "source": "Client-observed: @vercel/sdk 1.28.43 (published 2026-10-09, later than the vendored document) validates every deployment it reads against a schema that requires `duration` (an object whose members are all optional); the pinned document declares no such member, so the SDK's createDeployment refused the emulator's answer (ResponseValidationError: [<root>.duration]: Required). Recorded in test/behavior/vercel/testdata/clients/vercel-sdk-1.28.43/. Never compared with api.vercel.com."
+    },
+    {
+      "shape": "CreateDeploymentResponse.oneOf1",
+      "members": {
+        "duration": {
+          "$ref": "#/components/schemas/SupplementDuration"
+        }
+      },
+      "source": "Client-observed: @vercel/sdk 1.28.43 (published 2026-10-09, later than the vendored document) validates every deployment it reads against a schema that requires `duration` (an object whose members are all optional); the pinned document declares no such member, so the SDK's createDeployment refused the emulator's answer (ResponseValidationError: [<root>.duration]: Required). Recorded in test/behavior/vercel/testdata/clients/vercel-sdk-1.28.43/. Never compared with api.vercel.com."
+    },
+    {
+      "shape": "GetDeploymentResponse.oneOf0",
+      "members": {
+        "duration": {
+          "$ref": "#/components/schemas/SupplementDuration"
+        }
+      },
+      "source": "Client-observed: @vercel/sdk 1.28.43 (published 2026-10-09, later than the vendored document) validates every deployment it reads against a schema that requires `duration` (an object whose members are all optional); the pinned document declares no such member, so the SDK's createDeployment refused the emulator's answer (ResponseValidationError: [<root>.duration]: Required). Recorded in test/behavior/vercel/testdata/clients/vercel-sdk-1.28.43/. Never compared with api.vercel.com."
+    },
+    {
+      "shape": "GetDeploymentResponse.oneOf1",
+      "members": {
+        "duration": {
+          "$ref": "#/components/schemas/SupplementDuration"
+        }
+      },
+      "source": "Client-observed: @vercel/sdk 1.28.43 (published 2026-10-09, later than the vendored document) validates every deployment it reads against a schema that requires `duration` (an object whose members are all optional); the pinned document declares no such member, so the SDK's createDeployment refused the emulator's answer (ResponseValidationError: [<root>.duration]: Required). Recorded in test/behavior/vercel/testdata/clients/vercel-sdk-1.28.43/. Never compared with api.vercel.com."
+    },
+    {
+      "shape": "GetDeploymentResponse.oneOf2",
+      "members": {
+        "duration": {
+          "$ref": "#/components/schemas/SupplementDuration"
+        }
+      },
+      "source": "Client-observed: @vercel/sdk 1.28.43 (published 2026-10-09, later than the vendored document) validates every deployment it reads against a schema that requires `duration` (an object whose members are all optional); the pinned document declares no such member, so the SDK's createDeployment refused the emulator's answer (ResponseValidationError: [<root>.duration]: Required). Recorded in test/behavior/vercel/testdata/clients/vercel-sdk-1.28.43/. Never compared with api.vercel.com."
+    },
+    {
+      "shape": "CancelDeploymentResponse",
+      "members": {
+        "duration": {
+          "$ref": "#/components/schemas/SupplementDuration"
+        }
+      },
+      "source": "Client-observed: @vercel/sdk 1.28.43 (published 2026-10-09, later than the vendored document) validates every deployment it reads against a schema that requires `duration` (an object whose members are all optional); the pinned document declares no such member, so the SDK's createDeployment refused the emulator's answer (ResponseValidationError: [<root>.duration]: Required). Recorded in test/behavior/vercel/testdata/clients/vercel-sdk-1.28.43/. Never compared with api.vercel.com."
+    }
+  ]
 }

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -591,10 +592,16 @@ func Snapshot(deps spi.Deps, lockSHA string, w io.Writer) error {
 	if err := deps.Blobs.Snapshot(context.Background(), &blobBuf); err != nil {
 		return err
 	}
-	man, _ := json.Marshal(map[string]string{
+	manifest := map[string]string{
 		"lockSHA": lockSHA,
 		"seed":    "",
-	})
+	}
+	// Where the identifier stream stood, so a process restored from this
+	// archive goes on from there and does not hand out the ids it already did.
+	if r, ok := deps.Rand.(interface{ Position() uint64 }); ok {
+		manifest["randPosition"] = strconv.FormatUint(r.Position(), 10)
+	}
+	man, _ := json.Marshal(manifest)
 	tw := tar.NewWriter(w)
 	defer tw.Close()
 	for _, f := range []struct {
@@ -634,7 +641,8 @@ func Restore(deps spi.Deps, lockSHA string, r io.Reader) error {
 		files[hdr.Name] = b
 	}
 	var man struct {
-		LockSHA string `json:"lockSHA"`
+		LockSHA      string `json:"lockSHA"`
+		RandPosition string `json:"randPosition"`
 	}
 	if b, ok := files["manifest.json"]; ok {
 		_ = json.Unmarshal(b, &man)
@@ -646,6 +654,11 @@ func Restore(deps spi.Deps, lockSHA string, r io.Reader) error {
 	if b := files["store.tar"]; len(b) > 0 {
 		if err := deps.Store.Restore(context.Background(), bytes.NewReader(b)); err != nil {
 			return err
+		}
+	}
+	if r, ok := deps.Rand.(interface{ Resume(uint64) }); ok && man.RandPosition != "" {
+		if pos, err := strconv.ParseUint(man.RandPosition, 10, 64); err == nil {
+			r.Resume(pos)
 		}
 	}
 	if b := files["blobs.json"]; len(b) > 0 {

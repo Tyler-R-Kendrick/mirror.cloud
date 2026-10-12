@@ -43,9 +43,11 @@ func TestASplattedPayloadDoesNotFailTheRequiredCheck(t *testing.T) {
 	project, _ := created.Output["id"].(string)
 
 	// The request carries the body's members and never `body` itself, which is
-	// exactly what the REST/JSON codec produces for this shape.
+	// exactly what the REST/JSON codec produces for this shape. The type is
+	// plain because an encrypted value is answered opaque, and this asks about
+	// the payload, not about what a variable shows.
 	got, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateProjectEnv",
-		Input: map[string]any{"idOrName": project, "key": "K", "value": "V"}})
+		Input: map[string]any{"idOrName": project, "key": "K", "value": "V", "type": "plain"}})
 	if err != nil {
 		t.Fatalf("create env: %v", err)
 	}

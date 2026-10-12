@@ -1,0 +1,124 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "mirror.cloud — Vercel test-control surface",
+    "version": "authored",
+    "description": "Mirror's own routes for breaking vercel.api on purpose, not part of the Vercel API and absent from the vendored document. They sit under /_mirror/vercel/, answer 404 unless the process was started with MIRROR_VERCEL_FAULTS=1, take no credential, and exist so a failure test can make a deployment end in ERROR or CANCELED without racing the build clock. Every cell is authored."
+  },
+  "x-mirror-service": "vercel.api",
+  "servers": [{ "url": "https://api.vercel.com" }],
+  "paths": {
+    "/_mirror/vercel/deployments/{idOrUrl}/state": {
+      "post": {
+        "operationId": "MirrorSetDeploymentState",
+        "summary": "Move a deployment to a state now.",
+        "parameters": [
+          { "name": "idOrUrl", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "teamId", "in": "query", "schema": { "type": "string" } },
+          { "name": "slug", "in": "query", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["readyState"],
+                "properties": {
+                  "readyState": { "type": "string", "enum": ["BUILDING", "READY", "ERROR", "CANCELED"] },
+                  "errorCode": { "type": "string" },
+                  "errorMessage": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The deployment's id and the state it is in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["id", "readyState"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "readyState": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "The deployment cannot move to that state from the one it is in." },
+          "404": { "description": "No such deployment." }
+        }
+      }
+    },
+    "/_mirror/vercel/deployments/fail-next": {
+      "post": {
+        "operationId": "MirrorArmDeploymentFailure",
+        "summary": "Make the next deployments end in ERROR or CANCELED.",
+        "parameters": [
+          { "name": "teamId", "in": "query", "schema": { "type": "string" } },
+          { "name": "slug", "in": "query", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "count": { "type": "integer", "minimum": 1 },
+                  "readyState": { "type": "string", "enum": ["ERROR", "CANCELED"] },
+                  "errorCode": { "type": "string" },
+                  "errorMessage": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "How many deployments are armed and how they will end.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["count", "readyState"],
+                  "properties": {
+                    "count": { "type": "integer" },
+                    "readyState": { "type": "string" },
+                    "errorCode": { "type": "string" },
+                    "errorMessage": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "MirrorDisarmDeploymentFailure",
+        "summary": "Disarm the failure the previous call armed.",
+        "parameters": [
+          { "name": "teamId", "in": "query", "schema": { "type": "string" } },
+          { "name": "slug", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Nothing is armed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["count"],
+                  "properties": { "count": { "type": "integer" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

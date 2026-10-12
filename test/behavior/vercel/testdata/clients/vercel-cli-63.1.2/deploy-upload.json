@@ -1,0 +1,197 @@
+{
+  "client": "vercel CLI 63.1.2 (node v22.22.0, linux x64)",
+  "observed": "client-observed: recorded by a proxy between the real CLI and a running emulator, `vercel deploy --prod --yes` in a directory of five files (the CLI's agent detection off). The CLI offers every file by its SHA-1, is told which the server lacks (400 missing_files), uploads those to POST /v2/files with the digest in x-vercel-digest, and offers the deployment again. Never compared with api.vercel.com.",
+  "steps": [
+    {
+      "name": "project add",
+      "request": {
+        "method": "POST",
+        "path": "/v1/projects",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"name\":\"upload-journey\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id"
+        ]
+      },
+      "capture": {
+        "projectId": "id"
+      }
+    },
+    {
+      "name": "offer the files",
+      "request": {
+        "method": "POST",
+        "path": "/v13/deployments?skipAutoDetectionConfirmation=1",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json",
+          "accept": "application/json, application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"env\":{},\"build\":{\"env\":{}},\"name\":\"upload-journey\",\"project\":\"{{projectId}}\",\"meta\":{},\"target\":\"production\",\"projectSettings\":{\"sourceFilesOutsideRootDirectory\":true,\"rootDirectory\":null},\"source\":\"cli\",\"version\":2,\"files\":[{\"file\":\"index.html\",\"size\":31,\"mode\":33188,\"sha\":\"919fa466a4efad398d7a2c9c7b00a36304b9df72\"},{\"file\":\"assets/a.txt\",\"size\":4053,\"mode\":33188,\"sha\":\"3a902b20282da87623242cdf4653b61796c46490\"},{\"file\":\"assets/b.txt\",\"size\":4053,\"mode\":33188,\"sha\":\"6ec2ff6d9c185159eacd8c23b36fcad1e149053e\"},{\"file\":\"assets/c.txt\",\"size\":4053,\"mode\":33188,\"sha\":\"eba8e71c51a24d12e0316acc84b988154b97e1cb\"},{\"file\":\"assets/site.css\",\"size\":16,\"mode\":33188,\"sha\":\"21ef14208c03845349614a37d516463738e52e04\"}]}"
+      },
+      "want": {
+        "status": 400,
+        "members": [
+          "error.code",
+          "error.missing.0"
+        ],
+        "equals": {
+          "error.code": "missing_files"
+        }
+      }
+    },
+    {
+      "name": "upload file 1",
+      "request": {
+        "method": "POST",
+        "path": "/v2/files",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/octet-stream",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "x-now-digest": "6ec2ff6d9c185159eacd8c23b36fcad1e149053e",
+          "x-now-size": "4053",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "bodyBase64": "REl5cVNzTjk1NUZvemxvcS95WWZrejdhRWU4Y3h6YWkzTzlHNmF1ZkJxQTJoVDJGRllYa2dKaGZQeTJqZ0NNNUFOVTZ2RHJuWnR0SwpiZ1RnditMdWVDejAyZEl3Y05PUUZBR2R5Z2daV2lZQXcySUNyRXlXMXNmQ3NvdmRYWHczaTJMODRrVHgwM2ZpeWc0aTZtL2VuMWFWCjJQaGxVOXROdEcxeEVjUTU2Vjl2Q3JJb1VZQXlEMERhZUg2T2I4TCtaZTV1dEtmWXdOaEJMV2txUDJEVEgwZitPM1laVG9SdWdiVzgKdFdtQ094MEtGcEZ2N0tTenBDVWgyWVAwWHVla0xoVnFwbFA2d3FXMXRMNitJbnlKTWNwYjZKbWFnVVpvaUFsdW9LTjlTWHBlYXFzNwpSdmVLMmdtSVJXNG1SdmpDMFpQK2JYN01GdnZjOGhEcVhidWNQbEFJaDFENHhaM0N3Q0RmaktQYXVES2VlQjNOa1dST3gyN3piQmdUCmtrdXhYS2tQM2E2SDFNeHJ0Zk8yRTJ3TnNkOGQ1YjdZMS9zd1pCNWxCVkJGUVd3MjVrd2p0YkNhMTM1NEhrZXo2UnZTUkxCRmpCZmEKNndBUUV3R0FvU2R5eFhvUnkxTVA0c08wdFNCeGZBeXpnclpQZkpCd1NmUXBvblpnRHFmUXczWEhGakd3dEV6ckpZYVg1Q3BsNzE0cQorNTZhZVpQRjVGUU5mbTNGVXA1eVFVNEMvMGtaYWJDMzhEd296OURqVEppY2FYVXpVd2JiMUw3bG14OWVXOXoxYnVEQzRuOUVxTy9ICm91OWtjMTVJc0FyWXF6WjVDS2RpRUs4V1dWOUF5cURpSERKL3dkSHB6UXIzUVQ0alJtLzU3YmJLN1dzMHJCYmpnMitoZ3BCbERaWTEKWXpVK0ZhUm4rOWQzNWVubCtSQUhNdFB4Vk5NTWxhY2NFRnJ4WlBMY25DY0FJUjlSRnBwRTZqMituM1RuYlRKUGZlSmVZY2pXVDVGNwpIR0F1d0tJbmNqejBuNmZLL3Z1NlV1Ulh3eFFkTE1OUjAwRjNWaEZvOXhBMi9Md2Y1N0tpbGxaWUdYWTh0UDJmWUlrVUFaVkpOSnRoCjVSeURkcFIxVzZmcWIwMS9pSnBjS1RqbUhuL2FqblF0MGNCQnYyUjhGcWZrUGZBS2Y1VGJzSUZNdm1BdW9nVkt3RVlJOTNKd1BIaTMKMllnMmczeW9aaFIwNFlXajRxYWRtNEEzWnBnRHMzKzVsWUo2d1BsdmppVm0yNHVDcm5rMmgwSENzMTVlTGovZnZCNUplWGZNaXF6WApsYlY3YS8yN2VJRXpjbFFoR3BMalRRYUtiMWorTGl5N2x3aEFKUlRxRm42am1BQnpnWEN4QndwZFNydUx1YlpxbHVYYmhwOWFNMm1nCkVRWDEwNERhOTJvMnQ3cnlCUDJYSVhpOXJCYTNRSzY3dU9ZdWY4NlhjUmwwSFc0TFFGMDF1MVZEeVlZQ05sa1g3allXVlVDNUUwODUKTXMvREIwRXJtTmdtcG5obVZjalk1ZEE1d0tsTjY4Y20wR3RnVVpYUUZlN2NZV2l4Z3RXbnViZmFiTjJMb1IwVWUrcjVZRGJLei85SgpYVG0xWVZLVnlCUWgzcEIrcHozc3NuRTd1cmNEeDUxN21vTXdrVHdsbndDRDlHQXh3LzdLMGJGNFcwbnRWYURmZTZLdEUyTXk5V1hOCjBVYnE1V2ZkNmIrRUsrbG5ialQ1QmE2VFdSZ1V4SXhQKzZpckNqZWMrMU9uMHVpMHRCd2RuTjhuRmkvN09kNTg5NENpMTdybUNMWU8KaUx2UEJVUXowYVNhbTlQTmZUWDZiNlY4WlhIREo0Y1kxUHF1Rko3ek1PU3lmU21kT0hBTkdjLzVVcWN3WS9XWUg0R2QxczVyUGVLRQowR0RaRlE3VCt5ZERsYk1hbDNRalJMREM2ZzlQNlQrUmZXYmFyaFU0WGhxR3Fhdkl3T1MybnpQdlBuZms3YWp4S1NmM2U5MVNaYkZLCjZKN2lXOEdGbjBuT0RGSTVhaENPV3M4K0dTSXliNlJmZGQ3UHlmeDRpejdBcWIybkZ3anQ3enhVS0h3Nmd3Y3FjUDdhRmd0blhES3kKREgrMllNZnV6UnNkY3Q5Q3VBYllOU2JOMG5YbXdScEl0akdoZkJsZmQzVVdYaXNxUzJERnk2Yzl2ZU9zZkFhZ04xaG94UDRXbnF4NwphazBVT2VMalZ2Wll6TmlsRTFYOUorSk82eWR1dTZ4OVVHdnFxZmpQV3Z0ZUZsNjg2S3NkK21DN1B1UjNGNzFyQmtWVWZWL01yQk9PCk8wV3JDSHhVNG12cTBSbURKanh1dzVlSWMxZkJRZDFPTzNMaXZVamowNU00VmphTHVYNE9rQjhlcmZtNHNJVkdzUDQ0SUlGWnpLYnkKc0o1eFdlVVR4WTRTQTluMlpsU2dwT0hlNWEvL2FYRG96RUx2U0RMbjZTS2JQMUxpVVdaMGpmeDRTeFhXejBIWm5RWHlLMHdyVjFxSwpxM08xaGs4ZUNaRUtCSDZGdVd1aG9YOGoyRmlKT0RQNGJwc0lYUmZldDBQOW0wOElmeXZxem15RE9USEFwV0I4dGFCVDlkVEZXdWxwCmR5UUlvNnNNMFg4TTFUaGJ1b1dldkc0RjVlSys5ZmNXWVlESFZSdHlNT3VnQ1orelF5U08wYTlaME1oVGNlQit0aER4bWcza05ybHUKZkFadnk0c3Frd09OSFZJaWgydFUyWEYxeEFFR1JJUTh1djc0cVhmcFIvU0NoODNoWGkwb3M5SmwyVXVjOHBOendwK2ZHR1VMamRwNwpnYlZrckZnRE8wSzZlSndtdTAraTloRmRRMVRhTFFGZHA2NW1mOG1QZkY5citLNS9XWlBGWWU1V2dsSU5KYzhsVGluZk0xNHMvZDViCklIOXRkd2dWZ2JnWEZHZytWNkxGMzlmbWVzaFNlVHdhOWU5T2wwVmRhc1hNc2xUTmdvYWFzVWJ5YjB4L0dRdTFVTEZCZnl6Qlh1NzcKKzk2WS9YaWZaUEZlUm54NFFSUXlsczlGMnFMVDNzN2c1KzdZV1pTR1M1Y1Jzb1NZWGIxK0g1V0xqOVZsVi9BTEkwak9EdTVoeWRwRgppdEQ4MGZjVXJ5Ni9TQmsrQ2d1MmF6SWo0TzRzRHlyZXE3YURxRHBjTnNmZFNPYXpPU0NSTzlnbWp6Tm1IK2pUM056NFEwRmowN0NnClh0eFg3elcrLy9UTTVlNG8vN2tIUjZzS0Y5SFVVNkFGNVI2Rzl2RVZtdHZ3d3QwNytiVFIrY0JxNHpWQ0d2b2p3T2x6aUNLWm5wU2wKZ3M1M09pbEcyM3A2S0VSVjJ3SDVrWXJlN3E3MU94aG05RUhlWjFQbkFDMWUyZWptYTVLZWFBN252RVRrYWN5MFpWdXF4L2hpT3BneApMR1FrYlYyODk3RitIem1CTUFJdEdEdXhOams2TmxKUEJKNXpkZ3N1QzRYU0dCZ0R3STZCSFBxcE9Jb2orbFVQWFkrT1E0SFAybXZTCkdWYlpmQ29EaTNocW9iVXhtSnhycWl2djYzK0hZeGNHYWxUTmF0WXdXSjF3U3lXaWovdm9QSTQ0WGZ2VklHZERjQTdLNHFneEZTU2gKa044VlpXSUV6WVRkMFF6dm9wVUtJcVcyZVdjSS9qRVVjWGZBbHRYZ0dGb0dkalM2cHE2ai9wNnVWM3VkcFlkUWdmMWZvODBKc1M3WgplejVIMFFzOW5HQ2t6V2hQb0puY2l6L1dwbjBncGlrRWZaWGFrZGM2SlFIbTZRYWw3OG5rS0VhVE9DcWpXaDNkSHFBcDl5bDZXOVhLCjMxbG8rT3ViemdGZXRDYWEzaHFNZml6Qld4SjdWK040UlRRTHIxLytpa1ptRktGb0Vxb2xONmY2ekRFaWlTd2tnaDFpWWxvMUNZVVQKRXNReE11eDc5YzJld0t0dk04elV2Sm9renIrNHpka051OWZHb1Y3Wmt3QzUycnE2N3NlWHUzQzJwRm9xcVRQM0NWZy9ud1EyQkc2KwpBZkMwUE5mY3BheUV3eSt5eld0N1dBemM2YnV6T2lEbFNVRWl5OHhkRVdnZ2RQSEtmWlFEOXMvMEFPeUNVaE9sMnJwS2tEQk1iK1doCmsrQ01hUm50dnp2YXJ6bTJxd1QyN1FUOGdUWEZSaTI3SjBuVlhVUTB6ZDR4dTdjaHBkellOY3JrUmZoWnh1S0h1V2t6SVpaWDRPamYKWW9hLzM2TElDZyt0SDRjYWlHNXMwSkcyU1NuYzBtTEZzRFB0RmtWeUpSN21JVjRUOTEwOEIrUGJmQW5mV2QrVGxuaWdjM2VYM3ltdQpWU25YVHVqNTVrdHVLVUxIZkpHSEc4OWVxV1hLUGZFanFlU200N3JVVjU0eFZjOWIwd3R3bHRkWTU5RGFwaE8reWRxb1NXTVBjdXE3CndhTlkxNmtwR0lCc1pmNU9mdlNLU0V5Uys1OERsY0JOR1Y5bmR6SFZoK0tkdUc4Ni9ZM3dHTzBHclFiOVI5RStQZDlrZDAyMTZxMDMKK1Y3R1FkaVBJRnhERzdZUS9oSG1BZmdJbXpQTkpjenpwaFRLVG9aMWl5SEtwclIwYVNTNkhYbzBONWdlODVHQUNLdzRXYUlLend0aQpLL2NsV1pGZE90UnVIakFNMER3WStkRk1oTzhxb0FKTTdLcVZiUUU5akMrWk82Y3MxRWtRcEtKTDRpaXZNRVdRTXE0TDN0Y2ZidHZ4Cm1mRjg3RVBJdXVnQ3FZSlNET1pvQkt1cFJNTmVUYlZISDFDa0JkdEthdldoUUV1ZTV5T0cvdmNaelBLclJBcXRQbE5mOGIwUlBFYVgKN1U4T1NuYUgrKyt5d1p4d1FtZUpYRlNYU0t3Z0U1SHA1WFBSYmhwZXcrUHdtRkFrVkdGS3k3NXNDeFdKUjRKbFZLRzZkUkdpOWI4UQpYL1NvRlU3Y2hhTmVHc2g3a0twc2QrVkRhS2gySVZ6MFdqQUIrR0FKSlBsQ0FtWlFXcTdKazZZeGgzRDB4ZVltNk9ISWE0b3kwanB4ClY2ajltVnBsamFRSkwxWGRtY0hicXN5dWc3V1lyOEJvRGpkOWVFNHNQdHlSTFNmYUJZNWk0Z3M2S2Y4MkZNdXc4NUlTOWNTT2hPWFQKQUdaOTUwRnM3SkZpeG92Y29KcFpDaVc0K0dhSlBZOVRyRDI4Q2lZVWREeGRDcU1laWxNTE5yK2VqNS9hcXAwc01HV0ZJZ1lRK3ZSaQpYNnBPaGFCVDBQS3Vmak1KZGpQNElqTjZRallLL1hsaHBITXpwZVNjRUY0cHUxOHIK"
+      },
+      "want": {
+        "status": 200
+      }
+    },
+    {
+      "name": "upload file 2",
+      "request": {
+        "method": "POST",
+        "path": "/v2/files",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/octet-stream",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "x-now-digest": "eba8e71c51a24d12e0316acc84b988154b97e1cb",
+          "x-now-size": "4053",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "bodyBase64": "SVU2enJVc3lIUlhFeHJYQ05mcnhkQkorekZaZy91Qk5VUWtFTWdPeDZTREhsVE5pQUk1aUJqSVJWYW9QeUR2SzFLbTFYS0owSU5hdgpGUzI5QkNlenppU2tFcTFJSWNiMEVubTJyQ0JwWWRXSnhpSE5ra05GT3pSMFZpTjltTlQ3VVNzZHdQOFpBSkFHTGVKQkEvR1N1WXBTCmFuSExSVm80U1BVVUlhUWNDKy9WdUZZMDczMlZRVGFTdCtZeWZXSWJSSGlNSU4rejZBVXFVbWIzWWRiaGFMYTBHVFpyaUJLQnorZVMKRXY3ZlhvNC9WZDlWVXRyN25ob0RjeTk1UDhnUTRxZWNZay9sNnhQbG42eFMrN3A5V2hpUEhUc1BTUkpISjI5RVRVYW8zbEp0Qzg3SAo3cWdvekZWaWpMWkNxZjFnWm85d1dhcHhUZm5uRm9MVjBaejZVRGhjSjZUWFczVzJXYjQyeUo5Z0syMHJzMmY3RlpnNFFkalNUK2p4CjVXUnc4QjRVSXVBWXJqSlFRelFycVFEYTlCWHVla0ZsQUp2QUt2c1I5Um5nd0tRL2IzcXp6b3ZiTzkzMEFGaU1qR2JDYlBlb2pwcm8KVHZaakwvOWVwRUlUbWg5c0dLQ0dkTVZSYjRLMENVSFl3TGtzWHl0dWJnREFVQkUyM2dUbWNsb0Z0d3Y3ejR5dWJreCttNnZNbHMzOApjbEhNa3RIbHBHbllKOUJEbjFuUkxNZEZyZFpsRkhZdFhCYWZudzNwMitqVG14dU9MdlFBdGY2RDNpZ0d3MHVxYStoWWUzMVMvVHhsCnNEeFlzRTJUZ01FM3AyMVA3QVRsWnhveTk1V2lYdVRrQXVSSy9WeVUrTmhydFFkSEhTckR6L2lYbGFlV0svNnQzZ3ZmTFlQb1BTNmIKa0ZvRkw0WDVsUC9FTmxhWkF1aFgxbkdnWFI4aER4WFhzYTJuYXNjcnYxWnFIblNQV0dpbHRuaktQTW1uUEVlWndGYlJNdVM3aytDbgpzYUlOclNyaWhJd0pIdXd1WjBWSGJLeTRoekRYT3R0SVhtRGU3Ukl1Z09FNGhBQ01JUEo5d2UvODcrcExCbjRkdk5XZi9wK3l2KzBNCm5aeWhDVERJOXhUQnplWk5VRDBmaDNSTGYrUTF5Tzg0OVo5c1ROYmVVcWxCM2R1VUVxL2w4NkRnYlBEZzJ4d1Bvek9MYUtwRzVUbVIKSUt2Ly94SHZtZ0lkUDdidjNZYThvZHU3V2FiZStzRkNTZVlrL3Q1YlBqWTRkN0N0c2p3NjBZQWp5OHRsYzg2ZVg1eWF5enpoQkdBOQpxdkhOQ09WU014WDVlbEdXNGpqYVdTNHAxOW1URzZEV0N6RTByWXJzUHl3U2JhMlRFQnY0Znlid012bVRFYyswNDBBU0RqZzFFTkF3CnkvY0ZpRTRuT1REWVlpZnFpakRSVFhQcDR1OE94elExR01jYTJ4VHZNYzFOS0VhMTdwdngxWnRPUUt6azk4dGVEYys1QnVha0xHcFUKMVBVVDBiWDlrVVVlaGNKVjA3T0Q3SHdISStYMFFPMmxabHJabE9ySDh5SXRXa3dGaC85OGJIUkZQWVFHTWd3YnN0UjJnaWRXNCtIVwowMzhBNnBHZU9HUW1oWEN3Y3lpTjFWY1g0RVpHYlZhQXpSUW80cUtWNjM2QUN2NmpRd1V1R3oxemhFc1QxRVZmblc2bWhPMmhqS3VZCnBYeXBQVVMvaTZ3Si9nUHF6U1F2SHhIRWgwSVlZY3Q4WjZpZTBTZ2tlMjhnVEFzWWNJbkdVZ2pkMUNPSmZORWtuN25YdzRYSFphUEQKVXNhdjBVb1diVFlrSnIzQkJJRWJ3WTFwK2VMSlZ4TWs4bjk4YUZzVTNMMTNOK0kvZThBM1BBaHBNSVVGZDcxbXJVNktTTmIrOXpMMgpSV1J4UTRNWlRXZ0FjQ2NXRVFrdGxmQ2k2TmdyY2x6UE8yckc3djlWbFlYSW9IaDVlY2RibWVsYXRaeDVoWmJWVVBRRCtVZi9hRlNVClFtTDdpam4xVlQ5NHZhaVRGTm1ZUlgxMTFRKzdTOVdBenhyY1QydEpOajdpb2FtZTlzVzQzUW55aFA2bTRQMHJFUDJ2OUxxNFFiQWUKVjZLU21YRm13WVVMTXk1YWdJVE83T2hWNCtiR1QweXhBQWp4bzNoWndySVI1MnZJUy9Rdmx0QTVMOTBDcUZxdm5vQUU1WXNRQ2VnOApKN0RXN1o5UE9GVmpHaGEzWWFxTnlQVEQzbU1JWmxVd1pwaE9CaTFDcmtUcFl2RDFaY3JMRHdNdmJCdks5cHU4U2FRdVk3VUJZY2kxClZRY0xLSW5GblFxUEhtRVVFd0JxVFN0VlAwSGtrOFVLOHZPWm9oSWt0RVBuSDhVOGg4djRrYnIvdEswcHlxVFZjalUxbVdrOE8wZisKdDBJU0drWWtBNU9qakJweTlGc2RNd3R4eFJ4dWo1ZzBTdEhReEN6VUthcHQydjhkNFRPaVhqbkxPZFdKOVl4emRHdzNVQncwVDNuYQpJSjd0M0JFREJVUEpGSzhmZjVlUzFXb2twMnlISzgxQW5TaThMc2FRSzZhUEpLcmU3bDBOMUUwNkVTTndodGhvNlJqNUpWb0plSWl3CmVXWHIxekFFZVdRbVZaOElzdEhxT0NEbkE4UGxBTXZ0YlhNMWk2Q0M3RmVXVnpVdjk2R2hGcmhYdCs1ZzI4eDNkMnlYV2twMk9Qb2sKLzNoUzdDRE1aTnVqWUFudzRxS21lVkdrOGtOZUpPb2ZqNnArd2JrYStVQUpTZ3pGR1VnV3QrcGtxNXJZbXluaXRodi9mWlMraTVRSwpuWnlNRnNpZUZmMW9BY0YyVFlweGhMVU9yWUxCTEJlU1hteFBJRWFnQUZBNEZFbldnUlJxRTM4NnA2NXhFMDdieisxbnJ5dzNMaExvClVUMnlvMTNLaEFuYzhSOW10amphRWtLVVUweTA5alZZcFJoM0NHK1J2ZWwwSTJPSm5rVlpzYnZ5RWVwZW5jWFQvS3B4U05nL29oWGsKZ0dydkFvVjdhY2VOOVUxVjlud2tqWFFDQzdSOEw2eHN6d1hGQUxOOC83ZFdROU9BSldRZVRjK0t0b2srNHlSd09jNEw2Q216ZUJjRwozbGdlRnlPblJoTlk3NStwTDlyLzBOU0QzZy81WnVFbnBLN0NteGRPakhOb05XZys0ck1heEdKNVhjajR5N0xjc2hXOHhOZVZDdGV4CmRJUG4yUXVWVUhpa3gwTHIrQ0FaVmgzK2dzWDhSNnF5WjJqVG5BNDBnR0FjTUFENHRHZWFLdXBLZFdqS0VhZXhoQTFFai9hSFRZUXcKMHZQamtrT2xEaUp1Uy80WFdSekJrL2FkYVdSaHhYVkJmb3dHKzNKdUk2UFFSbmxyQjVmZ1BHNFBBakJlT2JVMGVkYmhqdTl3eWxiYgpnRm1rVWM3V1FMR3piZjY3MnZvcUN2a2FlMXNYNXVESjJDZ1dzVXNJWTV2T0plYnNvVTlvZVBMZHU2RUJUcTZKdnhSa1Iyd2RIMzROClFtbzIrM0x0NGtRRFZxcGdrTmFibXJ0REVjRi95b3FlWUhqeU9yb2tvZnZNRWJPZy9WdGdmaW5aT1hYN05GSDY0SmE1L3E5UFBnaWwKTVpLYkxVSzRMUUFYU2tmeFcyMGp3UndzdXRHQnJiUjFTdlluWjR4SEJtVzg0alN1RjA2NkNhSDZYT1U1eDE1aEZhaGQ5cHBoZXFZawpTYjlWY0xodlVEZmIxVEFBT0V1TXlYWVNhbUNtVE9yU0p4M2x4TlVHVXJhNHlYNXdWYjhpVTBScFRqMHp0YmxLdEVQazgyck5XUVpNClhWOUVnMURaWWJaMkEvQW1KNkE2R0JFRGd6ZWlZS2tWSHNpcHNlSWZXQWtLUTAzY2RNbTFQSEJGdnRFaFVtMDRsdHpqblU2aDc3NDYKUi9Dd1dzNHRFK2Q3UWZUY3lvNDJjeVEwYkRFVTluaVVZalFQaDFxaFFKeE8yRDM5VnVIVjEvOVQ4dWhORzY1cTlRc2NoVDJaa3J3NApObk9XMlVEUTl5dk9STFFjY2lKVEhuVlh2YVcrdVJKU1RCWVVycDdHcnVqdVBXTm1pTnljQzVjRjlvU3J6Y2J1UjcrRSt2cjdPaG1QCkxGUGtNQ3RuMUZyR1JrZjFGNDBtYWFQVW8zUXJZeHNDV3N3NlYxVUZtVnVjU1BubEZrVlhnYzNLRUc2Q2FMU1BEY3RYcitzeUgrNDEKc1pRODlvaExBMnU3RW1naUJlRnZ6MGVnQWpBM2J3bkt6V0pvNXpHeUFDUXA3VUhaQ2o1NFBuN2pCVnF6K3d2U2RUT0grK0phaUZTYgpBZ0xNdG9LMENEU3ZRNDIyNmpGWVdySXg5aUZrUlhqRCtyM1FCYmVqU1hlUG5tR3Z5VHF5SzhBRWtUNTVjRjJ3SlcyL1RGTUVLeWh0CjJLZkxDTVM0bkFlOVdIbGd0ajMvdG0ra3JGd3ZaMzNtQzdKQ3VCSlNkT2w0ZjdWWGNQUU0rNGlGaDJDenl5eWdaV2pEdGdCUDJtbVcKaElDM1J4OGFPalIvaExRVzdSRHp6cUUybTdCRUdnaHRFRllVb0VCZGhKQmgvTlFDdzR2VlQ4Z1N5U1REVnBFbUlXLzRyMkR3TVdBMgpaQWtxRnc3eDdRd0JIZVdBeUY5L24zWnFlMCtHcUN6M2tXN0hyNHFNZkdEQ2xjemJYK25YSlhudDV4T3JUQWdOZ3RFOHNUaVFSaTdCCng1L3lCUmpmdFNOOTlQakhza3JqcFg1dWltT0xhd1pIV3RwcjkySnJHeVNrdUNxN1ByaWlLdzIzRTMvSEpqQWUyL01tZGxuTlBzVk0KQnBpc2lteDl1U3FIVVBqeXpiZmxyTE00RVZhb0UrQVNObktLa1BTdjV4aFpncnNST2o4Uk5EZnRmd3N6T1d6by9CdlJQN2s0L1p0cQpFYXBTL1dtQXNRZ3dIVXRTYU8wOTlNSktSQjVTWWNNazVHUXBNZ21nN0VXVDN4QkVBWmg3NEtMcnFDZ2Nib3BPUU5jNjhwNjhvb2xOCnJEeXppUXFaUWhwdjVtVzhENkZvOEJJWUVweWhDZVh2dGVTeUhwekZhd05aUDhCQXVleTJhY0p5cVArL05XSmZzaVhKK2lnYy9FNUoKWDBoRnB4NmdQN0MwZjNuTmtEQ0JndldrenpjU0MxQnZsbzRTK2NDZ3Voajk3dFhkRHpEU1kxSXF0UVJSVjA1V3hENUpKc2k5TWZDYgpmYjlCWHpPazlEeDZwMWRUckNCYnN5YjAwSDlMaXYvbFpqb3I3ZWM3amxIOEVOYXMK"
+      },
+      "want": {
+        "status": 200
+      }
+    },
+    {
+      "name": "upload file 3",
+      "request": {
+        "method": "POST",
+        "path": "/v2/files",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/octet-stream",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "x-now-digest": "21ef14208c03845349614a37d516463738e52e04",
+          "x-now-size": "16",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "bodyBase64": "Ym9keXtjb2xvcjpyZWR9Cg=="
+      },
+      "want": {
+        "status": 200
+      }
+    },
+    {
+      "name": "upload file 4",
+      "request": {
+        "method": "POST",
+        "path": "/v2/files",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/octet-stream",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "x-now-digest": "3a902b20282da87623242cdf4653b61796c46490",
+          "x-now-size": "4053",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "bodyBase64": "R3J3RlN2L2hZS0lRakk4VHY0bnJHKzNYWnRXaVhWbjlEZkRxY2ZWZ2xwenhXZkphTGpWMmFNbnJ0RGFNck5qaUxhRVRsVzhuM0ZHMwppOEkrWG1WNklmU0VrNW9KbklaSENCZnRzQjFMcWI1OUU5eW5SY1Evamo2M0dqWUswQjR6Y3ZxMi85VmNob3NOQkJvdDMrT29VUk1zCk5EaENrZW1OK2VPK3lySHJXVmM2WEhKWHFlVXB1c2ZvR3V1Q21pcGlnL2Y5TG55aTlxVGM2dXZsUFhrZlZiSFpoWE03ZElWQWFGWWkKOWtwUmViWFl1Snp4a04reFdxb3JjaFAzaTRzcE8yS2cwVm1iVGtSRGpuRzVXNHdKa21XNE10dEJ2Z0hrVnJJTVBQTU16MWNnVnYvSApLVGRpS29jcWZQSkFzaEJ3ZW1hSjFYeUowVVE4MHJCd3ZHV0ZENTF4aWR5eUhiOEV5cEVteXFhRlZ1U2pneDB6Q25LS0Y3dWo4ZU9RClJvQWtPSk9BS1hoTjBOVkpaRjh6VFV1UHJmeTYzSXhhZUlaRkZJaEt4aDRlNEdQUmhZcDNtaVRxd3dvNVF6elR3QWgwdUZFTDVsaDgKdjB4L1ZYQXppeCtoWTlsUks2aDhDQVRFdkRGTWNycXB0VVZoYlk1MFRBb2NmWDU5TlVWaGh5Vkk2cUZwa0UxZmYxQ2Q3QXc2OG1xMgo4UUtGMlF3NUF0aGFBOGJpeEJXL2FJM2tqMklqWC9tV3lQRFl5UE9LNDNXLzF1b0xyQkxFTkdVMmtBMksvalJqdEhMRGc4QlA4QmJjCmFaQVZhVXV5TE1Eei94bnNpQmpSaWdFZm5ybERHUFNqeGdEclVpbzY3d1UrcEFNdngvNVBxSnBGVjNQR09BVXE4Qll6WVArZWlyUEgKS2o2L0JicXRSOGl3L2FUNW1jT1Zzd2RKRzlzS3dUWjYxcHBIcURvd2dKdm5rSXBHWm9DQ3ZVQmFDUTIyRlBDVS92ODgzbXBhUU5JRwpVUDl1NHYxV0p2d0ZERk0wN3hLc2JrMWdqb2tYYS9pM3NFcjVLYlZjVC9OWmZsSnNVUjJnNE9rQ2RURnFMcUc5UHoyUGJuaVFDUDM5CmRsdGRnSncwZXBkSG4wbXhuUkdUeXVMeXI1TGIxOUpOK1FhRktERFRiVFpJZlBoVWF2eEFkVDZWNUtZOWhvdmdMQWpieGM2OHAyUnUKcDRrMk5HM2V2QXZSQTZxbHRzb0poazBvYkkvTzB0RE1DVDFNUlk5RGxZWG1KU3JVR2FXZVEwWHZOUE1TWnBLdUR4aVpjWS92dFFzWgpncWc3enB2VVZqdVdiV3lWMWt2UzdzaGtNS3ZLck82YXUxRGhsUmNESjBpd1dkdXNGSWhOTGxvSTAzK1d2Z1RXbkt2YVRpZ0gxR29KCndHdEp5T2xGZlFzaDZwbksrbEp0Ui82NE1Kd093bkliKzZYKy93L2ZpL3l4QnUwa1dhVU0wdGo3YnFIZG50UDliWmNhbU8wSlZJMHoKcFJGNFQ4ZXlMUHQ4WGxYZXAzQzJjdDJoOEVKdG15eTE2OGdWalNvYjByeXh6c0ppaTRCMm1saWZ0RHh2WmY1alJzNUpYQnRUcFk0ZQpGangrUk9qZmlENVlrbTM2VC9Dbmt6TlFpRU9JemtNWkcwTzArL3NhenFZTGFIVVRibTl5dkRFMDVYSktlaWJmcm5RWlZDNjlBZUJMCjdRSjI3bzhhUklXeHJncFFBT09oOWFsTGE3ZmF3bHFTZEwySndiUmh1SG51T05VVmNzS09JWjYvOENmVGxOZnU0dkRMZDJ3SEJ0YzcKZERHSll2V1FYb1VlZ09lUEZ6bjRRUHlORmdrUFZVZlFjT1J2MjgrcHZ6TWZaMWY5aXJLY2hrRHRCUTFhTnlqNlVTMkt3SDg0WVJZdwp6ekFyeVlJcTl3eUVZQVgzNUxYZ25qVUZBc3NwQ3NCa01kQVo2RUNRZkZlL3Y0WFl3R3J3eUNJQUVFN0QxWDkycUhlaXJwNDloVlVQClAyMGZlUmgwYkhvY3ZZTXVxM1JSbHp6Y3dMcTNSWEx6aElkTXRpbGRIclNob2lMOHRJUEVLK01ERHpkdnpEbE45Zk8xa3VYeUQyVkYKUm9iQ01jOXNUMXFDOXppVmpMS2xHL2FYSUxud29sa0lwQUlMWEdjMWZMcVFoeUNxMlJSUWdlaXVDZjBkQXBMTThoNjBDTEtRZEd1ZwpHb1RiQW9CYWVPS0VKNzMra3ZwczdTUksxQ2phS3JxeXNCNXlwUkNjY0tRNDdZU1YwYVlQUTZBNmI5RFBxSnExc1BQRGdvZSt3L0MvCjUyMk9ob0tLczJudURoUGZvWVJpKzhBM1l1WVNyaXFyMVdoQms2dThkeW9MVUZKL0k3NG1VWmE3NkxQUk9xQ3dEYjY5N08wVW1ocE0KRVU0RHFDZ0FPekdGWC8wWjBOMUFabHcrcWFrdmlRSnQ0T0tnUTgrYVAxcFFaQXZQRVVKVWpya2pIUUdzQlhHY0t0b0dBTmx3c3Z4aQpXSU8vRVlDTkNVTk05clpIT3JwVGFtZm93YUdTakgwQzAwQklNeE1VYlhzU1JjRnliVTMyQnk3OHlHWVJhTUdpWmNBVWR2WjVWL2ViCkpyK1NzUFhnRnVMMzlad0dDY1p1RlRJcSttTUdwLzlWdDZDQldZRksxSm1kZGJsaEsrMEk0QVIzM0tURjQ2MzNkZDZqV2dBdkthU2oKT3MxaVFZejFzdThBZ2lDMm16VmljNkZ2cHlzVDhTNmhZQVFXMVZ1YjYyYW13YVZtL3FKMXlsUzZKR1VwYnEwQVEvVFdxMzFnOVVhWQpvb1ZwNWhPUjFqWTgycWw3UkFoZG9CTEJBd25ubzFCSUJHaEhJaGFHMmtrRjI2T0FqNnB2aWd5VXdmbE1DZjU4K3JnVFBWYzZZdTY2CkNzMTJJbDVCM3NKdHNpdnc0aUd2bmtCYUdCVUd6VVhIakREeXJsNjVoTUZPZkVWcmFoU1JFYlRyMFZWbjQ1YjhFZ0RCQkgxdFhDT2EKTU1RdHhZTldjWUUzVEtNbmsyVGJ2UVdIRFc0clJPQisxdU9WMHEwUEg0SGJhNGt0K0JKdFZRY2haR05ZZ01mWVg5RUQzU0RDV0VZTgp3bXMzNU50M1krNzZEcVdWYkh3T1NJVHRaTEppTDJKVHJTR1d3MTdvTy9jcitGcXJaT2ZwWG9JMmRLMy9CeDFqUXhla0dudzBkTDVTCjJEeUJ1dUtKQlFaQWdXUEwyM3RzNThTbkRZdlg5QTlLNTZRTGdIdGNxOFNGb2xaWWhEbEpTVTBWNU9vR2RFMnR0TmRLOVJhMXhwQS8KQkIxTXRCM3IwdlA4cUU3aWtwaTBxZFR0cjBLZXdkNVoxSmRJd2pOR2FKWkFwYlVNZEsxdU9LejJUZHpJRXl4L0QyZ2Jub1NKQ1FWZwo1OEFFT1k3dWpEdDRWcTVNdkZ6aUhhTG5DSE1zamNFL0lOakFnTnkwVGlwakxQNE1RSGp3SVpwVVhLM2tsMHh6L2NZTUFNY1NkN3M0CjRSZ0ZNcGI2NnhQWG0vcnVVOE1tQkhqQnNZb0tkcHZzbzUzUmsrdW1adE5GRFpyRXdvVHlrb1JGYWNvKzYyTDBNN1dja2c4c0gwMXYKamhHVHZiakk5WUR1MGJ4UUIyREdrNEJ5QWRZMlpqWmFhV0hZRzlWRzRvc1FqakY5MGwzMXVYdHBYNG9DaHlLLzdQejdWSWkxcjQybQp0ZGJabCt2MEpqQUU2N0Q0UW1uQjJ2VDdwOEF3N3JGYXBDbSsySWI5cVRMcVowNmIzNzZZdnBrbGVwYjYzRGRVNk8wdGg1RW81c2VPClNTVm92UTFENnhXRUR0YnlRRDcrTE9xZEpCVS83L09saUt6anhCa09kT0dhWlpxR1l0TGJnZzZLaUc3Y0lwaFRObDBNbWV4dEl2c00Kd1RwQW93bTRmTHl2SnBIUTFOZC9rNjkwVWRhOG15MjkvT1JrQ29LcXNTOE8wWGZtRGk2U1I3MnNxUGwyYWNocWZwdDE0aEtScEhCSApaT2IvbXRIVmkyV3d0OFp1KzNZdG1mRnEvbW81ZFdnOGhuYlpPUTdKQUplUDJZRkdldlM2WkQzTjJYK3c2RjFLb3dNanNTSDRKZVZhCkMzTjU2OWE1SW9TTHM2L0tnWlVzczB6cVpVa2lVNm8rRmVlN1RGeVNVdDI3YWprNXJKc1BYUXR3ZllqeXVoemZEajlLc3FBaWpLN1oKNTdhUUFrNkVtZmp4KzZyWmJXU3p4cTlnSFpmVHZWTk1rYU9kcjNieFdJczMzV2ttbVo5OU5hQmY5VWNwZFRtMmdSR2c3TUVFNmtVeApBc05rVkl4YVY5U3Ywa3U1V1hFQnlGTHA4QWplNHF5VHArSDN4NFVrYXh2MGwxeW5YcUdiT1g3UW1Zc1hPVkhIL0RmdHk4YTg2WlcyCk51elJsQ1Z4T2tnL0VYZnNIK3BoSE5NYVdEL1l5aFlHT0xRL0F6Y1JzM1U0NGdtWmQ0a3JLYVBFRFE2OW1DNVYvcjllRllFK0RFNUcKbmZCd0lUcDJTaWZNMkUvM3pNWlZKYndwK2RoL05CTVlsKy9Tb2NwVW1ERHRxYkEzZHdWSGpPb2JnUEhqaTd0Nm1Qays1YzVQYkUyQgp2TVd4K3FPbjFTODRMWlA3M2VWN1lUc3dWTlB1b0hTR3c1MDBJNUEzQmhIVXAxbndaeXlyTkJzeDBxRDZnK2hNZG51RTE3TUg2MVFyCjJiUzlHSVBMaGpJcjM5YlFhb2JzbDBteE1NLzZjeDdRcDBPeXM3NjhicnRUUEVydFVFZUNTOFJUM2RwaFc3UmxKTXkxbGJtZlhoVEYKWnh5dW5JUVNmUU9kTERvYmZ2VXpXZVNpUDc2UFZKcjRIUHVHUFE4YUhYa1NCRU91cjk3QVJDWUVNMG1oV1o0M1VOQlgwTnF1cTZrRQovSkJRUUxZTTRpcW9HWXh2U01rYjBIZEljZFJQUHlYekR4bzVyWUs0UzFXL21nSk9MelNGV3EzWjMxa3hPbjMxMjRvaHp2V3BISEpwCkk2dUxXaE4wekdlaDdsWTk3K25yNm9NT1BRVHUvemxEQ3RFdkJML1Fqak1mNGdYSnVlT043Mk82cjdDc0dOREZJa200czVSRXhpOC8KTTdUdWtFVE54QmNPREFLbVNNSFE1bGIyc2IwNnFmZ3A1MWRhR1RaeFQ3TUI5eWJnVWNzYlBYcHFFV3ZwV1pnSC96amk3ZkZZVTFDVwpsejU3RkhLcnF6N0lSempCN0JXaGpoWTVvVVhRL0RjS2xxOW14K1Yva3ZTMk1Wa0oK"
+      },
+      "want": {
+        "status": 200
+      }
+    },
+    {
+      "name": "upload file 5",
+      "request": {
+        "method": "POST",
+        "path": "/v2/files",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/octet-stream",
+          "accept": "application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "x-now-digest": "919fa466a4efad398d7a2c9c7b00a36304b9df72",
+          "x-now-size": "31",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "bodyBase64": "PCFkb2N0eXBlIGh0bWw+PGgxPnVwbG9hZDwvaDE+Cg=="
+      },
+      "want": {
+        "status": 200
+      }
+    },
+    {
+      "name": "offer again",
+      "request": {
+        "method": "POST",
+        "path": "/v13/deployments?skipAutoDetectionConfirmation=1",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json",
+          "accept": "application/json, application/json",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"env\":{},\"build\":{\"env\":{}},\"name\":\"upload-journey\",\"project\":\"{{projectId}}\",\"meta\":{},\"target\":\"production\",\"projectSettings\":{\"sourceFilesOutsideRootDirectory\":true,\"rootDirectory\":null},\"source\":\"cli\",\"version\":2,\"files\":[{\"file\":\"index.html\",\"size\":31,\"mode\":33188,\"sha\":\"919fa466a4efad398d7a2c9c7b00a36304b9df72\"},{\"file\":\"assets/a.txt\",\"size\":4053,\"mode\":33188,\"sha\":\"3a902b20282da87623242cdf4653b61796c46490\"},{\"file\":\"assets/b.txt\",\"size\":4053,\"mode\":33188,\"sha\":\"6ec2ff6d9c185159eacd8c23b36fcad1e149053e\"},{\"file\":\"assets/c.txt\",\"size\":4053,\"mode\":33188,\"sha\":\"eba8e71c51a24d12e0316acc84b988154b97e1cb\"},{\"file\":\"assets/site.css\",\"size\":16,\"mode\":33188,\"sha\":\"21ef14208c03845349614a37d516463738e52e04\"}]}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "url",
+          "readyState"
+        ],
+        "equals": {
+          "readyState": "QUEUED"
+        }
+      }
+    }
+  ]
+}

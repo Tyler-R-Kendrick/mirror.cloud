@@ -1,0 +1,626 @@
+schema: bir/1
+service: vercel.api
+
+# Deployments: the files a deployment is made of, the build that runs, and the
+# states it passes through.
+#
+# Provenance is the bundle's, authored. What the vendored document establishes
+# (the shape of every answer, the enums, which members are required) is
+# `declared`, and test/behavior/vercel holds each answer to it; what it does not
+# say (how long a build takes, what a build prints, which errors a client keys
+# on) is transcribed from what the clients read, and is called out where it is.
+
+resources:
+  # A deployment is born QUEUED and settles on the clock: BUILDING one second
+  # later, READY one after that, unless a failure was armed (the control
+  # surface, specs/vercel/control.json), in which case the second deadline is
+  # the one that ends it in ERROR or CANCELED. Cancel and the control surface's
+  # state move are the one event, MOVE, with the state asked for in its
+  # context, because an event's name is static and its guards are not.
+  deployment:
+    collection: vdeploy
+    # Keyed on uid, which is what the record carries: the identifier has a dpl_
+    # prefix, so the record member rather than the raw generated id is the key.
+    key: uid
+    id:
+      # No `generate`: a deployment costs TWO draws, the id and the six bytes of
+      # its hostname, and they have to be drawn in that order, which a resource
+      # generate cannot say. A get names it `idOrUrl`, a delete `id`.
+      input_members: [idOrUrl, id]
+    record:
+      # `uid` is the key itself, spelled `id` because that is what a record
+      # calls its own key; the one writer passes the key explicitly and this
+      # carries it into the record, where the validator wants it.
+      uid: id
+      type: "'LAMBDAS'"
+    statechart:
+      initial: QUEUED
+      states:
+        QUEUED:
+          timers:
+            - { deadline: start_build, target: BUILDING }
+          on: &move
+            MOVE:
+              - guard: "event.to == 'BUILDING'"
+                target: BUILDING
+              - guard: "event.to == 'READY'"
+                target: READY
+              - guard: "event.to == 'ERROR'"
+                target: ERROR
+                actions:
+                  - set:
+                      errorCode: "coalesce(event.errorCode, 'BUILD_FAILED')"
+                      errorMessage: "coalesce(event.errorMessage, 'The build failed.')"
+                      erroredAt: "now_ms"
+              - guard: "event.to == 'CANCELED'"
+                target: CANCELED
+                actions:
+                  - set: { canceledAt: "now_ms" }
+        BUILDING:
+          timers:
+            - { deadline: finish_build, target: READY }
+            - { deadline: fail_build, target: ERROR }
+            - { deadline: cancel_build, target: CANCELED }
+          on: *move
+        READY: {}
+        ERROR: {}
+        CANCELED: {}
+
+  # A hostname names one deployment, and a client may address it by that.
+  deployment_url:
+    collection: vdepurl
+    id:
+      derive: "''"
+
+  # What the deployment was made of, by path. Keyed deployment id plus path so
+  # one flat collection holds every deployment's files in per-deployment order.
+  deployment_file:
+    collection: vdfile
+    id:
+      derive: "''"
+
+  # An uploaded file, content-addressed: its key is the SHA-1 of its bytes, the
+  # same name both writers give it -- UploadFile from the digest header, a
+  # deployment create from each file entry's `sha` (or from hashing an inlined
+  # one). Uploading the same bytes again lands on the same row, which is what
+  # makes the upload idempotent.
+  file:
+    collection: vfile
+    id:
+      derive: >
+        ('x-vercel-digest' in input && input['x-vercel-digest'] != null) ? string(input['x-vercel-digest'])
+          : (('x-now-digest' in input && input['x-now-digest'] != null) ? string(input['x-now-digest']) : '')
+    record:
+      digest: id
+
+  # The failure the next deployments are armed with. One row per account, the
+  # same scope the deployments it will end live in.
+  deploy_fault:
+    collection: vdeployfault
+    singleton: armed
+
+operations:
+  CreateDeployment:
+    reads:
+      by_name:
+        resource: project_name
+        key: >
+          ('project' in input && input.project != null && string(input.project) != '') ? string(input.project)
+            : (('name' in input && input.name != null) ? string(input.name) : '')
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('project' in input && input.project != null) ? string(input.project) : '')
+      armed: { resource: deploy_fault }
+    let:
+      userId: "'usr_' + (identity.project != '' ? identity.project : identity.account)"
+      pname: "proj_found ? string(proj.name) : string(input.name)"
+      failing: "armed_found && int(armed.count) > 0"
+      # The files, one shape whichever way the client sent them. A file arrives
+      # either by reference ({file, sha, size}, uploaded earlier) or inlined
+      # ({file, data, encoding}), and an inlined one is hashed here, because a
+      # deployment names its files by the SHA-1 of their bytes and a later
+      # deployment will refer to this one by it.
+      entries: >
+        ('files' in input && input.files != null) ? input.files.map(f, {
+          'file': string(f.file),
+          'inline': 'data' in f && f.data != null,
+          'sha': ('sha' in f && f.sha != null) ? string(f.sha)
+            : sha1hex(('encoding' in f && f.encoding == 'base64') ? b64decode(string(f.data)) : string(f.data)),
+          'size': ('data' in f && f.data != null)
+            ? blen(('encoding' in f && f.encoding == 'base64') ? b64decode(string(f.data)) : string(f.data))
+            : (('size' in f && f.size != null) ? int(f.size) : 0),
+          'content': ('data' in f && f.data != null)
+            ? b64(('encoding' in f && f.encoding == 'base64') ? b64decode(string(f.data)) : string(f.data)) : ''
+        }) : []
+    # The files the account has uploaded among the ones this request refers to.
+    # A `require` that names the binding runs after the selection, which is the
+    # one place the engine can answer "which of these are missing".
+    select:
+      binding: uploaded
+      resource: file
+      filter: "entries.exists(e, e.sha == string(item.digest))"
+    require:
+      - { cond: "'name' in input && input.name != null && string(input.name) != ''", error: BadRequest, message: "Deployment name is required" }
+      # An explicit project has to exist; a name alone creates one, which is
+      # what `vercel deploy` relies on the first time it runs in a directory.
+      - cond: "!('project' in input && input.project != null && string(input.project) != '') || proj_found"
+        error: NotFound
+        message: "Project not found"
+      - cond: "!('files' in input && input.files != null) || input.files.all(f, 'file' in f && f.file != null && ('data' in f || 'sha' in f))"
+        error: BadRequest
+        message: "Each file needs a path and either its contents or the SHA-1 of an uploaded file"
+      # The protocol every Vercel client uploads by. A deployment that names a
+      # file nobody uploaded is refused with the list of what is missing, the
+      # client uploads those and asks again; accepting the deployment instead
+      # would let a client that never uploads anything look as if it worked.
+      - cond: "entries.filter(e, !e.inline && !uploaded.exists(u, u.digest == e.sha)).size() == 0"
+        error: MissingFiles
+        message: "Missing files"
+        fields:
+          missing: "entries.filter(e, !e.inline && !uploaded.exists(u, u.digest == e.sha)).map(e, e.sha)"
+    effects:
+      # Three draws, in this order, because that is the order the pack drew
+      # them and the recording gates every identifier after them: the project
+      # id ONLY when there is no project, then the deployment id, then the six
+      # bytes in the hostname.
+      - generate: { bind: newproj, kind: hex, bytes: 12, when: "!proj_found" }
+      - generate: { bind: depid, kind: hex, bytes: 16 }
+      - generate: { bind: host, kind: hex, bytes: 6 }
+      - put:
+          resource: project_name
+          when: "!proj_found"
+          record:
+            project: "'prj_' + fx.newproj"
+      - create:
+          resource: project
+          key: "'prj_' + fx.newproj"
+          when: "!proj_found"
+          record:
+            id: "'prj_' + fx.newproj"
+            name: "string(input.name)"
+            framework: "('projectSettings' in input && input.projectSettings != null && 'framework' in input.projectSettings) ? input.projectSettings.framework : null"
+      # An inlined file is stored by its digest, content and all, so that a
+      # later deployment can name it by sha alone. A referenced one is already
+      # there.
+      - put:
+          resource: file
+          for_each: entries
+          when: "item.inline"
+          key: "item.sha"
+          record:
+            size: "item.size"
+            content: "item.content"
+      - patch:
+          resource: deploy_fault
+          when: "failing"
+          record:
+            count: "int(armed.count) - 1"
+      - put:
+          resource: deployment_url
+          key: "pname + '-' + fx.host + '.vercel.app'"
+          record:
+            uid: "'dpl_' + fx.depid"
+            projectId: "proj_found ? string(proj.id) : 'prj_' + fx.newproj"
+      - put:
+          resource: deployment_file
+          for_each: entries
+          key: "'dpl_' + fx.depid + ':' + item.file"
+          record:
+            uid: "'f_' + item.sha"
+            deploymentId: "'dpl_' + fx.depid"
+            projectId: "proj_found ? string(proj.id) : 'prj_' + fx.newproj"
+            name: "item.file"
+            sha: "item.sha"
+            size: "item.size"
+            type: "'file'"
+            mode: "420"
+            contentType: >
+              item.file.endsWith('.html') ? 'text/html' : item.file.endsWith('.css') ? 'text/css'
+                : item.file.endsWith('.js') ? 'application/javascript' : item.file.endsWith('.json') ? 'application/json'
+                : item.file.endsWith('.svg') ? 'image/svg+xml' : item.file.endsWith('.png') ? 'image/png'
+                : item.file.endsWith('.txt') ? 'text/plain' : 'application/octet-stream'
+      # The deployment's own URL is an alias of it, which is what the oracle
+      # writes and what the alias listings read back.
+      - put:
+          resource: deployment_alias
+          key: "'als_' + fx.depid"
+          record:
+            uid: "'als_' + fx.depid"
+            alias: "pname + '-' + fx.host + '.vercel.app'"
+            deploymentUrl: "pname + '-' + fx.host + '.vercel.app'"
+            deploymentId: "'dpl_' + fx.depid"
+            projectId: "proj_found ? string(proj.id) : 'prj_' + fx.newproj"
+      - put:
+          resource: deployment_alias_by_alias
+          key: "pname + '-' + fx.host + '.vercel.app'"
+          record:
+            uid: "'als_' + fx.depid"
+            deploymentId: "'dpl_' + fx.depid"
+            projectId: "proj_found ? string(proj.id) : 'prj_' + fx.newproj"
+      # The deployment is written last, and its deadline last of all: every
+      # write rebinds `rec`, and the answer is the deployment.
+      - create:
+          resource: deployment
+          key: "'dpl_' + fx.depid"
+          state: "'QUEUED'"
+          deadline: { name: start_build, after: "seconds(1)" }
+          record:
+            name: "string(input.name)"
+            url: "pname + '-' + fx.host + '.vercel.app'"
+            projectId: "proj_found ? string(proj.id) : 'prj_' + fx.newproj"
+            projectName: "pname"
+            # Only a production deployment carries a target; a preview is null,
+            # and the document's enum has no value for it.
+            target: "('target' in input && input.target == 'production') ? dyn('production') : (('target' in input && input.target == 'staging') ? dyn('staging') : dyn(null))"
+            meta: "('meta' in input && input.meta != null) ? input.meta : {}"
+            regions: "['iad1']"
+            source: "'cli'"
+            ownerId: "identity.account"
+            creator: "{'uid': userId, 'username': 'test', 'type': 'user'}"
+            projectSettings: "{'framework': (proj_found ? (('framework' in proj) ? proj.framework : null) : (('projectSettings' in input && input.projectSettings != null && 'framework' in input.projectSettings) ? input.projectSettings.framework : null))}"
+            createdAt: "now_ms"
+            created: "now_ms"
+            # The two moments the build timers will move it, as the timers
+            # will: a record cannot be told the instant a timer fires, so the
+            # instants are written down beside the deadlines they mirror.
+            buildingAt: "now_ms + 1000"
+            readyAt: "now_ms + 2000"
+            seq: { counter: "vdeploy" }
+            # The hostnames assigned to it (AssignAlias); its own URL is not one.
+            aliases: "[]"
+            # Absent until a failure or a cancel puts something here; the keys
+            # exist from creation so that an answer can read them.
+            errorCode: "''"
+            errorMessage: "''"
+            erroredAt: "failing && armed.readyState == 'ERROR' ? dyn(now_ms + 2000) : dyn(null)"
+            canceledAt: "failing && armed.readyState == 'CANCELED' ? dyn(now_ms + 2000) : dyn(null)"
+            failureState: "failing ? string(armed.readyState) : ''"
+            failureCode: "failing ? string(armed.errorCode) : ''"
+            failureMessage: "failing ? string(armed.errorMessage) : ''"
+      - patch:
+          resource: deployment
+          key: "'dpl_' + fx.depid"
+          when: "!failing"
+          deadline: { name: finish_build, after: "seconds(2)" }
+          record:
+            uid: id
+      - patch:
+          resource: deployment
+          key: "'dpl_' + fx.depid"
+          when: "failing && armed.readyState == 'ERROR'"
+          deadline: { name: fail_build, after: "seconds(2)" }
+          record:
+            uid: id
+      - patch:
+          resource: deployment
+          key: "'dpl_' + fx.depid"
+          when: "failing && armed.readyState == 'CANCELED'"
+          deadline: { name: cancel_build, after: "seconds(2)" }
+          record:
+            uid: id
+    omit_null: [ready, canceledAt, errorCode, errorMessage]
+    output: &deployment
+      id: rec.uid
+      name: rec.name
+      url: rec.url
+      inspectorUrl: "null"
+      projectId: rec.projectId
+      type: "'LAMBDAS'"
+      version: "2"
+      readyState: "string(rec.__state)"
+      status: "string(rec.__state)"
+      target: rec.target
+      createdAt: rec.createdAt
+      createdIn: "'iad1'"
+      buildingAt: rec.buildingAt
+      bootedAt: rec.createdAt
+      creator: rec.creator
+      ownerId: rec.ownerId
+      plan: "'hobby'"
+      public: "false"
+      regions: rec.regions
+      routes: "null"
+      meta: rec.meta
+      env: "[]"
+      build: "{'env': []}"
+      projectSettings: rec.projectSettings
+      buildSkipped: "false"
+      # The SDK (1.28.43) requires this object on every deployment it reads and
+      # every member inside it is optional. Nothing builds here, so nothing is
+      # timed: an empty object is the honest answer.
+      duration: "{}"
+      isInConcurrentBuildsQueue: "false"
+      isInSystemBuildsQueue: "false"
+      # A production deployment is aliased to its project's own domain once it
+      # is READY, and not before.
+      alias: "((rec.__state == 'READY' && rec.target == 'production') ? [rec.projectName + '.vercel.app'] : []) + rec.aliases"
+      # A READY deployment is reachable at its own URL, which is an alias, so a
+      # preview has one assigned as a production deployment does. The CLI waits
+      # for this member after READY ("Completing...") and polled a preview
+      # deployment forever while it stayed false.
+      aliasAssigned: "rec.__state == 'READY'"
+      aliasError: "null"
+      ready: "rec.__state == 'READY' ? rec.readyAt : null"
+      canceledAt: "rec.__state == 'CANCELED' ? rec.canceledAt : null"
+      errorCode: "rec.__state == 'ERROR' ? coalesce(rec.errorCode, coalesce(rec.failureCode, 'BUILD_FAILED')) : null"
+      errorMessage: "rec.__state == 'ERROR' ? coalesce(rec.errorMessage, coalesce(rec.failureMessage, 'The build failed.')) : null"
+
+  GetDeployments:
+    let:
+      limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+    list:
+      resource: deployment
+      member: deployments
+      # Every filter is one the document declares: the project (by id, or by
+      # name through `app`), the target, the state (comma separated) and the
+      # window `since`/`until`, both exclusive, in milliseconds.
+      filter: >
+        (!('projectId' in input && input.projectId != null && string(input.projectId) != '') || item.projectId == string(input.projectId))
+          && (!('app' in input && input.app != null && string(input.app) != '') || item.projectName == string(input.app))
+          && (!('target' in input && input.target != null && string(input.target) != '')
+              || (string(input.target) == 'production' ? item.target == 'production' : item.target != 'production'))
+          && (!('state' in input && input.state != null && string(input.state) != '') || split(string(input.state), ',').exists(s, s == string(item.__state)))
+          && (!('since' in input && input.since != null && string(input.since) != '') || item.created > int(string(input.since)))
+          && (!('until' in input && input.until != null && string(input.until) != '') || item.created < int(string(input.until)))
+    output: &deployments
+      # Newest first, which is the order a client pages through. The store lists
+      # by key and the key is a random identifier, so the order is the creation
+      # sequence, and `next` is the instant to ask for as `until`.
+      deployments: >
+        slice(sortBy(items, 'seq', true), 0, limit).map(i, merge({
+          'uid': i.uid, 'name': i.name, 'url': i.url, 'projectId': i.projectId,
+          'created': i.created, 'createdAt': i.createdAt, 'type': 'LAMBDAS',
+          'readyState': string(i.__state), 'state': string(i.__state),
+          'creator': i.creator, 'inspectorUrl': null, 'target': i.target,
+          'meta': i.meta, 'source': i.source, 'buildingAt': i.buildingAt,
+          'aliasAssigned': i.__state == 'READY'
+        }, i.__state == 'READY' ? {'ready': i.readyAt}
+          : (i.__state == 'ERROR' ? {'errorCode': coalesce(i.errorCode, coalesce(i.failureCode, 'BUILD_FAILED'))} : {})))
+      pagination: >
+        {'count': size(slice(sortBy(items, 'seq', true), 0, limit)),
+         'next': size(items) > limit ? slice(sortBy(items, 'seq', true), 0, limit)[limit - 1].created : null,
+         'prev': (('since' in input && input.since != null) || ('until' in input && input.until != null)) && size(items) > 0
+           ? sortBy(items, 'seq', true)[0].created : null}
+
+  # The older listing keeps the newer one's rules: nothing about an old client
+  # asking is a reason to answer it differently.
+  GetDeploymentsV6:
+    let:
+      limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+    list:
+      resource: deployment
+      member: deployments
+      filter: >
+        (!('projectId' in input && input.projectId != null && string(input.projectId) != '') || item.projectId == string(input.projectId))
+          && (!('app' in input && input.app != null && string(input.app) != '') || item.projectName == string(input.app))
+          && (!('target' in input && input.target != null && string(input.target) != '')
+              || (string(input.target) == 'production' ? item.target == 'production' : item.target != 'production'))
+          && (!('state' in input && input.state != null && string(input.state) != '') || split(string(input.state), ',').exists(s, s == string(item.__state)))
+          && (!('since' in input && input.since != null && string(input.since) != '') || item.created > int(string(input.since)))
+          && (!('until' in input && input.until != null && string(input.until) != '') || item.created < int(string(input.until)))
+    output: *deployments
+
+  GetDeployment:
+    reads: &by_id_or_url
+      by_url: { resource: deployment_url, key: "lastSegment(string(input.idOrUrl), '//')" }
+      rec: { resource: deployment, key: "by_url_found ? string(by_url.uid) : string(input.idOrUrl)" }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Deployment not found" }
+    omit_null: [ready, canceledAt, errorCode, errorMessage]
+    output: *deployment
+
+  DeleteDeployment:
+    reads:
+      dep: { resource: deployment }
+    require:
+      - { cond: dep_found, error: NotFound, message: "Deployment not found" }
+    effects:
+      # Cascade: the hostname, aliases and files, plus the CI/CD children scoped
+      # under this deployment (checks, check runs, runtime logs).
+      - delete: { resource: deployment_url, key: "string(dep.url)", missing: ignore }
+      - delete: { resource: deployment_alias_by_alias, where: "item.deploymentId == string(dep.uid)" }
+      - delete: { resource: deployment_alias, where: "item.deploymentId == string(dep.uid)" }
+      - delete: { resource: deployment_file, where: "item.deploymentId == string(dep.uid)" }
+      - delete: { resource: check, where: "true" }
+      - delete: { resource: check_run, where: "item.deploymentId == string(dep.uid)" }
+      - delete: { resource: runtime_log, where: "true" }
+      - delete: { resource: deployment }
+    output:
+      uid: dep.uid
+      state: "'DELETED'"
+
+  CancelDeployment:
+    reads:
+      dep: { resource: deployment }
+    require:
+      - { cond: dep_found, error: NotFound, message: "Deployment not found" }
+      - { cond: "dep.__state == 'QUEUED' || dep.__state == 'BUILDING'", error: BadRequest, message: "Deployment cannot be canceled in its current state" }
+    effects:
+      - send_event:
+          resource: deployment
+          key: "string(dep.uid)"
+          event: MOVE
+          context: { to: "'CANCELED'" }
+      # Binds the record as it now stands for the answer.
+      - patch:
+          resource: deployment
+          key: "string(dep.uid)"
+          record:
+            uid: id
+    omit_null: [ready, canceledAt, errorCode, errorMessage]
+    output: *deployment
+
+  # Events are a function of the deployment, derived rather than stored: a
+  # state it has not reached has no event yet, and the instants are the ones
+  # the build timers move it at. What a build prints is not Vercel's output,
+  # only lines in the shape its clients print.
+  # `vercel inspect` reads a deployment's builds (client-observed, vercel
+  # 63.1.2). Nothing builds here, so there are none to list; the deployment still
+  # has to exist.
+  GetDeploymentBuilds:
+    reads:
+      by_url: { resource: deployment_url, key: "lastSegment(string(input.deploymentId), '//')" }
+      rec: { resource: deployment, key: "by_url_found ? string(by_url.uid) : string(input.deploymentId)" }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Deployment not found" }
+    output:
+      builds: "[]"
+
+  GetDeploymentEvents:
+    reads: *by_id_or_url
+    let:
+      limit: "('limit' in input && input.limit != null && string(input.limit) != '' && int(string(input.limit)) > 0) ? int(string(input.limit)) : 100"
+      build: "'bld_' + substr(string(rec.uid), 4, 20)"
+      # One event per state the deployment has reached, in the order it
+      # reached them. `deployment-state` is the event a client waits on; the
+      # stdout lines are what `vercel` prints under it.
+      queuedEvents: >
+        [{'type': 'deployment-state', 'created': rec.createdAt,
+          'payload': {'deploymentId': rec.uid, 'text': 'Deployment queued', 'id': rec.uid + ':1', 'date': rec.createdAt,
+            'serial': string(rec.createdAt) + '01', 'info': {'type': 'build', 'name': build, 'readyState': 'QUEUED'}}}]
+      buildingEvents: >
+        rec.__state == 'QUEUED' ? [] : [
+          {'type': 'deployment-state', 'created': rec.buildingAt,
+           'payload': {'deploymentId': rec.uid, 'text': 'Building', 'id': rec.uid + ':2', 'date': rec.buildingAt,
+             'serial': string(rec.buildingAt) + '02', 'info': {'type': 'build', 'name': build, 'readyState': 'BUILDING'}}},
+          {'type': 'stdout', 'created': rec.buildingAt,
+           'payload': {'deploymentId': rec.uid, 'text': 'Running build in Washington, D.C., USA (East) - iad1',
+             'id': rec.uid + ':3', 'date': rec.buildingAt, 'serial': string(rec.buildingAt) + '03',
+             'info': {'type': 'build', 'name': build}}}]
+      readyEvents: >
+        rec.__state != 'READY' ? [] : [
+          {'type': 'stdout', 'created': rec.readyAt,
+           'payload': {'deploymentId': rec.uid, 'text': 'Build Completed in /vercel/output [1s]', 'id': rec.uid + ':4',
+             'date': rec.readyAt, 'serial': string(rec.readyAt) + '04', 'info': {'type': 'build', 'name': build}}},
+          {'type': 'deployment-state', 'created': rec.readyAt,
+           'payload': {'deploymentId': rec.uid, 'text': 'Ready', 'id': rec.uid + ':5', 'date': rec.readyAt,
+             'serial': string(rec.readyAt) + '05', 'info': {'type': 'build', 'name': build, 'readyState': 'READY'}}}]
+      errorEvents: >
+        rec.__state != 'ERROR' ? [] : [
+          {'type': 'stderr', 'created': coalesce(rec.erroredAt, rec.readyAt),
+           'payload': {'deploymentId': rec.uid, 'text': coalesce(rec.errorMessage, coalesce(rec.failureMessage, 'The build failed.')),
+             'id': rec.uid + ':6', 'date': coalesce(rec.erroredAt, rec.readyAt), 'serial': string(coalesce(rec.erroredAt, rec.readyAt)) + '06',
+             'info': {'type': 'build', 'name': build}}},
+          {'type': 'deployment-state', 'created': coalesce(rec.erroredAt, rec.readyAt),
+           'payload': {'deploymentId': rec.uid, 'text': 'Error', 'id': rec.uid + ':7', 'date': coalesce(rec.erroredAt, rec.readyAt),
+             'serial': string(coalesce(rec.erroredAt, rec.readyAt)) + '07', 'info': {'type': 'build', 'name': build, 'readyState': 'ERROR'}}}]
+      canceledEvents: >
+        rec.__state != 'CANCELED' ? [] : [
+          {'type': 'deployment-state', 'created': rec.canceledAt,
+           'payload': {'deploymentId': rec.uid, 'text': 'Canceled', 'id': rec.uid + ':8', 'date': rec.canceledAt,
+             'serial': string(rec.canceledAt) + '08', 'info': {'type': 'build', 'name': build, 'readyState': 'CANCELED'}}}]
+      events: "queuedEvents + buildingEvents + readyEvents + errorEvents + canceledEvents"
+    require:
+      - { cond: rec_found, error: NotFound, message: "Deployment not found" }
+    output:
+      _list: >
+        slice(
+          (('direction' in input && input.direction == 'backward')
+            ? indices(events).map(i, events[size(events) - 1 - i]) : events)
+          .filter(e, (!('since' in input && input.since != null && string(input.since) != '') || e.created >= int(string(input.since)))
+            && (!('until' in input && input.until != null && string(input.until) != '') || e.created <= int(string(input.until)))),
+          0, limit)
+
+  ListDeploymentFiles:
+    reads:
+      dep: { resource: deployment }
+    require:
+      - { cond: dep_found, error: NotFound, message: "Deployment not found" }
+    effects:
+      # The root's identifier is drawn, as it always was: the recordings that
+      # follow this one in vercel.api's trace carry literal identifiers cut
+      # from this draw sequence, and a draw fewer here would move every one.
+      - generate: { bind: root, kind: hex, bytes: 10 }
+    list:
+      resource: deployment_file
+      member: _list
+      filter: "item.deploymentId == string(dep.uid)"
+    output:
+      # The tree is flat: every file is a child of one root directory under its
+      # full path, where the real one splits a path into directories. A
+      # directory carries no contentType, which the document types as a string
+      # and so does not allow to be null.
+      _list: >
+        [{'uid': 'file_' + fx.root, 'name': '/', 'type': 'directory', 'mode': 16877,
+          'children': items.map(f, {'uid': f.uid, 'name': f.name, 'type': 'file', 'mode': f.mode,
+            'contentType': f.contentType, 'children': []})}]
+
+  UploadFile:
+    let:
+      digest: >
+        ('x-vercel-digest' in input && input['x-vercel-digest'] != null && string(input['x-vercel-digest']) != '') ? string(input['x-vercel-digest'])
+          : (('x-now-digest' in input && input['x-now-digest'] != null) ? string(input['x-now-digest']) : '')
+      content: "('body' in input && input.body != null) ? string(input.body) : ''"
+    require:
+      - { cond: "digest != ''", error: BadRequest, message: "Missing x-vercel-digest header" }
+      # The digest is the file's name and the server checks it is the file's:
+      # a client that hashes wrong would otherwise store a file under a name
+      # nothing will ever ask for.
+      - { cond: "sha1hex(content) == digest", error: BadRequest, message: "The digest does not match the SHA-1 of the file" }
+    effects:
+      - put:
+          resource: file
+          key: "digest"
+          record:
+            size: "blen(content)"
+            content: "b64(content)"
+    output: {}
+
+  # The document declares no success body for this one, only its errors. The
+  # model's answer is an empty object, so the file's bytes are not served.
+  GetDeploymentFileContents:
+    reads:
+      dep: { resource: deployment }
+    require:
+      - { cond: dep_found, error: NotFound, message: "Deployment not found" }
+    output: {}
+
+  MirrorSetDeploymentState:
+    reads: *by_id_or_url
+    require:
+      - { cond: rec_found, error: NotFound, message: "Deployment not found" }
+      - cond: >
+          (input.readyState == 'BUILDING' && rec.__state == 'QUEUED')
+            || (input.readyState != 'BUILDING' && (rec.__state == 'QUEUED' || rec.__state == 'BUILDING'))
+        error: BadRequest
+        message: "The deployment cannot move to that state from the one it is in"
+    effects:
+      - send_event:
+          resource: deployment
+          key: "string(rec.uid)"
+          event: MOVE
+          context:
+            to: "string(input.readyState)"
+            errorCode: "('errorCode' in input && input.errorCode != null) ? string(input.errorCode) : ''"
+            errorMessage: "('errorMessage' in input && input.errorMessage != null) ? string(input.errorMessage) : ''"
+      - patch:
+          resource: deployment
+          key: "string(rec.uid)"
+          record:
+            uid: id
+    output:
+      id: rec.uid
+      readyState: "string(rec.__state)"
+
+  MirrorArmDeploymentFailure:
+    effects:
+      - put:
+          resource: deploy_fault
+          record:
+            count: "('count' in input && input.count != null) ? int(input.count) : 1"
+            readyState: "('readyState' in input && input.readyState != null) ? string(input.readyState) : 'ERROR'"
+            errorCode: "('errorCode' in input && input.errorCode != null) ? string(input.errorCode) : 'BUILD_FAILED'"
+            errorMessage: "('errorMessage' in input && input.errorMessage != null) ? string(input.errorMessage) : 'The build failed.'"
+    output:
+      count: rec.count
+      readyState: rec.readyState
+      errorCode: rec.errorCode
+      errorMessage: rec.errorMessage
+
+  MirrorDisarmDeploymentFailure:
+    effects:
+      - delete: { resource: deploy_fault, missing: ignore }
+    output:
+      count: "0"

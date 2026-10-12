@@ -1,0 +1,248 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Vercel REST API — client-observed addresses",
+    "version": "authored",
+    "description": "Addresses that real Vercel clients call and the vendored document does not list. The vendored document names each endpoint once, at its newest version, while the API keeps answering the versions it superseded and the clients written against them (Vercel's own CLI creates projects at /v9 where the document says /v11). Each entry names an operation the other documents declare and the extra addresses it also answers at, with the source that establishes the claim. Every cell is `authored` provenance: a reading of what clients send, never an observation of api.vercel.com."
+  },
+  "x-mirror-service": "vercel.api",
+  "servers": [{ "url": "https://api.vercel.com" }],
+  "paths": {},
+  "x-mirror-aliases": [
+    {
+      "operation": "CreateProject",
+      "uris": ["/v9/projects", "/v10/projects", "/v1/projects"],
+      "source": "vercel CLI project create; deploy-platform REST providers calling POST /v9/projects. Client-observed: vercel CLI 63.1.2 'project add' sends POST /v1/projects with {\"name\": ...} (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/project-add.json)"
+    },
+    {
+      "operation": "GetTeams",
+      "uris": ["/v1/teams"],
+      "source": "vercel CLI 'Loading teams' (GET /v1/teams)"
+    },
+    {
+      "operation": "CreateTeam",
+      "uris": ["/v1/teams"],
+      "source": "vercel CLI 'teams add' (POST /v1/teams); the vendored document declares this address with an {id, slug} answer, which this operation's answer contains"
+    },
+    {
+      "operation": "FilterProjectEnvs",
+      "uris": ["/v9/projects/{idOrName}/env", "/v8/projects/{idOrName}/env"],
+      "source": "the project-env listing at the older versions the API still answers; clients written against them (the CLI's env commands among them) keep calling these. Named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "CreateProjectEnv",
+      "uris": ["/v9/projects/{idOrName}/env", "/v8/projects/{idOrName}/env"],
+      "source": "the project-env create at the older versions the API still answers (/v8, /v9), where the document declares /v10. Named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "GetProjectEnv",
+      "uris": ["/v10/projects/{idOrName}/env/{id}", "/v9/projects/{idOrName}/env/{id}", "/v8/projects/{idOrName}/env/{id}"],
+      "source": "reading one variable at the project-env address of the version a client was written against; the vendored document declares it at /v1 only. Named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "EditProjectEnv",
+      "uris": ["/v10/projects/{idOrName}/env/{id}", "/v8/projects/{idOrName}/env/{id}"],
+      "source": "editing a variable at the versions around the document's /v9 (/v8 older, /v10 newer). Named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "RemoveProjectEnv",
+      "uris": ["/v10/projects/{idOrName}/env/{id}", "/v8/projects/{idOrName}/env/{id}"],
+      "source": "removing a variable at the versions around the document's /v9 (/v8 older, /v10 newer). Named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "GetProjectDomains",
+      "uris": ["/v10/projects/{idOrName}/domains", "/v8/projects/{idOrName}/domains"],
+      "source": "the project-domain listing at the versions around the document's /v9; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "AddProjectDomain",
+      "uris": ["/v9/projects/{idOrName}/domains", "/v8/projects/{idOrName}/domains"],
+      "source": "adding a domain to a project at the older versions the API still answers, where the document declares /v10; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "GetProjectDomain",
+      "uris": ["/v10/projects/{idOrName}/domains/{domain}", "/v8/projects/{idOrName}/domains/{domain}"],
+      "source": "reading one project domain at the versions around the document's /v9; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "UpdateProjectDomain",
+      "uris": ["/v10/projects/{idOrName}/domains/{domain}", "/v8/projects/{idOrName}/domains/{domain}"],
+      "source": "editing a project domain at the versions around the document's /v9; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "RemoveProjectDomain",
+      "uris": ["/v10/projects/{idOrName}/domains/{domain}", "/v8/projects/{idOrName}/domains/{domain}"],
+      "source": "removing a project domain at the versions around the document's /v9; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "VerifyProjectDomain",
+      "uris": ["/v10/projects/{idOrName}/domains/{domain}/verify", "/v8/projects/{idOrName}/domains/{domain}/verify"],
+      "source": "verifying a project domain at the versions around the document's /v9; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "GetDomains",
+      "uris": ["/v6/domains", "/v4/domains"],
+      "source": "the account's domain listing at the older versions the API still answers (the CLI's domains ls is at /v5); named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "GetDomain",
+      "uris": ["/v6/domains/{domain}", "/v4/domains/{domain}"],
+      "source": "reading one account domain at the older versions; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "CreateOrTransferDomain",
+      "uris": ["/v4/domains"],
+      "source": "adding a domain to the account at the older version, before /v7 added transfers; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "DeleteDomain",
+      "uris": ["/v5/domains/{domain}", "/v4/domains/{domain}"],
+      "source": "removing an account domain at the versions around the document's /v6; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "AssignAlias",
+      "uris": ["/v3/deployments/{id}/aliases"],
+      "source": "assigning an alias at the version after the document's /v2; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "ListAliases",
+      "uris": ["/v2/aliases", "/v3/aliases"],
+      "source": "listing aliases at the older versions the API still answers, where the document declares /v4; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "GetAlias",
+      "uris": ["/v2/aliases/{idOrAlias}", "/v3/aliases/{idOrAlias}"],
+      "source": "reading one alias, by uid or hostname, at the older versions; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "DeleteAlias",
+      "uris": ["/v4/aliases/{aliasId}"],
+      "source": "removing an alias at the version after the document's /v2; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "ListDeploymentAliases",
+      "uris": ["/v3/deployments/{id}/aliases"],
+      "source": "listing a deployment's aliases at the version after the document's /v2; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "GetEdgeConfigs",
+      "uris": ["/v1/edge-config"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "CreateEdgeConfig",
+      "uris": ["/v1/edge-config"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "GetEdgeConfig",
+      "uris": ["/v1/edge-config/{edgeConfigId}"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "UpdateEdgeConfig",
+      "uris": ["/v1/edge-config/{edgeConfigId}"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "DeleteEdgeConfig",
+      "uris": ["/v1/edge-config/{edgeConfigId}"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "GetEdgeConfigItems",
+      "uris": ["/v1/edge-config/{edgeConfigId}/items"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "PatchEdgeConfigItems",
+      "uris": ["/v1/edge-config/{edgeConfigId}/items"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "GetEdgeConfigItem",
+      "uris": ["/v1/edge-config/{edgeConfigId}/item/{edgeConfigItemKey}"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "GetEdgeConfigSchema",
+      "uris": ["/v1/edge-config/{edgeConfigId}/schema"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "PatchEdgeConfigSchema",
+      "uris": ["/v1/edge-config/{edgeConfigId}/schema"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "DeleteEdgeConfigSchema",
+      "uris": ["/v1/edge-config/{edgeConfigId}/schema"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "GetEdgeConfigTokens",
+      "uris": ["/v1/edge-config/{edgeConfigId}/tokens"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "DeleteEdgeConfigTokens",
+      "uris": ["/v1/edge-config/{edgeConfigId}/tokens"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "GetEdgeConfigToken",
+      "uris": ["/v1/edge-config/{edgeConfigId}/token/{token}"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "CreateEdgeConfigToken",
+      "uris": ["/v1/edge-config/{edgeConfigId}/token"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "GetProjects",
+      "uris": ["/v9/projects"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel project ls` sends GET /v9/projects?limit=20; the document declares /v10."
+    },
+    {
+      "operation": "GetProjectsByIdOrNameCustomEnvironments",
+      "uris": ["/projects/{idOrName}/custom-environments"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel env add|ls|rm` and `vercel deploy` send GET /projects/{id}/custom-environments with no version segment at all."
+    },
+    {
+      "operation": "DeleteProject",
+      "uris": ["/projects/{idOrName}"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel remove` sends DELETE /projects/{id} with no version segment; it treats a 404 as already removed, so the project stayed."
+    },
+    {
+      "operation": "GetTeam",
+      "uris": ["/teams/{teamId}"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel ls` sends GET /teams/{orgId}?teamId={orgId} with no version segment, for a personal account's own id too."
+    },
+    {
+      "operation": "GetDeploymentEvents",
+      "uris": ["/v3/now/deployments/{idOrUrl}/events"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel deploy` polls GET /v3/now/deployments/{id}/events?direction=forward&follow=1&format=lines while it waits; the document declares /v3/deployments/{idOrUrl}/events."
+    },
+    {
+      "operation": "AssignAlias",
+      "uris": ["/now/deployments/{id}/aliases"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel alias set` sends POST /now/deployments/{host}/aliases with no version segment, naming the deployment by its URL."
+    },
+    {
+      "operation": "ListAliases",
+      "uris": ["/v3/now/aliases"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel alias ls` sends GET /v3/now/aliases?limit=20."
+    },
+    {
+      "operation": "GetAlias",
+      "uris": ["/now/aliases/{idOrAlias}"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel alias rm` looks the alias up first with GET /now/aliases/{alias}, no version segment."
+    },
+    {
+      "operation": "DeleteAlias",
+      "uris": ["/now/aliases/{aliasId}"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel alias rm` then removes it with DELETE /now/aliases/{id}, no version segment."
+    }
+  ]
+}

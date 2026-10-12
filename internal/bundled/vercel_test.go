@@ -101,13 +101,19 @@ func TestVercelBundleBehaves(t *testing.T) {
 	if edited["value"] != "rotated" || edited["key"] != "TOKEN" || edited["type"] != "encrypted" || edited["id"] != envID {
 		t.Fatalf("edit answered %v", edited)
 	}
+	// An encrypted value is listed opaque unless the request asks to decrypt:
+	// the row is the same one, and it is the same value underneath.
 	listed := ok(t, "FilterProjectEnvs", map[string]any{"idOrName": "app2"})
 	envs, _ := listed["envs"].([]any)
 	if len(envs) != 1 {
 		t.Fatalf("an edit moved the row: %v", listed)
 	}
-	if item, _ := envs[0].(map[string]any); item["value"] != "rotated" || item["id"] != envID {
+	if item, _ := envs[0].(map[string]any); item["id"] != envID || item["value"] == "rotated" || item["value"] == "" {
 		t.Fatalf("listed after edit %v", item)
+	}
+	decrypted := ok(t, "FilterProjectEnvs", map[string]any{"idOrName": "app2", "decrypt": "true"})
+	if item, _ := asList(decrypted["envs"])[0].(map[string]any); item["value"] != "rotated" || item["id"] != envID {
+		t.Fatalf("decrypted after edit %v", item)
 	}
 	if _, err := call("EditProjectEnv", map[string]any{"idOrName": "app2", "id": "env_nope", "value": "x"}); err == nil {
 		t.Fatal("a missing variable was edited")
@@ -226,4 +232,9 @@ func TestVercelBundleBehaves(t *testing.T) {
 	} else {
 		fault(t, err, "not_found", 404)
 	}
+}
+
+func asList(v any) []any {
+	l, _ := v.([]any)
+	return l
 }

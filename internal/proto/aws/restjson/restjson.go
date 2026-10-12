@@ -388,6 +388,16 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 		}
 		body = nil
 	}
+	// A body that may be one object or a list of them (a oneOf with an array
+	// arm) is decoded by what it is: an array lands under the payload member, and
+	// an object falls through to be splatted across the input like any other.
+	if name, ok := svc.UnionListPayloadMember(op); ok && len(bytes.TrimSpace(body)) > 0 && bytes.TrimSpace(body)[0] == '[' {
+		var list []any
+		if err := json.Unmarshal(body, &list); err == nil {
+			in[name] = list
+			body = nil
+		}
+	}
 	// A form body is as much a restJson payload as a JSON one: Vercel's OAuth
 	// callback and token exchange are declared form operations, and
 	// JSON-unmarshalling `code=...&state=...` into a map silently decodes to
@@ -522,11 +532,9 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	// Without this the input arrives empty and the operation addresses the
 	// zero value. The pattern is re-matched here rather than carried over from
 	// Route so that decoding a request stays independent of how it was routed.
-	if op.HTTP.URI != "" {
-		if bound, ok := httpuri.Parse(op.HTTP.URI).Match(r.URL.EscapedPath(), r.URL.Query()); ok {
-			for k, v := range bound {
-				in[k] = v
-			}
+	if bound, ok := httpuri.Bind(op, r.URL.EscapedPath(), r.URL.Query()); ok {
+		for k, v := range bound {
+			in[k] = v
 		}
 	}
 	return &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}, nil
@@ -638,6 +646,12 @@ func (Codec) Encode(svc *model.Service, op *model.Operation, w http.ResponseWrit
 	if lst, ok := resp.Output[bir.TopLevelList]; ok {
 		return json.NewEncoder(w).Encode(lst)
 	}
+	// `_object` is the same idea for an open object: the body is the value, with
+	// no member around it. A null is the body `null`, which the document allows
+	// where it marks the object nullable.
+	if obj, ok := resp.Output[bir.TopLevelObject]; ok {
+		return json.NewEncoder(w).Encode(obj)
+	}
 	return json.NewEncoder(w).Encode(resp.Output)
 }
 
@@ -741,8 +755,16 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		return json.NewEncoder(w).Encode(map[string]any{"error": f.Code, "error_description": f.Message})
 	}
 	if svc.ID == "vercel.api" || svc.ID == "vercel.blob" {
+		// A fault's extra members ride inside the error object, where Vercel
+		// puts them: invalidToken beside the 403, limit beside the 429.
+		e := map[string]any{"code": f.Code, "message": f.Message}
+		for k, v := range f.Fields {
+			if k != "code" && k != "message" {
+				e[k] = v
+			}
+		}
 		w.WriteHeader(status)
-		return json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": f.Code, "message": f.Message}})
+		return json.NewEncoder(w).Encode(map[string]any{"error": e})
 	}
 	// Stripe's envelope is {error: {type, message, code?, param?}}. The type
 	// is the oracle's constant invalid_request_error -- no route in the

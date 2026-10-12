@@ -2,8 +2,6 @@ package vercel_test
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"testing"
 	"time"
 
@@ -17,6 +15,10 @@ import (
 // VC-DELIVERY: CreateDeployment with prebuilt static files → READY → promote
 // isolates production pointer; bad deploy + RequestRollback restores prior id;
 // bytes verified via mirror-owned StaticSite (B-IR does not retain bodies).
+//
+// The files travel inline: a deployment that names a file by digest must have
+// uploaded it first (POST /v2/files, named by the SHA-1 of its bytes), as
+// Vercel's does, and what this test asks about is the promote and the rollback.
 func TestVC_DELIVERY(t *testing.T) {
 	deps := spitest.Deps(t)
 	clk, ok := deps.Clock.(*clock.Controllable)
@@ -56,8 +58,7 @@ func TestVC_DELIVERY(t *testing.T) {
 		"files": []any{
 			map[string]any{
 				"file": "index.html",
-				"sha":  sha256Hex(previewBody),
-				"size": len(previewBody),
+				"data": string(previewBody),
 			},
 		},
 	})
@@ -80,8 +81,7 @@ func TestVC_DELIVERY(t *testing.T) {
 		"files": []any{
 			map[string]any{
 				"file": "index.html",
-				"sha":  sha256Hex(prodBody),
-				"size": len(prodBody),
+				"data": string(prodBody),
 			},
 		},
 	})
@@ -114,8 +114,7 @@ func TestVC_DELIVERY(t *testing.T) {
 		"files": []any{
 			map[string]any{
 				"file": "index.html",
-				"sha":  sha256Hex(badBody),
-				"size": len(badBody),
+				"data": string(badBody),
 			},
 		},
 	})
@@ -200,11 +199,6 @@ func promotedDeploymentID(t *testing.T, call func(string, map[string]any) map[st
 		t.Fatalf("want one PROMOTED with deploymentId, got n=%d id=%q aliases=%#v", n, promoted, aliases)
 	}
 	return promoted
-}
-
-func sha256Hex(b []byte) string {
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
 }
 
 func asSlice(v any) []any {

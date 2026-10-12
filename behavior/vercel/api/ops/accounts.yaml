@@ -1,0 +1,316 @@
+schema: bir/1
+service: vercel.api
+
+# Who is calling and which teams exist: the user, the teams, their members.
+#
+# The user and the teams are global -- stored in the one scope every account
+# shares -- because they are not owned by any account a request can name. A
+# request acts for a team through ?teamId= or ?slug= (internal/edge/vercel.go),
+# which rewrites the account the engine scopes projects, deployments and the rest
+# by; the team itself, the slug index the edge resolves ?slug= through, and the
+# one user have to be found from every one of those scopes.
+#
+# Authentication is not checked here, except where the oracle's own routes did
+# and the recording and tests that were cut from them say so: CreateTeam,
+# ListTeamMembers, UpdateAuthUser and the API-key routes answer 401 to a request
+# carrying no Authorization at all. Vercel's API proper does not -- a client that
+# needs to see ITS refusal (403 forbidden) asks for it with
+# MIRROR_VERCEL_STRICT_AUTH, which refuses at the edge, for every operation alike.
+
+resources:
+  # The one caller. The pack answered a fixed identity and patches move it; the
+  # singleton keeps the overrides so GetAuthUser, the patch and userinfo read the
+  # same answer.
+  user:
+    collection: vuser
+    global: true
+    singleton: current
+
+  team:
+    collection: vteam
+    global: true
+    key: id
+    id:
+      input_members: [teamId]
+    record:
+      id: id
+
+  # Teams are addressed by id or by slug, the way the oracle's
+  # resolveTeamByIdOrSlug accepts both: this index answers which. The edge reads
+  # it too, to turn ?slug= into a team: the collection name and the `teamId`
+  # member are a contract with internal/edge/vercel.go, held by
+  # internal/check/vercel_edge_coupling_test.go.
+  team_slug:
+    collection: vteamslug
+    global: true
+    id:
+      derive: "''"
+
+  # A membership row per invited address, keyed teamId:email so a repeat invite
+  # to the same address is the conflict the oracle answers.
+  team_member:
+    collection: vteammem
+    global: true
+    id:
+      derive: "''"
+
+operations:
+  GetAuthUser:
+    reads:
+      rec: { resource: user }
+    output: &user
+      user: >
+        {
+          'id': 'usr_' + (identity.project != '' ? identity.project : identity.account),
+          'email': ('email' in rec) ? rec.email : 'test@mirror.cloud',
+          'name': ('name' in rec) ? rec.name : 'Mirror',
+          'username': 'test',
+          'avatar': null,
+          'defaultTeamId': null,
+          'createdAt': 1577836800000.0,
+          'softBlock': null,
+          'billing': null,
+          'resourceConfig': {},
+          'stagingPrefix': 'mirror',
+          'hasTrialAvailable': false
+        }
+
+  UpdateAuthUser:
+    require:
+      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
+    reads:
+      u: { resource: user }
+    effects:
+      - patch:
+          resource: user
+          record: {}
+      - patch:
+          resource: user
+          when: "'name' in input"
+          record:
+            name: "input.name == null ? '' : string(input.name)"
+      - patch:
+          resource: user
+          when: "'email' in input"
+          record:
+            email: "input.email == null ? '' : string(input.email)"
+    output: *user
+
+  GetTeams:
+    let:
+      limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+    list:
+      resource: team
+      member: teams
+      filter: >
+        (!('since' in input && input.since != null && string(input.since) != '') || item.createdAt > int(string(input.since)))
+          && (!('until' in input && input.until != null && string(input.until) != '') || item.createdAt < int(string(input.until)))
+    output:
+      teams: "slice(sortBy(items, 'createdAt', true), 0, limit)"
+      pagination: >
+        {'count': size(slice(sortBy(items, 'createdAt', true), 0, limit)),
+         'next': size(items) > limit ? slice(sortBy(items, 'createdAt', true), 0, limit)[limit - 1].createdAt : null,
+         'prev': null}
+
+  GetTeam:
+    reads:
+      by_slug: { resource: team_slug, key: "string(input.teamId)" }
+      rec:
+        resource: team
+        key: "by_slug_found ? string(by_slug.teamId) : string(input.teamId)"
+    require:
+      - { cond: rec_found, error: NotFound, message: "Team not found" }
+    output: &team
+      id: rec.id
+      slug: rec.slug
+      name: rec.name
+      avatar: rec.avatar
+      description: rec.description
+      creatorId: rec.creatorId
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+      stagingPrefix: rec.stagingPrefix
+      billing: rec.billing
+      membership: rec.membership
+
+  PatchTeam:
+    reads:
+      by_slug: { resource: team_slug, key: "string(input.teamId)" }
+      team:
+        resource: team
+        key: "by_slug_found ? string(by_slug.teamId) : string(input.teamId)"
+      taken:
+        resource: team_slug
+        key: "('slug' in input && input.slug != null) ? trim(string(input.slug)) : ''"
+    require:
+      - { cond: team_found, error: NotFound, message: "Team not found" }
+      - { cond: "!('slug' in input && input.slug != null) || trim(string(input.slug)) != ''", error: BadRequest, message: "Missing required field: slug" }
+      - { cond: "!taken_found || string(taken.teamId) == string(team.id)", error: TeamSlugAlreadyExists, message: "A team with this slug already exists" }
+    effects:
+      # A rename moves the index with it: the old slug is free, the new one is
+      # taken, and the edge resolves ?slug= through the new one.
+      - delete:
+          resource: team_slug
+          key: "string(team.slug)"
+          when: "'slug' in input && input.slug != null && trim(string(input.slug)) != string(team.slug)"
+          missing: ignore
+      - put:
+          resource: team_slug
+          key: "trim(string(input.slug))"
+          when: "'slug' in input && input.slug != null && trim(string(input.slug)) != string(team.slug)"
+          record:
+            teamId: "string(team.id)"
+      - patch:
+          resource: team
+          key: "string(team.id)"
+          record:
+            updatedAt: "now_ms"
+      - patch:
+          resource: team
+          key: "string(team.id)"
+          when: "'name' in input && input.name != null"
+          record:
+            name: "string(input.name)"
+      - patch:
+          resource: team
+          key: "string(team.id)"
+          when: "'slug' in input && input.slug != null"
+          record:
+            slug: "trim(string(input.slug))"
+      - patch:
+          resource: team
+          key: "string(team.id)"
+          when: "'description' in input"
+          record:
+            description: "input.description"
+      - patch:
+          resource: team
+          key: "string(team.id)"
+          when: "'avatar' in input"
+          record:
+            avatar: "input.avatar"
+    output: *team
+
+  CreateTeam:
+    reads:
+      clash: { resource: team_slug, key: "('slug' in input && input.slug != null) ? trim(string(input.slug)) : ''" }
+    require:
+      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
+      - { cond: "trim(string(input.slug)) != ''", error: BadRequest, message: "Missing required field: slug" }
+      - { cond: "!clash_found", error: TeamSlugAlreadyExists, message: "A team with this slug already exists" }
+    effects:
+      - generate: { bind: tid, kind: hex, bytes: 8 }
+      - put:
+          resource: team_member
+          key: "'team_' + fx.tid + ':test'"
+          record:
+            teamId: "'team_' + fx.tid"
+            uid: "'usr_' + (identity.project != '' ? identity.project : identity.account)"
+            username: "'test'"
+            email: "'test@mirror.cloud'"
+            role: "'OWNER'"
+            confirmed: "true"
+            createdAt: "now_ms"
+      - put:
+          resource: team_slug
+          key: "trim(string(input.slug))"
+          record:
+            teamId: "'team_' + fx.tid"
+      - put:
+          resource: team
+          key: "'team_' + fx.tid"
+          record:
+            id: "'team_' + fx.tid"
+            slug: "trim(string(input.slug))"
+            name: "('name' in input && input.name != null && trim(string(input.name)) != '') ? trim(string(input.name)) : trim(string(input.slug))"
+            avatar: "null"
+            description: "null"
+            creatorId: "'usr_' + (identity.project != '' ? identity.project : identity.account)"
+            createdAt: "now_ms"
+            updatedAt: "now_ms"
+            stagingPrefix: "trim(string(input.slug))"
+            billing: "{'plan': 'hobby'}"
+            membership: "{'confirmed': true, 'role': 'OWNER', 'createdAt': now_ms, 'created': now_ms}"
+    output:
+      id: rec.id
+      slug: rec.slug
+      name: rec.name
+      creatorId: rec.creatorId
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+      membership: rec.membership
+
+  ListTeamMembers:
+    reads:
+      by_slug: { resource: team_slug, key: "string(input.teamId)" }
+      team:
+        resource: team
+        key: "by_slug_found ? string(by_slug.teamId) : string(input.teamId)"
+    require:
+      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
+      - { cond: team_found, error: NotFound, message: "Team not found" }
+    select:
+      binding: members
+      resource: team_member
+      filter: "string(item.teamId) == string(team.id)"
+    output:
+      members: "members.map(m, {'uid': string(m.uid), 'username': string(m.username), 'email': string(m.email), 'role': string(m.role)})"
+      pagination: "{'count': size(members), 'next': null, 'prev': null}"
+
+  # The document's listing of a team's members, at /v3. ListTeamMembers above is
+  # the oracle's older address and answers the older, smaller shape.
+  GetTeamMembers:
+    reads:
+      by_slug: { resource: team_slug, key: "string(input.teamId)" }
+      team:
+        resource: team
+        key: "by_slug_found ? string(by_slug.teamId) : string(input.teamId)"
+    require:
+      - { cond: team_found, error: NotFound, message: "Team not found" }
+    select:
+      binding: members
+      resource: team_member
+      filter: "string(item.teamId) == string(team.id)"
+    output:
+      members: >
+        members.map(m, {'uid': string(m.uid), 'username': string(m.username), 'email': string(m.email),
+          'role': string(m.role), 'confirmed': m.confirmed, 'createdAt': m.createdAt})
+      pagination: "{'hasNext': false, 'count': size(members), 'next': null, 'prev': null}"
+
+  InviteUserToTeam:
+    reads:
+      by_slug: { resource: team_slug, key: "string(input.teamId)" }
+      team:
+        resource: team
+        key: "by_slug_found ? string(by_slug.teamId) : string(input.teamId)"
+      member:
+        resource: team_member
+        key: >
+          ('body' in input && input.body != null && size(input.body) > 0
+            && 'email' in input.body[0] && input.body[0].email != null)
+            ? (by_slug_found ? string(by_slug.teamId) : string(input.teamId)) + ':' + string(input.body[0].email) : ''
+    require:
+      - { cond: team_found, error: NotFound, message: "Team not found" }
+      - { cond: "'body' in input && input.body != null && size(input.body) > 0", error: BadRequest, message: "Provide uid or email" }
+      - { cond: "'email' in input.body[0] && input.body[0].email != null && string(input.body[0].email) != ''", error: BadRequest, message: "Provide uid or email" }
+      - { cond: "!('role' in input.body[0]) || input.body[0].role == null || ['OWNER', 'MEMBER', 'DEVELOPER', 'VIEWER'].exists(r, r == string(input.body[0].role))", error: BadRequest, message: "Invalid role" }
+      - { cond: "!member_found", error: MemberAlreadyExists, message: "User is already a member of this team" }
+    effects:
+      - put:
+          resource: team_member
+          for_each: input.body
+          key: "string(team.id) + ':' + string(item.email)"
+          record:
+            teamId: "string(team.id)"
+            email: "string(item.email)"
+            uid: "'usr_' + substr(md5hex(string(item.email)), 0, 20)"
+            username: "string(item.email)"
+            role: "('role' in item && item.role != null) ? string(item.role) : 'MEMBER'"
+            confirmed: "true"
+            createdAt: "now_ms"
+            joinedFrom: "'email'"
+    output:
+      email: rec.email
+      role: rec.role
+      uid: rec.uid
+      username: rec.username

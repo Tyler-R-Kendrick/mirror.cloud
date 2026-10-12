@@ -159,3 +159,35 @@ func TestScalarBodyAdmitsEveryScalar(t *testing.T) {
 		t.Error("a nil service claimed a scalar body")
 	}
 }
+
+// TestUnionListPayloadMemberFindsAnObjectOrAListBody holds the one thing the
+// codec asks of the model before it looks at the bytes: is this body allowed to
+// be an array? A union of structures is not, a union with a list arm is, and a
+// bare list is a different question ListPayloadMember answers.
+func TestUnionListPayloadMemberFindsAnObjectOrAListBody(t *testing.T) {
+	payload := Member{Binding: MemberBinding{Location: "payload"}}
+	svc := &Service{Shapes: map[string]Shape{
+		"In":          {ID: "In", Kind: KindStructure, Members: map[string]Member{"body": withShape(payload, "Either")}},
+		"Either":      {ID: "Either", Kind: KindUnion, Members: map[string]Member{"option0": {Shape: "One"}, "option1": {Shape: "Many"}}},
+		"One":         {ID: "One", Kind: KindStructure},
+		"Many":        {ID: "Many", Kind: KindList, Member: "One"},
+		"OnlyObjects": {ID: "OnlyObjects", Kind: KindUnion, Members: map[string]Member{"option0": {Shape: "One"}, "option1": {Shape: "One"}}},
+		"In2":         {ID: "In2", Kind: KindStructure, Members: map[string]Member{"body": withShape(payload, "OnlyObjects")}},
+		"List":        {ID: "List", Kind: KindList, Member: "One"},
+		"In3":         {ID: "In3", Kind: KindStructure, Members: map[string]Member{"body": withShape(payload, "List")}},
+	}}
+	if name, ok := svc.UnionListPayloadMember(&Operation{Input: "In"}); !ok || name != "body" {
+		t.Errorf("an object-or-list body = %q, %v", name, ok)
+	}
+	if _, ok := svc.UnionListPayloadMember(&Operation{Input: "In2"}); ok {
+		t.Error("a union of objects only was taken for one that may be a list")
+	}
+	if _, ok := svc.UnionListPayloadMember(&Operation{Input: "In3"}); ok {
+		t.Error("a bare list is ListPayloadMember's, not the union's")
+	}
+}
+
+func withShape(m Member, shape string) Member {
+	m.Shape = shape
+	return m
+}

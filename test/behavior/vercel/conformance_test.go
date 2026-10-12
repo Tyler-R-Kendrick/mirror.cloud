@@ -58,8 +58,11 @@ type conf struct {
 	extra   *oasDoc
 	ops     map[string]*confOp
 	statuse map[string]map[int]bool // operation -> statuses driven and validated
-	spelled map[string]bool         // "operation address" -> driven
-	areas   int
+	// undeclared are the error statuses the emulator answered that the document
+	// does not list for the operation, as "Operation 404".
+	undeclared map[string]bool
+	spelled    map[string]bool // "operation address" -> driven
+	areas      int
 }
 
 type confArea struct {
@@ -82,12 +85,13 @@ func newConf(t *testing.T, opts ...func(*bootOptions)) *conf {
 	faults := withConfig(func(c *config.Config) { c.VercelFaults = true })
 	v := newVXWith(t, "vercel-conformance", []string{"vercel.api", "aws.s3"}, append([]func(*bootOptions){faults}, opts...)...)
 	c := &conf{
-		vx:      v,
-		main:    loadOAS(t, "api.json"),
-		extra:   loadOAS(t, "api-extra.json"),
-		ops:     map[string]*confOp{},
-		statuse: map[string]map[int]bool{},
-		spelled: map[string]bool{},
+		vx:         v,
+		main:       loadOAS(t, "api.json"),
+		extra:      loadOAS(t, "api-extra.json"),
+		ops:        map[string]*confOp{},
+		statuse:    map[string]map[int]bool{},
+		undeclared: map[string]bool{},
+		spelled:    map[string]bool{},
 	}
 	svc := v.rt.Deps.Model.ServiceByID("vercel.api")
 	if svc == nil {
@@ -144,6 +148,12 @@ func (c *conf) call(t *testing.T, method, path string, body any, want int, heade
 		case !declared && noBody && r.status < 300:
 			// The document gives this operation no success response at all, so
 			// there is nothing to hold the answer to; the reason is on the list.
+		case !declared && r.status >= 400:
+			// The document leaves out errors the real API answers: getProject
+			// declares no 404. An error status it does not list is not a shape
+			// to hold the answer to, and the envelope check above still applies;
+			// the count is reported so the gap is visible.
+			c.undeclared[op.name+" "+fmt.Sprint(r.status)] = true
 		case !declared:
 			t.Errorf("%s: %s answered %d, a status %s does not declare", label, op.name, r.status, op.doc.name)
 		case schema != nil && hasJSON:
@@ -158,6 +168,29 @@ func (c *conf) call(t *testing.T, method, path string, body any, want int, heade
 			t.Errorf("%s: the document declares a JSON body for %d and the answer is not JSON: %s", label, r.status, clip(r.raw))
 		case schema != nil && len(r.raw) == 0 && r.status != 204 && r.status != 304:
 			t.Errorf("%s: the document declares a JSON body for %d and the answer is empty", label, r.status)
+		}
+	}
+	// An alternate address the vendored document also declares, under an
+	// operation of its own, holds the answer to that operation's schema too:
+	// POST /v1/teams is mirror's CreateTeam and the document's createTeam, and a
+	// client that follows the document at that address reads the document's
+	// shape from it.
+	if c.main != nil && r.status < 400 && hasJSON {
+		bare, _, _ := strings.Cut(path, "?")
+		for _, alt := range op.alts {
+			if !templateMatches(alt, bare) {
+				continue
+			}
+			other, ok := c.main.operation(op.method, alt)
+			if !ok || (op.doc == c.main && alt == op.uri) {
+				continue
+			}
+			if schema, declared := c.main.responseSchema(other, r.status); declared && schema != nil {
+				if errs := c.main.validate(schema, inst); len(errs) > 0 {
+					t.Errorf("%s: the answer at %s does not satisfy the document's operation there:\n    %s\n  body: %s",
+						label, alt, strings.Join(clipList(errs, 12), "\n    "), clip(r.raw))
+				}
+			}
 		}
 	}
 	return r
@@ -245,6 +278,12 @@ func TestVercelResponsesConformToTheDocument(t *testing.T) {
 		t.Skipf("%d of %d areas ran; coverage is only meaningful for a whole run", c.areas, len(confAreas))
 	}
 	t.Run("coverage", c.coverage)
+	var names []string
+	for k := range c.undeclared {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	t.Logf("%d error answers the document does not list for their operation: %s", len(names), strings.Join(names, ", "))
 }
 
 // confNoSuccessBody lists the operations the vendored document declares only
@@ -272,14 +311,11 @@ var confUncovered = map[string]string{
 	"CreateCheck":                             pending,
 	"CreateCustomEnvironment":                 pending,
 	"CreateDeploymentCheckRun":                pending,
-	"CreateProject":                           pending,
 	"CreateProjectCheck":                      pending,
 	"CreateProjectEnv":                        pending,
-	"CreateTeam":                              pending,
 	"DeleteAlias":                             pending,
 	"DeleteAllArtifacts":                      pending,
 	"DeleteApiKey":                            pending,
-	"DeleteProject":                           pending,
 	"DeleteProjectCheck":                      pending,
 	"DeleteRollingReleaseConfig":              pending,
 	"DownloadArtifact":                        pending,
@@ -287,37 +323,29 @@ var confUncovered = map[string]string{
 	"FilterProjectEnvs":                       pending,
 	"GetAlias":                                pending,
 	"GetAllChecks":                            pending,
-	"GetAuthUser":                             pending,
 	"GetCheck":                                pending,
 	"GetCustomEnvironment":                    pending,
 	"GetDeploymentCheckRun":                   pending,
-	"GetProject":                              pending,
 	"GetProjectCheck":                         pending,
 	"GetProjectDomain":                        pending,
 	"GetProjectDomains":                       pending,
 	"GetProjectEnv":                           pending,
-	"GetProjects":                             pending,
 	"GetProjectsByIdOrNameCustomEnvironments": pending,
 	"GetRegistration":                         pending,
 	"GetRollingRelease":                       pending,
 	"GetRollingReleaseBillingStatus":          pending,
 	"GetRollingReleaseConfig":                 pending,
 	"GetRuntimeLogs":                          pending,
-	"GetTeam":                                 pending,
-	"GetTeams":                                pending,
-	"InviteUserToTeam":                        pending,
 	"ListAliases":                             pending,
 	"ListApiKeys":                             pending,
 	"ListCheckRuns":                           pending,
 	"ListDeploymentCheckRuns":                 pending,
 	"ListProjectChecks":                       pending,
 	"ListPromoteAliases":                      pending,
-	"ListTeamMembers":                         pending,
 	"OauthAuthorize":                          pending,
 	"OauthAuthorizeCallback":                  pending,
 	"OauthToken":                              pending,
 	"OauthUserinfo":                           pending,
-	"PatchTeam":                               pending,
 	"PatchUrlProtectionBypass":                pending,
 	"RecordEvents":                            pending,
 	"RemoveCustomEnvironment":                 pending,
@@ -328,11 +356,9 @@ var confUncovered = map[string]string{
 	"RerequestCheck":                          pending,
 	"StartRollingRelease":                     pending,
 	"Status":                                  pending,
-	"UpdateAuthUser":                          pending,
 	"UpdateCheck":                             pending,
 	"UpdateCustomEnvironment":                 pending,
 	"UpdateDeploymentCheckRun":                pending,
-	"UpdateProject":                           pending,
 	"UpdateProjectCheck":                      pending,
 	"UpdateProjectDomain":                     pending,
 	"UpdateProjectProtectionBypass":           pending,

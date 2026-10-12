@@ -202,6 +202,7 @@ operations:
           key: "pname + '-' + fx.host + '.vercel.app'"
           record:
             uid: "'dpl_' + fx.depid"
+            projectId: "proj_found ? string(proj.id) : 'prj_' + fx.newproj"
       - put:
           resource: deployment_file
           for_each: entries
@@ -209,6 +210,7 @@ operations:
           record:
             uid: "'f_' + item.sha"
             deploymentId: "'dpl_' + fx.depid"
+            projectId: "proj_found ? string(proj.id) : 'prj_' + fx.newproj"
             name: "item.file"
             sha: "item.sha"
             size: "item.size"
@@ -236,6 +238,7 @@ operations:
           record:
             uid: "'als_' + fx.depid"
             deploymentId: "'dpl_' + fx.depid"
+            projectId: "proj_found ? string(proj.id) : 'prj_' + fx.newproj"
       # The deployment is written last, and its deadline last of all: every
       # write rebinds `rec`, and the answer is the deployment.
       - create:

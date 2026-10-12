@@ -1,0 +1,271 @@
+schema: bir/1
+service: vercel.api
+
+# Projects: what a deployment belongs to, what its variables and domains hang
+# off, and what a client reads first when it links a directory.
+#
+# A project made at /v9, /v10 or /v11 is one operation and one store
+# (specs/vercel/clients.json says why those addresses exist), so the project a
+# client created with the CLI's /v9 is the one an SDK listing at /v10 shows.
+#
+# The record is the document's project: every member it requires is stored, with
+# the defaults a new project has, so an answer is the record and a listing is the
+# records. What the document leaves optional and nothing here knows (a git link,
+# analytics, firewall, crons) is absent rather than invented.
+
+resources:
+  project:
+    collection: vproj
+    # The identifier carries a prj_ prefix, so the record member rather than the
+    # raw generated id is the store key.
+    key: id
+    id:
+      # No `generate` here. The operations that create a project draw the id as
+      # an effect and pass it as the key, because two writes need the same one;
+      # a resource generate beside that would draw a SECOND id per create and
+      # throw it away, which is invisible in an answer and not in a recording --
+      # the two sides read the same seeded Rand, so a wasted draw moves every
+      # later identifier.
+      # The document calls the label `idOrName` because the real API accepts
+      # either. Addressing by id is what this resolves; addressing by name goes
+      # through project_name below.
+      input_members: [idOrName]
+    record:
+      # The key member, which the validator wants the record to set; every
+      # writer passes the key explicitly and states the identifier itself.
+      id: id
+      # Everything a project has the moment it exists, whichever request made it:
+      # CreateProject, and CreateDeployment for a name nobody had made a project
+      # of. Nothing here reads the request, so the second does not have to say it
+      # all again.
+      accountId: "identity.account"
+      createdAt: "now_ms"
+      updatedAt: "now_ms"
+      seq: { counter: "vproj" }
+      framework: "null"
+      buildCommand: "null"
+      devCommand: "null"
+      installCommand: "null"
+      outputDirectory: "null"
+      rootDirectory: "null"
+      serverlessFunctionRegion: "null"
+      nodeVersion: "'22.x'"
+      directoryListing: false
+      autoExposeSystemEnvs: true
+      autoAssignCustomDomains: true
+      gitForkProtection: true
+      gitLFS: false
+      sourceFilesOutsideRootDirectory: true
+      live: false
+      paused: false
+      deploymentExpiration: {}
+      resourceConfig:
+        functionDefaultRegions: "['iad1']"
+      defaultResourceConfig:
+        functionDefaultRegions: "['iad1']"
+      ssoProtection:
+        deploymentType: "'prod_deployment_urls_and_all_previews'"
+      passwordProtection: "null"
+      protectionBypass: {}
+
+  # Project names are unique per account, and the pack enforced that with a
+  # second row in the SAME collection keyed `name:<name>`, skipped when listing.
+  # It is a separate collection here for the reasons Cloudflare's title index is:
+  # a listing should not have to know which of its rows are really an index, and
+  # a project actually named `name:something` was indistinguishable from one.
+  project_name:
+    collection: vprojname
+    id:
+      # Total: evaluated wherever the resource is addressed, so a request
+      # carrying neither member must yield an empty key rather than an
+      # evaluation error. `idOrName` first, because a get and a delete name the
+      # project that way and a create names it `name`.
+      derive: >
+        ('idOrName' in input && input.idOrName != null) ? string(input.idOrName)
+          : (('name' in input && input.name != null) ? string(input.name) : '')
+
+operations:
+  CreateProject:
+    reads:
+      taken: { resource: project_name }
+    require:
+      # `cond` is a precondition: the error fires when it does NOT hold. The
+      # document marks `name` required, so a request omitting it entirely fails
+      # the engine's model check before reaching here -- same code and status,
+      # different wording. This rule answers a name that is present and empty,
+      # which the model check permits.
+      - { cond: "'name' in input && input.name != null && string(input.name) != ''", error: BadRequest, message: "Project name is required" }
+      - { cond: "!taken_found", error: Conflict, message: "A project with the same name already exists." }
+    effects:
+      # The id is drawn first, because both writes need the same one and neither
+      # can borrow it from the other: inside a write effect's record, `id` is
+      # THAT resource's own key -- for the index that is the project's name.
+      - generate: { bind: pid, kind: hex, bytes: 12 }
+      # The index is written first, and the order matters: every write effect
+      # rebinds `rec`, and the answer is the project.
+      - put:
+          resource: project_name
+          record:
+            project: "'prj_' + fx.pid"
+      - create:
+          resource: project
+          key: "'prj_' + fx.pid"
+          record:
+            id: "'prj_' + fx.pid"
+            name: "string(input.name)"
+            framework: "('framework' in input) ? input.framework : null"
+            buildCommand: "('buildCommand' in input) ? input.buildCommand : null"
+            devCommand: "('devCommand' in input) ? input.devCommand : null"
+            installCommand: "('installCommand' in input) ? input.installCommand : null"
+            outputDirectory: "('outputDirectory' in input) ? input.outputDirectory : null"
+            rootDirectory: "('rootDirectory' in input) ? input.rootDirectory : null"
+    output: &project
+      id: rec.id
+      name: rec.name
+      accountId: rec.accountId
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+      framework: rec.framework
+      nodeVersion: rec.nodeVersion
+      buildCommand: rec.buildCommand
+      devCommand: rec.devCommand
+      installCommand: rec.installCommand
+      outputDirectory: rec.outputDirectory
+      rootDirectory: rec.rootDirectory
+      directoryListing: rec.directoryListing
+      autoExposeSystemEnvs: rec.autoExposeSystemEnvs
+      autoAssignCustomDomains: rec.autoAssignCustomDomains
+      gitForkProtection: rec.gitForkProtection
+      gitLFS: rec.gitLFS
+      sourceFilesOutsideRootDirectory: rec.sourceFilesOutsideRootDirectory
+      live: rec.live
+      paused: rec.paused
+      deploymentExpiration: rec.deploymentExpiration
+      resourceConfig: rec.resourceConfig
+      defaultResourceConfig: rec.defaultResourceConfig
+      ssoProtection: rec.ssoProtection
+      passwordProtection: rec.passwordProtection
+      protectionBypass: rec.protectionBypass
+      alias: "[]"
+
+  GetProjects:
+    let:
+      limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+    list:
+      resource: project
+      member: projects
+      # `search` is a substring of the name. `from` is the cursor a previous page
+      # answered as pagination.next: the document words it "updated after", but
+      # it is what a client pages with, so it continues, taking the projects
+      # last touched before it.
+      filter: >
+        (!('search' in input && input.search != null && string(input.search) != '') || item.name.contains(string(input.search)))
+          && (!('from' in input && input.from != null && string(input.from) != '') || item.updatedAt < int(string(input.from)))
+    output:
+      # Newest first. The stored record is the member set the document declares
+      # plus the sequence it is ordered by, which a client never sees.
+      projects: "slice(sortBy(items, 'seq', true), 0, limit).map(i, merge(without(i, ['seq']), {'alias': []}))"
+      pagination: >
+        {'count': size(slice(sortBy(items, 'seq', true), 0, limit)),
+         'next': size(items) > limit ? slice(sortBy(items, 'seq', true), 0, limit)[limit - 1].updatedAt : null,
+         'prev': null}
+
+  GetProject:
+    reads: &project_reads
+      # Two reads, in this order, because reads resolve in dependency order and
+      # `by_name` sorts first: the index answers whether `idOrName` is a name,
+      # and the project read prefers what it found over the raw input. The pack
+      # did the same lookup in Go -- key, then name index, then the id the index
+      # pointed at.
+      #
+      # One read of `project` rather than one per spelling, because a
+      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
+      # resolves against whichever read of `project` ran last, so two of them
+      # make a child's collection depend on alphabetical order.
+      by_name: { resource: project_name }
+      rec:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+    require:
+      - { cond: rec_found, error: NotFound, message: "Project not found" }
+    output: *project
+
+  UpdateProject:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      taken:
+        resource: project_name
+        key: "('name' in input && input.name != null) ? string(input.name) : ''"
+    require:
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
+      - { cond: "!('name' in input) || input.name == null || string(input.name) != ''", error: BadRequest, message: "Project name is required" }
+      - { cond: "!taken_found || string(input.name) == string(proj.name)", error: Conflict, message: "A project with the same name already exists." }
+    effects:
+      # A rename moves the index with it, so the old name is free and the new
+      # one is taken.
+      - delete:
+          resource: project_name
+          key: "string(proj.name)"
+          when: "'name' in input && input.name != null && string(input.name) != string(proj.name)"
+      - put:
+          resource: project_name
+          key: "string(input.name)"
+          when: "'name' in input && input.name != null && string(input.name) != string(proj.name)"
+          record:
+            project: "string(proj.id)"
+      - patch:
+          resource: project
+          key: "string(proj.id)"
+          record:
+            id: id
+            updatedAt: "now_ms"
+            name: "('name' in input && input.name != null) ? string(input.name) : string(proj.name)"
+            framework: "('framework' in input) ? input.framework : proj.framework"
+            buildCommand: "('buildCommand' in input) ? input.buildCommand : proj.buildCommand"
+            devCommand: "('devCommand' in input) ? input.devCommand : proj.devCommand"
+            installCommand: "('installCommand' in input) ? input.installCommand : proj.installCommand"
+            outputDirectory: "('outputDirectory' in input) ? input.outputDirectory : proj.outputDirectory"
+            rootDirectory: "('rootDirectory' in input) ? input.rootDirectory : proj.rootDirectory"
+            nodeVersion: "('nodeVersion' in input && input.nodeVersion != null) ? input.nodeVersion : proj.nodeVersion"
+            directoryListing: "('directoryListing' in input && input.directoryListing != null) ? input.directoryListing : proj.directoryListing"
+            autoExposeSystemEnvs: "('autoExposeSystemEnvs' in input && input.autoExposeSystemEnvs != null) ? input.autoExposeSystemEnvs : proj.autoExposeSystemEnvs"
+            autoAssignCustomDomains: "('autoAssignCustomDomains' in input && input.autoAssignCustomDomains != null) ? input.autoAssignCustomDomains : proj.autoAssignCustomDomains"
+            gitForkProtection: "('gitForkProtection' in input && input.gitForkProtection != null) ? input.gitForkProtection : proj.gitForkProtection"
+            gitLFS: "('gitLFS' in input && input.gitLFS != null) ? input.gitLFS : proj.gitLFS"
+            sourceFilesOutsideRootDirectory: "('sourceFilesOutsideRootDirectory' in input && input.sourceFilesOutsideRootDirectory != null) ? input.sourceFilesOutsideRootDirectory : proj.sourceFilesOutsideRootDirectory"
+            ssoProtection: "('ssoProtection' in input) ? input.ssoProtection : proj.ssoProtection"
+            passwordProtection: "('passwordProtection' in input) ? input.passwordProtection : proj.passwordProtection"
+    output: *project
+
+  DeleteProject:
+    reads: *project_reads
+    require:
+      - { cond: rec_found, error: NotFound, message: "Project not found" }
+    effects:
+      # A project takes with it what hangs off it: its deployments and
+      # everything those hold, its variables, domains and custom environments.
+      - delete: { resource: deployment_url, where: "item.projectId == string(rec.id)" }
+      - delete: { resource: deployment_alias_by_alias, where: "item.projectId == string(rec.id)" }
+      - delete: { resource: deployment_alias, where: "item.projectId == string(rec.id)" }
+      - delete: { resource: deployment_file, where: "item.projectId == string(rec.id)" }
+      - delete: { resource: deployment, where: "item.projectId == string(rec.id)" }
+      - delete: { resource: env, where: "true" }
+      - delete: { resource: domain, where: "true" }
+      - delete: { resource: custom_environment, where: "true" }
+      - delete: { resource: custom_environment_slug, where: "true" }
+      - delete:
+          resource: project
+          key: "string(rec.id)"
+      # Keyed off the stored record, not the request: a delete may address the
+      # project by id and never carry its name.
+      - delete:
+          resource: project_name
+          key: "string(rec.name)"
+          missing: ignore

@@ -44,12 +44,44 @@
       },
       "output": {
         "accountId": "000000000000",
+        "alias": [],
+        "autoAssignCustomDomains": true,
+        "autoExposeSystemEnvs": true,
+        "buildCommand": null,
         "createdAt": 0,
+        "defaultResourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "deploymentExpiration": {},
+        "devCommand": null,
+        "directoryListing": false,
         "framework": "nextjs",
+        "gitForkProtection": true,
+        "gitLFS": false,
         "id": "prj_7c5891299f64",
+        "installCommand": null,
+        "live": false,
         "name": "web",
+        "nodeVersion": "22.x",
+        "outputDirectory": null,
+        "passwordProtection": null,
+        "paused": false,
+        "protectionBypass": {},
+        "resourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "rootDirectory": null,
+        "sourceFilesOutsideRootDirectory": true,
+        "ssoProtection": {
+          "deploymentType": "prod_deployment_urls_and_all_previews"
+        },
         "updatedAt": 0
-      }
+      },
+      "recut": "The vendored document's project (specs/vercel/api.json, POST /v11/projects, 200) requires alias, defaultResourceConfig, deploymentExpiration, directoryListing, nodeVersion and resourceConfig, which the pack never sent, and a client generated from it reads the settings a new project has (autoExposeSystemEnvs, gitForkProtection, ssoProtection and the rest). The members the pack did send keep their recorded values."
     },
     {
       "operation": "CreateProject",
@@ -120,12 +152,44 @@
       },
       "output": {
         "accountId": "000000000000",
+        "alias": [],
+        "autoAssignCustomDomains": true,
+        "autoExposeSystemEnvs": true,
+        "buildCommand": null,
         "createdAt": 0,
+        "defaultResourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "deploymentExpiration": {},
+        "devCommand": null,
+        "directoryListing": false,
         "framework": "nextjs",
+        "gitForkProtection": true,
+        "gitLFS": false,
         "id": "prj_7c5891299f64",
+        "installCommand": null,
+        "live": false,
         "name": "web",
+        "nodeVersion": "22.x",
+        "outputDirectory": null,
+        "passwordProtection": null,
+        "paused": false,
+        "protectionBypass": {},
+        "resourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "rootDirectory": null,
+        "sourceFilesOutsideRootDirectory": true,
+        "ssoProtection": {
+          "deploymentType": "prod_deployment_urls_and_all_previews"
+        },
         "updatedAt": 0
-      }
+      },
+      "recut": "As step 1: GET /v9/projects/{idOrName} answers the same project object."
     },
     {
       "operation": "GetProject",
@@ -141,12 +205,44 @@
       },
       "output": {
         "accountId": "000000000000",
+        "alias": [],
+        "autoAssignCustomDomains": true,
+        "autoExposeSystemEnvs": true,
+        "buildCommand": null,
         "createdAt": 0,
+        "defaultResourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "deploymentExpiration": {},
+        "devCommand": null,
+        "directoryListing": false,
         "framework": "nextjs",
+        "gitForkProtection": true,
+        "gitLFS": false,
         "id": "prj_7c5891299f64",
+        "installCommand": null,
+        "live": false,
         "name": "web",
+        "nodeVersion": "22.x",
+        "outputDirectory": null,
+        "passwordProtection": null,
+        "paused": false,
+        "protectionBypass": {},
+        "resourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "rootDirectory": null,
+        "sourceFilesOutsideRootDirectory": true,
+        "ssoProtection": {
+          "deploymentType": "prod_deployment_urls_and_all_previews"
+        },
         "updatedAt": 0
-      }
+      },
+      "recut": "As step 1."
     },
     {
       "operation": "GetProject",
@@ -196,12 +292,44 @@
       },
       "output": {
         "accountId": "000000000000",
+        "alias": [],
+        "autoAssignCustomDomains": true,
+        "autoExposeSystemEnvs": true,
+        "buildCommand": null,
         "createdAt": 0,
+        "defaultResourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "deploymentExpiration": {},
+        "devCommand": null,
+        "directoryListing": false,
         "framework": null,
+        "gitForkProtection": true,
+        "gitLFS": false,
         "id": "prj_5f59f223d797",
+        "installCommand": null,
+        "live": false,
         "name": "api",
+        "nodeVersion": "22.x",
+        "outputDirectory": null,
+        "passwordProtection": null,
+        "paused": false,
+        "protectionBypass": {},
+        "resourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "rootDirectory": null,
+        "sourceFilesOutsideRootDirectory": true,
+        "ssoProtection": {
+          "deploymentType": "prod_deployment_urls_and_all_previews"
+        },
         "updatedAt": 0
-      }
+      },
+      "recut": "As step 1."
     },
     {
       "operation": "GetProjects",
@@ -215,28 +343,95 @@
       },
       "output": {
         "pagination": {
-          "count": 2
+          "count": 2,
+          "next": null,
+          "prev": null
         },
         "projects": [
           {
             "accountId": "000000000000",
+            "alias": [],
+            "autoAssignCustomDomains": true,
+            "autoExposeSystemEnvs": true,
+            "buildCommand": null,
             "createdAt": 0,
+            "defaultResourceConfig": {
+              "functionDefaultRegions": [
+                "iad1"
+              ]
+            },
+            "deploymentExpiration": {},
+            "devCommand": null,
+            "directoryListing": false,
             "framework": null,
+            "gitForkProtection": true,
+            "gitLFS": false,
             "id": "prj_5f59f223d797",
+            "installCommand": null,
+            "live": false,
             "name": "api",
+            "nodeVersion": "22.x",
+            "outputDirectory": null,
+            "passwordProtection": null,
+            "paused": false,
+            "protectionBypass": {},
+            "resourceConfig": {
+              "functionDefaultRegions": [
+                "iad1"
+              ]
+            },
+            "rootDirectory": null,
+            "serverlessFunctionRegion": null,
+            "sourceFilesOutsideRootDirectory": true,
+            "ssoProtection": {
+              "deploymentType": "prod_deployment_urls_and_all_previews"
+            },
             "updatedAt": 0
           },
           {
             "accountId": "000000000000",
+            "alias": [],
+            "autoAssignCustomDomains": true,
+            "autoExposeSystemEnvs": true,
+            "buildCommand": null,
             "createdAt": 0,
+            "defaultResourceConfig": {
+              "functionDefaultRegions": [
+                "iad1"
+              ]
+            },
+            "deploymentExpiration": {},
+            "devCommand": null,
+            "directoryListing": false,
             "framework": "nextjs",
+            "gitForkProtection": true,
+            "gitLFS": false,
             "id": "prj_7c5891299f64",
+            "installCommand": null,
+            "live": false,
             "name": "web",
+            "nodeVersion": "22.x",
+            "outputDirectory": null,
+            "passwordProtection": null,
+            "paused": false,
+            "protectionBypass": {},
+            "resourceConfig": {
+              "functionDefaultRegions": [
+                "iad1"
+              ]
+            },
+            "rootDirectory": null,
+            "serverlessFunctionRegion": null,
+            "sourceFilesOutsideRootDirectory": true,
+            "ssoProtection": {
+              "deploymentType": "prod_deployment_urls_and_all_previews"
+            },
             "updatedAt": 0
           }
         ]
       },
-      "recorded_as": "ListProjects"
+      "recorded_as": "ListProjects",
+      "recut": "As step 1, for each project the listing carries."
     },
     {
       "operation": "CreateProjectEnv",
@@ -1075,12 +1270,44 @@
       },
       "output": {
         "accountId": "000000000000",
+        "alias": [],
+        "autoAssignCustomDomains": true,
+        "autoExposeSystemEnvs": true,
+        "buildCommand": null,
         "createdAt": 0,
+        "defaultResourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "deploymentExpiration": {},
+        "devCommand": null,
+        "directoryListing": false,
         "framework": null,
+        "gitForkProtection": true,
+        "gitLFS": false,
         "id": "prj_77df676fe2a7",
+        "installCommand": null,
+        "live": false,
         "name": "web",
+        "nodeVersion": "22.x",
+        "outputDirectory": null,
+        "passwordProtection": null,
+        "paused": false,
+        "protectionBypass": {},
+        "resourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "rootDirectory": null,
+        "sourceFilesOutsideRootDirectory": true,
+        "ssoProtection": {
+          "deploymentType": "prod_deployment_urls_and_all_previews"
+        },
         "updatedAt": 0
-      }
+      },
+      "recut": "As step 1."
     },
     {
       "operation": "GetProjects",
@@ -1094,36 +1321,135 @@
       },
       "output": {
         "pagination": {
-          "count": 3
+          "count": 3,
+          "next": null,
+          "prev": null
         },
         "projects": [
           {
             "accountId": "000000000000",
+            "alias": [],
+            "autoAssignCustomDomains": true,
+            "autoExposeSystemEnvs": true,
+            "buildCommand": null,
             "createdAt": 0,
+            "defaultResourceConfig": {
+              "functionDefaultRegions": [
+                "iad1"
+              ]
+            },
+            "deploymentExpiration": {},
+            "devCommand": null,
+            "directoryListing": false,
             "framework": null,
-            "id": "prj_3ed10eca83a2",
-            "name": "ghost",
-            "updatedAt": 0
-          },
-          {
-            "accountId": "000000000000",
-            "createdAt": 0,
-            "framework": null,
-            "id": "prj_5f59f223d797",
-            "name": "api",
-            "updatedAt": 0
-          },
-          {
-            "accountId": "000000000000",
-            "createdAt": 0,
-            "framework": null,
+            "gitForkProtection": true,
+            "gitLFS": false,
             "id": "prj_77df676fe2a7",
+            "installCommand": null,
+            "live": false,
             "name": "web",
+            "nodeVersion": "22.x",
+            "outputDirectory": null,
+            "passwordProtection": null,
+            "paused": false,
+            "protectionBypass": {},
+            "resourceConfig": {
+              "functionDefaultRegions": [
+                "iad1"
+              ]
+            },
+            "rootDirectory": null,
+            "serverlessFunctionRegion": null,
+            "sourceFilesOutsideRootDirectory": true,
+            "ssoProtection": {
+              "deploymentType": "prod_deployment_urls_and_all_previews"
+            },
+            "updatedAt": 0
+          },
+          {
+            "accountId": "000000000000",
+            "alias": [],
+            "autoAssignCustomDomains": true,
+            "autoExposeSystemEnvs": true,
+            "buildCommand": null,
+            "createdAt": 0,
+            "defaultResourceConfig": {
+              "functionDefaultRegions": [
+                "iad1"
+              ]
+            },
+            "deploymentExpiration": {},
+            "devCommand": null,
+            "directoryListing": false,
+            "framework": null,
+            "gitForkProtection": true,
+            "gitLFS": false,
+            "id": "prj_3ed10eca83a2",
+            "installCommand": null,
+            "live": false,
+            "name": "ghost",
+            "nodeVersion": "22.x",
+            "outputDirectory": null,
+            "passwordProtection": null,
+            "paused": false,
+            "protectionBypass": {},
+            "resourceConfig": {
+              "functionDefaultRegions": [
+                "iad1"
+              ]
+            },
+            "rootDirectory": null,
+            "serverlessFunctionRegion": null,
+            "sourceFilesOutsideRootDirectory": true,
+            "ssoProtection": {
+              "deploymentType": "prod_deployment_urls_and_all_previews"
+            },
+            "updatedAt": 0
+          },
+          {
+            "accountId": "000000000000",
+            "alias": [],
+            "autoAssignCustomDomains": true,
+            "autoExposeSystemEnvs": true,
+            "buildCommand": null,
+            "createdAt": 0,
+            "defaultResourceConfig": {
+              "functionDefaultRegions": [
+                "iad1"
+              ]
+            },
+            "deploymentExpiration": {},
+            "devCommand": null,
+            "directoryListing": false,
+            "framework": null,
+            "gitForkProtection": true,
+            "gitLFS": false,
+            "id": "prj_5f59f223d797",
+            "installCommand": null,
+            "live": false,
+            "name": "api",
+            "nodeVersion": "22.x",
+            "outputDirectory": null,
+            "passwordProtection": null,
+            "paused": false,
+            "protectionBypass": {},
+            "resourceConfig": {
+              "functionDefaultRegions": [
+                "iad1"
+              ]
+            },
+            "rootDirectory": null,
+            "serverlessFunctionRegion": null,
+            "sourceFilesOutsideRootDirectory": true,
+            "ssoProtection": {
+              "deploymentType": "prod_deployment_urls_and_all_previews"
+            },
             "updatedAt": 0
           }
         ]
       },
-      "recorded_as": "ListProjects"
+      "recorded_as": "ListProjects",
+      "recut": "As step 1, and the listing is newest first -- the order a client pages in, and the order the cursor continues from -- where the pack listed by store key, which is a random identifier."
     },
     {
       "operation": "UpdateProject",
@@ -1140,12 +1466,44 @@
       },
       "output": {
         "accountId": "000000000000",
+        "alias": [],
+        "autoAssignCustomDomains": true,
+        "autoExposeSystemEnvs": true,
+        "buildCommand": null,
         "createdAt": 0,
+        "defaultResourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "deploymentExpiration": {},
+        "devCommand": null,
+        "directoryListing": false,
         "framework": "astro",
+        "gitForkProtection": true,
+        "gitLFS": false,
         "id": "prj_77df676fe2a7",
+        "installCommand": null,
+        "live": false,
         "name": "web",
+        "nodeVersion": "22.x",
+        "outputDirectory": null,
+        "passwordProtection": null,
+        "paused": false,
+        "protectionBypass": {},
+        "resourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "rootDirectory": null,
+        "sourceFilesOutsideRootDirectory": true,
+        "ssoProtection": {
+          "deploymentType": "prod_deployment_urls_and_all_previews"
+        },
         "updatedAt": 0
-      }
+      },
+      "recut": "As step 1: PATCH /v9/projects/{idOrName} answers the same project object."
     },
     {
       "operation": "UpdateProject",
@@ -1162,12 +1520,44 @@
       },
       "output": {
         "accountId": "000000000000",
+        "alias": [],
+        "autoAssignCustomDomains": true,
+        "autoExposeSystemEnvs": true,
+        "buildCommand": null,
         "createdAt": 0,
+        "defaultResourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "deploymentExpiration": {},
+        "devCommand": null,
+        "directoryListing": false,
         "framework": "astro",
+        "gitForkProtection": true,
+        "gitLFS": false,
         "id": "prj_77df676fe2a7",
+        "installCommand": null,
+        "live": false,
         "name": "web2",
+        "nodeVersion": "22.x",
+        "outputDirectory": null,
+        "passwordProtection": null,
+        "paused": false,
+        "protectionBypass": {},
+        "resourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "rootDirectory": null,
+        "sourceFilesOutsideRootDirectory": true,
+        "ssoProtection": {
+          "deploymentType": "prod_deployment_urls_and_all_previews"
+        },
         "updatedAt": 0
-      }
+      },
+      "recut": "As step 41."
     },
     {
       "operation": "GetProject",
@@ -1183,12 +1573,44 @@
       },
       "output": {
         "accountId": "000000000000",
+        "alias": [],
+        "autoAssignCustomDomains": true,
+        "autoExposeSystemEnvs": true,
+        "buildCommand": null,
         "createdAt": 0,
+        "defaultResourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "deploymentExpiration": {},
+        "devCommand": null,
+        "directoryListing": false,
         "framework": "astro",
+        "gitForkProtection": true,
+        "gitLFS": false,
         "id": "prj_77df676fe2a7",
+        "installCommand": null,
+        "live": false,
         "name": "web2",
+        "nodeVersion": "22.x",
+        "outputDirectory": null,
+        "passwordProtection": null,
+        "paused": false,
+        "protectionBypass": {},
+        "resourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "rootDirectory": null,
+        "sourceFilesOutsideRootDirectory": true,
+        "ssoProtection": {
+          "deploymentType": "prod_deployment_urls_and_all_previews"
+        },
         "updatedAt": 0
-      }
+      },
+      "recut": "As step 1."
     },
     {
       "operation": "GetProject",
@@ -1971,12 +2393,44 @@
       },
       "output": {
         "accountId": "000000000000",
+        "alias": [],
+        "autoAssignCustomDomains": true,
+        "autoExposeSystemEnvs": true,
+        "buildCommand": null,
         "createdAt": 0,
+        "defaultResourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "deploymentExpiration": {},
+        "devCommand": null,
+        "directoryListing": false,
         "framework": null,
+        "gitForkProtection": true,
+        "gitLFS": false,
         "id": "prj_39bb7163b1cb",
+        "installCommand": null,
+        "live": false,
         "name": "orb",
+        "nodeVersion": "22.x",
+        "outputDirectory": null,
+        "passwordProtection": null,
+        "paused": false,
+        "protectionBypass": {},
+        "resourceConfig": {
+          "functionDefaultRegions": [
+            "iad1"
+          ]
+        },
+        "rootDirectory": null,
+        "sourceFilesOutsideRootDirectory": true,
+        "ssoProtection": {
+          "deploymentType": "prod_deployment_urls_and_all_previews"
+        },
         "updatedAt": 0
-      }
+      },
+      "recut": "As step 1."
     },
     {
       "operation": "CreateDeployment",
@@ -2711,12 +3165,15 @@
         "id": "team_ba094efe",
         "membership": {
           "confirmed": true,
+          "created": 0,
+          "createdAt": 0,
           "role": "OWNER"
         },
         "name": "acme",
         "slug": "acme",
         "updatedAt": 0
-      }
+      },
+      "recut": "The vendored document's team (POST /v1/teams answers {id, slug}; GET /v2/teams/{teamId} requires stagingPrefix, billing, membership.createdAt and the rest) is what a client generated from it reads; the members the pack sent keep their recorded values, and the membership gains the instants the document requires."
     },
     {
       "operation": "CreateTeam",
@@ -2757,19 +3214,28 @@
         },
         "teams": [
           {
+            "avatar": null,
+            "billing": {
+              "plan": "hobby"
+            },
             "createdAt": 0,
             "creatorId": "usr_000000000000",
+            "description": null,
             "id": "team_ba094efe",
             "membership": {
               "confirmed": true,
+              "created": 0,
+              "createdAt": 0,
               "role": "OWNER"
             },
             "name": "acme",
             "slug": "acme",
+            "stagingPrefix": "acme",
             "updatedAt": 0
           }
         ]
-      }
+      },
+      "recut": "As step 103, for each team in the listing."
     },
     {
       "operation": "ListTeamMembers",
@@ -2834,29 +3300,26 @@
         "Project": ""
       },
       "output": {
+        "avatar": null,
         "billing": {
-          "addons": null,
-          "cancelation": null,
-          "period": null,
-          "plan": "hobby",
-          "trial": null
+          "plan": "hobby"
         },
         "createdAt": 0,
         "creatorId": "usr_000000000000",
+        "description": null,
         "id": "team_ba094efe",
         "membership": {
           "confirmed": true,
+          "created": 0,
+          "createdAt": 0,
           "role": "OWNER"
         },
         "name": "Acme Inc",
-        "resourceConfig": {
-          "concurrentBuilds": 1,
-          "nodeType": "standard"
-        },
         "slug": "acme",
-        "stagingPrefix": "",
+        "stagingPrefix": "acme",
         "updatedAt": 0
-      }
+      },
+      "recut": "As step 103. The pack's resourceConfig is not a member of the document's team and is dropped; stagingPrefix, which the document requires and types a string, is the team's slug."
     },
     {
       "operation": "UpdateAuthUser",
@@ -2873,12 +3336,21 @@
       },
       "output": {
         "user": {
+          "avatar": null,
+          "billing": null,
+          "createdAt": 1577836800000,
+          "defaultTeamId": null,
           "email": "test@mirror.cloud",
+          "hasTrialAvailable": false,
           "id": "usr_000000000000",
           "name": "Pat",
+          "resourceConfig": {},
+          "softBlock": null,
+          "stagingPrefix": "mirror",
           "username": "test"
         }
-      }
+      },
+      "recut": "The vendored document's user (GET /v2/user, 200) requires createdAt, softBlock, billing, resourceConfig, stagingPrefix, hasTrialAvailable, avatar and defaultTeamId, which the pack never sent; the identity members keep their recorded values."
     },
     {
       "operation": "GetAuthUser",
@@ -2892,12 +3364,21 @@
       },
       "output": {
         "user": {
+          "avatar": null,
+          "billing": null,
+          "createdAt": 1577836800000,
+          "defaultTeamId": null,
           "email": "test@mirror.cloud",
+          "hasTrialAvailable": false,
           "id": "usr_000000000000",
           "name": "Pat",
+          "resourceConfig": {},
+          "softBlock": null,
+          "stagingPrefix": "mirror",
           "username": "test"
         }
-      }
+      },
+      "recut": "As step 109."
     },
     {
       "operation": "GetRegistration",

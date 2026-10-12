@@ -152,7 +152,7 @@ func (d *oasDoc) check(schema any, inst any, path string, depth int, out *[]stri
 		if !ok || len(variants) == 0 {
 			continue
 		}
-		var best []string
+		var failures [][]string
 		matched := false
 		for _, sub := range variants {
 			var errs []string
@@ -161,12 +161,16 @@ func (d *oasDoc) check(schema any, inst any, path string, depth int, out *[]stri
 				matched = true
 				break
 			}
-			if best == nil || len(errs) < len(best) {
-				best = errs
-			}
+			failures = append(failures, errs)
 		}
 		if !matched {
-			*out = append(*out, fmt.Sprintf("%s: matches none of the %s variants; closest failure: %s", path, key, strings.Join(best, "; ")))
+			// Every variant's failures, because "none matched" alone does not
+			// say which variant the answer was meant to be.
+			var parts []string
+			for i, errs := range failures {
+				parts = append(parts, fmt.Sprintf("variant %d: %s", i, strings.Join(clipList(errs, 4), "; ")))
+			}
+			*out = append(*out, fmt.Sprintf("%s: matches none of the %s variants (%s)", path, key, strings.Join(parts, " | ")))
 		}
 	}
 	if enum, ok := s["enum"].([]any); ok {

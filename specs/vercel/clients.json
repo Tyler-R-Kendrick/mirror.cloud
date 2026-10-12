@@ -18,6 +18,11 @@
       "operation": "GetTeams",
       "uris": ["/v1/teams"],
       "source": "vercel CLI 'Loading teams' (GET /v1/teams)"
+    },
+    {
+      "operation": "CreateTeam",
+      "uris": ["/v1/teams"],
+      "source": "vercel CLI 'teams add' (POST /v1/teams); the vendored document declares this address with an {id, slug} answer, which this operation's answer contains"
     }
   ]
 }

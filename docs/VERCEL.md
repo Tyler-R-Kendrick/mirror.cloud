@@ -486,7 +486,7 @@ compared with api.vercel.com.
   the emulator records (created, building, ready, canceled) as a finite list;
   `direction`, `limit`, `since` and `until` are read, `follow=1` and the other query
   members are accepted and read by nothing, and there is no build output to follow.
-- **About 310 of the document's 417 operations are not served** (103 are): the marketplace
+- **314 of the document's 417 operations are not served** (103 are): the marketplace
   and integrations, log drains and webhooks, sandboxes, storage, firewall, feature
   flags, certificates, DNS records, domain purchase and transfer (the registrar),
   access groups, shared variables, and the rest. They answer 501 when sent with

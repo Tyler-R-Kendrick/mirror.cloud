@@ -39,11 +39,11 @@ func TestVercelCensusDenominators(t *testing.T) {
 
 	model := vercelLoadGzippedJSON(t, filepath.Join(root, "internal", "generated", "vercel", "api", "model.json.gz"))
 	narrowed := len(model["Operations"].([]any))
-	// 117 operations of Vercel's API (six of them authored for the CLI: GetDeploymentBuilds, the three spellings of the env pull and
-	// AddProjectAlias and RemoveProjectAlias; GetDomainProjectDomains is the document's)
-	// and mirror's own test-control surface
-	// (specs/vercel/control.json): three, answering only when started with
-	// MIRROR_VERCEL_FAULTS.
+	// 123: 103 operations of the vendored document, 17 authored in the supplement
+	// (specs/vercel/api-extra.json holds 20; CreateTeam, GetEdgeConfigs and
+	// GetEdgeConfigTokens replace the document's own, which TestVercelServedSurfaceIsCountedFromTheDocuments
+	// counts) and mirror's own test-control surface (specs/vercel/control.json):
+	// three, answering only when started with MIRROR_VERCEL_FAULTS.
 	if narrowed != 123 {
 		t.Fatalf("narrowed vercel model = %d operations, want 123; the mirror.set narrowing moved", narrowed)
 	}

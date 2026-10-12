@@ -1,0 +1,441 @@
+schema: bir/1
+service: vercel.api
+
+# Domains, at the two levels Vercel keeps them.
+#
+# A project's domain is a hostname the project answers for: added, listed,
+# edited (a redirect or a git branch), verified, removed. An account's domain is
+# one the account holds, whichever project uses it: added, listed, inspected,
+# configured, deleted. A client touches both -- `vercel domains add` and
+# `vercel domains add <domain> <project>` are different requests -- and they
+# share the one fact that matters between them, which is whether the hostname's
+# ownership has been proven.
+#
+# That proof is a TXT record at _vercel.<apex> carrying
+# `vc-domain-verify=<hostname>,<token>`. The token is a digest of the account and
+# the hostname, so the record a project's domain asks for and the record the
+# account-level route answers are the same string, and it is the same on every
+# run of the same seed. The verify route does not resolve DNS (an emulator has no
+# network to ask); it takes the challenge as met. A hostname under vercel.app is
+# verified from the start, as Vercel's own are, and so is one whose apex the
+# account has already verified.
+#
+# What the vendor's own emulator answers (the oracle corpus under
+# test/behavior/vercel/oracle) is followed where the document is silent: the
+# verification challenge's wording, an empty challenge list once verified, and
+# the apex as the last two labels.
+
+resources:
+  # A project's hostnames. Parent-scoped: each project's are their own
+  # collection, as the environment variables are.
+  domain:
+    collection: "vdom:{project.id}"
+    parent: project
+    id:
+      # `name` on the add and `domain` on the rest: the two labels name the same
+      # record, and a hostname is case-insensitive, so the key is its lower case.
+      derive: >
+        lower(('domain' in input && input.domain != null) ? string(input.domain)
+          : (('name' in input && input.name != null) ? string(input.name) : ''))
+    record:
+      name: id
+
+  # Which project holds a hostname, account-wide: a hostname can be on one
+  # project at a time, and the per-project collections cannot say so. The
+  # `verified` flag rides along so the account-level routes can answer without
+  # knowing the project.
+  domain_owner:
+    collection: vdomowner
+    id:
+      derive: >
+        lower(('domain' in input && input.domain != null) ? string(input.domain)
+          : (('name' in input && input.name != null) ? string(input.name) : ''))
+
+  # The account's own domains (the /v5/domains family).
+  account_domain:
+    collection: vacctdom
+    id:
+      derive: >
+        lower(('domain' in input && input.domain != null) ? string(input.domain)
+          : (('name' in input && input.name != null) ? string(input.name) : ''))
+
+operations:
+  GetProjectDomains:
+    reads: &project_reads
+      # Two reads, in this order, because reads resolve in dependency order and
+      # `by_name` sorts first: the index answers whether `idOrName` is a name, and
+      # the project read prefers what it found over the raw input. One read of
+      # `project` rather than one per spelling, because a parent-scoped child
+      # names its parent by resource name.
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+    let:
+      limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+      asc: "'order' in input && input.order != null && upper(string(input.order)) == 'ASC'"
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+    list:
+      resource: domain
+      member: domains
+      filter: >
+        (!('verified' in input && input.verified != null && string(input.verified) != '') || item.verified == (string(input.verified) == 'true'))
+          && (!('gitBranch' in input && input.gitBranch != null && string(input.gitBranch) != '') || (item.gitBranch != null && item.gitBranch == string(input.gitBranch)))
+          && (!('since' in input && input.since != null && string(input.since) != '') || item.createdAt > int(string(input.since)))
+          && (!('until' in input && input.until != null && string(input.until) != '') || item.createdAt < int(string(input.until)))
+    output:
+      # Newest first, which the document calls DESC; the stored record carries the
+      # sequence it is ordered by, which a client never sees.
+      domains: "slice(sortBy(items, 'seq', !asc), 0, limit).map(i, without(i, ['seq']))"
+      pagination: >
+        {'count': size(slice(items, 0, limit)),
+         'next': size(items) > limit ? slice(sortBy(items, 'seq', !asc), 0, limit)[limit - 1].createdAt : null,
+         'prev': null}
+
+  AddProjectDomain:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      owner: { resource: domain_owner }
+      # The account may already hold this hostname's apex, verified.
+      held:
+        resource: account_domain
+        key: "('name' in input && input.name != null) ? apexOf(lower(string(input.name))) : ''"
+    let:
+      host: "('name' in input && input.name != null) ? lower(string(input.name)) : ''"
+      apex: "apexOf(host)"
+      verified: "host.endsWith('.vercel.app') || (held_found && held.verified)"
+      redirect: "('redirect' in input) ? input.redirect : null"
+      branch: "('gitBranch' in input) ? input.gitBranch : null"
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: "host != ''", error: BadRequest, message: "Domain name is required" }
+      - cond: "host.matches('^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')"
+        error: InvalidDomain
+        message: "The domain is not valid"
+      - { cond: "redirect == null || branch == null", error: BadRequest, message: "You can't set both a git branch and a redirect for the domain" }
+      - { cond: "redirect == null || string(redirect) != host", error: BadRequest, message: "A domain cannot redirect to itself" }
+      - { cond: "redirect == null || string(redirect).matches('^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')", error: BadRequest, message: "The domain redirect is not valid" }
+      - cond: "!owner_found"
+        error: DomainAlreadyInUse
+        message: "Cannot add a domain that is already assigned to a project"
+    effects:
+      - put:
+          resource: domain_owner
+          record:
+            projectId: "string(proj.id)"
+            verified: "verified"
+      # Last, because the answer is the record the last write left.
+      - put:
+          resource: domain
+          record:
+            name: "host"
+            apexName: "apex"
+            projectId: "string(proj.id)"
+            redirect: "redirect"
+            redirectStatusCode: "('redirectStatusCode' in input) ? input.redirectStatusCode : null"
+            gitBranch: "branch"
+            customEnvironmentId: "('customEnvironmentId' in input) ? input.customEnvironmentId : null"
+            verified: "verified"
+            verification: >
+              verified ? [] : [{'type': 'TXT', 'domain': '_vercel.' + apex,
+                'value': 'vc-domain-verify=' + host + ',' + substr(sha256hex(identity.account + ':' + host), 0, 16),
+                'reason': 'Add the TXT record above to verify domain ownership'}]
+            createdAt: "now_ms"
+            updatedAt: "now_ms"
+            seq: { counter: "vdom" }
+    output: &project_domain
+      name: rec.name
+      apexName: rec.apexName
+      projectId: rec.projectId
+      redirect: rec.redirect
+      redirectStatusCode: rec.redirectStatusCode
+      gitBranch: rec.gitBranch
+      customEnvironmentId: rec.customEnvironmentId
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+      verified: rec.verified
+      verification: rec.verification
+
+  GetProjectDomain:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      rec: { resource: domain }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: rec_found, error: NotFound, message: "The requested resource was not found." }
+    output: *project_domain
+
+  UpdateProjectDomain:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      dom: { resource: domain }
+    let:
+      redirect: "('redirect' in input) ? input.redirect : dom.redirect"
+      branch: "('gitBranch' in input) ? input.gitBranch : dom.gitBranch"
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: "redirect == null || branch == null", error: BadRequest, message: "You can't set both a git branch and a redirect for the domain" }
+      - { cond: "redirect == null || string(redirect) != string(dom.name)", error: BadRequest, message: "A domain cannot redirect to itself" }
+      - { cond: "redirect == null || string(redirect).matches('^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')", error: BadRequest, message: "The domain redirect is not valid" }
+    effects:
+      # Each member is stored only when the request carried it, so what it did
+      # not mention keeps its value -- and a null in the request clears it.
+      - patch:
+          resource: domain
+          record:
+            updatedAt: "now_ms"
+      - patch:
+          resource: domain
+          when: "'gitBranch' in input"
+          record:
+            gitBranch: "input.gitBranch"
+      - patch:
+          resource: domain
+          when: "'redirect' in input"
+          record:
+            redirect: "input.redirect"
+      - patch:
+          resource: domain
+          when: "'redirectStatusCode' in input"
+          record:
+            redirectStatusCode: "input.redirectStatusCode"
+      - patch:
+          resource: domain
+          when: "'customEnvironmentId' in input"
+          record:
+            customEnvironmentId: "input.customEnvironmentId"
+    output: *project_domain
+
+  RemoveProjectDomain:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      dom: { resource: domain }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - delete: { resource: domain }
+      - delete: { resource: domain_owner, missing: ignore }
+    # The answer is empty: the document declares no members. `removeRedirects`
+    # is accepted and read by nothing, as there are no redirect rows to remove.
+
+  VerifyProjectDomain:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      dom: { resource: domain }
+      # Named from the request: a read's key cannot wait for another read that
+      # is itself waiting on the project.
+      held:
+        resource: account_domain
+        key: "('domain' in input && input.domain != null) ? apexOf(lower(string(input.domain))) : ''"
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      # The challenge is taken as met. The hostname's owner entry carries the
+      # flag the account-level routes read, and the account's own record of the
+      # apex, when it holds one, is proven by the same TXT record.
+      - patch:
+          resource: domain_owner
+          key: "string(dom.name)"
+          record:
+            verified: "true"
+      - patch:
+          resource: account_domain
+          key: "string(dom.apexName)"
+          when: "held_found"
+          record:
+            verified: "true"
+      - patch:
+          resource: domain
+          record:
+            verified: "true"
+            verification: "[]"
+            updatedAt: "now_ms"
+    # The document's verify answer is the domain without its challenge list.
+    output:
+      name: rec.name
+      apexName: rec.apexName
+      projectId: rec.projectId
+      redirect: rec.redirect
+      redirectStatusCode: rec.redirectStatusCode
+      gitBranch: rec.gitBranch
+      customEnvironmentId: rec.customEnvironmentId
+      createdAt: rec.createdAt
+      updatedAt: rec.updatedAt
+      verified: rec.verified
+
+  # --- The account's domains ------------------------------------------------
+
+  GetDomains:
+    let:
+      limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+    list:
+      resource: account_domain
+      member: domains
+      filter: >
+        (!('since' in input && input.since != null && string(input.since) != '') || item.createdAt > int(string(input.since)))
+          && (!('until' in input && input.until != null && string(input.until) != '') || item.createdAt < int(string(input.until)))
+    output:
+      domains: "slice(sortBy(items, 'seq', true), 0, limit).map(i, without(i, ['seq']))"
+      pagination: >
+        {'count': size(slice(items, 0, limit)),
+         'next': size(items) > limit ? slice(sortBy(items, 'seq', true), 0, limit)[limit - 1].createdAt : null,
+         'prev': null}
+
+  GetDomain:
+    reads:
+      rec: { resource: account_domain }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Domain not found" }
+    output:
+      domain: "merge(without(rec, ['seq']), {'suffix': true})"
+
+  CreateOrTransferDomain:
+    reads:
+      # The request is a union of two shapes, so the key is named rather than
+      # left for the model to find.
+      held:
+        resource: account_domain
+        key: "('name' in input && input.name != null) ? lower(string(input.name)) : ''"
+    let:
+      host: "('name' in input && input.name != null) ? lower(string(input.name)) : ''"
+      userId: "'usr_' + (identity.project != '' ? identity.project : identity.account)"
+    require:
+      - { cond: "host != ''", error: BadRequest, message: "Domain name is required" }
+      - cond: "host.matches('^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')"
+        error: InvalidDomain
+        message: "The domain is not valid"
+      - { cond: "!held_found", error: DomainAlreadyExists, message: "The domain already exists on this account" }
+    effects:
+      - generate: { bind: did, kind: hex, bytes: 12 }
+      - put:
+          resource: account_domain
+          key: "host"
+          record:
+            id: "'dom_' + fx.did"
+            name: "host"
+            # Not delegated: the registry still points at someone else's
+            # nameservers, and the domain says which ones it wants.
+            verified: "false"
+            nameservers: "[]"
+            intendedNameservers: "['ns1.vercel-dns.com', 'ns2.vercel-dns.com']"
+            creator:
+              id: "userId"
+              username: "'test'"
+              email: "'test@mirror.cloud'"
+              customerId: "null"
+              isDomainReseller: false
+            echMode: "'auto'"
+            # The personal account is the caller's own; any other is a team.
+            teamId: "identity.project != identity.account ? identity.account : null"
+            userId: "userId"
+            boughtAt: "null"
+            createdAt: "now_ms"
+            expiresAt: "null"
+            renew: false
+            serviceType: "'external'"
+            transferredAt: "null"
+            transferStartedAt: "now_ms"
+            seq: { counter: "vacctdom" }
+    output:
+      domain: "without(rec, ['seq'])"
+
+  PatchDomain:
+    reads:
+      rec: { resource: account_domain }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Domain not found" }
+      - { cond: "!('op' in input) || input.op == null || string(input.op) == 'update'", error: BadRequest, message: "Only op=update is supported" }
+    effects:
+      - patch:
+          resource: account_domain
+          record:
+            echMode: "('echMode' in input && input.echMode != null) ? string(input.echMode) : string(rec.echMode)"
+      - patch:
+          resource: account_domain
+          when: "'renew' in input && input.renew != null"
+          record:
+            renew: "input.renew"
+      - patch:
+          resource: account_domain
+          when: "'zone' in input && input.zone != null"
+          record:
+            zone: "input.zone"
+      - patch:
+          resource: account_domain
+          when: "'customNameservers' in input && input.customNameservers != null"
+          record:
+            customNameservers: "input.customNameservers"
+    output:
+      renew: "('renew' in rec) ? rec.renew : null"
+      customNameservers: "('customNameservers' in rec) ? rec.customNameservers : null"
+      zone: "('zone' in rec) ? rec.zone : null"
+      echMode: rec.echMode
+    omit_null: [renew, customNameservers, zone]
+
+  DeleteDomain:
+    reads:
+      rec: { resource: account_domain }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Domain not found" }
+    effects:
+      - delete: { resource: account_domain }
+    output:
+      uid: "string(rec.id)"
+
+  # What a client is told to put in DNS for a hostname, and whether it has.
+  GetDomainConfig:
+    reads:
+      owner: { resource: domain_owner }
+    let:
+      host: "('domain' in input && input.domain != null) ? lower(string(input.domain)) : ''"
+      done: "owner_found && owner.verified"
+    output:
+      configuredBy: "done ? dyn(apexOf(host) == host ? 'A' : 'CNAME') : null"
+      acceptedChallenges: "['dns-01', 'http-01']"
+      recommendedIPv4: "[{'rank': 1, 'value': ['76.76.21.21']}]"
+      recommendedCNAME: "[{'rank': 1, 'value': 'cname.vercel-dns.com'}]"
+      misconfigured: "!done"
+
+  # The TXT record that proves ownership of a hostname.
+  GetDomainVerificationRecord:
+    reads:
+      held: { resource: account_domain }
+      owner: { resource: domain_owner }
+    let:
+      host: "('domain' in input && input.domain != null) ? lower(string(input.domain)) : ''"
+    require:
+      - { cond: "held_found || owner_found", error: NotFound, message: "Domain not found" }
+    output:
+      txtRecord: "'vc-domain-verify=' + host + ',' + substr(sha256hex(identity.account + ':' + host), 0, 16)"
+      verificationDomain: "'_vercel.' + apexOf(host)"

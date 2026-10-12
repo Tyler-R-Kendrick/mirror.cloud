@@ -17,32 +17,6 @@ provenance: authored
 missing_input_error: BadRequest
 
 resources:
-  domain:
-    collection: "vdom:{project.id}"
-    parent: project
-    id:
-      # `name` on the add, `domain` on the get/update/remove/verify: the two
-      # labels name the same record. input_members is tried first and an add
-      # carries no `domain`, so it still falls through to the derive.
-      input_members: [domain]
-      derive: "('name' in input && input.name != null) ? string(input.name) : ''"
-    record:
-      name: id
-      apexName: id
-      # No projectId here: a parent-scoped resource's record cannot see its
-      # parent, which binds for the collection template and not in this scope.
-      # The two operations that answer a domain project it from their own read
-      # of the project, which is the same value by construction -- a domain
-      # lives in its project's collection.
-      #
-      # The pack verified on add; the vendor's own emulator does not -- a
-      # domain is unverified until the verify route runs. The differential
-      # corpus (test/behavior/vercel/oracle) records the difference and the
-      # oracle wins it.
-      verified: "false"
-      createdAt: "int(now) * 1000"
-      updatedAt: "int(now) * 1000"
-
   custom_environment:
     collection: "vcenv:{project.id}"
     parent: project
@@ -149,6 +123,20 @@ errors:
     code: ENV_CONFLICT
     http: 409
     fault: client
+  # Domains. The document names the statuses and not the codes; these are the
+  # codes this bundle chose, and the quirks say so.
+  InvalidDomain:
+    code: invalid_domain
+    http: 400
+    fault: client
+  DomainAlreadyInUse:
+    code: domain_already_in_use
+    http: 409
+    fault: client
+  DomainAlreadyExists:
+    code: domain_already_exists
+    http: 409
+    fault: client
   # The oracle's invite route answers a second 409 under its own code; the
   # generic Conflict stays for project names.
   MemberAlreadyExists:
@@ -177,193 +165,11 @@ errors:
     fault: client
 
 operations:
-  GetProjectDomains:
-    reads:
-      # Two reads, not three, and in this order because reads resolve in
-      # dependency order and `by_name` sorts first: the index answers whether
-      # `idOrName` is a name, and the project read prefers what it found over
-      # the raw input. The pack did the same lookup in Go -- key, then name
-      # index, then the id the index pointed at.
-      #
-      # One read of `project` rather than one per spelling, because a
-      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
-      # resolves against whichever read of `project` ran last, so two of them
-      # make a child's collection depend on alphabetical order. That is how the
-      # environment and domain operations failed to see a project addressed by
-      # name at all.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    # No `pagination`, for the reason FilterProjectEnvs has none.
-    list: { resource: domain, member: domains }
-    output:
-      # The listed record carries no projectId -- see the resource -- so the
-      # projection puts it back, which an unprojected list could not do.
-      domains: "items.map(i, merge(i, {'projectId': proj.id}))"
-
-  AddProjectDomain:
-    reads:
-      # Two reads, not three, and in this order because reads resolve in
-      # dependency order and `by_name` sorts first: the index answers whether
-      # `idOrName` is a name, and the project read prefers what it found over
-      # the raw input. The pack did the same lookup in Go -- key, then name
-      # index, then the id the index pointed at.
-      #
-      # One read of `project` rather than one per spelling, because a
-      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
-      # resolves against whichever read of `project` ran last, so two of them
-      # make a child's collection depend on alphabetical order. That is how the
-      # environment and domain operations failed to see a project addressed by
-      # name at all.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: "'name' in input && input.name != null && string(input.name) != ''", error: BadRequest, message: "Domain name is required" }
-    effects:
-      - put: { resource: domain }
-    output:
-      name: rec.name
-      apexName: rec.apexName
-      projectId: proj.id
-      verified: rec.verified
-      createdAt: rec.createdAt
-      updatedAt: rec.updatedAt
-
   # The ones below have no pack behind them: the pack never served them, so
   # there was nothing to transcribe. Each is written from the document alone
   # -- its path, its declared response members, its status -- and keeps to the
   # state the fourteen above establish. Where the document is thin the
   # behavior is minimal and `quirks` says so.
-
-  GetProjectDomain:
-    reads:
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      dom: { resource: domain }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      name: dom.name
-      apexName: dom.apexName
-      projectId: proj.id
-      verified: dom.verified
-      createdAt: dom.createdAt
-      updatedAt: dom.updatedAt
-      # The three an update can set are null until one does: the shape
-      # declares them optional, and an add does not establish them.
-      gitBranch: "('gitBranch' in dom) ? dom.gitBranch : null"
-      redirect: "('redirect' in dom) ? dom.redirect : null"
-      redirectStatusCode: "('redirectStatusCode' in dom) ? dom.redirectStatusCode : null"
-
-  UpdateProjectDomain:
-    reads:
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      dom: { resource: domain }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      # The unconditional patch refreshes updatedAt and guarantees `rec` for
-      # the output; each conditional one stores a member only when the request
-      # carried it, so an absent member stays absent from the record rather
-      # than becoming null -- the same split CodeCommit's repository
-      # description needed.
-      - patch:
-          resource: domain
-          record:
-            updatedAt: "int(now) * 1000"
-      - patch:
-          resource: domain
-          when: "'gitBranch' in input"
-          record:
-            gitBranch: "input.gitBranch"
-      - patch:
-          resource: domain
-          when: "'redirect' in input"
-          record:
-            redirect: "input.redirect"
-      - patch:
-          resource: domain
-          when: "'redirectStatusCode' in input"
-          record:
-            redirectStatusCode: "input.redirectStatusCode"
-    output:
-      name: rec.name
-      apexName: rec.apexName
-      projectId: proj.id
-      verified: rec.verified
-      createdAt: rec.createdAt
-      updatedAt: rec.updatedAt
-      gitBranch: "('gitBranch' in rec) ? rec.gitBranch : null"
-      redirect: "('redirect' in rec) ? rec.redirect : null"
-      redirectStatusCode: "('redirectStatusCode' in rec) ? rec.redirectStatusCode : null"
-
-  RemoveProjectDomain:
-    reads:
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      dom: { resource: domain }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - delete: { resource: domain }
-    # No output: the response shape declares no members. `removeRedirects` is
-    # accepted and read by nothing -- there are no redirects to remove.
-
-  VerifyProjectDomain:
-    reads:
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      dom: { resource: domain }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      # Verification moves the flag: unverified from creation, verified here.
-      - patch:
-          resource: domain
-          record:
-            verified: "true"
-            updatedAt: "int(now) * 1000"
-    output:
-      name: rec.name
-      apexName: rec.apexName
-      projectId: proj.id
-      verified: rec.verified
-      createdAt: rec.createdAt
-      updatedAt: rec.updatedAt
-      gitBranch: "('gitBranch' in rec) ? rec.gitBranch : null"
-      redirect: "('redirect' in rec) ? rec.redirect : null"
-      redirectStatusCode: "('redirectStatusCode' in rec) ? rec.redirectStatusCode : null"
 
   CreateCustomEnvironment:
     reads:
@@ -1013,12 +819,17 @@ quirks:
       an encrypted value is shown decrypted.
   - operation: AddProjectDomain
     note: >
-      The pack answered a domain verified the moment it was added, and the
-      vendored document declares `verified` without saying what it starts as.
-      The vendor's own emulator answers false until the verify route runs --
-      better evidence than the dead pack -- so a domain is added unverified and
-      VerifyProjectDomain moves the flag. The differential corpus caught the
-      old answer (test/behavior/vercel/oracle, domains-get).
+      A domain is added unverified and carries the TXT challenge a client is
+      told to publish (`_vercel.<apex>`, `vc-domain-verify=<host>,<token>`),
+      where the pack answered it verified the moment it was added. The wording
+      and the empty challenge list once verified follow the vendor's own
+      emulator (test/behavior/vercel/oracle, domains-add). A hostname under
+      vercel.app, and one whose apex the account already holds verified, are
+      verified from the start. A hostname is lower-cased; one that is not a
+      hostname is a 400 invalid_domain; one a project already holds (this or
+      another) is a 409 domain_already_in_use. The error codes are this
+      bundle's reading of Vercel's: the document names the statuses and not the
+      codes.
   - operation: CreateDeployment
     note: >
       Creating a deployment for a project that does not exist creates the
@@ -1035,12 +846,11 @@ quirks:
       exercisable before Advance.
   - operation: UpdateProject
     note: >
-      The document's update shape declares some fifty members; the bundle
-      tracks only the ones its create establishes -- name and framework -- so
-      an update carrying buildCommand, rootDirectory or the rest is accepted
-      and dropped. No pack ever served this operation, so there is no
-      transcription to outrank; the document declares the members and says
-      nothing about which an update must honor.
+      Stores the members a project is created with and the settings a client
+      changes after (name, framework, the build, install and dev commands, the
+      root and output directories, nodeVersion, the protection settings and the
+      switches). The document declares some fifty; the rest are accepted and
+      dropped, because nothing here reads them.
   - operation: EditProjectEnv
     note: >
       Honors key, value, type, target, gitBranch, comment and
@@ -1050,17 +860,34 @@ quirks:
       is shown decrypted because the variable is addressed by id.
   - operation: UpdateProjectDomain
     note: >
-      The document declares a 409 for this operation without saying what
-      produces it -- redirect targets and git branches are stored verbatim,
-      so the conflict is never answered. Simplified deliberately: the shape
-      of the disagreement is known (a declared status with no declared
-      trigger), which a probe run can overturn.
+      Sets a redirect (with its status), a git branch or a custom environment;
+      a null clears one. A redirect and a git branch together are a 400, as the
+      document says, and so is a redirect to the domain itself or to something
+      that is not a hostname. Whether the redirect target is a domain of the
+      same project is not checked. The document declares a 409 for a project
+      being transferred, which nothing here produces.
   - operation: VerifyProjectDomain
     note: >
-      Answers the domain, which is already verified: true from creation --
-      the add's quirk -- so verify moves nothing. A real verify is a DNS
-      round trip that can fail; this one cannot, which follows from the
-      creation behavior rather than being a second invention.
+      Takes the TXT challenge as met: an emulator has no network to resolve it,
+      so verify cannot fail. It moves the domain, the account-wide record of the
+      hostname and the account's own record of the apex (when it holds one) to
+      verified, and the challenge list to empty. The document's 400s for a
+      missing or mismatched TXT record are never answered.
+  - operation: CreateOrTransferDomain
+    note: >
+      Adds the domain to the account unverified, with Vercel's nameservers as
+      the intended ones and none as the current ones; `method` other than add is
+      treated as add. A second add of the same name is a 409
+      domain_already_exists, a code this bundle chose: the document names the
+      status and not the code.
+  - operation: PatchDomain
+    note: >
+      Only `op: update` is served (renew, zone, custom nameservers, echMode).
+      Moving a domain out answers 400.
+  - operation: GetDomainConfig
+    note: >
+      Recommends Vercel's real A record and CNAME target. A hostname is
+      configured once a project holds it verified; there is no DNS to look at.
   - operation: CreateCustomEnvironment
     note: >
       The body's `slug` and the team-slug query share one member name in the

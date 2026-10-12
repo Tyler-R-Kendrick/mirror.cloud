@@ -791,11 +791,24 @@
       "output": {
         "apexName": "example.com",
         "createdAt": 0,
+        "customEnvironmentId": null,
+        "gitBranch": null,
         "name": "example.com",
         "projectId": "prj_7c5891299f64",
+        "redirect": null,
+        "redirectStatusCode": null,
         "updatedAt": 0,
+        "verification": [
+          {
+            "domain": "_vercel.example.com",
+            "reason": "Add the TXT record above to verify domain ownership",
+            "type": "TXT",
+            "value": "vc-domain-verify=example.com,22a55b5e9c8e8321"
+          }
+        ],
         "verified": false
-      }
+      },
+      "recut": "A domain added to a project is unverified and carries the challenge to publish (specs/vercel/api.json, POST /v10/projects/{idOrName}/domains: verification, a list of {type, domain, value, reason}); the pack answered neither. The wording and the _vercel.\u003capex\u003e TXT record follow the vendor's own emulator (test/behavior/vercel/oracle, domains-add). The members the pack sent keep their recorded values."
     },
     {
       "operation": "AddProjectDomain",
@@ -879,14 +892,32 @@
           {
             "apexName": "example.com",
             "createdAt": 0,
+            "customEnvironmentId": null,
+            "gitBranch": null,
             "name": "example.com",
             "projectId": "prj_7c5891299f64",
+            "redirect": null,
+            "redirectStatusCode": null,
             "updatedAt": 0,
+            "verification": [
+              {
+                "domain": "_vercel.example.com",
+                "reason": "Add the TXT record above to verify domain ownership",
+                "type": "TXT",
+                "value": "vc-domain-verify=example.com,22a55b5e9c8e8321"
+              }
+            ],
             "verified": false
           }
-        ]
+        ],
+        "pagination": {
+          "count": 1,
+          "next": null,
+          "prev": null
+        }
       },
-      "recorded_as": "ListProjectDomains"
+      "recorded_as": "ListProjectDomains",
+      "recut": "As step 21, for each domain the listing carries; the listing also answers its pagination, which the document requires."
     },
     {
       "operation": "CreateDeployment",
@@ -1879,13 +1910,26 @@
         "Project": ""
       },
       "output": {
-        "apexName": "web2.example.com",
+        "apexName": "example.com",
         "createdAt": 0,
+        "customEnvironmentId": null,
+        "gitBranch": null,
         "name": "web2.example.com",
         "projectId": "prj_77df676fe2a7",
+        "redirect": null,
+        "redirectStatusCode": null,
         "updatedAt": 0,
+        "verification": [
+          {
+            "domain": "_vercel.example.com",
+            "reason": "Add the TXT record above to verify domain ownership",
+            "type": "TXT",
+            "value": "vc-domain-verify=web2.example.com,528d7ce7db8a0cac"
+          }
+        ],
         "verified": false
-      }
+      },
+      "recut": "As step 21. The apex of web2.example.com is example.com, where the pack set apexName to the whole hostname; the document and the vendor's emulator both give the registrable part."
     },
     {
       "operation": "GetProjectDomain",
@@ -1901,16 +1945,26 @@
         "Project": ""
       },
       "output": {
-        "apexName": "web2.example.com",
+        "apexName": "example.com",
         "createdAt": 0,
+        "customEnvironmentId": null,
         "gitBranch": null,
         "name": "web2.example.com",
         "projectId": "prj_77df676fe2a7",
         "redirect": null,
         "redirectStatusCode": null,
         "updatedAt": 0,
+        "verification": [
+          {
+            "domain": "_vercel.example.com",
+            "reason": "Add the TXT record above to verify domain ownership",
+            "type": "TXT",
+            "value": "vc-domain-verify=web2.example.com,528d7ce7db8a0cac"
+          }
+        ],
         "verified": false
-      }
+      },
+      "recut": "As step 52: GET /v9/projects/{idOrName}/domains/{domain} answers the same object."
     },
     {
       "operation": "GetProjectDomain",
@@ -1947,16 +2001,26 @@
         "Project": ""
       },
       "output": {
-        "apexName": "web2.example.com",
+        "apexName": "example.com",
         "createdAt": 0,
+        "customEnvironmentId": null,
         "gitBranch": null,
         "name": "web2.example.com",
         "projectId": "prj_77df676fe2a7",
         "redirect": "example.com",
         "redirectStatusCode": 307,
         "updatedAt": 0,
+        "verification": [
+          {
+            "domain": "_vercel.example.com",
+            "reason": "Add the TXT record above to verify domain ownership",
+            "type": "TXT",
+            "value": "vc-domain-verify=web2.example.com,528d7ce7db8a0cac"
+          }
+        ],
         "verified": false
-      }
+      },
+      "recut": "As step 52: PATCH /v9/projects/{idOrName}/domains/{domain} answers the same object."
     },
     {
       "operation": "VerifyProjectDomain",
@@ -1972,8 +2036,9 @@
         "Project": ""
       },
       "output": {
-        "apexName": "web2.example.com",
+        "apexName": "example.com",
         "createdAt": 0,
+        "customEnvironmentId": null,
         "gitBranch": null,
         "name": "web2.example.com",
         "projectId": "prj_77df676fe2a7",
@@ -1981,7 +2046,8 @@
         "redirectStatusCode": 307,
         "updatedAt": 0,
         "verified": true
-      }
+      },
+      "recut": "As step 52, without the challenge list: the document's verify answer is the domain without it."
     },
     {
       "operation": "RemoveProjectDomain",

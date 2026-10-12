@@ -301,7 +301,6 @@ const pending = "its area's conformance driver has not landed"
 
 // confUncovered names the served operations the run does not drive, and why.
 var confUncovered = map[string]string{
-	"AddProjectDomain":                        pending,
 	"ApproveRollingReleaseStage":              pending,
 	"ArtifactExists":                          pending,
 	"ArtifactQuery":                           pending,
@@ -324,8 +323,6 @@ var confUncovered = map[string]string{
 	"GetCustomEnvironment":                    pending,
 	"GetDeploymentCheckRun":                   pending,
 	"GetProjectCheck":                         pending,
-	"GetProjectDomain":                        pending,
-	"GetProjectDomains":                       pending,
 	"GetProjectsByIdOrNameCustomEnvironments": pending,
 	"GetRegistration":                         pending,
 	"GetRollingRelease":                       pending,
@@ -345,7 +342,6 @@ var confUncovered = map[string]string{
 	"PatchUrlProtectionBypass":                pending,
 	"RecordEvents":                            pending,
 	"RemoveCustomEnvironment":                 pending,
-	"RemoveProjectDomain":                     pending,
 	"RequestPromote":                          pending,
 	"RequestRollback":                         pending,
 	"RerequestCheck":                          pending,
@@ -355,12 +351,10 @@ var confUncovered = map[string]string{
 	"UpdateCustomEnvironment":                 pending,
 	"UpdateDeploymentCheckRun":                pending,
 	"UpdateProjectCheck":                      pending,
-	"UpdateProjectDomain":                     pending,
 	"UpdateProjectProtectionBypass":           pending,
 	"UpdateProjectsByProjectIdRollbackByDeploymentIdUpdateDescription": pending,
 	"UpdateRollingReleaseConfig":                                       pending,
 	"UploadArtifact":                                                   pending,
-	"VerifyProjectDomain":                                              pending,
 }
 
 func (c *conf) coverage(t *testing.T) {

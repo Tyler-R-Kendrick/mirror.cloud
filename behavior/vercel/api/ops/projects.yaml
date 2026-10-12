@@ -258,6 +258,7 @@ operations:
       - delete: { resource: deployment, where: "item.projectId == string(rec.id)" }
       - delete: { resource: env, where: "true" }
       - delete: { resource: domain, where: "true" }
+      - delete: { resource: domain_owner, where: "item.projectId == string(rec.id)" }
       - delete: { resource: custom_environment, where: "true" }
       - delete: { resource: custom_environment_slug, where: "true" }
       - delete:

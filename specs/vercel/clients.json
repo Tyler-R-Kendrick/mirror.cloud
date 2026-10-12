@@ -48,6 +48,56 @@
       "operation": "RemoveProjectEnv",
       "uris": ["/v10/projects/{idOrName}/env/{id}", "/v8/projects/{idOrName}/env/{id}"],
       "source": "removing a variable at the versions around the document's /v9 (/v8 older, /v10 newer). Named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "GetProjectDomains",
+      "uris": ["/v10/projects/{idOrName}/domains", "/v8/projects/{idOrName}/domains"],
+      "source": "the project-domain listing at the versions around the document's /v9; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "AddProjectDomain",
+      "uris": ["/v9/projects/{idOrName}/domains", "/v8/projects/{idOrName}/domains"],
+      "source": "adding a domain to a project at the older versions the API still answers, where the document declares /v10; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "GetProjectDomain",
+      "uris": ["/v10/projects/{idOrName}/domains/{domain}", "/v8/projects/{idOrName}/domains/{domain}"],
+      "source": "reading one project domain at the versions around the document's /v9; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "UpdateProjectDomain",
+      "uris": ["/v10/projects/{idOrName}/domains/{domain}", "/v8/projects/{idOrName}/domains/{domain}"],
+      "source": "editing a project domain at the versions around the document's /v9; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "RemoveProjectDomain",
+      "uris": ["/v10/projects/{idOrName}/domains/{domain}", "/v8/projects/{idOrName}/domains/{domain}"],
+      "source": "removing a project domain at the versions around the document's /v9; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "VerifyProjectDomain",
+      "uris": ["/v10/projects/{idOrName}/domains/{domain}/verify", "/v8/projects/{idOrName}/domains/{domain}/verify"],
+      "source": "verifying a project domain at the versions around the document's /v9; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "GetDomains",
+      "uris": ["/v6/domains", "/v4/domains"],
+      "source": "the account's domain listing at the older versions the API still answers (the CLI's domains ls is at /v5); named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "GetDomain",
+      "uris": ["/v6/domains/{domain}", "/v4/domains/{domain}"],
+      "source": "reading one account domain at the older versions; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "CreateOrTransferDomain",
+      "uris": ["/v4/domains"],
+      "source": "adding a domain to the account at the older version, before /v7 added transfers; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "DeleteDomain",
+      "uris": ["/v5/domains/{domain}", "/v4/domains/{domain}"],
+      "source": "removing an account domain at the versions around the document's /v6; named from the API's version history, not observed against api.vercel.com"
     }
   ]
 }

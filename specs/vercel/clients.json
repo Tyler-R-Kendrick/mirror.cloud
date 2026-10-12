@@ -123,6 +123,81 @@
       "operation": "ListDeploymentAliases",
       "uris": ["/v3/deployments/{id}/aliases"],
       "source": "listing a deployment's aliases at the version after the document's /v2; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "GetEdgeConfigs",
+      "uris": ["/v1/edge-config"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "CreateEdgeConfig",
+      "uris": ["/v1/edge-config"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "GetEdgeConfig",
+      "uris": ["/v1/edge-config/{edgeConfigId}"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "UpdateEdgeConfig",
+      "uris": ["/v1/edge-config/{edgeConfigId}"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "DeleteEdgeConfig",
+      "uris": ["/v1/edge-config/{edgeConfigId}"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "GetEdgeConfigItems",
+      "uris": ["/v1/edge-config/{edgeConfigId}/items"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "PatchEdgeConfigItems",
+      "uris": ["/v1/edge-config/{edgeConfigId}/items"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "GetEdgeConfigItem",
+      "uris": ["/v1/edge-config/{edgeConfigId}/item/{edgeConfigItemKey}"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "GetEdgeConfigSchema",
+      "uris": ["/v1/edge-config/{edgeConfigId}/schema"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "PatchEdgeConfigSchema",
+      "uris": ["/v1/edge-config/{edgeConfigId}/schema"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "DeleteEdgeConfigSchema",
+      "uris": ["/v1/edge-config/{edgeConfigId}/schema"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "GetEdgeConfigTokens",
+      "uris": ["/v1/edge-config/{edgeConfigId}/tokens"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "DeleteEdgeConfigTokens",
+      "uris": ["/v1/edge-config/{edgeConfigId}/tokens"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "GetEdgeConfigToken",
+      "uris": ["/v1/edge-config/{edgeConfigId}/token/{token}"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "CreateEdgeConfigToken",
+      "uris": ["/v1/edge-config/{edgeConfigId}/token"],
+      "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
     }
   ]
 }

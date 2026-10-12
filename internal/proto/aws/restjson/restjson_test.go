@@ -530,6 +530,8 @@ func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
 		{http.MethodGet, "/v9/projects/app/env", "FilterProjectEnvs"},
 		{http.MethodGet, "/v8/projects/app/env", "FilterProjectEnvs"},
 		{http.MethodGet, "/v10/projects/app/domains", "GetProjectDomains"},
+		{http.MethodGet, "/v1/edge-config", "GetEdgeConfigs"},
+		{http.MethodGet, "/v1/global-config", "GetEdgeConfigs"},
 	} {
 		req := httptest.NewRequest(test.method, "http://api.vercel.com"+test.path, nil)
 		op, err := (Codec{}).Route(vercel, req)
@@ -540,14 +542,14 @@ func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
 	// What the pack answered at a version nothing declares, and arbitrary
 	// versions to show the stripping is really gone. /v6/deployments left this
 	// list when the authored supplement declared it, and the env and domain
-	// listings at /v9 and /v10 when the alternate addresses named them: a
-	// version is served because someone wrote it down, never because it was a
-	// version.
+	// listings at /v9 and /v10 when the alternate addresses named them: a version
+	// is served because someone wrote it down, never because it was a version.
 	for _, test := range []struct{ method, path string }{
 		{http.MethodGet, "/v9/projects"},
 		{http.MethodGet, "/v7/projects/app/env"},
 		{http.MethodGet, "/v7/projects/app/domains"},
 		{http.MethodGet, "/v99/projects"},
+		{http.MethodGet, "/v2/edge-config"},
 	} {
 		req := httptest.NewRequest(test.method, "http://api.vercel.com"+test.path, nil)
 		op, err := (Codec{}).Route(vercel, req)

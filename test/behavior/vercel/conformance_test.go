@@ -99,7 +99,10 @@ func newConf(t *testing.T, opts ...func(*bootOptions)) *conf {
 	}
 	for _, mo := range svc.Operations {
 		op := &confOp{name: mo.Name, method: mo.HTTP.Method, uri: mo.HTTP.URI, alts: mo.HTTP.AltURIs}
-		for _, d := range []*oasDoc{c.main, c.extra} {
+		// The supplement first: where it states an operation the vendored
+		// document also states, it is the one the model took (fusion keeps the
+		// authored fragment), so it is the one to hold the answer to.
+		for _, d := range []*oasDoc{c.extra, c.main} {
 			if spec, ok := d.operation(mo.HTTP.Method, mo.HTTP.URI); ok {
 				op.doc, op.spec = d, spec
 				break

@@ -3272,7 +3272,7 @@
         "http_status": 400,
         "fault": "client"
       },
-      "recut": "The pack answered 401 not_authenticated to a request carrying no Authorization. The emulator's covenant is that any credentials work, none included (MIRROR_VERCEL_STRICT_AUTH is the opt-in that refuses, with Vercel's own 403), so the request is served. This one carries no slug either, and the answer is the bad_request the rule for a missing slug always declared, which the 401 in front of it hid."
+      "recut": "The pack answered 401 not_authenticated to a request carrying no Authorization. The emulator's covenant is that any credentials work, none included (MIRROR_VERCEL_STRICT_AUTH is the opt-in that refuses, with Vercel's own 403), so the request is served. This one carries no slug either, and the answer is the bad_request the rule for a missing slug always declared, which the 401 in front of it hid. What the reference says of a request with no credential is held separately: started with MIRROR_VERCEL_STRICT_AUTH the emulator refuses it with Vercel's own 403 forbidden envelope (TestVercelOracleRoutesFollowTheCredentialCovenant, strict mode, every route and every kind of credential). This step differs from the pack's recorded answer only in the way described, the 401 the pack put in front of the route; no other member of the answer was changed to match the bundle."
     },
     {
       "operation": "CreateTeam",
@@ -3678,7 +3678,7 @@
       "output": {
         "keys": []
       },
-      "recut": "The pack answered 401 not_authenticated to a request carrying no Authorization. The emulator's covenant is that any credentials work, none included, so the listing is served: no key has been made, and the answer is an empty list."
+      "recut": "The pack answered 401 not_authenticated to a request carrying no Authorization. The emulator's covenant is that any credentials work, none included, so the listing is served: no key has been made, and the answer is an empty list. What the reference says of a request with no credential is held separately: started with MIRROR_VERCEL_STRICT_AUTH the emulator refuses it with Vercel's own 403 forbidden envelope (TestVercelOracleRoutesFollowTheCredentialCovenant, strict mode, every route and every kind of credential). This step differs from the pack's recorded answer only in the way described, the 401 the pack put in front of the route; no other member of the answer was changed to match the bundle."
     },
     {
       "operation": "CreateApiKey",

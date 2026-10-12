@@ -38,6 +38,13 @@ gcp.storage	gcp/storage.json	https://storage.googleapis.com/$discovery/rest?vers
 hetzner.v1	hetzner/v1.json	https://docs.hetzner.cloud/cloud.spec.json
 hostinger.api	hostinger/api.json	https://raw.githubusercontent.com/hostinger/api/main/openapi.json
 vercel.api	vercel/api.json	https://openapi.vercel.sh/
+# vercel.api's authored documents. Every operation in them is a reading of what a client sends or of the vendor's own emulator, never an
+# observation of api.vercel.com, and the lock pins their bytes like any other document.
+#   api-extra.json  operations the pinned document does not list: the oracle's team, user, API-key and OAuth routes, two Edge Config
+#                   listings it describes wrongly, GetDeploymentBuilds (vercel inspect) and GetEnvPull, GetEnvPullTarget and
+#                   GetEnvPullBranch (GET /v3/env/pull/{project}[/{target}[/{branch}]], read by vercel env pull, pull and link)
+#   clients.json    further addresses an operation also answers at (the versions and the /now/ spellings the CLI sends)
+#   control.json    mirror's own fault-injection routes, answering only under MIRROR_VERCEL_FAULTS
 vercel.api	vercel/api-extra.json	authored
 vercel.api	vercel/api-extra.json	authored
 vercel.kv	vercel/kv.json	authored

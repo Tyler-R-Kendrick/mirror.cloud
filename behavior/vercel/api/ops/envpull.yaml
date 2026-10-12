@@ -1,0 +1,85 @@
+schema: bir/1
+service: vercel.api
+
+# Pulling a project's variables for one target: `vercel env pull`, `vercel pull`
+# and `vercel link` (which refreshes VERCEL_OIDC_TOKEN with it) all read
+#
+#   GET /v3/env/pull/{project}[/{target}[/{gitBranch}]]?source=vercel-cli:...
+#
+# and write what comes back to a file. The pinned document does not list the
+# route, so it is the supplement's (specs/vercel/api-extra.json) and everything
+# here is authored from what the CLI does with the answer (vercel 63.1.2):
+#
+#   - it reads `env`, an object of KEY: value, and writes every key it is given;
+#   - a key whose value is empty is one it takes for a sensitive variable it
+#     could not read: it asks GET /v10/projects/{id}/env for the variable's type
+#     and tells the person which values it left a placeholder for.
+#
+# So a pull carries the value of every type that can be read back (plain,
+# encrypted, secret, system) and the key with "" for a sensitive one, whose value
+# is not even stored. Which variables a target pulls is the target list of the
+# variable; a custom environment is named by its slug or its id and matches the
+# variables that list it. A git branch adds the variables set for it and lets them
+# override the ones set for no branch, and without a branch they are left out.
+#
+# The three spellings are three operations because an alternate address binds the
+# same path labels as the canonical one (internal/check/alias_test.go), and these
+# differ in how many labels they carry. They share one definition below.
+
+operations:
+  GetEnvPull:
+    reads: &pull_reads
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      by_slug:
+        resource: custom_environment_slug
+        key: "('target' in input && input.target != null) ? string(input.target) : ''"
+      cenv:
+        resource: custom_environment
+        key: >
+          by_slug_found ? string(by_slug.environment)
+            : (('target' in input && input.target != null) ? string(input.target) : '')
+    let: &pull_let
+      # With no target the CLI is refreshing its development token.
+      target: "('target' in input && input.target != null && string(input.target) != '') ? string(input.target) : 'development'"
+      branch: "('gitBranch' in input && input.gitBranch != null) ? string(input.gitBranch) : ''"
+      builtin: "('target' in input && input.target != null) ? string(input.target) in ['development', 'preview', 'production'] : true"
+      environment: "cenv_found ? string(cenv.id) : ''"
+    require: &pull_require
+      - { cond: proj_found, error: NotFound, message: "Project not found" }
+      # A target that is none of the three and names no custom environment of the
+      # project is a typo (`prod`), and an empty file written for it would hide it.
+      - cond: "builtin || cenv_found"
+        error: BadRequest
+        message_expr: "'Unknown environment `' + target + '`'"
+    list: &pull_list
+      resource: env
+      member: env
+      filter: >
+        (builtin ? item.target.exists(t, t == target) : item.customEnvironmentIds.exists(c, c == environment))
+          && (item.gitBranch == '' || item.gitBranch == branch)
+    output: &pull_output
+      # A variable set for a branch is laid over the ones set for none. A
+      # sensitive variable is stored with no value, so "" is what it pulls.
+      env: >
+        merge(
+          rollup(sortBy(items.filter(i, i.gitBranch == ''), 'seq', false), 'key', 'value'),
+          rollup(sortBy(items.filter(i, i.gitBranch != ''), 'seq', false), 'key', 'value'))
+
+  GetEnvPullTarget:
+    reads: *pull_reads
+    let: *pull_let
+    require: *pull_require
+    list: *pull_list
+    output: *pull_output
+
+  GetEnvPullBranch:
+    reads: *pull_reads
+    let: *pull_let
+    require: *pull_require
+    list: *pull_list
+    output: *pull_output

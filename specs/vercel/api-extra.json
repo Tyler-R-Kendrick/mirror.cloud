@@ -599,6 +599,156 @@
           }
         }
       }
+    },
+    "/v3/env/pull/{idOrName}": {
+      "get": {
+        "operationId": "GetEnvPull",
+        "description": "With no target the development environment, which is what the CLI's dev command and `vercel link` ask for. What `vercel env pull`, `vercel pull` and `vercel link` (which refreshes VERCEL_OIDC_TOKEN with it) read: the project's environment variables for one target, as {\"env\": {KEY: value}}. The pinned document does not list the route. Client-observed: vercel CLI 63.1.2 sends GET /v3/env/pull/{project id}/{target}[/{git branch}]?source=vercel-cli:env:pull (or vercel-cli:pull, vercel-cli:link), and with no target from its dev command, and reads `env` (a `buildEnv` for a deployment id, which is not served). Everything about which variable is included is authored: the CLI writes every key it is given, and treats a key with an empty value as a sensitive one it could not read (it then asks GET /v10/projects/{id}/env for the variable's type), so a sensitive variable is the key with \"\" and never its value. Not compared with api.vercel.com.",
+        "parameters": [
+          {
+            "name": "idOrName",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the variables of the target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementEnvPull"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/env/pull/{idOrName}/{target}": {
+      "get": {
+        "operationId": "GetEnvPullTarget",
+        "description": "For one target: development, preview, production, or the slug or id of one of the project's custom environments. What `vercel env pull`, `vercel pull` and `vercel link` (which refreshes VERCEL_OIDC_TOKEN with it) read: the project's environment variables for one target, as {\"env\": {KEY: value}}. The pinned document does not list the route. Client-observed: vercel CLI 63.1.2 sends GET /v3/env/pull/{project id}/{target}[/{git branch}]?source=vercel-cli:env:pull (or vercel-cli:pull, vercel-cli:link), and with no target from its dev command, and reads `env` (a `buildEnv` for a deployment id, which is not served). Everything about which variable is included is authored: the CLI writes every key it is given, and treats a key with an empty value as a sensitive one it could not read (it then asks GET /v10/projects/{id}/env for the variable's type), so a sensitive variable is the key with \"\" and never its value. Not compared with api.vercel.com.",
+        "parameters": [
+          {
+            "name": "idOrName",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "target",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the variables of the target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementEnvPull"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/env/pull/{idOrName}/{target}/{gitBranch}": {
+      "get": {
+        "operationId": "GetEnvPullBranch",
+        "description": "For a target and a git branch: the variables set for no branch in particular, with those set for the branch laid over them. What `vercel env pull`, `vercel pull` and `vercel link` (which refreshes VERCEL_OIDC_TOKEN with it) read: the project's environment variables for one target, as {\"env\": {KEY: value}}. The pinned document does not list the route. Client-observed: vercel CLI 63.1.2 sends GET /v3/env/pull/{project id}/{target}[/{git branch}]?source=vercel-cli:env:pull (or vercel-cli:pull, vercel-cli:link), and with no target from its dev command, and reads `env` (a `buildEnv` for a deployment id, which is not served). Everything about which variable is included is authored: the CLI writes every key it is given, and treats a key with an empty value as a sensitive one it could not read (it then asks GET /v10/projects/{id}/env for the variable's type), so a sensitive variable is the key with \"\" and never its value. Not compared with api.vercel.com.",
+        "parameters": [
+          {
+            "name": "idOrName",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "target",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "gitBranch",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the variables of the target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementEnvPull"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -986,6 +1136,20 @@
                   "type": "string"
                 }
               }
+            }
+          }
+        }
+      },
+      "SupplementEnvPull": {
+        "type": "object",
+        "required": [
+          "env"
+        ],
+        "properties": {
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
             }
           }
         }

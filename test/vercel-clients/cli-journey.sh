@@ -16,9 +16,8 @@
 # gets the deployment's URL, so the agent switches in its environment are cleared
 # and the URL is read from either form.
 #
-# Not walked, because the emulator cannot serve them: `env pull`, `pull` and `build`
-# (docs/VERCEL.md, "Real clients"). `link` tries an env pull of its own and only
-# warns when it fails.
+# Not walked: `build`, which needs the framework builders the toolchain does not
+# carry (docs/VERCEL.md, "Real clients").
 set -euo pipefail
 
 : "${MIRROR_VERCEL_CLIENT_DIR:?set MIRROR_VERCEL_CLIENT_DIR to a directory with the vercel package installed}"
@@ -45,6 +44,32 @@ vc project add "$NAME"
 vc link --yes --project "$NAME"
 printf 'https://api.example.test' | vc env add API_URL production
 vc env ls
+
+# `env pull` and `pull` read GET /v3/env/pull/{project}/{target}. The CLI stores a
+# production variable as a secret unless told otherwise, and a secret is the one
+# thing a pull cannot give back: it writes the placeholder, never the value.
+# The value is on the command line, and the CLI still reads a piped stdin to its end, so give it none.
+envadd() { vc env add "$@" < /dev/null; }
+envadd LOG_LEVEL production --value info --type config --yes
+envadd LOG_LEVEL development --value debug --type config --yes
+envadd FEATURE_FLAG preview --value on --git-branch feature --type config --yes
+envadd DB_PASSWORD production --value vtok_dummy_marker_0123456789abcdef --sensitive --yes
+vc env pull .env.development --yes
+vc env pull .env.production --environment production --yes
+vc env pull .env.feature --environment preview --git-branch feature --yes
+expect_line() { grep -qxF "$2" "$1" || { echo "$1 lacks the line $2:" >&2; cat "$1" >&2; exit 1; }; }
+reject_text() { ! grep -qF "$2" "$1" || { echo "$1 holds $2:" >&2; cat "$1" >&2; exit 1; }; }
+expect_line .env.development 'LOG_LEVEL="debug"'
+expect_line .env.production 'LOG_LEVEL="info"'
+expect_line .env.production 'DB_PASSWORD="[SENSITIVE]"'
+reject_text .env.production vtok_dummy_marker
+reject_text .env.production debug
+expect_line .env.feature 'FEATURE_FLAG="on"'
+# `pull` is the same read, written under .vercel with the project's settings beside it.
+vc pull --yes --environment production
+expect_line .vercel/.env.production.local 'LOG_LEVEL="info"'
+reject_text .vercel/.env.production.local vtok_dummy_marker
+grep -q '"projectId"' .vercel/project.json || { echo ".vercel/project.json has no projectId:" >&2; cat .vercel/project.json >&2; exit 1; }
 out="$(vc deploy --prod --yes)"
 # A person's terminal gets the URL; a JSON document comes back when the CLI took the run for an agent's.
 url="$(printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{s=s.trim();try{console.log(JSON.parse(s).deployment.url)}catch{console.log(s.split("\n")[0])}})')"

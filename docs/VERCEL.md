@@ -112,6 +112,20 @@ with `Host: api.vercel.com` it is a 501 `MirrorNotImplemented`, never a silent s
 (without the host, a path no service claims falls to S3's routes, whose 501 it gets). The Edge Config routes answer at `/v1/edge-config`, which the API
 serves, and at `/v1/global-config`, which the document spells.
 
+## Pulling variables
+
+`vercel env pull`, `vercel pull` and `vercel link` (which refreshes `VERCEL_OIDC_TOKEN` the same
+way) read `GET /v3/env/pull/{project}[/{target}[/{gitBranch}]]`, a route the pinned document does
+not list. It is authored from what the CLI does with the answer (vercel 63.1.2, read from its
+JavaScript): it takes `env`, an object of `KEY: value`, and writes every key it is given. A
+sensitive variable is the key with `""` (its value is not stored, so it cannot come back); the CLI
+takes an empty value for one it could not read, asks `GET /v10/projects/{id}/env` which are
+sensitive, and writes `[SENSITIVE]` in their place. The target is `development` (also what a pull
+with no target gets), `preview`, `production`, or the slug or id of one of the project's custom
+environments; anything else is a 400 rather than an empty file. A git branch adds the variables set
+for it over the ones set for none, and without one they are left out. Nothing here was compared with
+api.vercel.com: which variables a real target includes (system variables, for one) is not known.
+
 ## Errors
 
 Every error is Vercel's envelope, `{"error": {"code": "...", "message": "..."}}`
@@ -184,14 +198,14 @@ What each journey walks, and how it ends now:
 
 | Step | Result |
 |---|---|
-| CLI `whoami`, `project add`, `link` | pass; `link` warns that it could not refresh `VERCEL_OIDC_TOKEN` (below) |
+| CLI `whoami`, `project add`, `link` | pass; `link` asks for the development variables to refresh `VERCEL_OIDC_TOKEN`, and none is issued |
 | CLI `env add`, `env ls`, `env rm` | pass |
 | CLI `deploy --prod`, `deploy` (preview) | pass; files go inline or by the upload protocol (`missing_files`, then `POST /v2/files`, the digest in `x-now-digest`) |
 | CLI `inspect`, `ls`, `project ls`, `alias set\|ls\|rm`, `remove` | pass |
 | CLI `redeploy`, `promote` | pass when run by hand; not in the journey script |
 | SDK projects, variables, deployments, aliases, domains, Edge Config, and the listings that carry a pagination object | pass |
-| CLI `env pull`, `pull` | **fail**: `GET /v3/env/pull/{id}/{target}` is not in the document, and the CLI exits "Response Error" |
-| CLI `build` | **not run**: it needs `pull` first and the builders it loads |
+| CLI `env pull` (all three targets, a git branch), `pull` | pass; `GET /v3/env/pull/{project}[/{target}[/{branch}]]` is authored, the document does not list it (below) |
+| CLI `build` | **not run**: it loads the framework builders, which the toolchain does not carry |
 | CLI `domains add`, `alias set` to a hostname the account does not hold | **fail**: `domains add` posts to `POST /projects/{project}/alias` with `{domain}` (an older address and body than the document's `AddProjectDomain`); `alias set` asks the registrar (`GET /v1/registrar/domains/{host}/availability`) whether the name is for sale, and the registrar is not served |
 
 What running them changed, one entry per finding (the commit that made each change
@@ -331,6 +345,9 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `GetEdgeConfigToken` | GET `/v1/global-config/{edgeConfigId}/token/{token}` | `/v1/edge-config/{edgeConfigId}/token/{token}` | spec-validated |
 | `GetEdgeConfigTokens` | GET `/v1/global-config/{edgeConfigId}/tokens` | `/v1/edge-config/{edgeConfigId}/tokens` | authored (held to the supplement's schema) |
 | `GetEdgeConfigs` | GET `/v1/global-config` | `/v1/edge-config` | authored (held to the supplement's schema) |
+| `GetEnvPull` | GET `/v3/env/pull/{idOrName}` | - | authored (held to the supplement's schema) |
+| `GetEnvPullBranch` | GET `/v3/env/pull/{idOrName}/{target}/{gitBranch}` | - | authored (held to the supplement's schema) |
+| `GetEnvPullTarget` | GET `/v3/env/pull/{idOrName}/{target}` | - | authored (held to the supplement's schema) |
 | `GetProject` | GET `/v9/projects/{idOrName}` | - | spec-validated |
 | `GetProjectCheck` | GET `/v2/projects/{projectIdOrName}/checks/{checkId}` | - | spec-validated |
 | `GetProjectDomain` | GET `/v9/projects/{idOrName}/domains/{domain}` | `/v10/projects/{idOrName}/domains/{domain}`, `/v8/projects/{idOrName}/domains/{domain}` | spec-validated |
@@ -412,12 +429,11 @@ What a person deploying through this will run into, roughly in the order they wi
   `Host: api.vercel.com`; a client pointed at `http://127.0.0.1:PORT` sends its own
   host, and an address no model claims then falls through to S3 and answers its
   `NoSuchBucket`.
-- **`vercel env pull`, `vercel pull` and so `vercel build`** do not work: the CLI asks
-  `GET /v3/env/pull/{projectId}/{target}` (and `/{gitBranch}`), which the document does not
-  list, so nothing here knows what to answer, and the first failure ends the command. `vercel
-  link` makes the same request to refresh `VERCEL_OIDC_TOKEN` and only warns. `vercel build`
-  also loads the framework builders and was not run. A deployment is made from source
-  (`vercel deploy`), not from prebuilt output.
+- **`vercel build`** was not run: it needs the framework builders the toolchain does not
+  carry, and a deployment is made from source (`vercel deploy`), not from prebuilt output.
+  `vercel env pull`, `vercel pull` and `vercel link`'s token refresh work (see
+  [Pulling variables](#pulling-variables)); a pull of a deployment id (`env pull --id dpl_...`,
+  which reads `buildEnv`) is not served, and no `VERCEL_OIDC_TOKEN` is ever issued.
 - **`vercel domains add`** posts the older `POST /projects/{project}/alias` with `{domain}`;
   `vercel alias set` to a hostname the account does not hold asks the registrar
   whether it is for sale. Neither is served. A custom domain is added with the SDK's

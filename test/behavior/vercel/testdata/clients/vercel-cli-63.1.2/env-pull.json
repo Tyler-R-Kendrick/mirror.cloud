@@ -1,0 +1,279 @@
+{
+  "client": "vercel CLI 63.1.2 (node v22.22.0, linux x64)",
+  "observed": "client-observed: recorded by a proxy between the real CLI and a running emulator (vercel project add, link, env add, env pull, pull). Never compared with api.vercel.com; the CLI wrote these requests, and the answers are the emulator's.",
+  "steps": [
+    {
+      "name": "project add",
+      "request": {
+        "method": "POST",
+        "path": "/v1/projects",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"name\":\"cli-envpull\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id"
+        ],
+        "equals": {
+          "name": "cli-envpull"
+        }
+      },
+      "capture": {
+        "projectId": "id"
+      }
+    },
+    {
+      "name": "link refreshes its development token",
+      "request": {
+        "method": "GET",
+        "path": "/v3/env/pull/{{projectId}}/development?source=vercel-cli%3Alink",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "env"
+        ]
+      },
+      "note": "vercel link asks for the development environment right after it links, to refresh VERCEL_OIDC_TOKEN. It used to fail here with NoSuchBucket (the route was not served) and only warn."
+    },
+    {
+      "name": "env add: a readable production variable",
+      "request": {
+        "method": "POST",
+        "path": "/v10/projects/{{projectId}}/env",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"type\":\"encrypted\",\"key\":\"LOG_LEVEL\",\"value\":\"info\",\"target\":[\"production\"],\"visibility\":\"config\"}"
+      },
+      "want": {
+        "status": 201,
+        "members": [
+          "created.id"
+        ]
+      }
+    },
+    {
+      "name": "env add: a development variable",
+      "request": {
+        "method": "POST",
+        "path": "/v10/projects/{{projectId}}/env",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"type\":\"encrypted\",\"key\":\"LOG_LEVEL\",\"value\":\"debug\",\"target\":[\"development\"],\"visibility\":\"config\"}"
+      },
+      "want": {
+        "status": 201,
+        "members": [
+          "created.id"
+        ]
+      }
+    },
+    {
+      "name": "env add: a preview variable for one branch",
+      "request": {
+        "method": "POST",
+        "path": "/v10/projects/{{projectId}}/env",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"type\":\"encrypted\",\"key\":\"FEATURE_FLAG\",\"value\":\"on\",\"target\":[\"preview\"],\"gitBranch\":\"feature\",\"visibility\":\"config\"}"
+      },
+      "want": {
+        "status": 201,
+        "members": [
+          "created.id"
+        ]
+      }
+    },
+    {
+      "name": "env add: a sensitive production variable",
+      "request": {
+        "method": "POST",
+        "path": "/v10/projects/{{projectId}}/env",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"type\":\"sensitive\",\"key\":\"DB_PASSWORD\",\"value\":\"vtok_dummy_marker_0123456789abcdef\",\"target\":[\"production\"],\"visibility\":\"secret\"}"
+      },
+      "want": {
+        "status": 201,
+        "members": [
+          "created.id"
+        ],
+        "equals": {
+          "created.value": ""
+        }
+      }
+    },
+    {
+      "name": "env pull (development)",
+      "request": {
+        "method": "GET",
+        "path": "/v3/env/pull/{{projectId}}/development?source=vercel-cli%3Aenv%3Apull",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "env.LOG_LEVEL"
+        ],
+        "equals": {
+          "env.LOG_LEVEL": "debug"
+        },
+        "absent": [
+          "env.DB_PASSWORD",
+          "env.FEATURE_FLAG"
+        ]
+      },
+      "note": "GET /v3/env/pull/{project id}/{target}?source=vercel-cli:env:pull. The CLI reads `env` and writes every key it is given to .env.local."
+    },
+    {
+      "name": "env pull (production)",
+      "request": {
+        "method": "GET",
+        "path": "/v3/env/pull/{{projectId}}/production?source=vercel-cli%3Aenv%3Apull",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "env.LOG_LEVEL",
+          "env.DB_PASSWORD"
+        ],
+        "equals": {
+          "env.LOG_LEVEL": "info",
+          "env.DB_PASSWORD": ""
+        }
+      },
+      "note": "A sensitive variable comes back as its key with an empty value. The CLI treats an empty value as one it could not read, asks which variables are sensitive (the next step), and writes the placeholder [SENSITIVE] for them."
+    },
+    {
+      "name": "env pull asks which empty values are sensitive",
+      "request": {
+        "method": "GET",
+        "path": "/v10/projects/{{projectId}}/env?target=production&source=vercel-cli%3Aenv%3Apull",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "envs.0.type"
+        ]
+      }
+    },
+    {
+      "name": "env pull (preview, one branch)",
+      "request": {
+        "method": "GET",
+        "path": "/v3/env/pull/{{projectId}}/preview/feature?source=vercel-cli%3Aenv%3Apull",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "env.FEATURE_FLAG"
+        ],
+        "equals": {
+          "env.FEATURE_FLAG": "on"
+        }
+      },
+      "note": "GET /v3/env/pull/{project id}/preview/{git branch}: the target and the branch are two more path segments."
+    },
+    {
+      "name": "pull (production)",
+      "request": {
+        "method": "GET",
+        "path": "/v3/env/pull/{{projectId}}/production?source=vercel-cli%3Apull",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "env.LOG_LEVEL"
+        ],
+        "equals": {
+          "env.LOG_LEVEL": "info"
+        }
+      },
+      "note": "vercel pull reads the same route with source=vercel-cli:pull and writes .vercel/.env.production.local beside .vercel/project.json."
+    }
+  ]
+}

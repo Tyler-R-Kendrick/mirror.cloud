@@ -564,3 +564,42 @@ func TestStructuredPayloadStillDecodesAsAStructure(t *testing.T) {
 		t.Fatalf("structured payload arrived as %T: %#v", decoded.Input["CreateApplicationRequest"], decoded.Input)
 	}
 }
+
+// TestAnObjectOrListBodyIsDecodedByWhatItIs holds the codec's half of a oneOf
+// with an array arm. Vercel's variable create takes one variable or an array of
+// them; the array lands under the payload member and the object is splatted
+// across the input as it always was, so neither form costs the other.
+func TestAnObjectOrListBodyIsDecodedByWhatItIs(t *testing.T) {
+	svc := generatedModel(t, "vercel.api")
+	op := svc.OperationByName("CreateProjectEnv")
+	if op == nil {
+		t.Fatal("vercel.api has no CreateProjectEnv")
+	}
+	decode := func(body string) map[string]any {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodPost, "/v10/projects/app/env", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		req, err := Codec{}.Decode(svc, op, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return req.Input
+	}
+
+	list := decode(`[{"key":"A","value":"1","type":"plain","target":["production"]},{"key":"B"}]`)
+	body, ok := list["body"].([]any)
+	if !ok || len(body) != 2 {
+		t.Fatalf("an array body = %#v, want the two elements under body", list)
+	}
+	if _, splat := list["key"]; splat {
+		t.Errorf("an array body was also splatted across the input: %#v", list)
+	}
+
+	one := decode(`{"key":"A","value":"1","type":"plain","target":["production"]}`)
+	if one["key"] != "A" || one["body"] != nil {
+		t.Errorf("an object body = %#v, want its members on the input", one)
+	}
+	if empty := decode(``); empty["body"] != nil {
+		t.Errorf("no body = %#v", empty)
+	}
+}

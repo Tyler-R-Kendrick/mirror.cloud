@@ -388,6 +388,16 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 		}
 		body = nil
 	}
+	// A body that may be one object or a list of them (a oneOf with an array
+	// arm) is decoded by what it is: an array lands under the payload member, and
+	// an object falls through to be splatted across the input like any other.
+	if name, ok := svc.UnionListPayloadMember(op); ok && len(bytes.TrimSpace(body)) > 0 && bytes.TrimSpace(body)[0] == '[' {
+		var list []any
+		if err := json.Unmarshal(body, &list); err == nil {
+			in[name] = list
+			body = nil
+		}
+	}
 	// A form body is as much a restJson payload as a JSON one: Vercel's OAuth
 	// callback and token exchange are declared form operations, and
 	// JSON-unmarshalling `code=...&state=...` into a map silently decodes to

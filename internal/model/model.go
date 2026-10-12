@@ -355,6 +355,29 @@ func (s *Service) ListPayloadMember(op *Operation) (string, bool) {
 	})
 }
 
+// UnionListPayloadMember names the input member an operation binds to the whole
+// request body when that member is a union with an array arm: a document that
+// says "one object, or a list of them" with a oneOf. Vercel's variable create is
+// that shape -- one variable, or an array of them to make several at once.
+//
+// The union is not a list, so ListPayloadMember does not claim it, and it is not
+// a structure either, so the codec cannot just splat it: which it is depends on
+// the bytes. The codec asks here and then looks at them.
+func (s *Service) UnionListPayloadMember(op *Operation) (string, bool) {
+	return s.payloadMember(op, func(id string) bool {
+		shape, ok := s.Shapes[id]
+		if !ok || shape.Kind != KindUnion {
+			return false
+		}
+		for _, arm := range shape.Members {
+			if opt, ok := s.Shapes[arm.Shape]; ok && opt.Kind == KindList {
+				return true
+			}
+		}
+		return false
+	})
+}
+
 // payloadMember names the input member bound to the whole body whose shape the
 // predicate accepts.
 //

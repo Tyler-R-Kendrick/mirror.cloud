@@ -75,6 +75,10 @@ func celFuncs() []cel.EnvOption {
 		binaryDyn("messageSize", str, dyn, cel.IntType),
 		unaryDyn("md5MessageAttributes", dyn, str),
 		unaryDyn("sha256hex", str, str),
+		// sha1hex is the digest Vercel's file API names a file by: a deployment
+		// refers to an uploaded file by the SHA-1 of its bytes, and an inlined
+		// file has to be hashed to be stored under the same name.
+		unaryDyn("sha1hex", str, str),
 		// b64urlhex decodes a hex string and base64url-encodes it without
 		// padding. PKCE's S256 is base64url(sha256(verifier)), so the
 		// challenge check is b64urlhex(sha256hex(verifier)) == challenge.
@@ -161,6 +165,11 @@ func celFuncs() []cel.EnvOption {
 		// slicing at all, and cursor pagination -- take the page after this
 		// position, keep the first limit entries -- is slicing.
 		ternaryDyn("slice", dyn, num, num, dyn),
+		// sortBy orders a list of records by one member, descending when the
+		// third argument is true. CEL has no sort at all, and a listing the
+		// store returns in key order (the keys are random identifiers) is
+		// not the order a client asked for: Vercel lists newest first.
+		ternaryDyn("sortBy", dyn, str, cel.BoolType, dyn),
 
 		// Provider-shaped helpers. These are string manipulation, not provider
 		// logic: the engine stays free of service names.

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"crypto/md5"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
@@ -129,6 +130,12 @@ func runtimeFuncs() []cel.EnvOption {
 		cel.Function("md5hex", cel.Overload("md5hex_1", []*cel.Type{str}, str,
 			cel.UnaryBinding(func(v ref.Val) ref.Val {
 				sum := md5.Sum([]byte(fmt.Sprint(v.Value())))
+				return types.String(hex.EncodeToString(sum[:]))
+			}))),
+
+		cel.Function("sha1hex", cel.Overload("sha1hex_1", []*cel.Type{str}, str,
+			cel.UnaryBinding(func(v ref.Val) ref.Val {
+				sum := sha1.Sum([]byte(fmt.Sprint(v.Value())))
 				return types.String(hex.EncodeToString(sum[:]))
 			}))),
 
@@ -409,6 +416,31 @@ func runtimeFuncs() []cel.EnvOption {
 				end = min(max(end, start), n)
 				out := make([]any, 0, end-start)
 				return types.DefaultTypeAdapter.NativeToValue(append(out, list[start:end]...))
+			}))),
+
+		// sortBy orders records by one member: numbers numerically, everything
+		// else by its text, and a record without the member after every record
+		// with it. The sort is stable, so records that tie keep the order the
+		// store listed them in, which is what keeps an answer reproducible.
+		cel.Function("sortBy", cel.Overload("sortBy_3", []*cel.Type{dyn, str, cel.BoolType}, dyn,
+			cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+				list, _ := fromCEL(args[0]).([]any)
+				key := fmt.Sprint(args[1].Value())
+				desc, _ := args[2].Value().(bool)
+				out := append([]any(nil), list...)
+				sort.SliceStable(out, func(i, j int) bool {
+					a, aok := sortKey(out[i], key)
+					b, bok := sortKey(out[j], key)
+					switch {
+					case !aok || !bok:
+						return aok && !bok
+					case desc:
+						return lessSortKey(b, a)
+					default:
+						return lessSortKey(a, b)
+					}
+				})
+				return types.DefaultTypeAdapter.NativeToValue(out)
 			}))),
 
 		cel.Function("lastSegment", cel.Overload("lastSegment_2", []*cel.Type{str, str}, str,
@@ -865,4 +897,27 @@ func asciiLower(s string) string {
 		}
 	}
 	return string(out)
+}
+
+// sortKey reads the member sortBy orders a record by.
+func sortKey(rec any, key string) (any, bool) {
+	m, ok := rec.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	v, ok := m[key]
+	if !ok || v == nil {
+		return nil, false
+	}
+	return v, true
+}
+
+// lessSortKey orders two members: both numbers numerically, otherwise by text.
+func lessSortKey(a, b any) bool {
+	if x, ok := toFloat(a); ok {
+		if y, ok := toFloat(b); ok {
+			return x < y
+		}
+	}
+	return fmt.Sprint(a) < fmt.Sprint(b)
 }

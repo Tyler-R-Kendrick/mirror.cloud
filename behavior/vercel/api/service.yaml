@@ -1118,7 +1118,7 @@ operations:
       # projection answers the two a reader of the document can rely on. The
       # document also requires a `created` the oracle never sends; it is
       # omitted, as the oracle omits it.
-      aliases: "items.map(a, {'uid': a.uid, 'alias': a.alias})"
+      aliases: "items.map(a, {'uid': a.uid, 'alias': a.alias, 'created': a.created})"
 
   ListPromoteAliases:
     reads:

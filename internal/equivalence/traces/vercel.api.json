@@ -2060,10 +2060,12 @@
         "aliases": [
           {
             "alias": "orb-a0e8b5.vercel.app",
+            "created": "1970-01-01T00:00:00.000Z",
             "uid": "als_842605a09b0619a8"
           }
         ]
-      }
+      },
+      "recut": "The vendored document's alias row (GET /v2/deployments/{id}/aliases, 200) requires `created`, an RFC 3339 date-time, which the pack never sent; the members it did send keep their recorded values."
     },
     {
       "operation": "GetDeploymentEvents",

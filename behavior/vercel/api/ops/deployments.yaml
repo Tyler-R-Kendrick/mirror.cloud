@@ -227,6 +227,7 @@ operations:
           record:
             uid: "'als_' + fx.depid"
             alias: "pname + '-' + fx.host + '.vercel.app'"
+            created: "iso8601ms(now)"
             deploymentId: "'dpl_' + fx.depid"
             projectId: "proj_found ? string(proj.id) : 'prj_' + fx.newproj"
       - put:

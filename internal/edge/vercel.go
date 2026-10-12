@@ -128,7 +128,13 @@ func (s *Server) vercelPrologue(w http.ResponseWriter, r *http.Request, id *spi.
 	q := r.URL.Query()
 	id.Project = id.Account
 	if team := q.Get("teamId"); team != "" {
-		id.Account = team
+		// The caller's own id is the personal account, not a team of that
+		// name: the CLI writes the user's id as the org of a linked project
+		// and `vercel ls` sends it back as ?teamId=. Acting for an empty team
+		// of that id listed nothing the caller had just deployed.
+		if team != "usr_"+id.Account && team != id.Account {
+			id.Account = team
+		}
 		return false
 	}
 	if slug := q.Get("slug"); slug != "" {

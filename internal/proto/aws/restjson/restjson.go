@@ -739,8 +739,16 @@ func (Codec) EncodeFault(svc *model.Service, op *model.Operation, w http.Respons
 		return json.NewEncoder(w).Encode(map[string]any{"error": f.Code, "error_description": f.Message})
 	}
 	if svc.ID == "vercel.api" || svc.ID == "vercel.blob" {
+		// A fault's extra members ride inside the error object, where Vercel
+		// puts them: invalidToken beside the 403, limit beside the 429.
+		e := map[string]any{"code": f.Code, "message": f.Message}
+		for k, v := range f.Fields {
+			if k != "code" && k != "message" {
+				e[k] = v
+			}
+		}
 		w.WriteHeader(status)
-		return json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": f.Code, "message": f.Message}})
+		return json.NewEncoder(w).Encode(map[string]any{"error": e})
 	}
 	// Stripe's envelope is {error: {type, message, code?, param?}}. The type
 	// is the oracle's constant invalid_request_error -- no route in the

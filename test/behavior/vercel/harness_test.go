@@ -30,6 +30,20 @@ type vx struct {
 // timestamps are the same across suites.
 func newVX(t *testing.T, seed string, services ...string) *vx {
 	t.Helper()
+	return newVXWith(t, seed, services)
+}
+
+// bootOptions are the ways a test changes the configuration it boots with.
+type bootOptions struct{ cfg []func(*config.Config) }
+
+// withConfig edits the configuration before the runtime boots.
+func withConfig(f func(*config.Config)) func(*bootOptions) {
+	return func(o *bootOptions) { o.cfg = append(o.cfg, f) }
+}
+
+// newVXWith is newVX with configuration edits.
+func newVXWith(t *testing.T, seed string, services []string, opts ...func(*bootOptions)) *vx {
+	t.Helper()
 	t.Setenv("MIRROR_CLOCK", "controllable")
 	cfg := config.Default()
 	if len(services) == 0 {
@@ -37,6 +51,13 @@ func newVX(t *testing.T, seed string, services ...string) *vx {
 	}
 	cfg.Services = services
 	cfg.Seed = seed
+	var o bootOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	for _, f := range o.cfg {
+		f(&cfg)
+	}
 	rt, err := rtpkg.Boot(cfg)
 	if err != nil {
 		t.Fatal(err)

@@ -30,6 +30,19 @@ type Config struct {
 	ProxyEndpoint                 string
 	CassetteDir                   string
 	LockSHA                       string
+
+	// VercelFaults registers the /_mirror/vercel/ control routes: a deployment
+	// can be driven to ERROR or CANCELED, the next deployments can be armed to
+	// fail, and the next requests can be answered 429. They are unauthenticated
+	// by design -- they are how a test breaks the emulator on purpose -- so they
+	// exist only when this is set, and answer 404 otherwise.
+	VercelFaults bool
+	// VercelStrictAuth makes vercel.api refuse a request that carries no bearer
+	// token (403 forbidden, "Not authenticated") or one starting "invalid" (403
+	// forbidden with invalidToken). It is off by default because the covenant
+	// says any credentials work, none included; it is on request, for testing
+	// what a client does when Vercel says no.
+	VercelStrictAuth bool
 }
 
 // Default returns the documented defaults.
@@ -78,6 +91,12 @@ func FromEnv(c Config) Config {
 	if v := os.Getenv("MIRROR_S3_ALLOW_NONSTANDARD_REGIONS"); v == "1" || strings.EqualFold(v, "true") {
 		c.S3AllowNonstandardRegions = true
 	}
+	if v := os.Getenv("MIRROR_VERCEL_FAULTS"); v == "1" || strings.EqualFold(v, "true") {
+		c.VercelFaults = true
+	}
+	if v := os.Getenv("MIRROR_VERCEL_STRICT_AUTH"); v == "1" || strings.EqualFold(v, "true") {
+		c.VercelStrictAuth = true
+	}
 	if v := os.Getenv("MIRROR_PROXY_MODE"); v != "" {
 		c.ProxyMode = v
 	}
@@ -111,6 +130,8 @@ func FromFile(c Config, path string) Config {
 		SQSEndpointStrategy           string            `json:"sqs_endpoint_strategy"`
 		S3ValidatePresignedSignatures bool              `json:"s3_validate_presigned_signatures"`
 		S3AllowNonstandardRegions     bool              `json:"s3_allow_nonstandard_regions"`
+		VercelFaults                  bool              `json:"vercel_faults"`
+		VercelStrictAuth              bool              `json:"vercel_strict_auth"`
 		Services                      []string          `json:"services"`
 		Tiers                         map[string]string `json:"tiers"`
 	}
@@ -146,6 +167,12 @@ func FromFile(c Config, path string) Config {
 	}
 	if f.S3AllowNonstandardRegions {
 		c.S3AllowNonstandardRegions = true
+	}
+	if f.VercelFaults {
+		c.VercelFaults = true
+	}
+	if f.VercelStrictAuth {
+		c.VercelStrictAuth = true
 	}
 	if len(f.Services) > 0 {
 		c.Services = f.Services

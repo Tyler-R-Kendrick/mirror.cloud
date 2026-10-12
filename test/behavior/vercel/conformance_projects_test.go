@@ -15,6 +15,8 @@ func (c *conf) projects(t *testing.T) {
 	id := str(app.body, "id")
 	c.call(t, http.MethodPost, "/v10/projects", map[string]any{"name": "conform-v10"}, 200)
 	c.call(t, http.MethodPost, "/v9/projects", map[string]any{"name": "conform-v9"}, 200)
+	// The CLI's own address (vercel 63.1.2 'project add'), client-observed.
+	c.call(t, http.MethodPost, "/v1/projects", map[string]any{"name": "conform-v1"}, 200)
 	c.call(t, http.MethodPost, "/v11/projects", map[string]any{"name": "conform-app"}, 409)
 	c.call(t, http.MethodPost, "/v11/projects", map[string]any{"name": ""}, 400)
 

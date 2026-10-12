@@ -226,7 +226,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `CreateEdgeConfig` | POST `/v1/global-config` | `/v1/edge-config` | spec-validated |
 | `CreateEdgeConfigToken` | POST `/v1/global-config/{edgeConfigId}/token` | `/v1/edge-config/{edgeConfigId}/token` | spec-validated |
 | `CreateOrTransferDomain` | POST `/v7/domains` | `/v4/domains` | spec-validated |
-| `CreateProject` | POST `/v11/projects` | `/v10/projects`, `/v9/projects` | spec-validated |
+| `CreateProject` | POST `/v11/projects` | `/v1/projects`, `/v10/projects`, `/v9/projects` | spec-validated |
 | `CreateProjectCheck` | POST `/v2/projects/{projectIdOrName}/checks` | - | spec-validated |
 | `CreateProjectEnv` | POST `/v10/projects/{idOrName}/env` | `/v8/projects/{idOrName}/env`, `/v9/projects/{idOrName}/env` | spec-validated |
 | `CreateTeam` | POST `/v2/teams` | `/v1/teams` | authored (held to the supplement's schema) |

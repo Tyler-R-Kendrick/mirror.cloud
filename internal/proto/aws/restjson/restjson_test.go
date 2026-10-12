@@ -527,6 +527,7 @@ func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
 		// Declared as alternate addresses (specs/vercel/clients.json): the
 		// versions around the document's that clients were written against.
 		// Each is named, so each is served; none is a stripped version.
+		{http.MethodPost, "/v1/projects", "CreateProject"},
 		{http.MethodGet, "/v9/projects/app/env", "FilterProjectEnvs"},
 		{http.MethodGet, "/v8/projects/app/env", "FilterProjectEnvs"},
 		{http.MethodGet, "/v10/projects/app/domains", "GetProjectDomains"},

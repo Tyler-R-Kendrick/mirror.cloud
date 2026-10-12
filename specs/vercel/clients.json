@@ -11,8 +11,8 @@
   "x-mirror-aliases": [
     {
       "operation": "CreateProject",
-      "uris": ["/v9/projects", "/v10/projects"],
-      "source": "vercel CLI project create; deploy-platform REST providers calling POST /v9/projects"
+      "uris": ["/v9/projects", "/v10/projects", "/v1/projects"],
+      "source": "vercel CLI project create; deploy-platform REST providers calling POST /v9/projects. Client-observed: vercel CLI 63.1.2 'project add' sends POST /v1/projects with {\"name\": ...} (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/project-add.json)"
     },
     {
       "operation": "GetTeams",

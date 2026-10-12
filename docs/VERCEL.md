@@ -131,8 +131,11 @@ way) read `GET /v3/env/pull/{project}[/{target}[/{gitBranch}]]`, a route the pin
 not list. It is authored from what the CLI does with the answer (vercel 63.1.2, read from its
 JavaScript): it takes `env`, an object of `KEY: value`, and writes every key it is given. A
 sensitive variable is the key with `""` (its value is not stored, so it cannot come back); the CLI
-takes an empty value for one it could not read, asks `GET /v10/projects/{id}/env` which are
-sensitive, and writes `[SENSITIVE]` in their place. The target is `development` (also what a pull
+takes an empty value for one it could not read, asks `GET /v10/projects/{id}/env?target=<environment>`
+which are sensitive (the listing narrows to that environment, so a sensitive production variable does
+not make a legitimately empty development one look unreadable; `customEnvironmentSlug` and
+`customEnvironmentId` narrow it too, and a target that names nothing lists nothing), and writes
+`[SENSITIVE]` in their place. The target is `development` (also what a pull
 with no target gets), `preview`, `production`, or the slug or id of one of the project's custom
 environments; anything else is a 400 rather than an empty file. A git branch adds the variables set
 for it over the ones set for none, and without one they are left out. Nothing here was compared with

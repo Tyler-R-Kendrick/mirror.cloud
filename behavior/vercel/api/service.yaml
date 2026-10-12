@@ -732,9 +732,12 @@ quirks:
       Lists in creation order, where the pack listed by store key (a random
       identifier). The document does not say what order it lists in; creation
       order is the one a snapshot can reproduce. `gitBranch` narrows to the
-      variables set for that branch and those set for none. `source`,
-      `customEnvironmentId` and `customEnvironmentSlug` are accepted and read by
-      nothing.
+      variables set for that branch and those set for none. `target` (which the
+      document does not declare and `vercel env pull` sends, to ask which of
+      the empty values it was given are sensitive), `customEnvironmentSlug` and
+      `customEnvironmentId` narrow it to the variables that list that
+      environment; a target that is neither a built-in one nor a custom
+      environment of the project lists nothing. `source` is read by nothing.
   - operation: GetProjectEnv
     note: >
       The document declares this at /v1; the vendored fragment and the pack's

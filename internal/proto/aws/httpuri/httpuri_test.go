@@ -322,3 +322,49 @@ func TestALabelWithNoNameMatchesNothing(t *testing.T) {
 		}
 	}
 }
+
+// TestAlternateAddressesRouteAndBind covers the addresses an operation answers
+// at besides the one its document declares. Both the router and the codec read
+// them, and a request that arrives at an alternate must bind its labels the
+// way one at the canonical address does -- otherwise the operation is reached
+// and then addresses the zero value, which is worse than a 404.
+func TestAlternateAddressesRouteAndBind(t *testing.T) {
+	svc := &model.Service{
+		ID: "test",
+		Operations: []model.Operation{
+			{Name: "CreateThing", HTTP: model.HTTPBinding{Method: "POST", URI: "/v11/things", AltURIs: []string{"/v9/things", "/v10/things"}}},
+			{Name: "GetThing", HTTP: model.HTTPBinding{Method: "GET", URI: "/v9/things/{idOrName}", AltURIs: []string{"/v10/things/{idOrName}"}}},
+			{Name: "ListThings", HTTP: model.HTTPBinding{Method: "GET", URI: "/v10/things"}},
+		},
+	}
+	for _, tc := range []struct{ method, path, want, label string }{
+		{"POST", "/v11/things", "CreateThing", ""},
+		{"POST", "/v9/things", "CreateThing", ""},
+		{"POST", "/v10/things", "CreateThing", ""},
+		{"GET", "/v9/things/abc", "GetThing", "abc"},
+		{"GET", "/v10/things/abc", "GetThing", "abc"},
+		{"GET", "/v10/things", "ListThings", ""},
+	} {
+		op, bound, ok := httpuri.Match(svc, get(tc.method, tc.path))
+		if !ok || op.Name != tc.want {
+			t.Fatalf("%s %s routed to %v (matched=%v), want %s", tc.method, tc.path, op, ok, tc.want)
+		}
+		if got := bound["idOrName"]; got != tc.label {
+			t.Errorf("%s %s bound idOrName=%q, want %q", tc.method, tc.path, got, tc.label)
+		}
+		labels, ok := httpuri.Bind(op, tc.path, nil)
+		if !ok || labels["idOrName"] != tc.label {
+			t.Errorf("Bind(%s %s) = %v, %v; want idOrName=%q", tc.method, tc.path, labels, ok, tc.label)
+		}
+	}
+	// A version nobody declared is still a miss: the aliases are a list, not a
+	// pattern over version numbers.
+	if _, _, ok := httpuri.Match(svc, get("POST", "/v8/things")); ok {
+		t.Error("an undeclared version routed")
+	}
+	// A root operation is never claimed by path, alternate or not.
+	root := &model.Operation{Name: "Root", HTTP: model.HTTPBinding{Method: "POST", URI: "/", AltURIs: []string{"/"}}}
+	if httpuri.Claims(root, nil, nil) {
+		t.Error("an operation bound to / claimed a path")
+	}
+}

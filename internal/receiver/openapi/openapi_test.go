@@ -695,3 +695,28 @@ func TestRequestBodyRefCarriesPayloadMember(t *testing.T) {
 		t.Fatalf("body binding %#v", m.Binding)
 	}
 }
+
+func TestAliasesAreReadAndNeedASource(t *testing.T) {
+	mk := func(aliases string) []byte {
+		return []byte(`{"openapi":"3.0.3","info":{"title":"t"},"x-mirror-service":"vendor.api","servers":[{"url":"https://api.example.com"}],"paths":{},"x-mirror-aliases":` + aliases + `}`)
+	}
+	svcs, err := (openapi.Receiver{}).Ingest(context.Background(), model.SourceRef{Path: "vendor/clients.json"},
+		mk(`[{"operation":"CreateThing","uris":["/v9/things","v10/things"],"source":"a client"}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := svcs[0].RouteAliases
+	if len(got) != 2 || got[0] != (model.RouteAlias{Operation: "CreateThing", URI: "/v9/things"}) || got[1].URI != "/v10/things" {
+		t.Fatalf("aliases read as %+v", got)
+	}
+	for _, bad := range []string{
+		`[{"operation":"CreateThing","uris":["/v9/things"]}]`,         // no source
+		`[{"operation":"CreateThing","uris":[],"source":"x"}]`,        // no address
+		`[{"uris":["/v9/things"],"source":"x"}]`,                      // no operation
+		`[{"operation":"CreateThing","uris":["/v9/t"],"source":" "}]`, // blank source
+	} {
+		if _, err := (openapi.Receiver{}).Ingest(context.Background(), model.SourceRef{Path: "vendor/clients.json"}, mk(bad)); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}

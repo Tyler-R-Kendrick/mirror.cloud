@@ -82,6 +82,15 @@ type document struct {
 	// api-keys lifecycle, the OAuth token exchange) can only be authored.
 	// Fusion merges the two at operation level with provenance intact.
 	MirrorService string `json:"x-mirror-service"`
+	// MirrorAliases is `x-mirror-aliases`: further addresses for operations
+	// declared elsewhere -- by the vendored document this one supplements. A
+	// vendor that versions its paths keeps serving the old versions of an
+	// endpoint, and clients written against them are not wrong; the vendored
+	// document lists only the newest. Each entry names the operation, the
+	// addresses, and where the claim comes from (`source`), which the receiver
+	// requires so that an alias cannot be added without saying why. They leave
+	// as Service.RouteAliases and fusion folds them into the operations.
+	MirrorAliases []aliasEntry `json:"x-mirror-aliases"`
 	Servers       []struct {
 		URL string `json:"url"`
 	} `json:"servers"`
@@ -118,6 +127,16 @@ type requestBodyObject struct {
 type responseObject struct {
 	Ref     string               `json:"$ref"`
 	Content map[string]mediaType `json:"content"`
+}
+
+// aliasEntry is one element of `x-mirror-aliases`.
+type aliasEntry struct {
+	Operation string   `json:"operation"`
+	URIs      []string `json:"uris"`
+	// Source says what establishes the claim: a client observed calling it, a
+	// vendor changelog. Required, because the alias is the one place the model
+	// is wider than the document and the width has to be accounted for.
+	Source string `json:"source"`
 }
 
 type operation struct {
@@ -336,6 +355,14 @@ func (Receiver) Ingest(ctx context.Context, src model.SourceRef, data []byte) ([
 					Source:     src,
 				})
 			}
+		}
+	}
+	for i, a := range doc.MirrorAliases {
+		if a.Operation == "" || len(a.URIs) == 0 || strings.TrimSpace(a.Source) == "" {
+			return nil, fmt.Errorf("openapi: %s: x-mirror-aliases[%d] needs an operation, uris and a source", src.Path, i)
+		}
+		for _, uri := range a.URIs {
+			svc.RouteAliases = append(svc.RouteAliases, model.RouteAlias{Operation: a.Operation, URI: base + templated(uri)})
 		}
 	}
 	// Paths are walked in name order and methods in a fixed order, so the same

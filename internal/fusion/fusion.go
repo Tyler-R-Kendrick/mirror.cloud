@@ -5,7 +5,9 @@ package fusion
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 )
@@ -81,6 +83,7 @@ func Fuse(ctx context.Context, provider model.Provider, in [][]model.Service) (m
 				}
 			}
 			merged := existing
+			merged.RouteAliases = append(append([]model.RouteAlias(nil), existing.RouteAliases...), svc.RouteAliases...)
 			merged.Operations = merged.Operations[:0]
 			names := make([]string, 0, len(ops))
 			for n := range ops {
@@ -113,9 +116,73 @@ func Fuse(ctx context.Context, provider model.Provider, in [][]model.Service) (m
 		Sources:       sources,
 	}
 	for _, id := range ids {
-		out.Services = append(out.Services, byID[id])
+		svc := byID[id]
+		if err := foldAliases(&svc); err != nil {
+			return model.Bundle{}, nil, err
+		}
+		out.Services = append(out.Services, svc)
 	}
 	return out, conflicts, nil
+}
+
+// foldAliases moves a service's RouteAliases onto the operations they name and
+// clears them, so the model that leaves fusion states each address once, on the
+// operation that answers it.
+//
+// An alias that names no operation fails the build rather than vanishing: it
+// would be a route the supplement believes it serves and nothing does. So does
+// one that lands on an address another operation already owns with the same
+// method -- the router would then pick between two operations by name, which is
+// a guess, and which operation answers a request should never be one.
+func foldAliases(svc *model.Service) error {
+	if len(svc.RouteAliases) == 0 {
+		return nil
+	}
+	owner := map[string]string{} // METHOD shape -> operation name
+	for _, op := range svc.Operations {
+		owner[strings.ToUpper(op.HTTP.Method)+" "+addressShape(op.HTTP.URI)] = op.Name
+		for _, alt := range op.HTTP.AltURIs {
+			owner[strings.ToUpper(op.HTTP.Method)+" "+addressShape(alt)] = op.Name
+		}
+	}
+	index := map[string]int{}
+	for i, op := range svc.Operations {
+		index[op.Name] = i
+	}
+	for _, a := range svc.RouteAliases {
+		i, ok := index[a.Operation]
+		if !ok {
+			return fmt.Errorf("fusion: %s: alias %s names operation %q, which no fragment declares", svc.ID, a.URI, a.Operation)
+		}
+		op := &svc.Operations[i]
+		key := strings.ToUpper(op.HTTP.Method) + " " + addressShape(a.URI)
+		if who, taken := owner[key]; taken {
+			if who == op.Name {
+				continue // already served there; the supplement repeating the document is harmless
+			}
+			return fmt.Errorf("fusion: %s: alias %s for %s collides with %s at %s", svc.ID, a.URI, op.Name, who, key)
+		}
+		owner[key] = op.Name
+		op.HTTP.AltURIs = append(op.HTTP.AltURIs, a.URI)
+	}
+	for i := range svc.Operations {
+		sort.Strings(svc.Operations[i].HTTP.AltURIs)
+	}
+	svc.RouteAliases = nil
+	return nil
+}
+
+// addressShape reduces an address to what a router tells apart: a label is a
+// label whatever it is called, so /v9/projects/{idOrName} and
+// /v9/projects/{id} are one address.
+func addressShape(uri string) string {
+	parts := strings.Split(uri, "/")
+	for i, p := range parts {
+		if strings.HasPrefix(p, "{") && strings.HasSuffix(p, "}") {
+			parts[i] = "{}"
+		}
+	}
+	return strings.Join(parts, "/")
 }
 
 // Conflict records a fusion precedence decision.

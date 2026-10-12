@@ -522,11 +522,9 @@ func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) 
 	// Without this the input arrives empty and the operation addresses the
 	// zero value. The pattern is re-matched here rather than carried over from
 	// Route so that decoding a request stays independent of how it was routed.
-	if op.HTTP.URI != "" {
-		if bound, ok := httpuri.Parse(op.HTTP.URI).Match(r.URL.EscapedPath(), r.URL.Query()); ok {
-			for k, v := range bound {
-				in[k] = v
-			}
+	if bound, ok := httpuri.Bind(op, r.URL.EscapedPath(), r.URL.Query()); ok {
+		for k, v := range bound {
+			in[k] = v
 		}
 	}
 	return &spi.Request{ServiceID: svc.ID, Operation: op.Name, Input: in, HTTP: r}, nil

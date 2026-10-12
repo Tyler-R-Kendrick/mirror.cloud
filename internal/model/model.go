@@ -94,10 +94,17 @@ type Service struct {
 	// seven-service change hides the seven, and this repository has already
 	// landed a regeneration that rewrote twenty-nine models nobody was looking
 	// at.
-	Hosts      []string `json:",omitempty"`
-	Operations []Operation
-	Shapes     map[string]Shape // shape ID -> shape
-	Source     SourceRef
+	Hosts []string `json:",omitempty"`
+	// RouteAliases are alternate addresses a fragment asks for on operations
+	// another fragment declared. They are how an authored supplement says "this
+	// operation is also served at /v9/..." without restating the operation:
+	// fusion folds each into its operation's HTTP.AltURIs and clears the list,
+	// so a generated model never carries one. Omitted when empty for the reason
+	// Hosts is.
+	RouteAliases []RouteAlias `json:",omitempty"`
+	Operations   []Operation
+	Shapes       map[string]Shape // shape ID -> shape
+	Source       SourceRef
 }
 
 // Operation is one RPC or REST method on a Service.
@@ -121,6 +128,22 @@ type HTTPBinding struct {
 	Method string // "POST", "GET", ...
 	URI    string // e.g. "/{Bucket}/{Key+}"; "/" for RPC-style protocols
 	Code   int    // success status code
+	// AltURIs are further addresses the same operation answers at, same method,
+	// same labels. A vendor that versions its paths keeps serving the old
+	// versions of an endpoint after the document moves on, and a client written
+	// against one is not wrong: Vercel's own CLI creates projects at /v9 while
+	// the document says /v11. The canonical URI stays URI -- it is what the
+	// document declares and what generated clients send -- and these are the
+	// authored extras, each added through a RouteAlias so its source is on
+	// record. Omitted when empty so a model with none is byte-identical.
+	AltURIs []string `json:",omitempty"`
+}
+
+// RouteAlias asks for URI to be served by the operation named Operation, in the
+// service it is declared for. See Service.RouteAliases.
+type RouteAlias struct {
+	Operation string
+	URI       string
 }
 
 // Pagination describes token-based paging members.

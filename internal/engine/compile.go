@@ -115,6 +115,7 @@ func runtimeEnv(names []string) (*cel.Env, error) {
 		opts = append(opts, cel.Variable(n, cel.DynType))
 	}
 	opts = append(opts, runtimeFuncs()...)
+	opts = append(opts, cursorFuncs()...)
 	return cel.NewEnv(opts...)
 }
 
@@ -455,56 +456,6 @@ func runtimeFuncs() []cel.EnvOption {
 					}
 				})
 				return types.DefaultTypeAdapter.NativeToValue(out)
-			}))),
-
-		// cursorAt, olderThanCursor and newerThanCursor are a listing's cursor:
-		// cursorAt is what `pagination.next` answers for an item of a sorted list
-		// (null past its end), and the other two are how the `until` and `since` a
-		// client sends back cut the items. See cursor.go for why the cursor carries
-		// the item's place among those created in the same millisecond, and how a
-		// bare timestamp is still read.
-		cel.Function("cursorAt", cel.Overload("cursorAt_3", []*cel.Type{dyn, str, num}, dyn,
-			cel.FunctionBinding(func(args ...ref.Val) ref.Val {
-				list, _ := fromCEL(args[0]).([]any)
-				i := asInt(args[2])
-				if i < 0 || i >= int64(len(list)) {
-					return types.NullValue
-				}
-				rec, _ := list[i].(map[string]any)
-				ms, ok := toFloat(rec[fmt.Sprint(args[1].Value())])
-				if !ok {
-					return types.NullValue
-				}
-				seq, _ := toFloat(rec["seq"])
-				return types.Double(pageCursor(int64(ms), int64(seq)))
-			}))),
-		// validCursors is whether every cursor in a list reads, so a listing can
-		// refuse `until=yesterday` with a 400 before it cuts anything.
-		cel.Function("validCursors", cel.Overload("validCursors_1", []*cel.Type{dyn}, cel.BoolType,
-			cel.UnaryBinding(func(v ref.Val) ref.Val {
-				list, _ := fromCEL(v).([]any)
-				for _, c := range list {
-					if _, err := parseCursor(c); err != nil {
-						return types.False
-					}
-				}
-				return types.True
-			}))),
-		cel.Function("olderThanCursor", cel.Overload("olderThanCursor_3", []*cel.Type{dyn, dyn, dyn}, cel.BoolType,
-			cel.FunctionBinding(func(args ...ref.Val) ref.Val {
-				c, err := parseCursor(fromCEL(args[2]))
-				if err != nil {
-					return types.NewErr("%s", err.Error())
-				}
-				return types.Bool(olderThanCursor(asInt(args[0]), asInt(args[1]), c))
-			}))),
-		cel.Function("newerThanCursor", cel.Overload("newerThanCursor_3", []*cel.Type{dyn, dyn, dyn}, cel.BoolType,
-			cel.FunctionBinding(func(args ...ref.Val) ref.Val {
-				c, err := parseCursor(fromCEL(args[2]))
-				if err != nil {
-					return types.NewErr("%s", err.Error())
-				}
-				return types.Bool(newerThanCursor(asInt(args[0]), asInt(args[1]), c))
 			}))),
 
 		cel.Function("lastSegment", cel.Overload("lastSegment_2", []*cel.Type{str, str}, str,

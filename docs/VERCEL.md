@@ -516,18 +516,25 @@ compared with api.vercel.com.
 - **Teams** are created, read, renamed and given members by email; there is no
   invitation to accept, no roles beyond the stored string, no billing.
 - **Pagination.** `pagination.next` is a number, as the document types it, and carries more
-  than the timestamp: the creation instant of the last item on the page with that item's
-  place among those made in the same millisecond as the fraction (a 1/1024 step). Sent back
-  as `until` (`from` for projects) it continues without a skip or a repeat, which a bare
-  timestamp cannot do for items that share one, and every item does on a controllable
-  clock that is not moving. A bare integer timestamp still means what it did (the items
-  strictly before it for `until`, after it for `since`), and anything that is not a number
-  is a 400. The ceiling is 1023: more items than that in one millisecond are ambiguous at
-  a page boundary again. Projects page by creation, since that is the order of the listing
-  (an update moves nothing in it); the document words `from` as "updated after". The
-  paged listings are teams, projects, deployments (`/v6` and `/v7`), aliases, the
-  account's domains, a project's domains and the project domains of an apex; the others
-  (project variables, team members, Edge Config) answer one page with `next: null`.
+  than the timestamp: the creation instant of the last item on the page, with that item's
+  place among those made in the same millisecond as the fraction. Sent back as `until`
+  (`from` for projects) it continues without a skip or a repeat, which a bare timestamp
+  cannot do for items that share one, and every item does on a controllable clock that is
+  not moving. A listing runs newest first, the later instant first and, of two made at one
+  instant, the later made, and every cut is a cut of that order, so a clock that steps back
+  does not drop an item. The fraction has the bits a float64 leaves the timestamp: 12 today,
+  which is 4095 places, halving each time the timestamp gains a bit (2039, 2109, ...), and
+  none from 2^52 milliseconds (about the year 144,000), where a cursor is a whole timestamp.
+  The ceiling is that the items of one listing made in one millisecond lie within that many
+  creations of each other (a creation counts for every listing that draws on its counter): a
+  longer run is ambiguous at a page boundary again, and the page can repeat or skip an item
+  there. A bare integer timestamp still means what it did (the items strictly before it for
+  `until`, after it for `since`), and anything that is not a number is a 400. Projects page
+  by creation, since that is the order of the listing (an update moves nothing in it); the
+  document words `from` as "updated after". The paged listings are teams, projects,
+  deployments (`/v6` and `/v7`), aliases, the account's domains, a project's domains and the
+  project domains of an apex; the others (project variables, team members, Edge Config)
+  answer one page with `next: null`.
 - **The OAuth flow** is the oracle's local login (a page, a callback, a token
   exchange, userinfo), not Vercel's.
 - **Rate limiting** is the armed 429s and nothing else; there is no accounting.

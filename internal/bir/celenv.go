@@ -42,6 +42,7 @@ func envFor(names ...string) (*cel.Env, error) {
 		opts = append(opts, cel.Variable(n, cel.DynType))
 	}
 	opts = append(opts, celFuncs()...)
+	opts = append(opts, cursorFuncs()...)
 	return cel.NewEnv(opts...)
 }
 
@@ -180,19 +181,6 @@ func celFuncs() []cel.EnvOption {
 		// store returns in key order (the keys are random identifiers) is
 		// not the order a client asked for: Vercel lists newest first.
 		ternaryDyn("sortBy", dyn, str, cel.BoolType, dyn),
-		// cursorAt(sorted, msMember, i) is what a listing answers as
-		// `pagination.next` for the i-th item of a page's list (null past its end):
-		// the item's millisecond with its place among those created in that
-		// millisecond as a fraction, so that the page boundary can fall between
-		// items that share a timestamp. olderThanCursor and
-		// newerThanCursor(ms, seq, cursor) are the `until` and `since` that cut a
-		// listing by it, and read a bare timestamp as it always was. Everything a
-		// listing needs to page without a skip, none of it Vercel's.
-		ternaryDyn("cursorAt", dyn, str, num, dyn),
-		unaryDyn("validCursors", dyn, cel.BoolType),
-		ternaryDyn("olderThanCursor", dyn, dyn, dyn, cel.BoolType),
-		ternaryDyn("newerThanCursor", dyn, dyn, dyn, cel.BoolType),
-
 		// Provider-shaped helpers. These are string manipulation, not provider
 		// logic: the engine stays free of service names.
 		binaryDyn("arn", str, dyn, str),

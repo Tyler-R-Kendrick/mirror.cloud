@@ -105,16 +105,10 @@ operations:
     list:
       resource: team
       member: teams
-      filter: >
-        newerThanCursor(item.createdAt, (('seq' in item) ? item.seq : 0), since)
-          && olderThanCursor(item.createdAt, (('seq' in item) ? item.seq : 0), until)
     output:
-      # The sequence is the order and the tie-break, not a member of a team.
-      teams: "slice(sortBy(items, 'seq', true), 0, limit).map(t, without(t, ['seq']))"
-      pagination: >
-        {'count': size(slice(sortBy(items, 'seq', true), 0, limit)),
-         'next': size(items) > limit ? cursorAt(sortBy(items, 'seq', true), 'createdAt', limit - 1) : null,
-         'prev': null}
+      # The sequence is the tie-break, not a member of a team.
+      teams: "pageOf(items, 'createdAt', [since], [until], false, limit).page.map(t, without(t, ['seq']))"
+      pagination: "pageOf(items, 'createdAt', [since], [until], false, limit).pagination"
 
   GetTeam:
     reads:

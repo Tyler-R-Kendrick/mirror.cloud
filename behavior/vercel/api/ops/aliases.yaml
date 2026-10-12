@@ -167,24 +167,19 @@ operations:
         (!('domain' in input && input.domain != null && string(input.domain) != '')
             || item.alias == string(input.domain) || item.alias.endsWith('.' + string(input.domain)))
           && (!('projectId' in input && input.projectId != null && string(input.projectId) != '') || item.projectId == string(input.projectId))
-          && newerThanCursor(item.createdAt, item.seq, from)
-          && newerThanCursor(item.createdAt, item.seq, since)
-          && olderThanCursor(item.createdAt, item.seq, until)
     output:
-      # Newest first, as a client pages; `next` is the cursor to ask for as
-      # `until` (cursor.go says what it carries).
+      # Newest first, as a client pages, cut by `from` and `since` (newer) and
+      # `until` (older); `next` is the cursor to ask for as `until` (cursor.go says
+      # what it carries).
       aliases: >
-        slice(sortBy(items, 'seq', true), 0, limit).map(a, {
+        pageOf(items, 'createdAt', [from, since], [until], false, limit).page.map(a, {
           'uid': a.uid, 'alias': a.alias, 'created': a.created, 'createdAt': a.createdAt,
           'updatedAt': a.updatedAt, 'deletedAt': a.deletedAt, 'creator': a.creator,
           'deploymentId': a.deploymentId, 'projectId': a.projectId,
           'redirect': a.redirect, 'redirectStatusCode': a.redirectStatusCode,
           'deployment': {'id': a.deploymentId, 'url': ('deploymentUrl' in a) ? a.deploymentUrl : a.alias},
           'protectionBypass': a.protectionBypass})
-      pagination: >
-        {'count': size(slice(items, 0, limit)),
-         'next': size(items) > limit ? cursorAt(sortBy(items, 'seq', true), 'createdAt', limit - 1) : null,
-         'prev': null}
+      pagination: "pageOf(items, 'createdAt', [from, since], [until], false, limit).pagination"
 
   GetAlias:
     reads:

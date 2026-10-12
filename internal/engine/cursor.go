@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"math"
+	"math/bits"
 	"strconv"
 	"strings"
 )
@@ -21,36 +22,73 @@ import (
 // The document types the cursor as a number, and the SDK validates it as one, so
 // the cursor stays a number. It keeps the timestamp in its integer part and puts
 // the item's place among those created in the same millisecond in the fraction:
-// slot/1024, the slot being 1 + the record's creation sequence modulo 1023. Both
-// parts are exact in a float64 (a millisecond timestamp needs 41 bits, the
-// fraction 10), the cursor still reads as the timestamp to anything that floors
-// it, and a slot is never 0, so a cursor with a fraction is never mistaken for a
-// bare timestamp. Records created consecutively get consecutive slots, so up to
-// 1023 created in one millisecond are told apart; beyond that the boundary is
-// ambiguous again, which is the ceiling.
+// slot / 2^k, where the slot is 1 + the record's creation sequence modulo the
+// number of slots, 2^k - 1, and k is as many fraction bits as the timestamp leaves
+// a float64 (53 less the bits of the millisecond, and at most 12). A millisecond
+// of today has 41 bits, so k is 12 and there are 4095 slots; they halve each time
+// the timestamp gains a bit (2039, 2109, ...), and at 2^52 milliseconds none are
+// left and the cursor is a whole timestamp. Both parts are exact in a float64, the
+// cursor still reads as the timestamp to anything that floors it, and a slot is
+// never 0, so a cursor with a fraction is never mistaken for a bare timestamp.
+//
+// A slot is the sequence modulo the slot count, so it wraps, and a cursor alone
+// cannot say which of the items that share its slot it named. A listing says: it
+// has the items, and the oldest of those made in the cursor's millisecond bounds
+// the sequences that can have been meant, since the slots of a run of fewer items
+// than there are slots are all different (see pageOf). That is the ceiling: while
+// the items made in one millisecond, in one listing, span fewer sequence numbers
+// than there are slots (4095 today), a cursor names exactly the item it was made
+// from, wherever the run falls in the count. Past it a slot is shared by two
+// items of the run and the boundary is ambiguous again; the listing still answers,
+// its page boundary inside that run may repeat or skip an item.
 //
 // A cursor with no fraction is the old form, a bare millisecond timestamp, and
 // means what it always meant: strictly before (or after) that millisecond. That
 // is what a client that computes its own timestamp sends, and what a client of an
 // earlier version of the emulator echoed.
-const cursorSlots = 1023
 
-// cursorSlot is the item's place among those created in its millisecond.
-func cursorSlot(seq int64) int64 {
-	return 1 + ((seq%cursorSlots)+cursorSlots)%cursorSlots
+const (
+	floatBits   = 53 // bits a float64 holds of an integer and its fraction together
+	maxSlotBits = 12 // fraction bits a cursor uses at most
+	maxCursorMS = 1 << floatBits
+	cursorForm  = "a cursor is a decimal number, as pagination.next of an earlier page is"
+)
+
+// slotBits is how many bits of fraction a cursor made at this millisecond has.
+func slotBits(ms int64) int {
+	if ms < 0 {
+		return 0
+	}
+	return min(max(floatBits-bits.Len64(uint64(ms)), 0), maxSlotBits)
 }
 
-// pageCursor is what `pagination.next` answers for the last item of a page.
+// slotCount is how many places a cursor tells apart within this millisecond.
+func slotCount(ms int64) int64 { return int64(1)<<slotBits(ms) - 1 }
+
+// slotOf is the item's place among those created in its millisecond: 1 to
+// slotCount, 0 where the millisecond has no room for a fraction.
+func slotOf(ms, seq int64) int64 {
+	n := slotCount(ms)
+	if n == 0 {
+		return 0
+	}
+	return 1 + ((seq%n)+n)%n
+}
+
+// pageCursor is what `pagination.next` answers for an item.
 func pageCursor(ms, seq int64) float64 {
-	return float64(ms) + float64(cursorSlot(seq))/1024
+	slot := slotOf(ms, seq)
+	if slot == 0 {
+		return float64(ms)
+	}
+	return float64(ms) + float64(slot)/float64(int64(1)<<slotBits(ms))
 }
 
 // cursor is a client's cursor, read.
 type cursor struct {
-	set       bool  // false: the client sent none, and nothing is cut
-	ms        int64 // the millisecond
-	slot      int64 // the place among that millisecond's items; 0 for a bare timestamp
-	composite bool
+	set  bool  // false: the client sent none, and nothing is cut
+	ms   int64 // the millisecond
+	slot int64 // the place among that millisecond's items; 0 for a bare timestamp
 }
 
 // parseCursor reads what a request carried as `until`, `since` or `from`: a
@@ -68,57 +106,33 @@ func parseCursor(v any) (cursor, error) {
 			return cursor{}, nil
 		}
 		n, err := strconv.ParseFloat(s, 64)
-		if err != nil || math.IsNaN(n) || math.IsInf(n, 0) {
-			return cursor{}, fmt.Errorf("the cursor %q is not a number", t)
+		if err != nil {
+			return cursor{}, fmt.Errorf("the cursor %q is not a number: %s", t, cursorForm)
 		}
 		f = n
 	default:
 		n, ok := toFloat(v)
 		if !ok {
-			return cursor{}, fmt.Errorf("the cursor %v is not a number", v)
+			return cursor{}, fmt.Errorf("the cursor %v is not a number: %s", v, cursorForm)
 		}
 		f = n
+	}
+	return cursorOf(f)
+}
+
+// cursorOf reads a number as a cursor.
+func cursorOf(f float64) (cursor, error) {
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return cursor{}, fmt.Errorf("the cursor %v is not a number: %s", f, cursorForm)
 	}
 	ms := math.Floor(f)
 	frac := f - ms
 	if frac == 0 {
 		return cursor{set: true, ms: int64(ms)}, nil
 	}
-	slot := int64(math.Round(frac * 1024))
-	if slot < 1 || slot > cursorSlots {
-		// A fraction that is no slot (a timestamp with a stray decimal) is
-		// the millisecond it falls in, read as a bare timestamp.
-		return cursor{set: true, ms: int64(ms)}, nil
+	places := frac * float64(int64(1)<<slotBits(int64(ms)))
+	if places != math.Trunc(places) {
+		return cursor{}, fmt.Errorf("the cursor %v has a fraction that is no place among the items of a millisecond: %s", f, cursorForm)
 	}
-	return cursor{set: true, ms: int64(ms), slot: slot, composite: true}, nil
-}
-
-// olderThanCursor reports whether the item sorts strictly after the cursor in a
-// listing that runs newest first: the items the next page is made of.
-func olderThanCursor(ms, seq int64, c cursor) bool {
-	switch {
-	case !c.set:
-		return true
-	case !c.composite:
-		return ms < c.ms
-	}
-	return ms < c.ms || (ms == c.ms && cursorSlot(seq) < c.slot)
-}
-
-// newerThanCursor is the other direction, for `since`: the items strictly before
-// the cursor in a newest-first listing.
-func newerThanCursor(ms, seq int64, c cursor) bool {
-	switch {
-	case !c.set:
-		return true
-	case !c.composite:
-		return ms > c.ms
-	}
-	return ms > c.ms || (ms == c.ms && cursorSlot(seq) > c.slot)
-}
-
-// trimFloat prints a cursor the way it goes on the wire: the shortest text that
-// reads back as the same number, which is what a JSON encoder writes.
-func trimFloat(f float64) string {
-	return strconv.FormatFloat(f, 'f', -1, 64)
+	return cursor{set: true, ms: int64(ms), slot: int64(places)}, nil
 }

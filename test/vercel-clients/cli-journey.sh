@@ -50,12 +50,17 @@ out="$(vc deploy --prod --yes)"
 url="$(printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{s=s.trim();try{console.log(JSON.parse(s).deployment.url)}catch{console.log(s.split("\n")[0])}})')"
 case "$url" in https://*.vercel.app) ;; *) echo "no deployment URL in: $out" >&2; exit 1 ;; esac
 echo "deployed: $url"
+# A preview deployment (no --prod) is the CLI's default; it finishes when the deployment is READY and aliasAssigned.
+preview="$(vc deploy --yes)"
+preview="${preview%%$'\n'*}"
+case "$preview" in https://*.vercel.app) echo "previewed: $preview" ;; *) echo "no preview URL in: $preview" >&2; exit 1 ;; esac
 vc inspect "$url"
 # A *.vercel.app hostname needs no domain of the account's, which a custom one does.
 vc alias set "$url" "$NAME-alias.vercel.app"
 vc alias ls
 vc ls
 vc project ls
+vc alias rm "$NAME-alias.vercel.app" --yes
 vc remove "$NAME" --yes
 # `vercel remove` calls a 404 on its DELETE "already removed", so ask the API whether the project is really gone.
 status="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $VERCEL_TOKEN" "$API/v9/projects/$NAME")"

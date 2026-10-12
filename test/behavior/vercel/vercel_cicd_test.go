@@ -66,6 +66,11 @@ func TestVercelCICDParity(t *testing.T) {
 			t.Fatalf("deploy %d %#v", code, dpl)
 		}
 		did := dpl["id"].(string)
+		// An alias names a deployment that has finished building, so the
+		// build's two seconds pass first.
+		if err := rt.Deps.Clock.Advance(3 * time.Second); err != nil {
+			t.Fatal(err)
+		}
 		code, als := call(http.MethodPost, "/v2/deployments/"+did+"/aliases", `{"alias":"cicd.example"}`)
 		if code != 200 || als["alias"] != "cicd.example" {
 			t.Fatalf("assign %d %#v", code, als)

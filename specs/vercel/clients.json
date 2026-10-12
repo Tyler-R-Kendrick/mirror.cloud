@@ -98,6 +98,31 @@
       "operation": "DeleteDomain",
       "uris": ["/v5/domains/{domain}", "/v4/domains/{domain}"],
       "source": "removing an account domain at the versions around the document's /v6; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "AssignAlias",
+      "uris": ["/v3/deployments/{id}/aliases"],
+      "source": "assigning an alias at the version after the document's /v2; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "ListAliases",
+      "uris": ["/v2/aliases", "/v3/aliases"],
+      "source": "listing aliases at the older versions the API still answers, where the document declares /v4; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "GetAlias",
+      "uris": ["/v2/aliases/{idOrAlias}", "/v3/aliases/{idOrAlias}"],
+      "source": "reading one alias, by uid or hostname, at the older versions; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "DeleteAlias",
+      "uris": ["/v4/aliases/{aliasId}"],
+      "source": "removing an alias at the version after the document's /v2; named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "ListDeploymentAliases",
+      "uris": ["/v3/deployments/{id}/aliases"],
+      "source": "listing a deployment's aliases at the version after the document's /v2; named from the API's version history, not observed against api.vercel.com"
     }
   ]
 }

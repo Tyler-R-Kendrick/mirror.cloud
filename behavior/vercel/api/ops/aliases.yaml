@@ -1,0 +1,212 @@
+schema: bir/1
+service: vercel.api
+
+# Aliases: a hostname that names a deployment.
+#
+# Every deployment has one the moment it exists -- its own URL, which is what the
+# vendor's emulator writes and what the listings read back -- and a client adds
+# others by assigning a hostname to a READY deployment (`vercel alias set`, or
+# `vercel deploy --prod` assigning the project's domains). Assigning a hostname
+# that already names another deployment moves it, and the answer says which
+# deployment it came from. The deployment keeps the hostnames assigned to it, so
+# its own `alias` member shows them.
+#
+# Two collections hold the same alias: the row, keyed by its uid, and an index
+# keyed by hostname, which is how a hostname is found without scanning the rows.
+
+resources:
+  deployment_alias:
+    collection: vdepalias
+    id:
+      derive: "''"
+    record:
+      # What a new alias is before anything says otherwise. Both writers (the
+      # assignment and the deployment create) get the same row, so a listing
+      # cannot find a shorter one.
+      created: "iso8601ms(now)"
+      createdAt: "now_ms"
+      updatedAt: "now_ms"
+      deletedAt: "null"
+      redirect: "null"
+      redirectStatusCode: "null"
+      creator:
+        uid: "'usr_' + (identity.project != '' ? identity.project : identity.account)"
+        email: "'test@mirror.cloud'"
+        username: "'test'"
+      protectionBypass: {}
+      seq: { counter: "valias" }
+
+  # Hostname -> uid, so GetAlias can resolve idOrAlias either as the store key
+  # or as the alias string the document's path label allows.
+  deployment_alias_by_alias:
+    collection: vdepaliasby
+    id:
+      derive: >
+        lower(('alias' in input && input.alias != null && string(input.alias) != '') ? string(input.alias)
+          : (('idOrAlias' in input && input.idOrAlias != null) ? string(input.idOrAlias) : ''))
+    record:
+      uid: "''"
+      deploymentId: "''"
+
+operations:
+  AssignAlias:
+    reads:
+      # Read in this order: `old` names the deployment the hostname leaves, and
+      # its key waits for `cur` by sorting after it.
+      cur:
+        resource: deployment_alias_by_alias
+        key: "('alias' in input && input.alias != null) ? lower(string(input.alias)) : ''"
+      dep: { resource: deployment }
+      old:
+        resource: deployment
+        key: "cur_found ? string(cur.deploymentId) : ''"
+    let:
+      host: "('alias' in input && input.alias != null) ? lower(string(input.alias)) : ''"
+      redirect: "('redirect' in input) ? input.redirect : null"
+    require:
+      - { cond: dep_found, error: NotFound, message: "The deployment was not found" }
+      - { cond: "host != ''", error: BadRequest, message: "Alias is required" }
+      - { cond: "host.matches('^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')", error: BadRequest, message: "The supplied alias is invalid" }
+      - { cond: "redirect == null || string(redirect).matches('^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')", error: BadRequest, message: "The supplied alias is invalid" }
+      # Only a deployment that has finished building can be named.
+      - { cond: "string(dep.__state) == 'READY'", error: BadRequest, message: "The deployment is not READY and can not be aliased" }
+      - { cond: "!(cur_found && string(cur.deploymentId) == string(dep.uid))", error: Conflict, message: "The provided alias is already assigned to the given deployment" }
+    effects:
+      - generate: { bind: als, kind: hex, bytes: 10 }
+      - put:
+          resource: deployment_alias_by_alias
+          key: "host"
+          record:
+            uid: "cur_found ? string(cur.uid) : 'als_' + fx.als"
+            deploymentId: "string(dep.uid)"
+            projectId: "string(dep.projectId)"
+      # The deployment it leaves forgets the hostname...
+      - patch:
+          resource: deployment
+          key: "string(old.uid)"
+          when: "cur_found && old_found"
+          record:
+            uid: id
+            aliases: "old.aliases.filter(a, a != host)"
+      # ...and the one it names learns it.
+      - patch:
+          resource: deployment
+          key: "string(dep.uid)"
+          record:
+            uid: id
+            aliases: "dep.aliases + [host]"
+      # The row: made the first time, moved after. A move keeps what the alias
+      # was created as and changes what it names.
+      - put:
+          resource: deployment_alias
+          key: "'als_' + fx.als"
+          when: "!cur_found"
+          record:
+            uid: "'als_' + fx.als"
+            alias: "host"
+            deploymentId: "string(dep.uid)"
+            deploymentUrl: "string(dep.url)"
+            projectId: "string(dep.projectId)"
+            redirect: "redirect"
+      - patch:
+          resource: deployment_alias
+          key: "string(cur.uid)"
+          when: "cur_found"
+          record:
+            deploymentId: "string(dep.uid)"
+            deploymentUrl: "string(dep.url)"
+            projectId: "string(dep.projectId)"
+            redirect: "redirect"
+            updatedAt: "now_ms"
+    output:
+      uid: rec.uid
+      alias: rec.alias
+      created: rec.created
+      oldDeploymentId: "cur_found ? dyn(string(cur.deploymentId)) : null"
+
+  ListAliases:
+    let:
+      limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+    list:
+      resource: deployment_alias
+      member: aliases
+      filter: >
+        (!('domain' in input && input.domain != null && string(input.domain) != '')
+            || item.alias == string(input.domain) || item.alias.endsWith('.' + string(input.domain)))
+          && (!('projectId' in input && input.projectId != null && string(input.projectId) != '') || item.projectId == string(input.projectId))
+          && (!('from' in input && input.from != null && string(input.from) != '') || item.createdAt > int(string(input.from)))
+          && (!('since' in input && input.since != null && string(input.since) != '') || item.createdAt > int(string(input.since)))
+          && (!('until' in input && input.until != null && string(input.until) != '') || item.createdAt < int(string(input.until)))
+    output:
+      # Newest first, as a client pages; `next` is the instant to ask for as
+      # `until`.
+      aliases: >
+        slice(sortBy(items, 'seq', true), 0, limit).map(a, {
+          'uid': a.uid, 'alias': a.alias, 'created': a.created, 'createdAt': a.createdAt,
+          'updatedAt': a.updatedAt, 'deletedAt': a.deletedAt, 'creator': a.creator,
+          'deploymentId': a.deploymentId, 'projectId': a.projectId,
+          'redirect': a.redirect, 'redirectStatusCode': a.redirectStatusCode,
+          'deployment': {'id': a.deploymentId, 'url': ('deploymentUrl' in a) ? a.deploymentUrl : a.alias},
+          'protectionBypass': a.protectionBypass})
+      pagination: >
+        {'count': size(slice(items, 0, limit)),
+         'next': size(items) > limit ? slice(sortBy(items, 'seq', true), 0, limit)[limit - 1].createdAt : null,
+         'prev': null}
+
+  GetAlias:
+    reads:
+      # by_alias before found: reads resolve in name order when equally ready,
+      # and the key expression of found needs by_alias_found already bound.
+      by_alias: { resource: deployment_alias_by_alias, key: "lower(string(input.idOrAlias))" }
+      found:
+        resource: deployment_alias
+        key: "by_alias_found ? string(by_alias.uid) : string(input.idOrAlias)"
+    require:
+      - { cond: found_found, error: NotFound, message: "The alias was not found" }
+    output:
+      uid: found.uid
+      alias: found.alias
+      created: found.created
+      createdAt: found.createdAt
+      updatedAt: found.updatedAt
+      deletedAt: found.deletedAt
+      creator: found.creator
+      deploymentId: found.deploymentId
+      projectId: found.projectId
+      redirect: found.redirect
+      redirectStatusCode: found.redirectStatusCode
+      deployment: "{'id': found.deploymentId, 'url': ('deploymentUrl' in found) ? found.deploymentUrl : found.alias}"
+      protectionBypass: found.protectionBypass
+
+  DeleteAlias:
+    reads:
+      als: { resource: deployment_alias, key: "string(input.aliasId)" }
+      # Read after `als`, which names it.
+      dep: { resource: deployment, key: "als_found ? string(als.deploymentId) : ''" }
+    require:
+      - { cond: als_found, error: NotFound, message: "The alias was not found" }
+    effects:
+      - delete: { resource: deployment_alias_by_alias, key: "string(als.alias)", missing: ignore }
+      - delete: { resource: deployment_alias, key: "string(als.uid)" }
+      # The deployment stops naming it.
+      - patch:
+          resource: deployment
+          key: "string(dep.uid)"
+          when: "dep_found"
+          record:
+            uid: id
+            aliases: "dep.aliases.filter(a, a != string(als.alias))"
+    output:
+      status: "'SUCCESS'"
+
+  ListDeploymentAliases:
+    reads:
+      dep: { resource: deployment }
+    require:
+      - { cond: dep_found, error: NotFound, message: "The deployment was not found" }
+    list:
+      resource: deployment_alias
+      member: aliases
+      filter: "item.deploymentId == string(dep.uid)"
+    output:
+      aliases: "sortBy(items, 'seq', false).map(a, {'uid': a.uid, 'alias': a.alias, 'created': a.created, 'redirect': a.redirect, 'protectionBypass': a.protectionBypass})"

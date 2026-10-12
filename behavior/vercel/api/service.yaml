@@ -76,27 +76,6 @@ resources:
     id:
       derive: "''"
 
-  # A deployment's alias rows, written by CreateDeployment the way emulate
-  # writes them (one per deployment, the deployment's own URL). Keyed off the
-  # deployment id; the list filters on the record's deploymentId, so the key
-  # is never derived from a request.
-  deployment_alias:
-    collection: vdepalias
-    id:
-      derive: "''"
-
-  # Hostname → uid so GetAlias can resolve idOrAlias either as the store key
-  # or as the alias string the document's path label allows.
-  deployment_alias_by_alias:
-    collection: vdepaliasby
-    id:
-      derive: >
-        ('alias' in input && input.alias != null && string(input.alias) != '') ? string(input.alias)
-          : (('idOrAlias' in input && input.idOrAlias != null) ? string(input.idOrAlias) : '')
-    record:
-      uid: "''"
-      deploymentId: "''"
-
 errors:
   BadRequest:
     code: bad_request
@@ -370,23 +349,6 @@ operations:
   # written from the document's shapes and the oracle's route behavior; where
   # the two disagree the document wins and `quirks` says so.
 
-  ListDeploymentAliases:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-    list:
-      resource: deployment_alias
-      member: aliases
-      filter: "item.deploymentId == string(dep.uid)"
-    output:
-      # The oracle answers {uid, alias, deploymentId, projectId}; the
-      # document's item shape declares uid and alias but neither id, so the
-      # projection answers the two a reader of the document can rely on. The
-      # document also requires a `created` the oracle never sends; it is
-      # omitted, as the oracle omits it.
-      aliases: "items.map(a, {'uid': a.uid, 'alias': a.alias, 'created': a.created})"
-
   ListPromoteAliases:
     reads:
       # The label is spelled `projectId`, as RequestPromote's is, so the index
@@ -641,64 +603,6 @@ operations:
 
   # --- CI/CD surface beyond emulate's 52 routes ---
 
-  AssignAlias:
-    reads:
-      dep: { resource: deployment }
-    require:
-      - { cond: dep_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: "'alias' in input && input.alias != null && string(input.alias) != ''", error: BadRequest, message: "Alias is required" }
-    effects:
-      - generate: { bind: als, kind: hex, bytes: 10 }
-      - put:
-          resource: deployment_alias_by_alias
-          key: "string(input.alias)"
-          record:
-            uid: "'als_' + fx.als"
-            deploymentId: "string(dep.uid)"
-      - put:
-          resource: deployment_alias
-          key: "'als_' + fx.als"
-          record:
-            uid: "'als_' + fx.als"
-            alias: "string(input.alias)"
-            deploymentId: "string(dep.uid)"
-            projectId: "string(dep.projectId)"
-            protectionBypass: "{}"
-    output:
-      uid: rec.uid
-      alias: rec.alias
-
-  ListAliases:
-    list: { resource: deployment_alias, member: aliases }
-    output:
-      pagination: "{'count': size(items), 'next': null, 'prev': null}"
-
-  GetAlias:
-    reads:
-      # by_alias before found: reads resolve in name order when equally ready,
-      # and the key expression of found needs by_alias_found already bound.
-      by_alias: { resource: deployment_alias_by_alias, key: "string(input.idOrAlias)" }
-      found:
-        resource: deployment_alias
-        key: "by_alias_found ? string(by_alias.uid) : string(input.idOrAlias)"
-    require:
-      - { cond: found_found, error: NotFound, message: "The requested resource was not found." }
-    output:
-      uid: found.uid
-      alias: found.alias
-      deploymentId: found.deploymentId
-
-  DeleteAlias:
-    reads:
-      als: { resource: deployment_alias, key: "string(input.aliasId)" }
-    require:
-      - { cond: als_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - delete: { resource: deployment_alias_by_alias, key: "string(als.alias)", missing: ignore }
-      - delete: { resource: deployment_alias, key: "string(als.uid)" }
-    output:
-      status: "'SUCCESS'"
-
   PatchUrlProtectionBypass:
     reads:
       als: { resource: deployment_alias, key: "string(input.id)" }
@@ -937,10 +841,24 @@ quirks:
       address is the oracle's 409 member_already_exists.
   - operation: ListDeploymentAliases
     note: >
-      Answers uid and alias per row. The oracle also answers deploymentId and
-      projectId, which the document's alias item shape does not declare, and
-      the document requires a `created` the oracle never sends -- the
-      projection follows the document's shape with the oracle's membership.
+      Answers uid, alias, created, redirect and protectionBypass per row, the
+      document's item shape, oldest first. The oracle also answers deploymentId
+      and projectId, which the document's item shape does not declare. The
+      deployment's own URL is one of the rows, as the oracle writes it.
+  - operation: AssignAlias
+    note: >
+      Needs a READY deployment (a 400 otherwise, as the document says), so a
+      client polls to READY first; the pack and the oracle took one still
+      building. A hostname that already names another deployment moves, and the
+      answer carries oldDeploymentId; naming the deployment it already names is
+      a 409. Any well-formed hostname is accepted: the document's 404 for a
+      domain the account does not hold and its 403 for a missing .vercel.app
+      alias are never answered, so a deploy script does not have to add the
+      domain first. The deployment lists the hostname in its own `alias`.
+  - operation: DeleteAlias
+    note: >
+      Removes the row and the hostname's index entry, and the deployment stops
+      listing the hostname.
   - operation: GetDeploymentEvents
     note: >
       Newest first, the oracle's default direction; `direction`, `limit`,

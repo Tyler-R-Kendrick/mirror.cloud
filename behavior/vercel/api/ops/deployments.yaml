@@ -229,7 +229,7 @@ operations:
           record:
             uid: "'als_' + fx.depid"
             alias: "pname + '-' + fx.host + '.vercel.app'"
-            created: "iso8601ms(now)"
+            deploymentUrl: "pname + '-' + fx.host + '.vercel.app'"
             deploymentId: "'dpl_' + fx.depid"
             projectId: "proj_found ? string(proj.id) : 'prj_' + fx.newproj"
       - put:
@@ -268,6 +268,8 @@ operations:
             buildingAt: "now_ms + 1000"
             readyAt: "now_ms + 2000"
             seq: { counter: "vdeploy" }
+            # The hostnames assigned to it (AssignAlias); its own URL is not one.
+            aliases: "[]"
             # Absent until a failure or a cancel puts something here; the keys
             # exist from creation so that an answer can read them.
             errorCode: "''"
@@ -329,8 +331,8 @@ operations:
       isInSystemBuildsQueue: "false"
       # A production deployment is aliased to its project's own domain once it
       # is READY, and not before.
-      alias: "(rec.__state == 'READY' && rec.target == 'production') ? [rec.projectName + '.vercel.app'] : []"
-      aliasAssigned: "rec.__state == 'READY' && rec.target == 'production'"
+      alias: "((rec.__state == 'READY' && rec.target == 'production') ? [rec.projectName + '.vercel.app'] : []) + rec.aliases"
+      aliasAssigned: "rec.__state == 'READY' && (rec.target == 'production' || size(rec.aliases) > 0)"
       aliasError: "null"
       ready: "rec.__state == 'READY' ? rec.readyAt : null"
       canceledAt: "rec.__state == 'CANCELED' ? rec.canceledAt : null"
@@ -365,7 +367,7 @@ operations:
           'readyState': string(i.__state), 'state': string(i.__state),
           'creator': i.creator, 'inspectorUrl': null, 'target': i.target,
           'meta': i.meta, 'source': i.source, 'buildingAt': i.buildingAt,
-          'aliasAssigned': i.__state == 'READY' && i.target == 'production'
+          'aliasAssigned': i.__state == 'READY' && (i.target == 'production' || size(i.aliases) > 0)
         }, i.__state == 'READY' ? {'ready': i.readyAt}
           : (i.__state == 'ERROR' ? {'errorCode': coalesce(i.errorCode, coalesce(i.failureCode, 'BUILD_FAILED'))} : {})))
       pagination: >

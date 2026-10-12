@@ -56,7 +56,10 @@ operations:
       cur:
         resource: deployment_alias_by_alias
         key: "('alias' in input && input.alias != null) ? lower(string(input.alias)) : ''"
-      dep: { resource: deployment }
+      # The deployment is named by id or by its URL: `vercel alias set` sends
+      # the URL it was given, host only, in the path (client-observed).
+      by_url: { resource: deployment_url, key: "lastSegment(string(input.id), '//')" }
+      dep: { resource: deployment, key: "by_url_found ? string(by_url.uid) : string(input.id)" }
       old:
         resource: deployment
         key: "cur_found ? string(cur.deploymentId) : ''"

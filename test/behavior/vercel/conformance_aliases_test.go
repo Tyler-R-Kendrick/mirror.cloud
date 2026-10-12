@@ -30,6 +30,11 @@ func (c *conf) aliases(t *testing.T) {
 	c.advance(3 * time.Second)
 	c.call(t, http.MethodPost, "/v3/deployments/"+second+"/aliases", map[string]any{"alias": "www.conform.dev"}, 200)
 	c.call(t, http.MethodPost, "/v2/deployments/"+second+"/aliases", map[string]any{"alias": "app.conform.dev", "redirect": "www.conform.dev"}, 200)
+	// The CLI's address (no version, a /now/ segment), naming the deployment by
+	// the host it was given rather than by id.
+	host := str(c.call(t, http.MethodGet, "/v13/deployments/"+second, nil, 200).body, "url")
+	c.call(t, http.MethodPost, "/now/deployments/"+host+"/aliases", map[string]any{"alias": "cli.conform.dev"}, 200)
+	c.call(t, http.MethodGet, "/v3/now/aliases?limit=20", nil, 200)
 
 	// Listed and read at each version.
 	c.call(t, http.MethodGet, "/v4/aliases", nil, 200)

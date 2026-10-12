@@ -27,6 +27,7 @@ func (c *conf) customEnvironments(t *testing.T) {
 	c.call(t, http.MethodPost, base, map[string]any{"description": "no slug"}, 400)
 	c.call(t, http.MethodPost, "/v9/projects/prj_nope/custom-environments", map[string]any{"slug": "x"}, 404)
 	c.call(t, http.MethodGet, base, nil, 200)
+	c.call(t, http.MethodGet, "/projects/"+pid+"/custom-environments", nil, 200) // the CLI's address, no version
 	c.call(t, http.MethodGet, base+"/staging", nil, 200)
 	c.call(t, http.MethodGet, base+"/"+id, nil, 200)
 	c.call(t, http.MethodGet, base+"/nope", nil, 404)

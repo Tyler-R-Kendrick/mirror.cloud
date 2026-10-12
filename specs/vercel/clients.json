@@ -198,6 +198,41 @@
       "operation": "CreateEdgeConfigToken",
       "uris": ["/v1/edge-config/{edgeConfigId}/token"],
       "source": "the address the API serves and its own descriptions use; the vendored document spells every Edge Config route with the product's former name, /v1/global-config, which also answers"
+    },
+    {
+      "operation": "GetProjects",
+      "uris": ["/v9/projects"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel project ls` sends GET /v9/projects?limit=20; the document declares /v10."
+    },
+    {
+      "operation": "GetProjectsByIdOrNameCustomEnvironments",
+      "uris": ["/projects/{idOrName}/custom-environments"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel env add|ls|rm` and `vercel deploy` send GET /projects/{id}/custom-environments with no version segment at all."
+    },
+    {
+      "operation": "DeleteProject",
+      "uris": ["/projects/{idOrName}"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel remove` sends DELETE /projects/{id} with no version segment; it treats a 404 as already removed, so the project stayed."
+    },
+    {
+      "operation": "GetTeam",
+      "uris": ["/teams/{teamId}"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel ls` sends GET /teams/{orgId}?teamId={orgId} with no version segment, for a personal account's own id too."
+    },
+    {
+      "operation": "GetDeploymentEvents",
+      "uris": ["/v3/now/deployments/{idOrUrl}/events"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel deploy` polls GET /v3/now/deployments/{id}/events?direction=forward&follow=1&format=lines while it waits; the document declares /v3/deployments/{idOrUrl}/events."
+    },
+    {
+      "operation": "AssignAlias",
+      "uris": ["/now/deployments/{id}/aliases"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel alias set` sends POST /now/deployments/{host}/aliases with no version segment, naming the deployment by its URL."
+    },
+    {
+      "operation": "ListAliases",
+      "uris": ["/v3/now/aliases"],
+      "source": "Client-observed: vercel CLI 63.1.2 (node v22.22.0, linux x64), recorded by a proxy in front of the emulator (test/behavior/vercel/testdata/clients/vercel-cli-63.1.2/). Not observed against api.vercel.com. `vercel alias ls` sends GET /v3/now/aliases?limit=20."
     }
   ]
 }

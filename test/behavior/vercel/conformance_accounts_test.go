@@ -29,6 +29,8 @@ func (c *conf) accounts(t *testing.T) {
 	c.call(t, http.MethodGet, "/v2/teams/"+id, nil, 200)
 	c.call(t, http.MethodGet, "/v2/teams/acme", nil, 200)
 	c.call(t, http.MethodGet, "/v2/teams/team_nope", nil, 404)
+	c.call(t, http.MethodGet, "/teams/"+id, nil, 200) // the CLI's address, no version
+	c.call(t, http.MethodGet, "/teams/team_nope", nil, 404)
 
 	c.call(t, http.MethodPatch, "/v2/teams/"+id, map[string]any{"name": "Acme Inc", "slug": "acme-inc", "description": "builds things"}, 200)
 	c.call(t, http.MethodPatch, "/v2/teams/"+id, map[string]any{"slug": "acme-two"}, 409)

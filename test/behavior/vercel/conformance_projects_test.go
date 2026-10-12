@@ -25,6 +25,7 @@ func (c *conf) projects(t *testing.T) {
 	c.call(t, http.MethodGet, "/v9/projects/prj_nope", nil, 404)
 
 	c.call(t, http.MethodGet, "/v10/projects", nil, 200)
+	c.call(t, http.MethodGet, "/v9/projects?limit=20", nil, 200) // `vercel project ls`
 	page := c.call(t, http.MethodGet, "/v10/projects?limit=2", nil, 200)
 	if p, _ := page.body["pagination"].(map[string]any); p["next"] == nil {
 		t.Errorf("a page of 2 of 3 has a next cursor: %s", page.raw)
@@ -37,5 +38,7 @@ func (c *conf) projects(t *testing.T) {
 
 	c.call(t, http.MethodDelete, "/v9/projects/conform-renamed", nil, 204)
 	c.call(t, http.MethodDelete, "/v9/projects/conform-renamed", nil, 404)
+	c.call(t, http.MethodDelete, "/projects/conform-v1", nil, 204) // `vercel remove`, no version
+	c.call(t, http.MethodDelete, "/projects/conform-v1", nil, 404)
 	c.call(t, http.MethodGet, "/v9/projects/"+id, nil, 404)
 }

@@ -528,6 +528,15 @@ func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
 		// versions around the document's that clients were written against.
 		// Each is named, so each is served; none is a stripped version.
 		{http.MethodPost, "/v1/projects", "CreateProject"},
+		// Client-observed (vercel CLI 63.1.2): some spell an address with no
+		// version at all, or with the old /now/ segment.
+		{http.MethodGet, "/v9/projects", "GetProjects"},
+		{http.MethodGet, "/projects/app/custom-environments", "GetProjectsByIdOrNameCustomEnvironments"},
+		{http.MethodDelete, "/projects/app", "DeleteProject"},
+		{http.MethodGet, "/teams/team_1", "GetTeam"},
+		{http.MethodGet, "/v3/now/deployments/dpl_1/events", "GetDeploymentEvents"},
+		{http.MethodPost, "/now/deployments/app-1.vercel.app/aliases", "AssignAlias"},
+		{http.MethodGet, "/v3/now/aliases", "ListAliases"},
 		{http.MethodGet, "/v9/projects/app/env", "FilterProjectEnvs"},
 		{http.MethodGet, "/v8/projects/app/env", "FilterProjectEnvs"},
 		{http.MethodGet, "/v10/projects/app/domains", "GetProjectDomains"},
@@ -546,7 +555,7 @@ func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
 	// listings at /v9 and /v10 when the alternate addresses named them: a version
 	// is served because someone wrote it down, never because it was a version.
 	for _, test := range []struct{ method, path string }{
-		{http.MethodGet, "/v9/projects"},
+		{http.MethodGet, "/v7/projects"},
 		{http.MethodGet, "/v7/projects/app/env"},
 		{http.MethodGet, "/v7/projects/app/domains"},
 		{http.MethodGet, "/v99/projects"},

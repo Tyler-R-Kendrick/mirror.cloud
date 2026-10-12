@@ -214,7 +214,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `ApproveRollingReleaseStage` | POST `/v1/projects/{idOrName}/rolling-release/approve-stage` | - | spec-validated |
 | `ArtifactExists` | HEAD `/v8/artifacts/{hash}` | - | spec-validated |
 | `ArtifactQuery` | POST `/v8/artifacts` | - | spec-validated |
-| `AssignAlias` | POST `/v2/deployments/{id}/aliases` | `/v3/deployments/{id}/aliases` | spec-validated |
+| `AssignAlias` | POST `/v2/deployments/{id}/aliases` | `/now/deployments/{id}/aliases`, `/v3/deployments/{id}/aliases` | spec-validated |
 | `BatchRemoveProjectEnv` | DELETE `/v1/projects/{idOrName}/env` | - | spec-validated |
 | `CancelDeployment` | PATCH `/v12/deployments/{id}/cancel` | - | spec-validated |
 | `CompleteRollingRelease` | POST `/v1/projects/{idOrName}/rolling-release/complete` | - | spec-validated |
@@ -238,7 +238,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `DeleteEdgeConfig` | DELETE `/v1/global-config/{edgeConfigId}` | `/v1/edge-config/{edgeConfigId}` | spec-validated |
 | `DeleteEdgeConfigSchema` | DELETE `/v1/global-config/{edgeConfigId}/schema` | `/v1/edge-config/{edgeConfigId}/schema` | spec-validated |
 | `DeleteEdgeConfigTokens` | DELETE `/v1/global-config/{edgeConfigId}/tokens` | `/v1/edge-config/{edgeConfigId}/tokens` | spec-validated |
-| `DeleteProject` | DELETE `/v9/projects/{idOrName}` | - | spec-validated |
+| `DeleteProject` | DELETE `/v9/projects/{idOrName}` | `/projects/{idOrName}` | spec-validated |
 | `DeleteProjectCheck` | DELETE `/v2/projects/{projectIdOrName}/checks/{checkId}` | - | spec-validated |
 | `DeleteRollingReleaseConfig` | DELETE `/v1/projects/{idOrName}/rolling-release/config` | - | spec-validated |
 | `DownloadArtifact` | GET `/v8/artifacts/{hash}` | - | spec-validated; the body is bytes, so only the status is held |
@@ -251,7 +251,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `GetCustomEnvironment` | GET `/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}` | - | spec-validated |
 | `GetDeployment` | GET `/v13/deployments/{idOrUrl}` | - | spec-validated |
 | `GetDeploymentCheckRun` | GET `/v2/deployments/{deploymentId}/check-runs/{checkRunId}` | - | spec-validated |
-| `GetDeploymentEvents` | GET `/v3/deployments/{idOrUrl}/events` | - | spec-validated |
+| `GetDeploymentEvents` | GET `/v3/deployments/{idOrUrl}/events` | `/v3/now/deployments/{idOrUrl}/events` | spec-validated |
 | `GetDeploymentFileContents` | GET `/v8/deployments/{id}/files/{fileId}` | - | spec-validated |
 | `GetDeployments` | GET `/v7/deployments` | - | spec-validated |
 | `GetDeploymentsV6` | GET `/v6/deployments` | - | authored (held to the supplement's schema) |
@@ -271,18 +271,18 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `GetProjectDomain` | GET `/v9/projects/{idOrName}/domains/{domain}` | `/v10/projects/{idOrName}/domains/{domain}`, `/v8/projects/{idOrName}/domains/{domain}` | spec-validated |
 | `GetProjectDomains` | GET `/v9/projects/{idOrName}/domains` | `/v10/projects/{idOrName}/domains`, `/v8/projects/{idOrName}/domains` | spec-validated |
 | `GetProjectEnv` | GET `/v1/projects/{idOrName}/env/{id}` | `/v10/projects/{idOrName}/env/{id}`, `/v8/projects/{idOrName}/env/{id}`, `/v9/projects/{idOrName}/env/{id}` | spec-validated |
-| `GetProjects` | GET `/v10/projects` | - | spec-validated |
-| `GetProjectsByIdOrNameCustomEnvironments` | GET `/v9/projects/{idOrName}/custom-environments` | - | spec-validated |
+| `GetProjects` | GET `/v10/projects` | `/v9/projects` | spec-validated |
+| `GetProjectsByIdOrNameCustomEnvironments` | GET `/v9/projects/{idOrName}/custom-environments` | `/projects/{idOrName}/custom-environments` | spec-validated |
 | `GetRegistration` | GET `/registration` | - | authored (held to the supplement's schema) |
 | `GetRollingRelease` | GET `/v1/projects/{idOrName}/rolling-release` | - | spec-validated |
 | `GetRollingReleaseBillingStatus` | GET `/v1/projects/{idOrName}/rolling-release/billing` | - | spec-validated |
 | `GetRollingReleaseConfig` | GET `/v1/projects/{idOrName}/rolling-release/config` | - | spec-validated |
 | `GetRuntimeLogs` | GET `/v1/projects/{projectId}/deployments/{deploymentId}/runtime-logs` | - | spec-validated |
-| `GetTeam` | GET `/v2/teams/{teamId}` | - | spec-validated |
+| `GetTeam` | GET `/v2/teams/{teamId}` | `/teams/{teamId}` | spec-validated |
 | `GetTeamMembers` | GET `/v3/teams/{teamId}/members` | - | spec-validated |
 | `GetTeams` | GET `/v2/teams` | `/v1/teams` | spec-validated |
 | `InviteUserToTeam` | POST `/v2/teams/{teamId}/members` | - | spec-validated |
-| `ListAliases` | GET `/v4/aliases` | `/v2/aliases`, `/v3/aliases` | spec-validated |
+| `ListAliases` | GET `/v4/aliases` | `/v2/aliases`, `/v3/aliases`, `/v3/now/aliases` | spec-validated |
 | `ListApiKeys` | GET `/v1/api-keys` | - | authored (held to the supplement's schema) |
 | `ListCheckRuns` | GET `/v2/projects/{projectIdOrName}/checks/{checkId}/runs` | - | spec-validated |
 | `ListDeploymentAliases` | GET `/v2/deployments/{id}/aliases` | `/v3/deployments/{id}/aliases` | spec-validated |

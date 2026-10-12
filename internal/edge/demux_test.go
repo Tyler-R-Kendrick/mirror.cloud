@@ -77,6 +77,7 @@ func TestDemuxTargetsAndPaths(t *testing.T) {
 		{http.MethodGet, "", "bucket.s3.us-east-1.amazonaws.com", "/key", "aws.s3"},
 		{http.MethodGet, "", "localhost", "/storage/v1/b", "gcp.storage"},
 		{http.MethodGet, "", "localhost", "/v10/projects", "vercel.api"},
+		{http.MethodGet, "", "localhost", "/v9/projects", "vercel.api"},
 		{http.MethodGet, "", "api.vercel.com", "/v13/deployments", "vercel.api"},
 		{http.MethodPost, "", "id.kv.vercel-storage.com", "/", "vercel.kv"},
 		{http.MethodGet, "", "localhost", "/client/v4/accounts/a/storage/kv/namespaces", "cloudflare.api"},
@@ -115,18 +116,20 @@ func TestDemuxTargetsAndPaths(t *testing.T) {
 
 	// A version the document does not declare is not the service's path.
 	//
-	// `GET /v9/projects` used to reach vercel.api, because the predicate that
+	// `GET /v7/projects` used to reach vercel.api, because the predicate that
 	// answered for it asked whether a path looked like `/v<digit>/` and
 	// contained `projects`. Vercel's document lists the project list at
-	// `/v10/projects` and nothing at `/v9/projects`, so the old answer was to
-	// a request Vercel itself refuses -- the same error the deleted pack's
-	// route table made by stripping the version segment before matching, which
-	// the catalog already records as a deliberate break.
+	// `/v10/projects` and nothing at `/v7/projects` -- the same error the
+	// deleted pack's route table made by stripping the version segment before
+	// matching, which the catalog already records as a deliberate break.
+	// (This list said `/v9/projects` until the real CLI was run: `vercel project
+	// ls` sends exactly that, so it is a version somebody declared, in
+	// specs/vercel/clients.json, with the observation that establishes it.)
 	//
 	// This asserts the class rather than the instance: a path that differs
 	// from a declared one only in a version nobody declared belongs to no
 	// service, and a resolver reading the model cannot invent it.
-	for _, path := range []string{"/v9/projects", "/v1/droplets", "/v3/servers"} {
+	for _, path := range []string{"/v7/projects", "/v1/droplets", "/v3/servers"} {
 		req := httptest.NewRequest(http.MethodGet, "http://localhost"+path, nil)
 		if svc := server.demux(req); svc != nil && !strings.HasPrefix(svc.ID, "aws.") {
 			t.Errorf("demux GET %s = %s; no non-AWS model declares that path", path, svc.ID)

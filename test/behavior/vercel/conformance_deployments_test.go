@@ -36,6 +36,7 @@ func (c *conf) deployments(t *testing.T) {
 	c.call(t, http.MethodGet, "/v7/deployments?limit=1", nil, 200)
 	c.call(t, http.MethodGet, "/v6/deployments", nil, 200)
 	c.call(t, http.MethodGet, "/v3/deployments/"+id+"/events", nil, 200)
+	c.call(t, http.MethodGet, "/v3/now/deployments/"+id+"/events?direction=forward&follow=1&format=lines", nil, 200)
 	c.call(t, http.MethodGet, "/v6/deployments/"+id+"/files", nil, 200)
 	c.call(t, http.MethodGet, "/v2/deployments/"+id+"/aliases", nil, 200)
 	c.call(t, http.MethodGet, "/v8/deployments/"+id+"/files/f_"+sha, nil, 200)

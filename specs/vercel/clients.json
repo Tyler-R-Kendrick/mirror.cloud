@@ -1,0 +1,23 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Vercel REST API — client-observed addresses",
+    "version": "authored",
+    "description": "Addresses that real Vercel clients call and the vendored document does not list. The vendored document names each endpoint once, at its newest version, while the API keeps answering the versions it superseded and the clients written against them (Vercel's own CLI creates projects at /v9 where the document says /v11). Each entry names an operation the other documents declare and the extra addresses it also answers at, with the source that establishes the claim. Every cell is `authored` provenance: a reading of what clients send, never an observation of api.vercel.com."
+  },
+  "x-mirror-service": "vercel.api",
+  "servers": [{ "url": "https://api.vercel.com" }],
+  "paths": {},
+  "x-mirror-aliases": [
+    {
+      "operation": "CreateProject",
+      "uris": ["/v9/projects", "/v10/projects"],
+      "source": "vercel CLI project create; deploy-platform REST providers calling POST /v9/projects"
+    },
+    {
+      "operation": "GetTeams",
+      "uris": ["/v1/teams"],
+      "source": "vercel CLI 'Loading teams' (GET /v1/teams)"
+    }
+  ]
+}

@@ -53,3 +53,4 @@ aws.qldb	aws-retired/qldb-2019-01-02.json	https://raw.githubusercontent.com/aws/
 aws.appsync	appsync-graphql.json	authored
 aws.es	es-dataplane.json	authored
 aws.timestream	timestream-query.json	authored
+vercel.api	vercel/clients.json	authored

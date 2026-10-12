@@ -125,27 +125,27 @@ func TestRealClientFixturesReplay(t *testing.T) {
 			}
 			v := newVXWith(t, "vercel-client-fixtures", []string{"vercel.api", "aws.s3"})
 			vars := map[string]string{}
-			sub := func(s string) string {
-				return fxVar.ReplaceAllStringFunc(s, func(m string) string {
-					name := fxVar.FindStringSubmatch(m)[1]
-					val, ok := vars[name]
-					if !ok {
-						t.Fatalf("%s uses {{%s}}, which no earlier step captured", file, name)
-					}
-					return val
-				})
-			}
 			for i, step := range fx.Steps {
 				t.Run(strconv.Itoa(i+1)+" "+step.Name, func(t *testing.T) {
-					fxRun(t, v, step, vars, sub)
+					fxRun(t, v, step, vars)
 				})
 			}
 		})
 	}
 }
 
-func fxRun(t *testing.T, v *vx, step fxStep, vars map[string]string, sub func(string) string) {
+func fxRun(t *testing.T, v *vx, step fxStep, vars map[string]string) {
 	t.Helper()
+	sub := func(s string) string {
+		return fxVar.ReplaceAllStringFunc(s, func(m string) string {
+			name := fxVar.FindStringSubmatch(m)[1]
+			val, ok := vars[name]
+			if !ok {
+				t.Fatalf("%s uses {{%s}}, which no earlier step captured", step.Name, name)
+			}
+			return val
+		})
+	}
 	if step.Advance != "" {
 		d, err := time.ParseDuration(step.Advance)
 		if err != nil {
@@ -194,7 +194,7 @@ func fxRun(t *testing.T, v *vx, step fxStep, vars map[string]string, sub func(st
 	}
 	for path, want := range step.Want.Equals {
 		got, ok := fxGet(doc, path)
-		if !ok || strings.TrimSpace(printJSON(got)) != want {
+		if want = sub(want); !ok || strings.TrimSpace(printJSON(got)) != want {
 			t.Errorf("%s: %s = %v, want %q", label, path, got, want)
 		}
 	}

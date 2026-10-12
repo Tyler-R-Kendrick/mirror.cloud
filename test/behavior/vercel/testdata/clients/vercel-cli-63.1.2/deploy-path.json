@@ -430,6 +430,55 @@
       }
     },
     {
+      "name": "inspect: deployment by URL",
+      "note": "a deployment is read by its host as well as its id",
+      "request": {
+        "method": "GET",
+        "path": "/v13/deployments/{{deploymentHost}}",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id",
+          "url",
+          "readyState"
+        ],
+        "equals": {
+          "id": "{{deploymentId}}"
+        }
+      }
+    },
+    {
+      "name": "inspect: builds",
+      "note": "`vercel inspect` asks for a version 2 deployment's builds; the document does not list the address",
+      "request": {
+        "method": "GET",
+        "path": "/v11/deployments/{{deploymentId}}/builds",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "builds"
+        ]
+      }
+    },
+    {
       "name": "remove: project by name",
       "request": {
         "method": "GET",

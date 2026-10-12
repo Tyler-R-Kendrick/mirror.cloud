@@ -564,6 +564,41 @@
           }
         }
       }
+    },
+    "/v11/deployments/{deploymentId}/builds": {
+      "get": {
+        "operationId": "GetDeploymentBuilds",
+        "description": "The builds of a deployment. The pinned document does not list it; `vercel inspect` reads it (vercel 63.1.2 asks GET /v11/deployments/{id}/builds for a version 2 deployment) and cannot print a deployment without it. Nothing builds here, so the list is empty.",
+        "parameters": [
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "listed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementDeploymentBuilds"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -927,6 +962,31 @@
           },
           "timeToReady": {
             "type": "number"
+          }
+        }
+      },
+      "SupplementDeploymentBuilds": {
+        "type": "object",
+        "required": [
+          "builds"
+        ],
+        "properties": {
+          "builds": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "entrypoint": {
+                  "type": "string"
+                },
+                "readyState": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }

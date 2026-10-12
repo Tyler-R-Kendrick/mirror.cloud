@@ -33,6 +33,8 @@ func (c *conf) deployments(t *testing.T) {
 	c.call(t, http.MethodGet, "/v13/deployments/"+id, nil, 200)
 	c.call(t, http.MethodGet, "/v13/deployments/"+url.PathEscape("https://"+host), nil, 200)
 	c.call(t, http.MethodGet, "/v13/deployments/dpl_nope", nil, 404)
+	c.call(t, http.MethodGet, "/v11/deployments/"+id+"/builds", nil, 200) // `vercel inspect`
+	c.call(t, http.MethodGet, "/v11/deployments/dpl_nope/builds", nil, 404)
 	c.call(t, http.MethodGet, "/v7/deployments?limit=1", nil, 200)
 	c.call(t, http.MethodGet, "/v6/deployments", nil, 200)
 	c.call(t, http.MethodGet, "/v3/deployments/"+id+"/events", nil, 200)

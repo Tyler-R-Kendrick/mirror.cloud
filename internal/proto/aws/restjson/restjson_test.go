@@ -537,6 +537,7 @@ func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
 		{http.MethodGet, "/v3/now/deployments/dpl_1/events", "GetDeploymentEvents"},
 		{http.MethodPost, "/now/deployments/app-1.vercel.app/aliases", "AssignAlias"},
 		{http.MethodGet, "/v3/now/aliases", "ListAliases"},
+		{http.MethodGet, "/v11/deployments/dpl_1/builds", "GetDeploymentBuilds"},
 		{http.MethodGet, "/v9/projects/app/env", "FilterProjectEnvs"},
 		{http.MethodGet, "/v8/projects/app/env", "FilterProjectEnvs"},
 		{http.MethodGet, "/v10/projects/app/domains", "GetProjectDomains"},

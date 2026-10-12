@@ -452,6 +452,18 @@ operations:
   # state it has not reached has no event yet, and the instants are the ones
   # the build timers move it at. What a build prints is not Vercel's output,
   # only lines in the shape its clients print.
+  # `vercel inspect` reads a deployment's builds (client-observed, vercel
+  # 63.1.2). Nothing builds here, so there are none to list; the deployment still
+  # has to exist.
+  GetDeploymentBuilds:
+    reads:
+      by_url: { resource: deployment_url, key: "lastSegment(string(input.deploymentId), '//')" }
+      rec: { resource: deployment, key: "by_url_found ? string(by_url.uid) : string(input.deploymentId)" }
+    require:
+      - { cond: rec_found, error: NotFound, message: "Deployment not found" }
+    output:
+      builds: "[]"
+
   GetDeploymentEvents:
     reads: *by_id_or_url
     let:

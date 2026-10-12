@@ -250,6 +250,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `GetCheck` | GET `/v1/deployments/{deploymentId}/checks/{checkId}` | - | spec-validated |
 | `GetCustomEnvironment` | GET `/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}` | - | spec-validated |
 | `GetDeployment` | GET `/v13/deployments/{idOrUrl}` | - | spec-validated |
+| `GetDeploymentBuilds` | GET `/v11/deployments/{deploymentId}/builds` | - | authored (held to the supplement's schema) |
 | `GetDeploymentCheckRun` | GET `/v2/deployments/{deploymentId}/check-runs/{checkRunId}` | - | spec-validated |
 | `GetDeploymentEvents` | GET `/v3/deployments/{idOrUrl}/events` | `/v3/now/deployments/{idOrUrl}/events` | spec-validated |
 | `GetDeploymentFileContents` | GET `/v8/deployments/{id}/files/{fileId}` | - | spec-validated |

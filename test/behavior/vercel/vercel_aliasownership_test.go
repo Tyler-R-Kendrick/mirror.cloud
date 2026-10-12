@@ -91,6 +91,20 @@ func TestVercelAliasNeedsADomainTheAccountHolds(t *testing.T) {
 		refused(t, aliasAt(v, "v2", dep, "other.owned.dev"), "other.owned.dev")
 	})
 
+	t.Run("Given a project holds a hostname it has not verified When aliased at it Then accepted: holding is a record, not a proof of ownership", func(t *testing.T) {
+		pid := str(v.do(http.MethodGet, "/v9/projects/site", nil).body, "id")
+		added := v.do(http.MethodPost, "/v10/projects/"+pid+"/domains", map[string]any{"name": "www.google.com"})
+		if added.status != 200 || added.body["verified"] != false {
+			t.Fatalf("add project domain = %d %s, want an unverified one", added.status, added.raw)
+		}
+		if r := aliasAt(v, "v2", dep, "www.google.com"); r.status != 200 {
+			t.Errorf("alias at an unverified project domain = %d %s: docs/VERCEL.md says it is accepted", r.status, r.raw)
+		}
+		// What the project holds is that name, not what lies beneath it.
+		refused(t, aliasAt(v, "v2", dep, "mail.www.google.com"), "mail.www.google.com")
+		refused(t, aliasAt(v, "v2", dep, "www.example.com"), "www.example.com")
+	})
+
 	t.Run("Given the domain is deleted When a new host under it is aliased Then it is refused again", func(t *testing.T) {
 		if r := v.do(http.MethodDelete, "/v6/domains/example.dev", nil); r.status != 200 {
 			t.Fatalf("delete domain = %d %s", r.status, r.raw)

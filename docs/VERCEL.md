@@ -104,7 +104,9 @@ once it is ready.
 A hostname is the account's to alias only if it holds the domain: a `*.vercel.app` name
 needs none, and any other host must be a domain of the account, sit under one (the apex,
 which is the last two labels, three under the ccTLD second levels `apexOf` knows), or be a
-hostname one of its projects holds. Otherwise the answer is the document's `404` ("The
+hostname one of its projects holds. "Holds" means only that a record exists: the domain need
+not be verified and nothing proves the account owns the name (see Known gaps, Domains), so a
+project given `www.google.com` can alias at that name. Otherwise the answer is the document's `404` ("The
 domain used for the alias was not found"), under the code `domain_not_found`, which the
 document does not name: the CLI itself lists it beside `invalid_domain` for a domain the
 account cannot use, which makes it a reasoned choice and not an observed one. The check comes after the
@@ -506,8 +508,10 @@ compared with api.vercel.com.
   route itself refuses an unheld hostname, and `vercel alias set` to a `*.vercel.app` name
   or to a domain the account holds reaches it.
 - **Domains.** A domain is never resolved: verifying a project domain takes the TXT
-  challenge as met, there is no DNS to ask, and a held domain counts for an alias whether
-  or not it is verified. A domain still on a project is deleted all the same; the CLI knows a
+  challenge as met and there is no DNS to ask. Holding a domain means only that the
+  account has a record of it, so an alias is accepted under a domain, or at a project
+  hostname such as `www.google.com`, whether or not it is verified and whoever owns the
+  name. A domain still on a project is deleted all the same; the CLI knows a
   `domain_removal_conflict` that nothing raises. `domains add --force` falls back on
   `GET /project-domains/{domain}` when the error does not name the holder; the error
   always does, so that address is not served. An alias target's members beyond `domain`,

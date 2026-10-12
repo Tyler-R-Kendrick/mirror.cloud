@@ -25,7 +25,14 @@ const clientDirEnv = "MIRROR_VERCEL_CLIENT_DIR"
 // It needs a directory with node_modules holding the `vercel` package (for the
 // CLI journey) and `@vercel/sdk` (for the SDK one), and `node` on the PATH.
 // test/vercel-clients holds the two scripts; docs/VERCEL.md says how to
-// install the toolchain.
+// install the toolchain and which versions the journeys were run against
+// (vercel 63.1.2, @vercel/sdk 1.28.43). Each one is checked against the version
+// it was written for, because the SDK validates against a schema generated from
+// a particular revision of Vercel's document.
+//
+// What the clients sent when they were first run against the emulator is kept
+// as fixtures (testdata/clients) and replayed by TestRealClientFixturesReplay,
+// which needs neither node nor the clients.
 func TestVercelsOwnClientsDeploy(t *testing.T) {
 	dir := os.Getenv(clientDirEnv)
 	if dir == "" {

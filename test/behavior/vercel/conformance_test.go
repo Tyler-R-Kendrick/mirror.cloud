@@ -3,6 +3,7 @@ package vercel
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"testing"
@@ -141,12 +142,18 @@ func (c *conf) call(t *testing.T, method, path string, body any, want int, heade
 	c.note(op, path, r.status)
 	var inst any
 	hasJSON := len(r.raw) > 0 && json.Unmarshal(r.raw, &inst) == nil
-	if r.status >= 400 {
+	if r.status >= 400 && method != http.MethodHead {
+		// A HEAD answer has no body to hold to an envelope.
 		c.checkEnvelope(t, label, op, r, inst, hasJSON)
 	}
 	if op.doc != nil {
 		schema, declared := op.doc.responseSchema(op.spec, r.status)
 		_, noBody := confNoSuccessBody[op.name]
+		if _, raw := confBinaryBody[op.name]; raw && r.status < 300 {
+			// The answer is bytes, not JSON, whatever media type the document
+			// files it under; the status is all there is to hold it to.
+			schema, declared = nil, true
+		}
 		switch {
 		case !declared && noBody && r.status < 300:
 			// The document gives this operation no success response at all, so
@@ -296,6 +303,14 @@ var confNoSuccessBody = map[string]string{
 	"GetDeploymentFileContents": "the document declares 400, 401, 403, 404 and 410 and no 200",
 }
 
+// confBinaryBody lists the operations whose success answer is the stored bytes.
+// The document files the artifact download under application/json with a binary
+// string schema (its own description says "an octet stream response"), which no
+// JSON body can satisfy; the answer is the bytes, as a client reads them.
+var confBinaryBody = map[string]string{
+	"DownloadArtifact": "the document types the answer as a binary string under application/json",
+}
+
 // pending is the reason an operation is on the ledger while the area that will
 // drive it has not landed. The ledger only shrinks: an operation driven after
 // all fails the run until its entry is deleted, and what remains when every area
@@ -304,56 +319,8 @@ const pending = "its area's conformance driver has not landed"
 
 // confUncovered names the served operations the run does not drive, and why.
 var confUncovered = map[string]string{
-	"ApproveRollingReleaseStage":              pending,
-	"ArtifactExists":                          pending,
-	"ArtifactQuery":                           pending,
-	"CompleteRollingRelease":                  pending,
-	"CreateApiKey":                            pending,
-	"CreateCheck":                             pending,
-	"CreateCustomEnvironment":                 pending,
-	"CreateDeploymentCheckRun":                pending,
-	"CreateProjectCheck":                      pending,
-	"DeleteAllArtifacts":                      pending,
-	"DeleteApiKey":                            pending,
-	"DeleteProjectCheck":                      pending,
-	"DeleteRollingReleaseConfig":              pending,
-	"DownloadArtifact":                        pending,
-	"GetAllChecks":                            pending,
-	"GetCheck":                                pending,
-	"GetCustomEnvironment":                    pending,
-	"GetDeploymentCheckRun":                   pending,
-	"GetProjectCheck":                         pending,
-	"GetProjectsByIdOrNameCustomEnvironments": pending,
-	"GetRegistration":                         pending,
-	"GetRollingRelease":                       pending,
-	"GetRollingReleaseBillingStatus":          pending,
-	"GetRollingReleaseConfig":                 pending,
-	"GetRuntimeLogs":                          pending,
-	"ListApiKeys":                             pending,
-	"ListCheckRuns":                           pending,
-	"ListDeploymentCheckRuns":                 pending,
-	"ListProjectChecks":                       pending,
-	"ListPromoteAliases":                      pending,
-	"OauthAuthorize":                          pending,
-	"OauthAuthorizeCallback":                  pending,
-	"OauthToken":                              pending,
-	"OauthUserinfo":                           pending,
-	"PatchUrlProtectionBypass":                pending,
-	"RecordEvents":                            pending,
-	"RemoveCustomEnvironment":                 pending,
-	"RequestPromote":                          pending,
-	"RequestRollback":                         pending,
-	"RerequestCheck":                          pending,
-	"StartRollingRelease":                     pending,
-	"Status":                                  pending,
-	"UpdateCheck":                             pending,
-	"UpdateCustomEnvironment":                 pending,
-	"UpdateDeploymentCheckRun":                pending,
-	"UpdateProjectCheck":                      pending,
-	"UpdateProjectProtectionBypass":           pending,
-	"UpdateProjectsByProjectIdRollbackByDeploymentIdUpdateDescription": pending,
-	"UpdateRollingReleaseConfig":                                       pending,
-	"UploadArtifact":                                                   pending,
+	"OauthAuthorize":         "answers the login page as HTML, which no JSON schema describes; TestVercelAuthParity walks the whole flow",
+	"OauthAuthorizeCallback": "answers a 302 to the redirect URI carrying the code, with no body; the auth-and-oauth area reads the Location to get a code and TestVercelAuthParity asserts the redirect",
 }
 
 func (c *conf) coverage(t *testing.T) {

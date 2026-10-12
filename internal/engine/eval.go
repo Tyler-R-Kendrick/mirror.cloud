@@ -390,8 +390,90 @@ func resourceNameOf(ir *bir.Service, want bir.Resource) string {
 // A binding that never becomes evaluable is reported with the error it kept
 // producing, so a genuine mistake reads as itself rather than as "cycle".
 func (ev *eval) evalLets(op bir.Operation) error {
-	_, err := ev.resolveLets(op.Let, "operations."+ev.req.Operation+".let.")
+	waiting := waitsOnSelect(op)
+	if len(waiting) == 0 {
+		_, err := ev.resolveLets(op.Let, "operations."+ev.req.Operation+".let.")
+		return err
+	}
+	ready := make(map[string]string, len(op.Let))
+	for n, src := range op.Let {
+		if !waiting[n] {
+			ready[n] = src
+		}
+	}
+	_, err := ev.resolveLets(ready, "operations."+ev.req.Operation+".let.")
 	return err
+}
+
+// evalSelectLets computes the lets that read the selection, once it has run.
+func (ev *eval) evalSelectLets(op bir.Operation) error {
+	waiting := waitsOnSelect(op)
+	if len(waiting) == 0 {
+		return nil
+	}
+	late := make(map[string]string, len(waiting))
+	for n := range waiting {
+		late[n] = op.Let[n]
+	}
+	_, err := ev.resolveLets(late, "operations."+ev.req.Operation+".let.")
+	return err
+}
+
+// waitsOnSelect names the lets that cannot be computed until the selection has
+// run: the ones that read its binding or its count, and the ones that read
+// those. An expression that needs the records a select gathers has nothing to
+// read before it; a bundle that wants "which of the requested names already
+// exist" as a value, to use in a precondition and again in the effects, has to
+// be able to bind it once rather than restate the comparison at every use.
+//
+// The match is on whole identifiers, so a let named `taken` is not disturbed by
+// an expression that merely contains the letters.
+func waitsOnSelect(op bir.Operation) map[string]bool {
+	if op.Select == nil {
+		return nil
+	}
+	names := []string{op.Select.Binding, op.Select.Count}
+	waiting := map[string]bool{}
+	for changed := true; changed; {
+		changed = false
+		for n, src := range op.Let {
+			if waiting[n] {
+				continue
+			}
+			for _, name := range names {
+				if name != "" && mentions(src, name) {
+					waiting[n] = true
+					names = append(names, n)
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	return waiting
+}
+
+// mentions reports whether an expression contains name as a whole identifier.
+func mentions(src, name string) bool {
+	for i := 0; ; {
+		j := strings.Index(src[i:], name)
+		if j < 0 {
+			return false
+		}
+		start, end := i+j, i+j+len(name)
+		// A leading dot makes it a member (`rec.items`), not the binding; a
+		// trailing one is a call or a field of the binding and still mentions it.
+		before := start == 0 || !identByte(src[start-1]) && src[start-1] != '.'
+		after := end == len(src) || !identByte(src[end])
+		if before && after {
+			return true
+		}
+		i = end
+	}
+}
+
+func identByte(b byte) bool {
+	return b == '_' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }
 
 // resolveLets binds a set of let expressions, resolving them by dependency
@@ -429,6 +511,17 @@ func (ev *eval) resolveLets(lets map[string]string, base string) ([]string, erro
 	return bound, nil
 }
 
+// readsSelectLet reports whether a condition reads a let that waits on the
+// selection, and so cannot be asked before it.
+func readsSelectLet(op bir.Operation, cond string) bool {
+	for n := range waitsOnSelect(op) {
+		if mentions(cond, n) {
+			return true
+		}
+	}
+	return false
+}
+
 // checkRequires evaluates preconditions in declaration order. The first
 // failure decides the error: that ordering is the service's error precedence,
 // stated as data instead of buried in the order of Go if-statements.
@@ -441,10 +534,11 @@ func (ev *eval) checkRequires(op bir.Operation, afterSelect bool) *spi.Fault {
 		// Requires that name the select binding cannot run until select has
 		// bound it (PutBlockList InvalidBlockList). Skip them on the first
 		// pass; the second pass after select evaluates every rule.
-		if !afterSelect && sel != "" && strings.Contains(req.Cond, sel) {
+		after := sel != "" && (strings.Contains(req.Cond, sel) || readsSelectLet(op, req.Cond))
+		if !afterSelect && after {
 			continue
 		}
-		if afterSelect && sel != "" && !strings.Contains(req.Cond, sel) {
+		if afterSelect && !after {
 			continue
 		}
 		base := fmt.Sprintf("operations.%s.require[%d]", ev.req.Operation, i)

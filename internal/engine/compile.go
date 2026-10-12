@@ -456,6 +456,13 @@ func runtimeFuncs() []cel.EnvOption {
 				return types.String(asciiLower(fmt.Sprint(s.Value())))
 			}))),
 
+		// apexOf answers the registrable part of a hostname. See the
+		// declaration in internal/bir/celenv.go and apex.go for its limits.
+		cel.Function("apexOf", cel.Overload("apexOf_1", []*cel.Type{str}, str,
+			cel.UnaryBinding(func(s ref.Val) ref.Val {
+				return types.String(apexOf(fmt.Sprint(s.Value())))
+			}))),
+
 		// upper is the same fold the other way. See the declaration in
 		// internal/bir/celenv.go.
 		cel.Function("upper", cel.Overload("upper_1", []*cel.Type{str}, str,

@@ -108,6 +108,11 @@ func celFuncs() []cel.EnvOption {
 		// trim is strings.TrimSpace: the oracle trims a team slug before it
 		// stores it, and CEL has no whitespace handling at all.
 		unaryDyn("trim", str, str),
+		// apexOf is the registrable part of a hostname: example.com for
+		// www.example.com. Vercel answers every domain with its apexName, and
+		// the only way to write it in CEL is to restate a list of public
+		// suffixes at every use.
+		unaryDyn("apexOf", str, str),
 
 		// Value helpers. coalesce takes the first non-empty argument, which is
 		// how behavior data expresses a documented default without branching.

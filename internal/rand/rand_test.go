@@ -67,3 +67,35 @@ func TestDeriveIndependence(t *testing.T) {
 		t.Fatal("Derive is not deterministic")
 	}
 }
+
+// TestResumeContinuesTheStream holds what a restarted process relies on: a
+// stream resumed at a recorded position goes on with the identifiers the first
+// one would have drawn next, and a stale position never rewinds it.
+func TestResumeContinuesTheStream(t *testing.T) {
+	first := rand.New("restart")
+	for i := 0; i < 5; i++ {
+		first.Hex(12)
+	}
+	pos := first.Position()
+	want := first.Hex(12)
+
+	again := rand.New("restart")
+	if again.Hex(12) == want {
+		t.Fatal("a fresh stream starts over, which is the problem Resume solves")
+	}
+	resumed := rand.New("restart")
+	resumed.Resume(pos)
+	if got := resumed.Hex(12); got != want {
+		t.Fatalf("resumed stream drew %q, want %q", got, want)
+	}
+
+	ahead := rand.New("restart")
+	for i := 0; i < 20; i++ {
+		ahead.Hex(12)
+	}
+	before := ahead.Position()
+	ahead.Resume(pos)
+	if ahead.Position() != before {
+		t.Fatalf("a stale position rewound the stream from %d to %d", before, ahead.Position())
+	}
+}

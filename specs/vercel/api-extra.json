@@ -287,48 +287,6 @@
         }
       }
     },
-    "/v10/projects/{idOrName}/env/{id}": {
-      "get": {
-        "operationId": "GetProjectEnv",
-        "parameters": [
-          {
-            "name": "idOrName",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "the variable",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SupplementEnvVar"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/oauth/authorize": {
       "get": {
         "operationId": "OauthAuthorize",
@@ -735,35 +693,6 @@
           },
           "pagination": {
             "type": "object"
-          }
-        }
-      },
-      "SupplementEnvVar": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "key": {
-            "type": "string"
-          },
-          "value": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          },
-          "target": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "createdAt": {
-            "type": "integer"
-          },
-          "updatedAt": {
-            "type": "integer"
           }
         }
       },

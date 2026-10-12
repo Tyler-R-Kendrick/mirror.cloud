@@ -1411,18 +1411,18 @@
     {
       "serviceId": "vercel.api",
       "source": "authored",
-      "ref": "2026-09-18T18:20:01Z",
+      "ref": "2026-10-11T22:07:42Z",
       "path": "vercel/api-extra.json",
-      "sha256": "3543f5f7785fc1bf7b5b44e840783eea5a5eec9942097f6874d076f8637cb0b9",
-      "ingested": "2026-09-18T18:20:01Z"
+      "sha256": "58a64f1bb3a61c533852aa60bdcb3cf3284340c0ca4ae6351c516219772e39a8",
+      "ingested": "2026-10-11T22:07:42Z"
     },
     {
       "serviceId": "vercel.api",
       "source": "authored",
-      "ref": "2026-09-18T18:20:01Z",
+      "ref": "2026-10-11T22:07:42Z",
       "path": "vercel/api-extra.json",
-      "sha256": "3543f5f7785fc1bf7b5b44e840783eea5a5eec9942097f6874d076f8637cb0b9",
-      "ingested": "2026-09-18T18:20:01Z"
+      "sha256": "58a64f1bb3a61c533852aa60bdcb3cf3284340c0ca4ae6351c516219772e39a8",
+      "ingested": "2026-10-11T22:07:42Z"
     },
     {
       "serviceId": "vercel.api",
@@ -1443,10 +1443,10 @@
     {
       "serviceId": "vercel.api",
       "source": "authored",
-      "ref": "2026-10-11T21:50:52Z",
+      "ref": "2026-10-11T22:07:42Z",
       "path": "vercel/clients.json",
-      "sha256": "82e0fb4ad7da55a80f7e08ae40607fe6584b0c268ffa6ff00e5520cf99b87a55",
-      "ingested": "2026-10-11T21:50:52Z"
+      "sha256": "b0b9cb70048f5a68dd7bc6c25fbb884351cc236fa0d9c74fb798a9708c0994ca",
+      "ingested": "2026-10-11T22:07:42Z"
     },
     {
       "serviceId": "vercel.api",

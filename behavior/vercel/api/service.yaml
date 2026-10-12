@@ -17,22 +17,6 @@ provenance: authored
 missing_input_error: BadRequest
 
 resources:
-  env:
-    # Parent-scoped: each project's variables are their own collection, as the
-    # pack's `<project id>/<env id>` key prefix was.
-    collection: "venv:{project.id}"
-    parent: project
-    key: id
-    id:
-      generate: { kind: hex, bytes: 10 }
-      input_members: [id]
-    record:
-      # Input-independent for the same reason the project's is: EditProjectEnv
-      # patches this resource, and `key`/`value`/`type`/`target` read from
-      # `input` would reset to their defaults on any edit that omits them.
-      # They live on the create effect instead.
-      id: "'env_' + id"
-
   domain:
     collection: "vdom:{project.id}"
     parent: project
@@ -158,6 +142,13 @@ errors:
     code: missing_files
     http: 400
     fault: client
+  # A variable that already exists for the same key, target and branch. Vercel's
+  # CLI reads the code to ask whether to overwrite, and the envelope carries the
+  # key and targets it conflicts on.
+  EnvConflict:
+    code: ENV_CONFLICT
+    http: 409
+    fault: client
   # The oracle's invite route answers a second 409 under its own code; the
   # generic Conflict stays for project names.
   MemberAlreadyExists:
@@ -186,103 +177,6 @@ errors:
     fault: client
 
 operations:
-  FilterProjectEnvs:
-    reads:
-      # Two reads, not three, and in this order because reads resolve in
-      # dependency order and `by_name` sorts first: the index answers whether
-      # `idOrName` is a name, and the project read prefers what it found over
-      # the raw input. The pack did the same lookup in Go -- key, then name
-      # index, then the id the index pointed at.
-      #
-      # One read of `project` rather than one per spelling, because a
-      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
-      # resolves against whichever read of `project` ran last, so two of them
-      # make a child's collection depend on alphabetical order. That is how the
-      # environment and domain operations failed to see a project addressed by
-      # name at all.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-    # No `pagination`. The document declares the member, but the pack answered
-    # it only from the two unscoped listings -- projects and deployments -- and
-    # not from the two scoped ones. A member the document permits and the pack
-    # never sent is not evidence of anything, so it is not sent.
-    list: { resource: env, member: envs }
-
-  CreateProjectEnv:
-    reads:
-      # Two reads, not three, and in this order because reads resolve in
-      # dependency order and `by_name` sorts first: the index answers whether
-      # `idOrName` is a name, and the project read prefers what it found over
-      # the raw input. The pack did the same lookup in Go -- key, then name
-      # index, then the id the index pointed at.
-      #
-      # One read of `project` rather than one per spelling, because a
-      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
-      # resolves against whichever read of `project` ran last, so two of them
-      # make a child's collection depend on alphabetical order. That is how the
-      # environment and domain operations failed to see a project addressed by
-      # name at all.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: "'key' in input && input.key != null && string(input.key) != ''", error: BadRequest, message: "Env key is required" }
-    effects:
-      # `key`, `value`, `type` and `target` live here rather than on the
-      # resource: the resource record must stay input-independent because
-      # EditProjectEnv's patch re-evaluates it.
-      - create:
-          resource: env
-          record:
-            key: "string(input.key)"
-            value: "('value' in input && input.value != null) ? string(input.value) : ''"
-            type: "('type' in input && input.type != null) ? string(input.type) : 'encrypted'"
-            target: >
-              ('target' in input && input.target != null) ? input.target
-                : ['production', 'preview', 'development']
-    output:
-      # The document declares {created, failed} for this operation where the
-      # pack answered the variable itself -- see the quirk.
-      created: rec
-      failed: "[]"
-
-  RemoveProjectEnv:
-    reads:
-      # Two reads, not three, and in this order because reads resolve in
-      # dependency order and `by_name` sorts first: the index answers whether
-      # `idOrName` is a name, and the project read prefers what it found over
-      # the raw input. The pack did the same lookup in Go -- key, then name
-      # index, then the id the index pointed at.
-      #
-      # One read of `project` rather than one per spelling, because a
-      # parent-scoped child names its parent by RESOURCE name: `venv:{project.id}`
-      # resolves against whichever read of `project` ran last, so two of them
-      # make a child's collection depend on alphabetical order. That is how the
-      # environment and domain operations failed to see a project addressed by
-      # name at all.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      variable: { resource: env }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: variable_found, error: NotFound, message: "The requested resource was not found." }
-    effects:
-      - delete: { resource: env }
-
   GetProjectDomains:
     reads:
       # Two reads, not three, and in this order because reads resolve in
@@ -345,47 +239,11 @@ operations:
       createdAt: rec.createdAt
       updatedAt: rec.updatedAt
 
-  # The twelve below have no pack behind them: the pack never served them, so
+  # The ones below have no pack behind them: the pack never served them, so
   # there was nothing to transcribe. Each is written from the document alone
   # -- its path, its declared response members, its status -- and keeps to the
   # state the fourteen above establish. Where the document is thin the
   # behavior is minimal and `quirks` says so.
-
-  EditProjectEnv:
-    reads:
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      variable: { resource: env }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: variable_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: "!('key' in input) || input.key == null || string(input.key) != ''", error: BadRequest, message: "Env key is required" }
-    effects:
-      # One patch, every member falling back to what the read found: a member
-      # the request did not carry keeps its value. `id` is explicit for the
-      # reason UpdateProject's is.
-      - patch:
-          resource: env
-          # Explicit key, as UpdateProject's: here `input.id` happens to be
-          # the store key already, but the write should address the record the
-          # operation read, not re-derive one from the request.
-          key: "string(variable.id)"
-          record:
-            id: id
-            key: "('key' in input && input.key != null) ? string(input.key) : string(variable.key)"
-            value: "('value' in input && input.value != null) ? string(input.value) : string(variable.value)"
-            type: "('type' in input && input.type != null) ? string(input.type) : string(variable.type)"
-            target: "('target' in input && input.target != null) ? input.target : variable.target"
-    output:
-      id: rec.id
-      key: rec.key
-      value: rec.value
-      type: rec.type
-      target: rec.target
 
   GetProjectDomain:
     reads:
@@ -844,30 +702,6 @@ operations:
     output:
       registration: "false"
 
-  GetProjectEnv:
-    reads:
-      # The project's two-spelling resolution, the same as every other env
-      # operation: the parent scope names project.id, which nothing resolves
-      # unless the project is read.
-      by_name: { resource: project_name }
-      proj:
-        resource: project
-        key: >
-          by_name_found ? string(by_name.project)
-            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
-      v: { resource: env }
-    require:
-      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
-      - { cond: v_found, error: NotFound, message: "Environment Variable not found" }
-    output:
-      id: v.id
-      key: "('key' in v) ? v.key : null"
-      value: "('value' in v) ? v.value : null"
-      type: "('type' in v) ? v.type : null"
-      target: "('target' in v) ? v.target : null"
-      createdAt: "('createdAt' in v) ? v.createdAt : null"
-      updatedAt: "('updatedAt' in v) ? v.updatedAt : null"
-
   CreateApiKey:
     require:
       - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
@@ -1148,13 +982,35 @@ quirks:
       body gets none -- the rule is the protocol's, not this provider's.
   - operation: CreateProjectEnv
     note: >
-      Answers {created, failed} where the pack answered the variable itself at
-      the top level. The document declares those two members and the operation
-      is bulk-shaped: `created` carries what was made, `failed` what was not.
-      One variable at a time is what the pack did and what this transcribes, so
-      `failed` is always empty.
+      Answers {created, failed}, as the document declares, and 201. The pack
+      answered the variable itself at the top level, one at a time.
 
-      Answers 201, where the pack answered 200.
+      The body is one variable or an array of them. A variable that exists for
+      the same key, target and git branch is refused: a single variable with a
+      409 ENV_CONFLICT (the code the CLI reads to ask whether to overwrite, with
+      the key and targets in the envelope), a batch by listing it under
+      `failed` and making the rest. ?upsert=true updates it instead. What the
+      API shows of a value depends on the type: plain and secret as set,
+      encrypted opaque unless ?decrypt=true or the variable is addressed by id,
+      sensitive never (its digest is kept, its value is not, so a snapshot holds
+      no secret). The opaque form is a base64 document naming the digest; real
+      Vercel's is a ciphertext, which nothing a client does can tell apart.
+  - operation: FilterProjectEnvs
+    note: >
+      Lists in creation order, where the pack listed by store key (a random
+      identifier). The document does not say what order it lists in; creation
+      order is the one a snapshot can reproduce. `gitBranch` narrows to the
+      variables set for that branch and those set for none. `source`,
+      `customEnvironmentId` and `customEnvironmentSlug` are accepted and read by
+      nothing.
+  - operation: GetProjectEnv
+    note: >
+      The document declares this at /v1; the vendored fragment and the pack's
+      supplement disagreed about the version, and the supplement's /v10 is an
+      address of the same operation now, with /v9 and /v8, so a client written
+      against any of them reaches the one store. The pack's supplement answered
+      five members; the document's variable carries the rest. Addressed by id,
+      an encrypted value is shown decrypted.
   - operation: AddProjectDomain
     note: >
       The pack answered a domain verified the moment it was added, and the
@@ -1187,10 +1043,11 @@ quirks:
       nothing about which an update must honor.
   - operation: EditProjectEnv
     note: >
-      `comment`, `gitBranch` and `customEnvironmentIds` are accepted and
-      dropped: the variable record carries only what CreateProjectEnv
-      establishes (key, value, type, target), and the document declares the
-      members without saying what an edit must do with them.
+      Honors key, value, type, target, gitBranch, comment and
+      customEnvironmentIds; a member the request leaves out keeps its value. An
+      edit that would land on another variable's key, target and branch is a 409
+      ENV_CONFLICT. The pack carried only key, value, type and target. A value
+      is shown decrypted because the variable is addressed by id.
   - operation: UpdateProjectDomain
     note: >
       The document declares a 409 for this operation without saying what

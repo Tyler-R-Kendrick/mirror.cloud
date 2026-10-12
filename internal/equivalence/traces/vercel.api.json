@@ -593,28 +593,50 @@
       "output": {
         "envs": [
           {
-            "id": "env_33f6fc5d83",
-            "key": "REGION",
-            "target": [
-              "production"
-            ],
-            "type": "plain",
-            "value": "iad1"
-          },
-          {
+            "comment": "",
+            "configurationId": null,
+            "createdAt": 0,
+            "createdBy": "usr_000000000000",
+            "customEnvironmentIds": [],
             "id": "env_9c8e2cb007",
             "key": "TOKEN",
+            "securityIssues": [],
             "target": [
               "production",
               "preview",
               "development"
             ],
             "type": "encrypted",
-            "value": "s3cret"
+            "updatedAt": 0,
+            "updatedBy": "usr_000000000000",
+            "value": "eyJ2IjoibWlycm9yIiwiaCI6ImU5MmM4YjhjNjZlOWE4NTgzODUyOTY2N2QyZmUxMTUwNmNhOGQ5ZDM2MmRjNzE5OWQxYWU1ZWNjN2MwNWZkYmQifQ=="
+          },
+          {
+            "comment": "",
+            "configurationId": null,
+            "createdAt": 0,
+            "createdBy": "usr_000000000000",
+            "customEnvironmentIds": [],
+            "id": "env_33f6fc5d83",
+            "key": "REGION",
+            "securityIssues": [],
+            "target": [
+              "production"
+            ],
+            "type": "plain",
+            "updatedAt": 0,
+            "updatedBy": "usr_000000000000",
+            "value": "iad1"
           }
-        ]
+        ],
+        "pagination": {
+          "count": 2,
+          "next": null,
+          "prev": null
+        }
       },
-      "recorded_as": "ListProjectEnv"
+      "recorded_as": "ListProjectEnv",
+      "recut": "The vendored document's variable (specs/vercel/api.json, GET /v10/projects/{idOrName}/env) is what a client generated from it reads: it carries comment, createdAt, updatedAt, createdBy, updatedBy, configurationId and customEnvironmentIds beside the pack's key, type, target and value, and the listing answers its pagination. An encrypted variable is listed opaque unless ?decrypt=true asks, as the document describes, so TOKEN's value is no longer the plaintext. The listing is in creation order where the pack listed by store key, a random identifier no client can rely on."
     },
     {
       "operation": "FilterProjectEnvs",
@@ -629,9 +651,15 @@
         "Project": ""
       },
       "output": {
-        "envs": []
+        "envs": [],
+        "pagination": {
+          "count": 0,
+          "next": null,
+          "prev": null
+        }
       },
-      "recorded_as": "ListProjectEnv"
+      "recorded_as": "ListProjectEnv",
+      "recut": "As step 16: the listing of a project with no variables answers its pagination ({count: 0, next: null, prev: null})."
     },
     {
       "operation": "RemoveProjectEnv",
@@ -652,7 +680,27 @@
         "ARN": "",
         "Project": ""
       },
-      "recorded_as": "DeleteProjectEnv"
+      "output": {
+        "comment": "",
+        "configurationId": null,
+        "createdAt": 0,
+        "createdBy": "usr_000000000000",
+        "customEnvironmentIds": [],
+        "decrypted": true,
+        "id": "env_9c8e2cb007",
+        "key": "TOKEN",
+        "target": [
+          "production",
+          "preview",
+          "development"
+        ],
+        "type": "encrypted",
+        "updatedAt": 0,
+        "updatedBy": "usr_000000000000",
+        "value": "s3cret"
+      },
+      "recorded_as": "DeleteProjectEnv",
+      "recut": "As step 16: DELETE /v9/projects/{idOrName}/env/{id} answers the variable that was removed (the document's removeProjectEnv response) where the pack answered an empty object. Addressed by id, an encrypted value is shown decrypted and marked so."
     },
     {
       "operation": "RemoveProjectEnv",
@@ -698,17 +746,31 @@
       "output": {
         "envs": [
           {
+            "comment": "",
+            "configurationId": null,
+            "createdAt": 0,
+            "createdBy": "usr_000000000000",
+            "customEnvironmentIds": [],
             "id": "env_33f6fc5d83",
             "key": "REGION",
+            "securityIssues": [],
             "target": [
               "production"
             ],
             "type": "plain",
+            "updatedAt": 0,
+            "updatedBy": "usr_000000000000",
             "value": "iad1"
           }
-        ]
+        ],
+        "pagination": {
+          "count": 1,
+          "next": null,
+          "prev": null
+        }
       },
-      "recorded_as": "ListProjectEnv"
+      "recorded_as": "ListProjectEnv",
+      "recut": "As step 16, after the removal."
     },
     {
       "operation": "AddProjectDomain",
@@ -1703,18 +1765,27 @@
       },
       "output": {
         "created": {
+          "comment": "",
+          "configurationId": null,
+          "createdAt": 0,
+          "createdBy": "usr_000000000000",
+          "customEnvironmentIds": [],
           "id": "env_9045051ba6",
           "key": "A",
+          "securityIssues": [],
           "target": [
             "production",
             "preview",
             "development"
           ],
           "type": "encrypted",
-          "value": "1"
+          "updatedAt": 0,
+          "updatedBy": "usr_000000000000",
+          "value": "eyJ2IjoibWlycm9yIiwiaCI6IjM3MGI5ODE2MDNjZTdhNTNlZjk4Nzk1ZjcxNTI0MWJjZTIzZjVmM2RiZjI1ODk1YjUyZDY3NjBkN2ZhNWEzOTcifQ=="
         },
         "failed": []
-      }
+      },
+      "recut": "As step 16: the created variable carries the members the document describes, and an encrypted variable (the default type) is answered opaque where the pack echoed the plaintext it was given."
     },
     {
       "operation": "EditProjectEnv",
@@ -1734,6 +1805,12 @@
         "Project": ""
       },
       "output": {
+        "comment": "",
+        "configurationId": null,
+        "createdAt": 0,
+        "createdBy": "usr_000000000000",
+        "customEnvironmentIds": [],
+        "decrypted": true,
         "id": "env_9045051ba6",
         "key": "A",
         "target": [
@@ -1742,8 +1819,11 @@
           "development"
         ],
         "type": "encrypted",
+        "updatedAt": 0,
+        "updatedBy": "usr_000000000000",
         "value": "2"
-      }
+      },
+      "recut": "As step 18: PATCH /v9/projects/{idOrName}/env/{id} addresses the variable by id, so the encrypted value is shown decrypted and marked, with the document's other members."
     },
     {
       "operation": "EditProjectEnv",

@@ -508,6 +508,11 @@ func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
 		// Declared by the authored supplement (specs/vercel/api-extra.json),
 		// which the vendor's emulator serves from one handler as v7.
 		{http.MethodGet, "/v6/deployments", "GetDeploymentsV6"},
+		// Declared as alternate addresses (specs/vercel/clients.json): the
+		// versions around the document's that clients were written against.
+		// Each is named, so each is served; none is a stripped version.
+		{http.MethodGet, "/v9/projects/app/env", "FilterProjectEnvs"},
+		{http.MethodGet, "/v8/projects/app/env", "FilterProjectEnvs"},
 	} {
 		req := httptest.NewRequest(test.method, "http://api.vercel.com"+test.path, nil)
 		op, err := (Codec{}).Route(vercel, req)
@@ -515,13 +520,14 @@ func TestVercelRoutesFromItsGeneratedModel(t *testing.T) {
 			t.Fatalf("%s %s: op %v err %v, want %s", test.method, test.path, op, err, test.want)
 		}
 	}
-	// The three the pack answered at a version the document does not serve,
-	// and one arbitrary version to show the stripping is really gone. The
-	// fourth, /v6/deployments, left this list when the authored supplement
-	// declared it -- the vendor's emulator serves it, so it is served.
+	// What the pack answered at a version nothing declares, and arbitrary
+	// versions to show the stripping is really gone. /v6/deployments left this
+	// list when the authored supplement declared it, and the env listing at /v9
+	// when the alternate addresses named it: a version is served because someone
+	// wrote it down, never because it was a version.
 	for _, test := range []struct{ method, path string }{
 		{http.MethodGet, "/v9/projects"},
-		{http.MethodGet, "/v9/projects/app/env"},
+		{http.MethodGet, "/v7/projects/app/env"},
 		{http.MethodGet, "/v10/projects/app/domains"},
 		{http.MethodGet, "/v99/projects"},
 	} {

@@ -1414,7 +1414,7 @@ The counting contract, frozen by `TestVercelCensusDenominators`: the vendored do
 |---|---:|
 | Vercel REST document operations (vendored) | 417 |
 | Vercel REST document paths (vendored) | 297 |
-| Narrowed `vercel.api` model operations | 93 |
+| Narrowed `vercel.api` model operations | 94 |
 | CI/CD operations served by mirror | 49 / 49 |
 | `vercel.kv` authored-document operations | 1 (`Command`) |
 
@@ -1426,12 +1426,12 @@ KV's document is authored rather than vendored, and is the first such entry in t
 
 **Versioning is restored, and it is a visible break.** `vercelRoute` stripped the leading version segment before matching -- any `v` followed by a digit -- so `/v1/projects`, `/v9/projects` and `/v99/projects` were one route. That is not four transcription slips in the table; it is the table erasing versioning, which made four of its rows name a version the document does not serve. Listing projects is `/v10` where the pack answered `/v9`; project env is `/v10` where it answered `/v9`; project domains is `/v9` where it answered `/v10`; listing deployments is `/v7` where it answered `/v6`. A client written against the emulator's laxity breaks, which is the same shape as Cloudflare's percent-encoded slash: the document is `declared` and the pack's tolerance was `authored`.
 
-Routing is the model's now. The document is 10.7 MB and 297 paths; `specs/mirror.set` narrows it with `fields=` to the ninety-three operations the bundle serves (ninety of Vercel's, three of mirror's own test-control surface in `specs/vercel/control.json`) (oracle routes, the pack's REST surface, and the CI/CD gap: checks, aliases, artifacts, rolling release, rollback, file contents, runtime logs), so the generated model and the served surface are the same set — no mock-tier leftovers. Marketplace, git-namespace search, log drains, webhooks, sandboxes, edge config, and the integration deployment-action route stay outside the model.
+Routing is the model's now. The document is 10.7 MB and 297 paths; `specs/mirror.set` narrows it with `fields=` to the ninety-four operations the bundle serves (ninety-one of Vercel's, three of mirror's own test-control surface in `specs/vercel/control.json`) (oracle routes, the pack's REST surface, and the CI/CD gap: checks, aliases, artifacts, rolling release, rollback, file contents, runtime logs), so the generated model and the served surface are the same set — no mock-tier leftovers. Marketplace, git-namespace search, log drains, webhooks, sandboxes, edge config, and the integration deployment-action route stay outside the model.
 
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired for the emulated Vercel slice | 6 / 7 (equivalence replay, bundle behaviour, restJson1 contract, BDD HTTP, chaos/race, snapshot/`internal/golden` for the catalog and support matrix; overlay mutation covers the two fault envelopes and the three generic rules this extraction needed) |
-| Vercel REST operations served by the bundle | 93 / 93 narrowed (every narrowed op has a bundle rule; mock-tier leftovers removed from the served model; three of the 93 are mirror's own test-control routes, not Vercel's) |
+| Vercel REST operations served by the bundle | 94 / 94 narrowed (every narrowed op has a bundle rule; mock-tier leftovers removed from the served model; three of the 94 are mirror's own test-control routes, not Vercel's) |
 | CI/CD operations served by mirror | 49 / 49 |
 | Vercel KV commands served | 14 string commands (SET, GET, DEL, EXISTS, PING, INCR, DECR, INCRBY, DECRBY, APPEND, STRLEN, EXPIRE, TTL, SETEX; hashes/lists/sets/pipelines answer 501 `MirrorNotImplemented`) |
 | Live Vercel probe | none (not required) |

@@ -23,6 +23,31 @@
       "operation": "CreateTeam",
       "uris": ["/v1/teams"],
       "source": "vercel CLI 'teams add' (POST /v1/teams); the vendored document declares this address with an {id, slug} answer, which this operation's answer contains"
+    },
+    {
+      "operation": "FilterProjectEnvs",
+      "uris": ["/v9/projects/{idOrName}/env", "/v8/projects/{idOrName}/env"],
+      "source": "the project-env listing at the older versions the API still answers; clients written against them (the CLI's env commands among them) keep calling these. Named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "CreateProjectEnv",
+      "uris": ["/v9/projects/{idOrName}/env", "/v8/projects/{idOrName}/env"],
+      "source": "the project-env create at the older versions the API still answers (/v8, /v9), where the document declares /v10. Named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "GetProjectEnv",
+      "uris": ["/v10/projects/{idOrName}/env/{id}", "/v9/projects/{idOrName}/env/{id}", "/v8/projects/{idOrName}/env/{id}"],
+      "source": "reading one variable at the project-env address of the version a client was written against; the vendored document declares it at /v1 only. Named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "EditProjectEnv",
+      "uris": ["/v10/projects/{idOrName}/env/{id}", "/v8/projects/{idOrName}/env/{id}"],
+      "source": "editing a variable at the versions around the document's /v9 (/v8 older, /v10 newer). Named from the API's version history, not observed against api.vercel.com"
+    },
+    {
+      "operation": "RemoveProjectEnv",
+      "uris": ["/v10/projects/{idOrName}/env/{id}", "/v8/projects/{idOrName}/env/{id}"],
+      "source": "removing a variable at the versions around the document's /v9 (/v8 older, /v10 newer). Named from the API's version history, not observed against api.vercel.com"
     }
   ]
 }

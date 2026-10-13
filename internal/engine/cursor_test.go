@@ -25,7 +25,10 @@ func TestTheSlotsAHundredYearsLeaveAreAsManyAsTheTimestampLetsInAFloat(t *testin
 		{0, 4095}, {1, 4095}, {1 << 20, 4095}, {today, 4095}, {1<<41 - 1, 4095},
 		{1 << 41, 2047}, {1<<42 - 1, 2047}, {1 << 42, 1023}, {1 << 43, 511},
 		{1 << 44, 255}, {1 << 50, 3}, {1 << 51, 1}, {1<<52 - 1, 1}, {1 << 52, 0},
-		{1<<53 - 1, 0}, {-1, 0},
+		{1<<53 - 1, 0},
+		// Before 1970 the places are sized by the length of the magnitude, as after.
+		{-1, 4095}, {-1 << 20, 4095}, {-1<<41 + 1, 4095}, {-1 << 41, 2047}, {-1 << 43, 511},
+		{-1<<52 + 1, 1}, {-1 << 52, 0}, {-1<<53 + 1, 0},
 	} {
 		if got := slotCount(tc.ms); got != tc.slots {
 			t.Errorf("slotCount(%d) = %d, want %d", tc.ms, got, tc.slots)
@@ -62,18 +65,21 @@ func TestPageCursorIsAnExactNumberAtEveryMagnitude(t *testing.T) {
 	}
 	rnd := rand.New("cursor")
 	for bit := 0; bit <= 53; bit++ {
-		for _, ms := range []int64{1<<bit - 1, 1 << bit, 1<<bit + 1} {
-			if ms < 0 || ms > 1<<53 {
-				continue
-			}
-			n := slotCount(ms)
-			for _, seq := range []int64{0, 1, n - 1, n, n + 1, 2 * n, 1<<40 + 3, -1} {
-				check(ms, seq)
+		for _, m := range []int64{1<<bit - 1, 1 << bit, 1<<bit + 1} {
+			for _, ms := range []int64{m, -m, -m - 1} { // after 1970 and before it
+				if ms > 1<<53 || ms < -(1<<53) {
+					continue
+				}
+				n := slotCount(ms)
+				for _, seq := range []int64{0, 1, n - 1, n, n + 1, 2 * n, 1<<40 + 3, -1} {
+					check(ms, seq)
+				}
 			}
 		}
 	}
 	for i := 0; i < 200000; i++ {
 		check(int64(rnd.Intn(1<<52)), int64(rnd.Intn(1<<24)))
+		check(-int64(rnd.Intn(1<<52)), int64(rnd.Intn(1<<24)))
 	}
 }
 
@@ -161,6 +167,7 @@ func TestACursorIsADecimalNumberAndNothingAParserWouldTake(t *testing.T) {
 		{"1791836623140.5", today, 2048}, {"1791836623140.4", today, 1638}, // every fraction here is a multiple of 1/4096
 		{"1791836623140.0002", today, 1}, {"1791836623140.00001", today, 0},
 		{"0.000244140625", 0, 1}, {"0.5", 0, 2048},
+		{"-0.5", -1, 2048}, {"-1.5", -2, 2048}, {"-0.000244140625", -1, 4095}, {"-629683199999.5", -629683200000, 2048},
 		{"1.5e3", 1500, 0}, {"1E3", 1000, 0}, {"5e+2", 500, 0}, {"5e02", 500, 0}, {"1e-0", 1, 0},
 		{"1e19", maxCursorMS, 0}, {"-1e300", -maxCursorMS, 0},
 	} {

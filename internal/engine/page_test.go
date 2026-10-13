@@ -158,7 +158,7 @@ func TestPagesFollowTheInstantNotTheSequenceWhenTheClockStepsBack(t *testing.T) 
 func TestPagesNeverLoseOrRepeatAnItemOnAWanderingClock(t *testing.T) {
 	rnd := rand.New("pages")
 	for trial := 0; trial < 400; trial++ {
-		era := []int64{0, 1 << 20, today, 1 << 41, 1 << 43, 1 << 49}[rnd.Intn(6)]
+		era := []int64{0, 1 << 20, today, 1 << 41, 1 << 43, 1 << 49, -2, -(1 << 20), -(1 << 41), -(1 << 43)}[rnd.Intn(10)]
 		n := slotCount(era)
 		var ls []listed
 		seq := int64(rnd.Intn(int(3*max(n, 1)))) + int64(rnd.Intn(2))*(1<<33)

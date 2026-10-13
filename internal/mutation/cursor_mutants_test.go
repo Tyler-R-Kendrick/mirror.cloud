@@ -116,5 +116,13 @@ func init() {
 			pkg:  engine,
 			run:  "TestAPageAfterADeletedItemKeepsWhatWasOlderThanIt|TestPagesSurviveDeletesOfTheItemACursorNames",
 		},
+		{
+			name: "cursor-places-sized-by-the-signed-millisecond",
+			file: cursor,
+			old:  "magnitude = -magnitude // two's complement, so MinInt64 is 2^63 and has no bits left",
+			new:  "magnitude = magnitude",
+			pkg:  engine,
+			run:  "TestTheSlotsAHundredYearsLeaveAreAsManyAsTheTimestampLetsInAFloat|TestPageCursorIsAnExactNumberAtEveryMagnitude",
+		},
 	}...)
 }

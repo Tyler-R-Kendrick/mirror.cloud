@@ -534,7 +534,9 @@ compared with api.vercel.com.
   instant, the later made, and every cut is a cut of that order, so a clock that steps back
   does not drop an item. The fraction has the bits a float64 leaves the timestamp: 12 today,
   which is 4095 places, halving each time the timestamp gains a bit (2039, 2109, ...), and
-  none from 2^52 milliseconds (about the year 144,000), where a cursor is a whole timestamp.
+  none from 2^52 milliseconds from 1970, either way (the year 144,683, and as far before the epoch), where a
+  cursor is a whole timestamp; the instants before 1970 a wound clock can reach have as many places as the same
+  distance after it.
   The ceiling is that the items of one listing made in one millisecond lie within that many
   creations of each other (a creation counts for every listing that draws on its counter): a
   longer run is ambiguous at a page boundary again, and the page can repeat or skip an item

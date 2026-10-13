@@ -25,10 +25,11 @@ import (
 // the item's place among those created in the same millisecond in the fraction:
 // slot / 2^k, where the slot is 1 + the record's creation sequence modulo the
 // number of slots, 2^k - 1, and k is as many fraction bits as the timestamp leaves
-// a float64 (53 less the bits of the millisecond, and at most 12). A millisecond
-// of today has 41 bits, so k is 12 and there are 4095 slots; they halve each time
-// the timestamp gains a bit (2039, 2109, ...), and at 2^52 milliseconds none are
-// left and the cursor is a whole timestamp. Both parts are exact in a float64, the
+// a float64 (53 less the bits of the magnitude of the millisecond, and at most 12:
+// before 1970 as after it). A millisecond of today has 41 bits, so k is 12 and
+// there are 4095 slots; they halve each time the timestamp gains a bit (2039,
+// 2109, ...), and at 2^52 milliseconds from the epoch, either way, none are left
+// and the cursor is a whole timestamp. Both parts are exact in a float64, the
 // cursor still reads as the timestamp to anything that floors it, and a slot is
 // never 0, so a cursor with a fraction is never mistaken for a bare timestamp.
 //
@@ -55,12 +56,16 @@ const (
 	cursorForm  = "a cursor is a decimal number, as pagination.next of an earlier page is"
 )
 
-// slotBits is how many bits of fraction a cursor made at this millisecond has.
+// slotBits is how many bits of fraction a cursor made at this millisecond has. They
+// are sized by the magnitude, so a millisecond before 1970 has as many as the same
+// distance after it: the double ms + slot/2^k lies between ms and ms+1, so it is no
+// larger in magnitude than ms (or ms+1 where ms is -1) and no less exact.
 func slotBits(ms int64) int {
+	magnitude := uint64(ms)
 	if ms < 0 {
-		return 0
+		magnitude = -magnitude // two's complement, so MinInt64 is 2^63 and has no bits left
 	}
-	return min(max(floatBits-bits.Len64(uint64(ms)), 0), maxSlotBits)
+	return min(max(floatBits-bits.Len64(magnitude), 0), maxSlotBits)
 }
 
 // slotCount is how many places a cursor tells apart within this millisecond.

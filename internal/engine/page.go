@@ -39,19 +39,35 @@ type bound struct {
 // every item of the run is within a slot count of that one, and the item the
 // cursor was made from is one of them (cursor.go says what happens when more than
 // a slot count were made in one millisecond).
+//
+// The item may be gone, deleted since the cursor was made, and the cursor still
+// names the position it held between its neighbours. When the first sequence at or
+// after the oldest lies beyond the newest left in the run, the named item was
+// below the run or above it, and which is told by which end it is nearer (the
+// two candidates are a slot count apart, and a run is shorter than that): below
+// the run, everything left in the millisecond is newer than it; above, older.
+// That is exact for a run of up to half the slot count; a longer one whose named
+// item and every neighbour on one side are gone can be placed on the wrong side.
 func boundOf(c cursor, es []entry) bound {
 	b := bound{cursor: c}
 	if c.slot == 0 {
 		return b
 	}
 	n := slotCount(c.ms)
-	first, found := int64(0), false
+	lo, hi, found := int64(0), int64(0), false
 	for _, e := range es {
-		if e.ms == c.ms && (!found || e.seq < first) {
-			first, found = e.seq, true
+		if e.ms != c.ms {
+			continue
 		}
+		if !found {
+			lo, hi, found = e.seq, e.seq, true
+		}
+		lo, hi = min(lo, e.seq), max(hi, e.seq)
 	}
-	b.seq = first + (((c.slot-1-first)%n)+n)%n
+	b.seq = lo + (((c.slot-1-lo)%n)+n)%n
+	if found && b.seq > hi && lo-(b.seq-n) < b.seq-hi {
+		b.seq -= n
+	}
 	return b
 }
 

@@ -31,7 +31,7 @@ func init() {
 		{
 			name: "page-cursor-names-the-slot-not-the-sequence",
 			file: page,
-			old:  "b.seq = first + (((c.slot-1-first)%n)+n)%n",
+			old:  "b.seq = lo + (((c.slot-1-lo)%n)+n)%n",
 			new:  "b.seq = c.slot - 1 + n*0",
 			pkg:  engine,
 			run:  "TestPagesCutBetweenItemsOfOneMillisecondWhereverTheSlotsWrap",
@@ -99,6 +99,22 @@ func init() {
 			new:  "if false {",
 			pkg:  engine,
 			run:  "TestACursorIsADecimalNumberAndNothingAParserWouldTake",
+		},
+		{
+			name: "page-deleted-cursor-item-always-placed-above-the-run",
+			file: page,
+			old:  "if found && b.seq > hi && lo-(b.seq-n) < b.seq-hi {",
+			new:  "if false {",
+			pkg:  engine,
+			run:  "TestAPageAfterADeletedItemKeepsWhatWasOlderThanIt|TestPagesSurviveDeletesOfTheItemACursorNames",
+		},
+		{
+			name: "page-deleted-cursor-item-placed-at-the-farther-end",
+			file: page,
+			old:  "lo-(b.seq-n) < b.seq-hi {",
+			new:  "lo-(b.seq-n) > b.seq-hi {",
+			pkg:  engine,
+			run:  "TestAPageAfterADeletedItemKeepsWhatWasOlderThanIt|TestPagesSurviveDeletesOfTheItemACursorNames",
 		},
 	}...)
 }

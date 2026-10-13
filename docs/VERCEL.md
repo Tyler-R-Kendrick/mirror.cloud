@@ -538,7 +538,10 @@ compared with api.vercel.com.
   The ceiling is that the items of one listing made in one millisecond lie within that many
   creations of each other (a creation counts for every listing that draws on its counter): a
   longer run is ambiguous at a page boundary again, and the page can repeat or skip an item
-  there. A bare integer timestamp still means what it did (the items strictly before it for
+  there. A cursor keeps its position when the item it names is deleted between pages: what was
+  older than it is the next page and what was newer does not come back, exactly for a run of up
+  to half that many creations (a longer one whose named item and every neighbour on one side
+  are all gone can be placed on the wrong side). A bare integer timestamp still means what it did (the items strictly before it for
   `until`, after it for `since`), a number past what a float64 holds as an integer (beyond
   2^53 either way) is the bound it is, every item being before 1e19 and after -1e19, and
   anything that is not a decimal number, in the form a client prints one (a minus sign, digits

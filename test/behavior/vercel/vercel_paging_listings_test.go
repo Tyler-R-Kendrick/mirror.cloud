@@ -30,6 +30,19 @@ type pagedListing struct {
 	after  []string // parameters that keep the items newer than their cursor
 	items  string   // the member holding the page
 	id     string   // the member that names an item
+	// remove deletes one of the items by its id, as a client does; nil where the
+	// API has no such route (teams cannot be deleted).
+	remove func(t *testing.T, v *vx, path, id string)
+}
+
+// deleting makes a remove func that sends DELETE to an address built from the id.
+func deleting(address func(path, id string) string) func(*testing.T, *vx, string, string) {
+	return func(t *testing.T, v *vx, path, id string) {
+		t.Helper()
+		if r := v.do(http.MethodDelete, address(path, id), nil); r.status >= 300 {
+			t.Fatalf("DELETE %s = %d %s", address(path, id), r.status, r.raw)
+		}
+	}
 }
 
 // stamped makes n items with one, noting the instant each was made at.
@@ -51,6 +64,7 @@ func stamped(t *testing.T, v *vx, n int, pace func(i int), one func(i int) (id s
 
 func deploymentsListing(name, path string) pagedListing {
 	return pagedListing{name: name, older: "until", before: []string{"until"}, after: []string{"since"}, items: "deployments", id: "uid",
+		remove: deleting(func(_, id string) string { return "/v13/deployments/" + id }),
 		make: func(t *testing.T, v *vx, n int, pace func(i int)) (string, []pagedItem) {
 			newProjectNamed(t, v, "paged-app")
 			return path, stamped(t, v, n, pace, func(i int) (string, reply) {
@@ -63,6 +77,7 @@ func deploymentsListing(name, path string) pagedListing {
 func pagedListings() []pagedListing {
 	return []pagedListing{
 		{name: "projects", older: "from", before: []string{"from"}, items: "projects", id: "id",
+			remove: deleting(func(_, id string) string { return "/v9/projects/" + id }),
 			make: func(t *testing.T, v *vx, n int, pace func(i int)) (string, []pagedItem) {
 				return "/v10/projects", stamped(t, v, n, pace, func(i int) (string, reply) {
 					r := v.do(http.MethodPost, "/v11/projects", map[string]any{"name": fmt.Sprintf("paged-%02d", i)})
@@ -72,6 +87,7 @@ func pagedListings() []pagedListing {
 		deploymentsListing("deployments", "/v7/deployments"),
 		deploymentsListing("deployments (the older address)", "/v6/deployments"),
 		{name: "aliases", older: "until", before: []string{"until"}, after: []string{"since", "from"}, items: "aliases", id: "uid",
+			remove: deleting(func(_, id string) string { return "/v2/aliases/" + id }),
 			make: func(t *testing.T, v *vx, n int, pace func(i int)) (string, []pagedItem) {
 				v.do(http.MethodPost, "/v7/domains", map[string]any{"name": "paged.test"})
 				newProjectNamed(t, v, "paged-alias")
@@ -104,6 +120,7 @@ func pagedListings() []pagedListing {
 				})...)
 			}},
 		{name: "account domains", older: "until", before: []string{"until"}, after: []string{"since"}, items: "domains", id: "name",
+			remove: deleting(func(_, id string) string { return "/v6/domains/" + id }),
 			make: func(t *testing.T, v *vx, n int, pace func(i int)) (string, []pagedItem) {
 				return "/v5/domains", stamped(t, v, n, pace, func(i int) (string, reply) {
 					name := fmt.Sprintf("d%02d.example", i)
@@ -111,6 +128,7 @@ func pagedListings() []pagedListing {
 				})
 			}},
 		{name: "project domains", older: "until", before: []string{"until"}, after: []string{"since"}, items: "domains", id: "name",
+			remove: deleting(func(path, id string) string { return path + "/" + id }),
 			make: func(t *testing.T, v *vx, n int, pace func(i int)) (string, []pagedItem) {
 				pid := newProjectNamed(t, v, "paged-domains")
 				return "/v9/projects/" + pid + "/domains", stamped(t, v, n, pace, func(i int) (string, reply) {
@@ -119,6 +137,7 @@ func pagedListings() []pagedListing {
 				})
 			}},
 		{name: "the project domains of an apex", older: "until", before: []string{"until"}, after: []string{"since"}, items: "projectDomains", id: "name",
+			remove: deleting(func(_, id string) string { return "/v9/projects/paged-apex/domains/" + id }),
 			make: func(t *testing.T, v *vx, n int, pace func(i int)) (string, []pagedItem) {
 				v.do(http.MethodPost, "/v7/domains", map[string]any{"name": "apex.test"})
 				pid := newProjectNamed(t, v, "paged-apex")

@@ -152,7 +152,9 @@ and reads the entry for its host out of the array it gets back, so that is what 
 `AddProjectAlias` answers (the entry's members beyond `domain` are not observed). A host is held and
 listed in lower case, and the entry the add answers keeps the spelling that was posted, because the
 CLI compares it with `===` (`domains add WWW2.Example.Dev app` failed with "did not return a matching
-alias" when it was lower-cased); what api.vercel.com echoes is not known. The host lands in
+alias" when it was lower-cased); what api.vercel.com echoes is not known. The host is read `domain` first and `name` where there is none (the
+document's own add names it `name`), the same everywhere it is read, and a body that gives both as
+different hosts is a `400` on either address. The host lands in
 the same store the document's routes use, so `GET /v9/projects/{id}/domains/{host}` finds it and
 `AddProjectDomain` refuses it. When another project holds the host the answer is `409` with the code
 `ALIAS_DOMAIN_EXIST` and `project: {id}` in the envelope, which is what the CLI reads to tell "already

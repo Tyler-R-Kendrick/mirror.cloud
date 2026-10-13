@@ -107,22 +107,30 @@ operations:
       owner: { resource: domain_owner }
       # The account may already hold this hostname's apex, verified. The host is
       # `name` in the document's body and `domain` in the older address's
-      # (AddProjectAlias), which share all of this.
+      # (AddProjectAlias), which share all of this, and is read the way the
+      # resources' ids read it: `domain`, and `name` where there is none.
       held:
         resource: account_domain
         key: >
-          ('name' in input && input.name != null) ? apexOf(lower(string(input.name)))
-            : (('domain' in input && input.domain != null) ? apexOf(lower(string(input.domain))) : '')
+          ('domain' in input && input.domain != null) ? apexOf(lower(string(input.domain)))
+            : (('name' in input && input.name != null) ? apexOf(lower(string(input.name))) : '')
     let: &add_let
-      host: >
-        ('name' in input && input.name != null) ? lower(string(input.name))
-          : (('domain' in input && input.domain != null) ? lower(string(input.domain)) : '')
+      # The spelling posted, which AddProjectAlias echoes; the host is its lower case.
+      posted: >
+        ('domain' in input && input.domain != null) ? string(input.domain)
+          : (('name' in input && input.name != null) ? string(input.name) : '')
+      # Both given, they must be one host: the ids above read one, the stored name the other.
+      agree: >
+        !('domain' in input && input.domain != null && 'name' in input && input.name != null)
+          || lower(string(input.domain)) == lower(string(input.name))
+      host: "lower(posted)"
       apex: "apexOf(host)"
       verified: "host.endsWith('.vercel.app') || (held_found && held.verified)"
       redirect: "('redirect' in input) ? input.redirect : null"
       branch: "('gitBranch' in input) ? input.gitBranch : null"
     require:
       - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: agree, error: BadRequest, message: "name and domain are different hosts" }
       - { cond: "host != ''", error: BadRequest, message: "Domain name is required" }
       - cond: "host.matches('^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')"
         error: InvalidDomain
@@ -357,6 +365,7 @@ operations:
     let: *add_let
     require:
       - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: agree, error: BadRequest, message: "name and domain are different hosts" }
       - { cond: "host != ''", error: BadRequest, message: "Domain name is required" }
       - cond: "host.matches('^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?[.])+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$')"
         error: InvalidDomain
@@ -374,7 +383,7 @@ operations:
       # it posted, so a lower-cased echo of `WWW.Example.Dev` was "did not return a
       # matching alias".
       _list: >
-        [{'domain': string(input.domain), 'target': 'PRODUCTION', 'projectId': rec.projectId, 'redirect': rec.redirect,
+        [{'domain': posted, 'target': 'PRODUCTION', 'projectId': rec.projectId, 'redirect': rec.redirect,
           'verified': rec.verified, 'createdAt': rec.createdAt}]
 
   # --- The account's domains ------------------------------------------------

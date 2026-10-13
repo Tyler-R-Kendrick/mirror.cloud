@@ -987,7 +987,10 @@ quirks:
       it. The answer is an array of alias targets; the CLI reads the entry for its
       host, so the members beyond `domain` are authored. The host is held in lower
       case and the entry keeps the spelling that was posted (the CLI compares it
-      with ===; what Vercel echoes is not known). A host another project
+      with ===; what Vercel echoes is not known). The host is `domain`, and `name` where
+      there is none (the document's own add names it `name`), for the echo, the
+      stored name, the apex and the ownership key alike; a body that gives both
+      as different hosts is a 400 on either address. A host another project
       holds is 409 ALIAS_DOMAIN_EXIST with `project: {id}` in the envelope, which
       is what the CLI reads to tell "already on this project" from "on another".
       The holder is named by id only: a name kept in the envelope would go stale

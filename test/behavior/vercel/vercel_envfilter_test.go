@@ -57,6 +57,8 @@ func TestVercelProjectEnvsAreListedForTheTargetTheCLIAsksAbout(t *testing.T) {
 	}
 	cid := str(ce.body, "id")
 	add(map[string]any{"key": "STAGING_ONLY", "value": "s", "type": "plain", "customEnvironmentIds": []string{cid}})
+	// One that lists a built-in target and the custom environment both.
+	add(map[string]any{"key": "BOTH", "value": "b", "type": "plain", "target": []string{"production"}, "customEnvironmentIds": []string{cid}})
 	list := func(query string) map[string]string {
 		t.Helper()
 		return envKeys(t, v.do(http.MethodGet, "/v10/projects/"+pid+"/env?"+query, nil))
@@ -79,7 +81,7 @@ func TestVercelProjectEnvsAreListedForTheTargetTheCLIAsksAbout(t *testing.T) {
 	}
 	t.Run("Given the CLI's own lookup for production Then the sensitive variable is there and the development one is not", func(t *testing.T) {
 		got := envKeys(t, v.do(http.MethodGet, prod, nil))
-		same(t, prod, got, "SHARED/sensitive", "EVERYWHERE/plain")
+		same(t, prod, got, "SHARED/sensitive", "EVERYWHERE/plain", "BOTH/plain")
 		if got["SHARED/sensitive"] != "" {
 			t.Errorf("a sensitive variable lists its value: %q", got["SHARED/sensitive"])
 		}
@@ -94,13 +96,20 @@ func TestVercelProjectEnvsAreListedForTheTargetTheCLIAsksAbout(t *testing.T) {
 		same(t, "preview on another branch", list("target=preview&gitBranch=other"), "EVERYWHERE/plain", "PREVIEW/plain")
 	})
 	t.Run("Given a custom environment, by slug, by id or as the target Then it holds the variables that list it", func(t *testing.T) {
-		same(t, "customEnvironmentSlug", list("customEnvironmentSlug=staging"), "STAGING_ONLY/plain")
-		same(t, "customEnvironmentId", list("customEnvironmentId="+cid), "STAGING_ONLY/plain")
-		same(t, "target=<slug>", list("target=staging"), "STAGING_ONLY/plain")
+		same(t, "customEnvironmentSlug", list("customEnvironmentSlug=staging"), "STAGING_ONLY/plain", "BOTH/plain")
+		same(t, "customEnvironmentId", list("customEnvironmentId="+cid), "STAGING_ONLY/plain", "BOTH/plain")
+		same(t, "target=<slug>", list("target=staging"), "STAGING_ONLY/plain", "BOTH/plain")
+	})
+	t.Run("Given a built-in target and a custom environment together Then both narrow the listing", func(t *testing.T) {
+		same(t, "production and staging, by slug", list("target=production&customEnvironmentSlug=staging"), "BOTH/plain")
+		same(t, "production and staging, by id", list("target=production&customEnvironmentId="+cid), "BOTH/plain")
+		same(t, "staging as target and by slug", list("target=staging&customEnvironmentSlug=staging"), "STAGING_ONLY/plain", "BOTH/plain")
+		same(t, "development and staging", list("target=development&customEnvironmentSlug=staging"))
+		same(t, "production and a slug the project lacks", list("target=production&customEnvironmentSlug=nowhere"))
 	})
 	t.Run("Given no target Then every variable is listed, as it always was", func(t *testing.T) {
 		same(t, "no target", list("source=vercel-cli%3Aenv%3Apull"),
-			"SHARED/plain", "SHARED/sensitive", "EVERYWHERE/plain", "FEATURE/plain", "PREVIEW/plain", "STAGING_ONLY/plain")
+			"SHARED/plain", "SHARED/sensitive", "EVERYWHERE/plain", "FEATURE/plain", "PREVIEW/plain", "STAGING_ONLY/plain", "BOTH/plain")
 	})
 	t.Run("Given a target that is neither one of the three nor a custom environment Then nothing matches", func(t *testing.T) {
 		same(t, "target=prod", list("target=prod"))

@@ -136,7 +136,8 @@ sensitive variable is the key with `""` (its value is not stored, so it cannot c
 takes an empty value for one it could not read, asks `GET /v10/projects/{id}/env?target=<environment>`
 which are sensitive (the listing narrows to that environment, so a sensitive production variable does
 not make a legitimately empty development one look unreadable; `customEnvironmentSlug` and
-`customEnvironmentId` narrow it too, and a target that names nothing lists nothing), and writes
+`customEnvironmentId` narrow it too, all that are given apply together, so a variable must list both a
+`target` and a custom environment named with it, and a target that names nothing lists nothing), and writes
 `[SENSITIVE]` in their place. The target is `development` (also what a pull
 with no target gets), `preview`, `production`, or the slug or id of one of the project's custom
 environments; anything else is a 400 rather than an empty file. A git branch adds the variables set

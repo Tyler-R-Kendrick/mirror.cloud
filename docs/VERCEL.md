@@ -541,9 +541,15 @@ compared with api.vercel.com.
   cursor is a whole timestamp; the instants before 1970 a wound clock can reach have as many places as the same
   distance after it.
   The ceiling is that the items of one listing made in one millisecond lie within that many
-  creations of each other (a creation counts for every listing that draws on its counter): a
-  longer run is ambiguous at a page boundary again, and the page can repeat or skip an item
-  there. A cursor keeps its position when the item it names is deleted between pages: what was
+  creations of each other (a creation counts for every listing that draws on its counter, so a
+  clock stepped back to an earlier instant after more than that many creations reaches it with
+  a handful of items). Past it two items share a place and the cursor of the newer is read as
+  the older: a walk silently skips the items between, up to one slot count of them at each wrap
+  (6000 items of one instant, paged by 50, serve 1905; 9000 serve 810), and never serves one
+  twice; there is no error. Because a place is a sequence modulo the count, `next` is not
+  monotone: items 4096, 4095 and 4094 of one millisecond answer 2/4096, 1/4096 and 4095/4096
+  past it, so a client loop that insists on a decreasing cursor would see one step that is not,
+  once per 4095 creations of an instant; the listing resolves it. A cursor keeps its position when the item it names is deleted between pages: what was
   older than it is the next page and what was newer does not come back, exactly for a run of up
   to half that many creations (a longer one whose named item and every neighbour on one side
   are all gone can be placed on the wrong side). A bare integer timestamp still means what it did (the items strictly before it for

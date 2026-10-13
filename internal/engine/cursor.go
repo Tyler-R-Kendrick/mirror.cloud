@@ -41,8 +41,11 @@ import (
 // the items made in one millisecond, in one listing, span fewer sequence numbers
 // than there are slots (4095 today), a cursor names exactly the item it was made
 // from, wherever the run falls in the count. Past it a slot is shared by two
-// items of the run and the boundary is ambiguous again; the listing still answers,
-// its page boundary inside that run may repeat or skip an item.
+// items of the run and the cursor of the newer is read as the older: the listing
+// still answers, and a walk silently skips what lies between, up to one slot count
+// of items per wrap, and never serves one twice (page_ceiling_test.go measures it).
+// For the same reason a cursor is not monotone at the wrap: sequences 4096, 4095
+// and 4094 answer 2/4096, 1/4096 and 4095/4096.
 //
 // A cursor with no fraction is the old form, a bare millisecond timestamp, and
 // means what it always meant: strictly before (or after) that millisecond. That

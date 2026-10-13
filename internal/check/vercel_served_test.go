@@ -105,3 +105,31 @@ func TestVercelParityDoesNotCallAPagedListingUnpaginated(t *testing.T) {
 		}
 	}
 }
+
+// TestVercelPaginationDocsStateWhatTheCursorDoes holds the pagination paragraph of
+// docs/VERCEL.md to the measured behavior that three sentences of it once got
+// wrong: what happens past the ceiling (a silent skip, never a repeat), that the
+// cursor is not monotone at the wrap, and the year 2^52 milliseconds is.
+func TestVercelPaginationDocsStateWhatTheCursorDoes(t *testing.T) {
+	root := findMod(t)
+	raw, err := os.ReadFile(filepath.Join(root, "docs", "VERCEL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := strings.Join(strings.Fields(string(raw)), " ") // the paragraph is wrapped
+	for _, want := range []string{
+		"silently skips the items between",
+		"and never serves one twice",
+		"`next` is not monotone",
+		"the year 144,683",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("docs/VERCEL.md does not say %q", want)
+		}
+	}
+	for _, gone := range []string{"repeat or skip an item", "about the year 144,000"} {
+		if strings.Contains(doc, gone) {
+			t.Errorf("docs/VERCEL.md still says %q", gone)
+		}
+	}
+}

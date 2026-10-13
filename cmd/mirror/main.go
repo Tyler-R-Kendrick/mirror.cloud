@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
@@ -85,6 +86,12 @@ up flags:
   --advertise-url URL    self-referencing URLs
   --sqs-endpoint-strategy off|standard|domain|path
   --tls-cert PATH --tls-key PATH
+                         serve HTTPS with this certificate and key
+  --tls-self-signed DIR  serve HTTPS with a throwaway CA and a leaf for
+                         api.vercel.com, localhost, 127.0.0.1 and ::1, kept in
+                         DIR as ca.pem, server.pem and server.key (reused while
+                         valid for another 24h); prints the CA path.
+                         Not combinable with --tls-cert/--tls-key
   --real-clock           wall clock (default; required for SQS long poll)
 `)
 }
@@ -102,6 +109,7 @@ func cmdUp(args []string) error {
 	sqsStrategy := fs.String("sqs-endpoint-strategy", cfg.SQSEndpointStrategy, "")
 	tlsCert := fs.String("tls-cert", cfg.TLSCert, "")
 	tlsKey := fs.String("tls-key", cfg.TLSKey, "")
+	tlsSelfSigned := fs.String("tls-self-signed", "", "")
 	var tiers []string
 	fs.Func("tier", "", func(v string) error { tiers = append(tiers, v); return nil })
 	flagArgs, pos := splitFlags(args, map[string]bool{
@@ -118,6 +126,17 @@ func cmdUp(args []string) error {
 	cfg.SQSEndpointStrategy = *sqsStrategy
 	cfg.TLSCert = *tlsCert
 	cfg.TLSKey = *tlsKey
+	var tlsCA string
+	if *tlsSelfSigned != "" {
+		if cfg.TLSCert != "" || cfg.TLSKey != "" {
+			return fmt.Errorf("--tls-self-signed and --tls-cert/--tls-key are mutually exclusive: use one source of TLS material")
+		}
+		files, err := ensureSelfSigned(*tlsSelfSigned, clock.Real{}.Now())
+		if err != nil {
+			return err
+		}
+		cfg.TLSCert, cfg.TLSKey, tlsCA = files.Cert, files.Key, files.CA
+	}
 	cfg.LockSHA = lockSHA()
 	explicit := len(pos) > 0 || *profile != ""
 	cfg.Services = runtime.ExpandServices(pos, *profile, *all || !explicit)
@@ -149,19 +168,34 @@ func cmdUp(args []string) error {
 	if !strings.Contains(addr, ":") {
 		addr += ":4566"
 	}
-	fmt.Fprintf(os.Stderr, "mirror %s listening on http://%s\n", runtime.Version, addr)
+	scheme := "http"
+	if cfg.TLSCert != "" {
+		scheme = "https"
+	}
+	fmt.Fprintf(os.Stderr, "mirror %s listening on %s://%s\n", runtime.Version, scheme, addr)
 	if len(cfg.Services) == 0 {
 		fmt.Fprintln(os.Stderr, "services: all")
 	} else {
 		fmt.Fprintln(os.Stderr, "services:", strings.Join(cfg.Services, ", "))
 	}
+	if tlsCA != "" {
+		fmt.Fprintln(os.Stderr, "tls ca:", tlsCA)
+	}
 
 	srv := &http.Server{Addr: addr, Handler: rt.Handler()}
-	if cfg.TLSCert != "" {
-		return srv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey)
+	ln, err := listen("tcp", addr)
+	if err != nil {
+		return err
 	}
-	return srv.ListenAndServe()
+	if cfg.TLSCert != "" {
+		return srv.ServeTLS(ln, cfg.TLSCert, cfg.TLSKey)
+	}
+	return srv.Serve(ln)
 }
+
+// listen is net.Listen; a test replaces it to learn which port a --bind of :0
+// was given.
+var listen = net.Listen
 
 func cmdEnv(args []string) error {
 	fs := flag.NewFlagSet("env", flag.ContinueOnError)

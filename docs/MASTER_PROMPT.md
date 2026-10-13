@@ -866,7 +866,7 @@ This matters more than it looks. Shape conformance against a spec proves the *en
 
 ### S11 — CLI & day-2 tooling
 
-**Produces.** `cmd/mirror` with: `up` (accepting `s3`, `s3,sqs`, `--profile aws-core`, `--all`, `--tier <service>=<tier>`, `--strict`, `--seed`, `--persist`, `--bind`, `--advertise-url`, `--tls-cert`/`--tls-key`), `env`, `doctor`, `services`, `spec sync|pin|add|update|diff`, `snapshot save|load` (with `--name` and `--account` per §4.15), `drift`, `support-matrix`, `version`. Plus an `awslocal`-equivalent wrapper and a `gcslocal` equivalent. Hosted-mode startup banner per §4.15.
+**Produces.** `cmd/mirror` with: `up` (accepting `s3`, `s3,sqs`, `--profile aws-core`, `--all`, `--tier <service>=<tier>`, `--strict`, `--seed`, `--persist`, `--bind`, `--advertise-url`, `--tls-cert`/`--tls-key`, `--tls-self-signed`), `env`, `doctor`, `services`, `spec sync|pin|add|update|diff`, `snapshot save|load` (with `--name` and `--account` per §4.15), `drift`, `support-matrix`, `version`. Plus an `awslocal`-equivalent wrapper and a `gcslocal` equivalent. Hosted-mode startup banner per §4.15.
 
 - `doctor` must diagnose, concretely: unset or wrong `AWS_ENDPOINT_URL*`, port already bound, region mismatch between client and server, path-style vs virtual-host misconfiguration, a client configured to reach the real cloud while the emulator is running, missing `STORAGE_EMULATOR_HOST`, and a stale spec lock. Each finding prints the exact command or export that fixes it.
 - `support-matrix` generates `docs/SUPPORT.md` from the model. It is never hand-edited; a CI check asserts it is current.

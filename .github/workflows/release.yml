@@ -1,0 +1,144 @@
+name: release
+
+# A pushed v* tag builds mirror for four platforms, writes one SHA256SUMS over
+# the archives, and publishes them as a GitHub release. What a tag becomes, how
+# to verify a download, and the file formats are in docs/RELEASING.md; the build
+# itself is scripts/release-archive.sh, which test/release exercises on every CI
+# run, so this file only wires it to runners.
+#
+# Run by hand (Actions > release > Run workflow) it is a dry run: it builds the
+# commit selected in "Use workflow from" under the version label given as `tag`,
+# and leaves the archives and SHA256SUMS as artifacts of the run. Nothing is
+# released and no tag is needed, so this is how the workflow is tried before the
+# first tag exists.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Dry run: version label for the archives, e.g. v0.0.0-dryrun (builds the selected commit; nothing is released)"
+        required: true
+        type: string
+
+# No job gets a token it did not ask for. Only `publish` can write.
+permissions: {}
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  # The toolchain is an input to the bytes, so it is an exact version: bump it
+  # on purpose, in its own change, not by whatever "1.24" resolves to this week.
+  GO_VERSION: "1.24.7"
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # A release is built from the module cache the go.sum names and
+          # nothing a previous run left behind.
+          cache: false
+      - name: archive
+        env:
+          TARGET_OS: ${{ matrix.goos }}
+          TARGET_ARCH: ${{ matrix.goarch }}
+        run: |
+          # The time of the tagged commit: the one clock the archives may carry.
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          go version
+          scripts/release-archive.sh archive "$TAG" "$TARGET_OS" "$TARGET_ARCH" dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: archive-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/mirror_*
+          if-no-files-found: error
+          retention-days: 7
+
+  checksums:
+    name: SHA256SUMS
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: archive-*
+          merge-multiple: true
+          path: dist
+      - name: sums
+        run: |
+          scripts/release-archive.sh sums dist
+          {
+            echo '### SHA256SUMS'
+            echo '```'
+            cat dist/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-files
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # The only job that can write to the repository, and the only one that runs
+  # for a tag. It checks nothing out and builds nothing: it hands the files the
+  # two jobs above made to GitHub. The release is created as a draft with every
+  # file attached and published last, so a download never finds a release that
+  # is missing its checksums. A failed run leaves the draft behind: delete it
+  # and re-run this job. A published asset is never overwritten.
+  publish:
+    name: publish release
+    if: github.event_name == 'push'
+    needs: checksums
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-files
+          path: dist
+      - name: create and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          prerelease=()
+          case "$TAG" in *-*) prerelease=(--prerelease) ;; esac
+          {
+            echo "Archives for $TAG, with a SHA256SUMS over them. Verify a download with"
+            echo '`sha256sum --check --ignore-missing SHA256SUMS`;'
+            echo "see docs/RELEASING.md. Built with Go $GO_VERSION."
+          } > notes.md
+          gh release create "$TAG" dist/* --draft --verify-tag --title "$TAG" \
+            --notes-file notes.md "${prerelease[@]}"
+          gh release edit "$TAG" --draft=false

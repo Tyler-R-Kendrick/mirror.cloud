@@ -52,7 +52,7 @@ Hosted bind (`--bind 0.0.0.0:4566`) prints a banner: there is no authentication;
 
 `mirror up --tls-self-signed DIR` serves HTTPS for a client that will not speak plain HTTP (a Vercel client talks to `https://api.vercel.com`). It makes a throwaway CA and a leaf certificate for `api.vercel.com`, `localhost`, `127.0.0.1` and `::1`, writes `ca.pem`, `server.pem` and `server.key` (mode 0600) into `DIR`, reuses them while they stay valid for another 24 hours, and prints `tls ca: <path>` on startup. Make the client trust `ca.pem` (`NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`); the CA's own key is never written, so it cannot sign anything else. It cannot be combined with `--tls-cert`/`--tls-key`.
 
-See [docs/SUPPORT.md](docs/SUPPORT.md) (generated; do not hand-edit), [docs/DAY2.md](docs/DAY2.md), [docs/EXTENDING.md](docs/EXTENDING.md), and for deploying through the Vercel API, [docs/VERCEL.md](docs/VERCEL.md).
+See [docs/SUPPORT.md](docs/SUPPORT.md) (generated; do not hand-edit), [docs/DAY2.md](docs/DAY2.md), [docs/EXTENDING.md](docs/EXTENDING.md), for deploying through the Vercel API, [docs/VERCEL.md](docs/VERCEL.md), and for release binaries and how to verify one, [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Documents
 

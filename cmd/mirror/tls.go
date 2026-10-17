@@ -1,13 +1,16 @@
 package main
 
 import (
+	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
@@ -21,8 +24,9 @@ import (
 const tlsUsage = `  --tls-cert PATH --tls-key PATH
                          serve HTTPS with this certificate and key
   --tls-self-signed DIR  serve HTTPS with a throwaway CA and a leaf for
-                         api.vercel.com, localhost, 127.0.0.1 and ::1, kept in
-                         DIR as ca.pem, server.pem and server.key (reused while
+                         api.vercel.com, localhost, 127.0.0.1, ::1 and the
+                         --bind/--advertise-url host, kept in DIR (made 0700)
+                         as ca.pem, server.pem and server.key (reused while
                          valid for another 24h); prints the CA path.
                          Not combinable with --tls-cert/--tls-key
 `
@@ -41,22 +45,65 @@ func tlsFlags(fs *flag.FlagSet, cfg config.Config) tlsOptions {
 	}
 }
 
-// apply gives up its TLS material: it sets cfg.TLSCert and cfg.TLSKey and,
-// for --tls-self-signed, makes or reuses the files and returns ca.pem's path.
-func (o tlsOptions) apply(cfg *config.Config) (ca string, err error) {
+// apply gives up its TLS material: it sets cfg.TLSCert and cfg.TLSKey, returns
+// the pair to serve (nil without TLS), and for --tls-self-signed makes or
+// reuses the files for selfSignedNamesFor and returns ca.pem's path. The pair is
+// loaded here, once, so up serves exactly what was checked.
+func (o tlsOptions) apply(cfg *config.Config) (ca string, pair *tls.Certificate, err error) {
 	cfg.TLSCert, cfg.TLSKey = *o.cert, *o.key
 	if *o.selfSigned == "" {
-		return "", nil
+		if cfg.TLSCert == "" {
+			return "", nil, nil
+		}
+		p, err := tls.LoadX509KeyPair(cfg.TLSCert, cfg.TLSKey)
+		if err != nil {
+			return "", nil, fmt.Errorf("--tls-cert/--tls-key: %w", err)
+		}
+		return "", &p, nil
 	}
 	if cfg.TLSCert != "" || cfg.TLSKey != "" {
-		return "", errTLSConflict
+		return "", nil, errTLSConflict
 	}
-	files, err := ensureSelfSigned(*o.selfSigned, clock.Real{}.Now())
+	names := selfSignedNamesFor(cfg.Bind, cfg.AdvertiseURL)
+	files, err := ensureSelfSignedFor(*o.selfSigned, names, clock.Real{}.Now())
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	cfg.TLSCert, cfg.TLSKey = files.Cert, files.Key
-	return files.CA, nil
+	return files.CA, &files.pair, nil
+}
+
+// selfSignedNamesFor is selfSignedNames plus the host up binds to and the host
+// it advertises, when either is a specific name or address a client can dial
+// (not empty, not 0.0.0.0 or ::). The CA's name constraints follow the same
+// list, so a leaf for such a host still verifies.
+func selfSignedNamesFor(bind, advertise string) []string {
+	names := slices.Clone(selfSignedNames)
+	hosts := []string{bind}
+	if h, _, err := net.SplitHostPort(bind); err == nil {
+		hosts[0] = h
+	}
+	if advertise != "" {
+		if !strings.Contains(advertise, "://") {
+			advertise = "scheme://" + advertise
+		}
+		if u, err := url.Parse(advertise); err == nil {
+			hosts = append(hosts, u.Hostname())
+		}
+	}
+	for _, h := range hosts {
+		h = strings.ToLower(strings.TrimSuffix(h, "."))
+		if ip := net.ParseIP(h); ip != nil {
+			if ip.IsUnspecified() {
+				continue
+			}
+			h = ip.String()
+		}
+		if h != "" && !slices.Contains(names, h) {
+			names = append(names, h)
+		}
+	}
+	return names
 }
 
 // forEnv tells env what up would serve with the same flags, without making
@@ -118,15 +165,17 @@ func printTLSCA(ca string) {
 	}
 }
 
-// serve listens on addr and serves h, over TLS when cert is set.
-func serve(addr string, h http.Handler, cert, key string) error {
+// serve listens on addr and serves h, over TLS with pair when it is set. The
+// pair is served from memory: nothing is read from disk after it was checked.
+func serve(addr string, h http.Handler, pair *tls.Certificate) error {
 	srv := &http.Server{Addr: addr, Handler: h}
 	ln, err := listen("tcp", addr)
 	if err != nil {
 		return err
 	}
-	if cert != "" {
-		return srv.ServeTLS(ln, cert, key)
+	if pair != nil {
+		srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{*pair}}
+		return srv.ServeTLS(ln, "", "")
 	}
 	return srv.Serve(ln)
 }

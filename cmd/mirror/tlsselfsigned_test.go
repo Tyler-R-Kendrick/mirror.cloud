@@ -201,7 +201,9 @@ func TestSelfSignedMaterial(t *testing.T) {
 	}
 	var names []string
 	for _, e := range entries {
-		names = append(names, e.Name())
+		if e.Name() != ".lock" {
+			names = append(names, e.Name())
+		}
 	}
 	sort.Strings(names)
 	if strings.Join(names, " ") != "ca.pem server.key server.pem" {

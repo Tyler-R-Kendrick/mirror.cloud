@@ -113,7 +113,7 @@ func cmdUp(args []string) error {
 	cfg.Bind = *bind
 	cfg.AdvertiseURL = *adv
 	cfg.SQSEndpointStrategy = *sqsStrategy
-	tlsCA, err := tlsOpt.apply(&cfg)
+	tlsCA, tlsPair, err := tlsOpt.apply(&cfg)
 	if err != nil {
 		return err
 	}
@@ -155,7 +155,7 @@ func cmdUp(args []string) error {
 		fmt.Fprintln(os.Stderr, "services:", strings.Join(cfg.Services, ", "))
 	}
 	printTLSCA(tlsCA)
-	return serve(addr, rt.Handler(), cfg.TLSCert, cfg.TLSKey)
+	return serve(addr, rt.Handler(), tlsPair)
 }
 
 func cmdEnv(args []string) error {

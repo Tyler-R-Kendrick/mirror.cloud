@@ -10,25 +10,28 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
-	"net"
 	"os"
 	"path/filepath"
-	"runtime"
+	"strings"
 	"time"
 )
 
 // `mirror up --tls-self-signed DIR` serves HTTPS with throwaway material it
 // makes itself, for a client that must reach the emulator under the name
-// api.vercel.com and refuses plain HTTP. DIR ends up holding exactly:
+// api.vercel.com and refuses plain HTTP. DIR (made 0700; refused if anyone else
+// can write it) holds:
 //
-//	ca.pem      the CA a client trusts (NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, ...)
+//	ca.pem      the CA a client trusts (NODE_EXTRA_CA_CERTS, AWS_CA_BUNDLE)
 //	server.pem  the leaf the server presents
 //	server.key  the leaf's private key, mode 0600
+//	.lock       where concurrent starts on one DIR take turns (flock)
 //
-// The CA's own key is generated in memory, signs the leaf, and is dropped: it
-// is never written, so a CA that a machine has been told to trust cannot be used
-// to mint a certificate for any other name. The cost is that a leaf cannot be
-// reissued under an old CA, so material that is not reusable is replaced whole.
+// The CA's key exists only in memory while it signs the leaf and is never
+// written, so the CA vouches for that one leaf. Its critical name constraints
+// permit only the leaf's names, so a client that trusts ca.pem accepts it for
+// nothing else. A start reuses DIR's files only when they are exactly a set it
+// could have made (tlstrust.go); otherwise it replaces them whole, because a
+// leaf cannot be reissued under a CA whose key is gone.
 const (
 	// selfSignedHost is the name the leaf is issued for. Besides it the leaf
 	// covers the loopback names, so a client reaching the emulator by address
@@ -47,10 +50,16 @@ const (
 	selfSignedBackdate = time.Hour
 )
 
-// selfSignedNames are the names a leaf must cover to be reused.
+// selfSignedNames are the names every leaf covers; up adds the host it binds to
+// or advertises (selfSignedNamesFor).
 var selfSignedNames = []string{selfSignedHost, "localhost", "127.0.0.1", "::1"}
 
-type selfSignedFiles struct{ CA, Cert, Key string }
+// selfSignedFiles are the paths in DIR and the pair to serve, which is built
+// from the bytes that were checked or made, never read back from the paths.
+type selfSignedFiles struct {
+	CA, Cert, Key string
+	pair          tls.Certificate
+}
 
 func selfSignedIn(dir string) selfSignedFiles {
 	return selfSignedFiles{
@@ -60,22 +69,38 @@ func selfSignedIn(dir string) selfSignedFiles {
 	}
 }
 
-// ensureSelfSigned returns the paths of the material in dir, which it reuses
-// when it is whole and has more than selfSignedReuseMargin left, and otherwise
-// replaces. Paths are absolute so a caller may print them.
+// ensureSelfSigned is ensureSelfSignedFor with the default names.
 func ensureSelfSigned(dir string, now time.Time) (selfSignedFiles, error) {
+	return ensureSelfSignedFor(dir, selfSignedNames, now)
+}
+
+// ensureSelfSignedFor returns the material in dir for names: reused when
+// selfSignedReusable accepts it, made afresh otherwise. dir is created 0700 and
+// refused when someone else can write it; a start holds dir's lock throughout.
+// Paths are absolute so a caller may print them.
+func ensureSelfSignedFor(dir string, names []string, now time.Time) (selfSignedFiles, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return selfSignedFiles{}, err
 	}
-	files := selfSignedIn(abs)
-	if selfSignedReusable(files, now) {
-		return files, nil
-	}
-	if err := os.MkdirAll(abs, 0o755); err != nil {
+	if err := os.MkdirAll(abs, 0o700); err != nil {
 		return selfSignedFiles{}, fmt.Errorf("--tls-self-signed: %w", err)
 	}
-	ca, cert, key, err := newSelfSigned(now)
+	if err := checkDir(abs); err != nil {
+		return selfSignedFiles{}, err
+	}
+	unlock, err := lockDir(abs)
+	if err != nil {
+		return selfSignedFiles{}, err
+	}
+	defer unlock()
+	removeStaleTemps(abs)
+	files := selfSignedIn(abs)
+	if pair, ok := selfSignedReusable(files, names, now); ok {
+		files.pair = pair
+		return files, nil
+	}
+	ca, cert, key, err := newSelfSigned(names, now)
 	if err != nil {
 		return selfSignedFiles{}, err
 	}
@@ -90,51 +115,30 @@ func ensureSelfSigned(dir string, now time.Time) (selfSignedFiles, error) {
 			return selfSignedFiles{}, fmt.Errorf("--tls-self-signed: %w", err)
 		}
 	}
-	return files, nil
+	files.pair, err = tls.X509KeyPair(cert, key)
+	return files, err
 }
 
-// selfSignedReusable reports whether the files are a pair this process would
-// have made itself: the key matches the leaf, the leaf covers every name in
-// selfSignedNames and chains to ca.pem, both are valid now and for the margin,
-// and the key is not readable by anyone else.
-func selfSignedReusable(f selfSignedFiles, now time.Time) bool {
-	info, err := os.Stat(f.Key)
-	if err != nil || (runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0) {
-		return false
-	}
-	caPEM, err := os.ReadFile(f.CA)
+// removeStaleTemps deletes the temporary files writeAtomic leaves behind when a
+// start is killed between creating one and renaming it. It runs under dir's
+// lock, so no other start is writing them.
+func removeStaleTemps(dir string) {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return false
+		return
 	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(caPEM) {
-		return false
-	}
-	pair, err := tls.LoadX509KeyPair(f.Cert, f.Key)
-	if err != nil || len(pair.Certificate) == 0 {
-		return false
-	}
-	leaf, err := x509.ParseCertificate(pair.Certificate[0])
-	if err != nil {
-		return false
-	}
-	for _, name := range selfSignedNames {
-		for _, at := range []time.Time{now, now.Add(selfSignedReuseMargin)} {
-			_, err := leaf.Verify(x509.VerifyOptions{
-				Roots: pool, DNSName: name, CurrentTime: at,
-				KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-			})
-			if err != nil {
-				return false
+	for _, e := range entries {
+		for _, base := range []string{"ca.pem", "server.pem", "server.key"} {
+			if strings.HasPrefix(e.Name(), "."+base+".") {
+				_ = os.Remove(filepath.Join(dir, e.Name()))
 			}
 		}
 	}
-	return true
 }
 
-// newSelfSigned makes a CA and a leaf under it and returns their PEM, and the
-// leaf's key as PKCS#8 PEM. The CA's key goes out of scope here.
-func newSelfSigned(now time.Time) (caPEM, certPEM, keyPEM []byte, err error) {
+// newSelfSigned makes a CA and a leaf under it for names and returns their PEM,
+// and the leaf's key as PKCS#8 PEM. The CA's key goes out of scope here.
+func newSelfSigned(names []string, now time.Time) (caPEM, certPEM, keyPEM []byte, err error) {
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, nil, err
@@ -144,17 +148,26 @@ func newSelfSigned(now time.Time) (caPEM, certPEM, keyPEM []byte, err error) {
 		return nil, nil, nil, err
 	}
 	notBefore, notAfter := now.Add(-selfSignedBackdate), now.Add(selfSignedLifetime)
+	dns, ips := splitNames(names)
 
+	// The serial in the name keeps successive CAs apart in a trust store.
+	caSerial := serial()
 	caTmpl := &x509.Certificate{
-		SerialNumber:          serial(),
-		Subject:               pkix.Name{CommonName: "mirror.cloud throwaway CA", Organization: []string{"mirror.cloud"}},
-		NotBefore:             notBefore,
-		NotAfter:              notAfter,
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-		MaxPathLen:            0,
-		MaxPathLenZero:        true,
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		SerialNumber: caSerial,
+		Subject: pkix.Name{
+			CommonName:   fmt.Sprintf("mirror.cloud throwaway CA %08x", caSerial.Uint64()&0xffffffff),
+			Organization: []string{"mirror.cloud"},
+		},
+		NotBefore:                   notBefore,
+		NotAfter:                    notAfter,
+		IsCA:                        true,
+		BasicConstraintsValid:       true,
+		MaxPathLen:                  0,
+		MaxPathLenZero:              true,
+		KeyUsage:                    x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		PermittedDNSDomainsCritical: true,
+		PermittedDNSDomains:         dns,
+		PermittedIPRanges:           ipConstraints(ips),
 	}
 	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
 	if err != nil {
@@ -173,8 +186,8 @@ func newSelfSigned(now time.Time) (caPEM, certPEM, keyPEM []byte, err error) {
 		BasicConstraintsValid: true,
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:              []string{selfSignedHost, "localhost"},
-		IPAddresses:           []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
+		DNSNames:              dns,
+		IPAddresses:           ips,
 	}
 	leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, caCert, &leafKey.PublicKey, caKey)
 	if err != nil {

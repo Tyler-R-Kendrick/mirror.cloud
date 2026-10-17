@@ -27,6 +27,8 @@ func TestSelfSignedNamesFollowBindAndAdvertise(t *testing.T) {
 		{"127.0.0.1:4566", "mirror.test:4566", "mirror.test"},
 		{"192.0.2.10:4566", "https://192.0.2.10:4566", "192.0.2.10"},
 		{"127.0.0.1:4566", "http://[::1]:4566", ""},
+		{"[fe80::1%eth0]:4566", "", "fe80::1"},
+		{"127.0.0.1:4566", "https://[fe80::1%25eth0]:4566", "fe80::1"},
 	} {
 		want := strings.TrimSpace(base + " " + c.extra)
 		if got := strings.Join(selfSignedNamesFor(c.bind, c.adv), " "); got != want {

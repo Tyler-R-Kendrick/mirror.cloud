@@ -45,23 +45,20 @@ func TestSelfSignedDoesNotOpenAFIFO(t *testing.T) {
 	}
 }
 
-type fakeInfo struct {
-	os.FileInfo
-	st *syscall.Stat_t
-}
-
-func (f fakeInfo) Sys() any { return f.st }
-
-func TestOwnedByMe(t *testing.T) {
-	me := uint32(os.Geteuid())
-	if _, ok := ownedByMe(fakeInfo{st: &syscall.Stat_t{Uid: me}}); !ok {
-		t.Error("own uid not recognised")
+func TestDirAndFileRules(t *testing.T) {
+	if err := dirRule("d", 4242, false, 0o700); err == nil || !strings.Contains(err.Error(), "not to this user") {
+		t.Errorf("another owner: %v", err)
 	}
-	if uid, ok := ownedByMe(fakeInfo{st: &syscall.Stat_t{Uid: me + 1}}); ok || uid != int(me+1) {
-		t.Errorf("another uid accepted: %d %v", uid, ok)
+	for _, perm := range []os.FileMode{0o720, 0o702, 0o777} {
+		if err := dirRule("d", 0, true, perm); err == nil {
+			t.Errorf("mode %#o accepted", perm)
+		}
 	}
-	if _, ok := ownedByMe(fakeInfo{}); ok {
-		t.Error("an owner that cannot be read was accepted")
+	if err := dirRule("d", 0, true, 0o755); err != nil {
+		t.Errorf("0755: %v", err)
+	}
+	if fileRule(false, 0o600, true) || fileRule(true, 0o640, true) || fileRule(true, 0o664, false) || !fileRule(true, 0o644, false) || !fileRule(true, 0o600, true) {
+		t.Error("fileRule")
 	}
 }
 
@@ -85,9 +82,10 @@ func TestSelfSignedRefusesADirOfAnotherUser(t *testing.T) {
 // Under umask 0 the modes are still 0700, 0600 and 0644, and a key someone left
 // readable in a private DIR is replaced, not reused.
 func TestSelfSignedModesUnderUmaskZero(t *testing.T) {
+	base := t.TempDir() // made before the umask changes: testing makes it 0777 &^ umask
 	old := syscall.Umask(0)
 	defer syscall.Umask(old)
-	dir := filepath.Join(t.TempDir(), "a", "b")
+	dir := filepath.Join(base, "a", "b")
 	f, err := ensureSelfSigned(dir, clock.Real{}.Now())
 	if err != nil {
 		t.Fatal(err)

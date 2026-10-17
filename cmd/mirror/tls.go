@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -76,7 +77,8 @@ func (o tlsOptions) apply(cfg *config.Config) (ca string, pair *tls.Certificate,
 // selfSignedNamesFor is selfSignedNames plus the host up binds to and the host
 // it advertises, when either is a specific name or address a client can dial
 // (not empty, not 0.0.0.0 or ::). The CA's name constraints follow the same
-// list, so a leaf for such a host still verifies.
+// list, so a leaf for such a host still verifies. checkName refuses, before
+// anything is made, a host that cannot be in it (a wildcard, non-ASCII).
 func selfSignedNamesFor(bind, advertise string) []string {
 	names := slices.Clone(selfSignedNames)
 	hosts := []string{bind}
@@ -93,11 +95,13 @@ func selfSignedNamesFor(bind, advertise string) []string {
 	}
 	for _, h := range hosts {
 		h = strings.ToLower(strings.TrimSuffix(h, "."))
-		if ip := net.ParseIP(h); ip != nil {
-			if ip.IsUnspecified() {
+		// A zone (fe80::1%eth0) names the local interface, not the address;
+		// without stripping it the address would become a DNS name.
+		if a, err := netip.ParseAddr(h); err == nil {
+			if a = a.WithZone("").Unmap(); a.IsUnspecified() {
 				continue
 			}
-			h = ip.String()
+			h = a.String()
 		}
 		if h != "" && !slices.Contains(names, h) {
 			names = append(names, h)

@@ -12,7 +12,6 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -75,10 +74,16 @@ func ensureSelfSigned(dir string, now time.Time) (selfSignedFiles, error) {
 }
 
 // ensureSelfSignedFor returns the material in dir for names: reused when
-// selfSignedReusable accepts it, made afresh otherwise. dir is created 0700 and
-// refused when someone else can write it; a start holds dir's lock throughout.
-// Paths are absolute so a caller may print them.
+// validSet accepts it, made afresh otherwise. Every name is checked first, then
+// dir is created 0700, refused when someone else can write it or one of its
+// ancestors without a sticky bit, opened once (selfSignedDir), and locked for
+// the rest of the start. Paths are absolute so a caller may print them.
 func ensureSelfSignedFor(dir string, names []string, now time.Time) (selfSignedFiles, error) {
+	for _, n := range names {
+		if err := checkName(n); err != nil {
+			return selfSignedFiles{}, err
+		}
+	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return selfSignedFiles{}, err
@@ -86,19 +91,29 @@ func ensureSelfSignedFor(dir string, names []string, now time.Time) (selfSignedF
 	if err := os.MkdirAll(abs, 0o700); err != nil {
 		return selfSignedFiles{}, fmt.Errorf("--tls-self-signed: %w", err)
 	}
-	if err := checkDir(abs); err != nil {
+	if err := checkAncestors(abs); err != nil {
 		return selfSignedFiles{}, err
 	}
-	unlock, err := lockDir(abs)
+	d, err := openSelfSignedDir(abs)
+	if err != nil {
+		return selfSignedFiles{}, err
+	}
+	defer d.close()
+	unlock, err := d.lock()
 	if err != nil {
 		return selfSignedFiles{}, err
 	}
 	defer unlock()
-	removeStaleTemps(abs)
+	d.removeStaleTemps()
 	files := selfSignedIn(abs)
-	if pair, ok := selfSignedReusable(files, names, now); ok {
-		files.pair = pair
-		return files, nil
+	caPEM, okCA := d.read("ca.pem", false)
+	certPEM, okCert := d.read("server.pem", false)
+	keyPEM, okKey := d.read("server.key", true)
+	if okCA && okCert && okKey {
+		if pair, ok := validSet(caPEM, certPEM, keyPEM, names, now); ok {
+			files.pair = pair
+			return files, nil
+		}
 	}
 	ca, cert, key, err := newSelfSigned(names, now)
 	if err != nil {
@@ -107,33 +122,16 @@ func ensureSelfSignedFor(dir string, names []string, now time.Time) (selfSignedF
 	// Key first: a start that dies between writes leaves a set that fails the
 	// reuse check and is replaced, never one that is half trusted.
 	for _, w := range []struct {
-		path string
+		name string
 		body []byte
 		mode os.FileMode
-	}{{files.Key, key, 0o600}, {files.Cert, cert, 0o644}, {files.CA, ca, 0o644}} {
-		if err := writeAtomic(w.path, w.body, w.mode); err != nil {
+	}{{"server.key", key, 0o600}, {"server.pem", cert, 0o644}, {"ca.pem", ca, 0o644}} {
+		if err := d.write(w.name, w.body, w.mode); err != nil {
 			return selfSignedFiles{}, fmt.Errorf("--tls-self-signed: %w", err)
 		}
 	}
 	files.pair, err = tls.X509KeyPair(cert, key)
 	return files, err
-}
-
-// removeStaleTemps deletes the temporary files writeAtomic leaves behind when a
-// start is killed between creating one and renaming it. It runs under dir's
-// lock, so no other start is writing them.
-func removeStaleTemps(dir string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		for _, base := range []string{"ca.pem", "server.pem", "server.key"} {
-			if strings.HasPrefix(e.Name(), "."+base+".") {
-				_ = os.Remove(filepath.Join(dir, e.Name()))
-			}
-		}
-	}
 }
 
 // newSelfSigned makes a CA and a leaf under it for names and returns their PEM,
@@ -208,37 +206,4 @@ func serial() *big.Int {
 		panic(err) // crypto/rand failing is not recoverable
 	}
 	return n
-}
-
-// writeAtomic writes path through a temporary file in the same directory, so a
-// reader sees the old file or the new one and a key never exists with a looser
-// mode than it was given.
-func writeAtomic(path string, body []byte, mode os.FileMode) error {
-	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return err
-	}
-	tmp := f.Name()
-	ok := false
-	defer func() {
-		if !ok {
-			_ = os.Remove(tmp)
-		}
-	}()
-	if _, err := f.Write(body); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Chmod(mode); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	ok = true
-	return nil
 }

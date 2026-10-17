@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,7 +64,7 @@ func usage(w io.Writer) {
 
 Usage:
   mirror up [services...] [flags]
-  mirror env
+  mirror env [--bind ADDR] [--tls-cert PATH | --tls-self-signed DIR]
   mirror doctor
   mirror services
   mirror spec sync|pin|add|update|diff
@@ -84,8 +83,7 @@ up flags:
   --bind ADDR            listen address (default 127.0.0.1:4566)
   --advertise-url URL    self-referencing URLs
   --sqs-endpoint-strategy off|standard|domain|path
-  --tls-cert PATH --tls-key PATH
-  --real-clock           wall clock (default; required for SQS long poll)
+`+tlsUsage+`  --real-clock           wall clock (default; required for SQS long poll)
 `)
 }
 
@@ -100,8 +98,7 @@ func cmdUp(args []string) error {
 	bind := fs.String("bind", cfg.Bind, "")
 	adv := fs.String("advertise-url", cfg.AdvertiseURL, "")
 	sqsStrategy := fs.String("sqs-endpoint-strategy", cfg.SQSEndpointStrategy, "")
-	tlsCert := fs.String("tls-cert", cfg.TLSCert, "")
-	tlsKey := fs.String("tls-key", cfg.TLSKey, "")
+	tlsOpt := tlsFlags(fs, cfg)
 	var tiers []string
 	fs.Func("tier", "", func(v string) error { tiers = append(tiers, v); return nil })
 	flagArgs, pos := splitFlags(args, map[string]bool{
@@ -116,8 +113,10 @@ func cmdUp(args []string) error {
 	cfg.Bind = *bind
 	cfg.AdvertiseURL = *adv
 	cfg.SQSEndpointStrategy = *sqsStrategy
-	cfg.TLSCert = *tlsCert
-	cfg.TLSKey = *tlsKey
+	tlsCA, tlsPair, err := tlsOpt.apply(&cfg)
+	if err != nil {
+		return err
+	}
 	cfg.LockSHA = lockSHA()
 	explicit := len(pos) > 0 || *profile != ""
 	cfg.Services = runtime.ExpandServices(pos, *profile, *all || !explicit)
@@ -149,51 +148,50 @@ func cmdUp(args []string) error {
 	if !strings.Contains(addr, ":") {
 		addr += ":4566"
 	}
-	fmt.Fprintf(os.Stderr, "mirror %s listening on http://%s\n", runtime.Version, addr)
+	fmt.Fprintf(os.Stderr, "mirror %s listening on %s://%s\n", runtime.Version, tlsScheme(cfg.TLSCert), addr)
 	if len(cfg.Services) == 0 {
 		fmt.Fprintln(os.Stderr, "services: all")
 	} else {
 		fmt.Fprintln(os.Stderr, "services:", strings.Join(cfg.Services, ", "))
 	}
-
-	srv := &http.Server{Addr: addr, Handler: rt.Handler()}
-	if cfg.TLSCert != "" {
-		return srv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey)
-	}
-	return srv.ListenAndServe()
+	printTLSCA(tlsCA)
+	return serve(addr, rt.Handler(), tlsPair)
 }
 
 func cmdEnv(args []string) error {
 	fs := flag.NewFlagSet("env", flag.ContinueOnError)
 	bind := fs.String("bind", "", "")
+	tlsOpt := tlsFlags(fs, config.Config{})
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	scheme, ca, err := tlsOpt.forEnv()
+	if err != nil {
 		return err
 	}
 	cfg := config.Load()
 	url := cfg.AdvertiseURL
 	if *bind != "" {
-		url = "http://" + *bind
+		url = *bind
 	}
 	if url == "" {
-		url = "http://" + cfg.Bind
-		if !strings.Contains(cfg.Bind, "://") && !strings.HasPrefix(url, "http") {
-			url = "http://" + cfg.Bind
-		}
+		url = cfg.Bind
 	}
-	if !strings.HasPrefix(url, "http") {
-		url = "http://" + url
+	if !strings.Contains(url, "://") {
+		url = scheme + "://" + url
 	}
-	host := strings.TrimPrefix(strings.TrimPrefix(url, "https://"), "http://")
-	fmt.Printf("export AWS_ENDPOINT_URL=%s\n", url)
-	fmt.Printf("export AWS_ENDPOINT_URL_S3=%s\n", url)
+	host := storageEmulatorHost(url)
+	fmt.Printf("export AWS_ENDPOINT_URL=%s\n", shellQuote(url))
+	fmt.Printf("export AWS_ENDPOINT_URL_S3=%s\n", shellQuote(url))
 	fmt.Printf("export AWS_ACCESS_KEY_ID=test\n")
 	fmt.Printf("export AWS_SECRET_ACCESS_KEY=test\n")
-	fmt.Printf("export AWS_DEFAULT_REGION=%s\n", cfg.DefaultRegion)
+	fmt.Printf("export AWS_DEFAULT_REGION=%s\n", shellQuote(cfg.DefaultRegion))
 	fmt.Printf("export AWS_EC2_METADATA_DISABLED=true\n")
-	fmt.Printf("export STORAGE_EMULATOR_HOST=%s\n", host)
-	fmt.Printf("export VERCEL_API_URL=%s\n", url)
+	fmt.Printf("export STORAGE_EMULATOR_HOST=%s\n", shellQuote(host))
+	fmt.Printf("export VERCEL_API_URL=%s\n", shellQuote(url))
 	fmt.Printf("export VERCEL_TOKEN=test\n")
 	fmt.Printf("export AWS_S3_FORCE_PATH_STYLE=true\n")
+	printCAExports(ca)
 	return nil
 }
 

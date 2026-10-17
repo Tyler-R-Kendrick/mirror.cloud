@@ -149,7 +149,7 @@ func MiniflareStart(ctx context.Context, spec MiniflareStartSpec) (*MiniflareSes
 	cmd.Env = scrubEnv(append([]string{"MIRROR_SESSION_TOKEN=" + token}, spec.ExtraEnv...))
 	// New process group: Close can signal the whole tree (node -> workerd)
 	// without racing the parent's stdio.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcessGroup(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, fmt.Errorf("miniflare: stdout pipe: %w", err)
@@ -219,7 +219,7 @@ func MiniflareStart(ctx context.Context, spec MiniflareStartSpec) (*MiniflareSes
 
 func (s *MiniflareSession) cleanupAfterFailedStart() {
 	if s.cmd != nil && s.cmd.Process != nil {
-		_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+		killGroup(s.cmd.Process.Pid, syscall.SIGKILL)
 		_, _ = s.cmd.Process.Wait()
 	}
 }
@@ -277,13 +277,13 @@ func (s *MiniflareSession) Close() error {
 		s.waitErr = err
 		return nil
 	case <-time.After(3 * time.Second):
-		_ = syscall.Kill(-pid, syscall.SIGTERM)
+		killGroup(pid, syscall.SIGTERM)
 	}
 	select {
 	case err := <-done:
 		s.waitErr = err
 	case <-time.After(3 * time.Second):
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		killGroup(pid, syscall.SIGKILL)
 		s.waitErr = s.cmd.Wait()
 	}
 	return nil
@@ -368,7 +368,7 @@ func (s *MiniflareSession) Kill() {
 		return
 	}
 	s.closed = true
-	_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+	killGroup(s.cmd.Process.Pid, syscall.SIGKILL)
 	s.waitErr = s.cmd.Wait()
 }
 

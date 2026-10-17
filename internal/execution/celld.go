@@ -180,7 +180,7 @@ func CelldStart(ctx context.Context, spec CelldStartSpec) (*CelldSession, error)
 		"HOME=" + os.Getenv("HOME"),
 		"CELLD_ESBUILD=" + esbuild,
 	})
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	setProcessGroup(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -256,14 +256,14 @@ func (s *CelldSession) Close() error {
 		return nil
 	}
 	pid := s.cmd.Process.Pid
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	killGroup(pid, syscall.SIGTERM)
 	done := make(chan error, 1)
 	go func() { done <- s.cmd.Wait() }()
 	select {
 	case err := <-done:
 		s.waitErr = err
 	case <-time.After(5 * time.Second):
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		killGroup(pid, syscall.SIGKILL)
 		s.waitErr = s.cmd.Wait()
 	}
 	return nil

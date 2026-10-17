@@ -177,18 +177,18 @@ func cmdEnv(args []string) error {
 	if url == "" {
 		url = cfg.Bind
 	}
-	if !strings.HasPrefix(url, "http") {
+	if !strings.Contains(url, "://") {
 		url = scheme + "://" + url
 	}
 	host := storageEmulatorHost(url)
-	fmt.Printf("export AWS_ENDPOINT_URL=%s\n", url)
-	fmt.Printf("export AWS_ENDPOINT_URL_S3=%s\n", url)
+	fmt.Printf("export AWS_ENDPOINT_URL=%s\n", shellQuote(url))
+	fmt.Printf("export AWS_ENDPOINT_URL_S3=%s\n", shellQuote(url))
 	fmt.Printf("export AWS_ACCESS_KEY_ID=test\n")
 	fmt.Printf("export AWS_SECRET_ACCESS_KEY=test\n")
-	fmt.Printf("export AWS_DEFAULT_REGION=%s\n", cfg.DefaultRegion)
+	fmt.Printf("export AWS_DEFAULT_REGION=%s\n", shellQuote(cfg.DefaultRegion))
 	fmt.Printf("export AWS_EC2_METADATA_DISABLED=true\n")
-	fmt.Printf("export STORAGE_EMULATOR_HOST=%s\n", host)
-	fmt.Printf("export VERCEL_API_URL=%s\n", url)
+	fmt.Printf("export STORAGE_EMULATOR_HOST=%s\n", shellQuote(host))
+	fmt.Printf("export VERCEL_API_URL=%s\n", shellQuote(url))
 	fmt.Printf("export VERCEL_TOKEN=test\n")
 	fmt.Printf("export AWS_S3_FORCE_PATH_STYLE=true\n")
 	printCAExports(ca)

@@ -73,6 +73,66 @@ func TestEnvWithoutTLSIsUnchanged(t *testing.T) {
 	if strings.Contains(out, "https://") || strings.Contains(out, "NODE_EXTRA_CA_CERTS") || strings.Contains(out, "AWS_CA_BUNDLE") {
 		t.Errorf("TLS lines without TLS:\n%s", out)
 	}
+	// A host whose name starts with "http" still gets its scheme.
+	for _, c := range []struct{ bind, flag, want string }{
+		{"httpbin:4566", "", "httpbin:4566"},
+		{"127.0.0.1:4566", "httpd.local:4566", "httpd.local:4566"},
+	} {
+		t.Setenv("MIRROR_BIND", c.bind)
+		args := []string{}
+		if c.flag != "" {
+			args = []string{"--bind", c.flag}
+		}
+		out, err := captureStdout(t, func() error { return cmdEnv(args) })
+		if err != nil || !strings.Contains(out, "AWS_ENDPOINT_URL=http://"+c.want+"\n") ||
+			!strings.Contains(out, "STORAGE_EMULATOR_HOST="+c.want+"\n") {
+			t.Errorf("bind %q --bind %q: %v\n%s", c.bind, c.flag, err, out)
+		}
+	}
+}
+
+// Every value env prints is evaluated by a shell, so each comes back as itself
+// and nothing in it runs: CA paths and advertised URLs alike.
+func TestEnvOutputSurvivesEval(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh to eval with")
+	}
+	base := t.TempDir()
+	eval := func(t *testing.T, out, name string) string {
+		t.Helper()
+		cmd := exec.Command(sh, "-c", out+`printf %s "$`+name+`"`)
+		cmd.Dir = base
+		got, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("eval: %v\n%s", err, out)
+		}
+		if _, err := os.Stat(filepath.Join(base, "PWNED")); err == nil {
+			t.Fatalf("eval ran a command from:\n%s", out)
+		}
+		return string(got)
+	}
+	for _, n := range []string{"a\nb", "$(touch PWNED)", "`touch PWNED`", "it's", "x'\"$HOME\\", "-n", "~user", " lead", "tab\there", "semi;colon&amp|", "*glob?"} {
+		dir := filepath.Join(base, n)
+		_, out, err := envLines(t, "--tls-self-signed", dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := eval(t, out, "NODE_EXTRA_CA_CERTS"); got != filepath.Join(dir, "ca.pem") {
+			t.Errorf("%q: eval gave %q", n, got)
+		}
+	}
+	adv := "http://mirror.test:4566/a b?x=1&y=$(touch PWNED)"
+	t.Setenv("MIRROR_ADVERTISE_URL", adv)
+	out, err := captureStdout(t, func() error { return cmdEnv(nil) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_S3", "VERCEL_API_URL"} {
+		if got := eval(t, out, name); got != adv {
+			t.Errorf("%s: eval gave %q, want %q", name, got, adv)
+		}
+	}
 }
 
 func TestEnvTLSWithAnAdvertisedAddress(t *testing.T) {

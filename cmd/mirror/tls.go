@@ -150,7 +150,8 @@ func printCAExports(ca string) {
 	}
 }
 
-// shellQuote returns s as one word for a POSIX shell that evals env's output.
+// shellQuote returns s as one word for a POSIX shell that evals env's output;
+// the characters URLs and paths usually hold pass through unquoted.
 func shellQuote(s string) string {
 	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_@%+=:,./-") == "" {
 		return s

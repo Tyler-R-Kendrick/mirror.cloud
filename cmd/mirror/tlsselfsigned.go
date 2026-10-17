@@ -8,14 +8,12 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"errors"
 	"fmt"
 	"math/big"
 	"net"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 )
 
@@ -48,17 +46,6 @@ const (
 	// certificate made a moment ago.
 	selfSignedBackdate = time.Hour
 )
-
-// errTLSConflict refuses two sources of TLS material, in up and in env.
-var errTLSConflict = errors.New("--tls-self-signed and --tls-cert/--tls-key are mutually exclusive: use one source of TLS material")
-
-// shellQuote returns s as one word for a POSIX shell that evals env's output.
-func shellQuote(s string) string {
-	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_@%+=:,./-") == "" {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
-}
 
 // selfSignedNames are the names a leaf must cover to be reused.
 var selfSignedNames = []string{selfSignedHost, "localhost", "127.0.0.1", "::1"}

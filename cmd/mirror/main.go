@@ -8,12 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
@@ -85,14 +83,7 @@ up flags:
   --bind ADDR            listen address (default 127.0.0.1:4566)
   --advertise-url URL    self-referencing URLs
   --sqs-endpoint-strategy off|standard|domain|path
-  --tls-cert PATH --tls-key PATH
-                         serve HTTPS with this certificate and key
-  --tls-self-signed DIR  serve HTTPS with a throwaway CA and a leaf for
-                         api.vercel.com, localhost, 127.0.0.1 and ::1, kept in
-                         DIR as ca.pem, server.pem and server.key (reused while
-                         valid for another 24h); prints the CA path.
-                         Not combinable with --tls-cert/--tls-key
-  --real-clock           wall clock (default; required for SQS long poll)
+`+tlsUsage+`  --real-clock           wall clock (default; required for SQS long poll)
 `)
 }
 
@@ -107,9 +98,7 @@ func cmdUp(args []string) error {
 	bind := fs.String("bind", cfg.Bind, "")
 	adv := fs.String("advertise-url", cfg.AdvertiseURL, "")
 	sqsStrategy := fs.String("sqs-endpoint-strategy", cfg.SQSEndpointStrategy, "")
-	tlsCert := fs.String("tls-cert", cfg.TLSCert, "")
-	tlsKey := fs.String("tls-key", cfg.TLSKey, "")
-	tlsSelfSigned := fs.String("tls-self-signed", "", "")
+	tlsOpt := tlsFlags(fs, cfg)
 	var tiers []string
 	fs.Func("tier", "", func(v string) error { tiers = append(tiers, v); return nil })
 	flagArgs, pos := splitFlags(args, map[string]bool{
@@ -124,18 +113,9 @@ func cmdUp(args []string) error {
 	cfg.Bind = *bind
 	cfg.AdvertiseURL = *adv
 	cfg.SQSEndpointStrategy = *sqsStrategy
-	cfg.TLSCert = *tlsCert
-	cfg.TLSKey = *tlsKey
-	var tlsCA string
-	if *tlsSelfSigned != "" {
-		if cfg.TLSCert != "" || cfg.TLSKey != "" {
-			return errTLSConflict
-		}
-		files, err := ensureSelfSigned(*tlsSelfSigned, clock.Real{}.Now())
-		if err != nil {
-			return err
-		}
-		cfg.TLSCert, cfg.TLSKey, tlsCA = files.Cert, files.Key, files.CA
+	tlsCA, err := tlsOpt.apply(&cfg)
+	if err != nil {
+		return err
 	}
 	cfg.LockSHA = lockSHA()
 	explicit := len(pos) > 0 || *profile != ""
@@ -168,56 +148,26 @@ func cmdUp(args []string) error {
 	if !strings.Contains(addr, ":") {
 		addr += ":4566"
 	}
-	scheme := "http"
-	if cfg.TLSCert != "" {
-		scheme = "https"
-	}
-	fmt.Fprintf(os.Stderr, "mirror %s listening on %s://%s\n", runtime.Version, scheme, addr)
+	fmt.Fprintf(os.Stderr, "mirror %s listening on %s://%s\n", runtime.Version, tlsScheme(cfg.TLSCert), addr)
 	if len(cfg.Services) == 0 {
 		fmt.Fprintln(os.Stderr, "services: all")
 	} else {
 		fmt.Fprintln(os.Stderr, "services:", strings.Join(cfg.Services, ", "))
 	}
-	if tlsCA != "" {
-		fmt.Fprintln(os.Stderr, "tls ca:", tlsCA)
-	}
-
-	srv := &http.Server{Addr: addr, Handler: rt.Handler()}
-	ln, err := listen("tcp", addr)
-	if err != nil {
-		return err
-	}
-	if cfg.TLSCert != "" {
-		return srv.ServeTLS(ln, cfg.TLSCert, cfg.TLSKey)
-	}
-	return srv.Serve(ln)
+	printTLSCA(tlsCA)
+	return serve(addr, rt.Handler(), cfg.TLSCert, cfg.TLSKey)
 }
-
-// listen is net.Listen; a test replaces it to learn which port a --bind of :0
-// was given.
-var listen = net.Listen
 
 func cmdEnv(args []string) error {
 	fs := flag.NewFlagSet("env", flag.ContinueOnError)
 	bind := fs.String("bind", "", "")
-	tlsCert := fs.String("tls-cert", "", "")
-	tlsKey := fs.String("tls-key", "", "")
-	tlsSelfSigned := fs.String("tls-self-signed", "", "")
+	tlsOpt := tlsFlags(fs, config.Config{})
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	scheme, ca := "http", ""
-	if *tlsSelfSigned != "" {
-		if *tlsCert != "" || *tlsKey != "" {
-			return errTLSConflict
-		}
-		abs, err := filepath.Abs(*tlsSelfSigned)
-		if err != nil {
-			return err
-		}
-		scheme, ca = "https", selfSignedIn(abs).CA
-	} else if *tlsCert != "" {
-		scheme = "https"
+	scheme, ca, err := tlsOpt.forEnv()
+	if err != nil {
+		return err
 	}
 	cfg := config.Load()
 	url := cfg.AdvertiseURL
@@ -230,10 +180,7 @@ func cmdEnv(args []string) error {
 	if !strings.HasPrefix(url, "http") {
 		url = scheme + "://" + url
 	}
-	host := strings.TrimPrefix(strings.TrimPrefix(url, "https://"), "http://")
-	if strings.HasPrefix(url, "https://") {
-		host = url // a GCS client assumes http for a bare host:port
-	}
+	host := storageEmulatorHost(url)
 	fmt.Printf("export AWS_ENDPOINT_URL=%s\n", url)
 	fmt.Printf("export AWS_ENDPOINT_URL_S3=%s\n", url)
 	fmt.Printf("export AWS_ACCESS_KEY_ID=test\n")
@@ -244,10 +191,7 @@ func cmdEnv(args []string) error {
 	fmt.Printf("export VERCEL_API_URL=%s\n", url)
 	fmt.Printf("export VERCEL_TOKEN=test\n")
 	fmt.Printf("export AWS_S3_FORCE_PATH_STYLE=true\n")
-	if ca != "" {
-		fmt.Printf("export NODE_EXTRA_CA_CERTS=%s\n", shellQuote(ca))
-		fmt.Printf("export AWS_CA_BUNDLE=%s\n", shellQuote(ca))
-	}
+	printCAExports(ca)
 	return nil
 }
 

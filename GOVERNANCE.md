@@ -13,3 +13,7 @@ No capability is gated. No account. No token. No license check.
 ## Changes
 
 A change that would violate a covenant is out of scope, regardless of demand. Record disagreements between this document and a vendored spec in `docs/INTERFACE_NOTES.md`; the vendored spec wins for wire behavior.
+
+## Maintainer
+
+Tyler Kendrick ([@Tyler-R-Kendrick](https://github.com/Tyler-R-Kendrick)) is the maintainer and single BDFL. There is no foundation and no committee.

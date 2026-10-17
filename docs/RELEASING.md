@@ -4,6 +4,21 @@ How a tag becomes downloadable binaries, and how to check one you downloaded.
 The build is [`scripts/release-archive.sh`](../scripts/release-archive.sh), run by
 [`.github/workflows/release.yml`](../.github/workflows/release.yml).
 
+## Before the first tag
+
+The workflow checks that a tag still names the commit it built, once before
+the draft release is made and again just before it is published. That narrows
+the window in which someone with write access could move the tag, but cannot
+close it, and nothing in a workflow can stop a tag being moved or deleted
+after the release is out. So before tags are trusted, a repository
+administrator must turn on one of these in the repository's settings:
+
+- a tag ruleset targeting `refs/tags/v*` that blocks updates and deletions
+  (Settings, Rules, Rulesets, New tag ruleset); or
+- immutable releases, which lock a published release's tag and assets.
+
+This is a setting of the repository, not something the code can enforce.
+
 ## From a tag to assets
 
 ```sh

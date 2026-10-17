@@ -131,8 +131,11 @@ jobs:
   # file attached and published last, so a download never finds a release that
   # is missing its checksums, and only while the tag still names the commit
   # that was built and checked (asked of the API before the draft and again
-  # just before it is published). A failed run leaves the draft behind: delete
-  # it and re-run this job. A published asset is never overwritten.
+  # just before it is published). That narrows, but cannot close, the window in
+  # which a tag could move, and cannot stop it moving later: the repository's
+  # tag ruleset does that (docs/RELEASING.md, "Before the first tag"). A failed
+  # run leaves the draft behind: delete it and re-run this job. A published
+  # asset is never overwritten.
   publish:
     name: publish release
     if: github.event_name == 'push'
@@ -176,10 +179,14 @@ jobs:
           case "$TAG" in *-*) prerelease=(--prerelease) ;; esac
           {
             echo "Archives for $TAG, with a SHA256SUMS over them. Verify a download with"
+            # shellcheck disable=SC2016 # the backticks are Markdown in the notes, not a command
             echo '`sha256sum --check --ignore-missing SHA256SUMS`;'
             echo "see docs/RELEASING.md. Built with Go $GO_VERSION."
           } > notes.md
-          gh release create "$TAG" dist/* --draft --verify-tag --target "$VERIFIED_SHA" \
+          # No --target: GitHub ignores it for a tag that exists, and
+          # --verify-tag makes sure this one does. The re-checks around this
+          # are what tie the release to the commit; see docs/RELEASING.md.
+          gh release create "$TAG" dist/* --draft --verify-tag \
             --title "$TAG" --notes-file notes.md "${prerelease[@]}"
           tag_unmoved
           gh release edit "$TAG" --draft=false

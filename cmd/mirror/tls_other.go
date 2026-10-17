@@ -9,15 +9,18 @@ import (
 	"runtime"
 )
 
-// On every platform but Linux, macOS and the BSDs, DIR is handled by path. A
-// file must still be a regular file (Lstat; no symlink, no FIFO) and the set
-// must pass every certificate check, and on unixes without the dirfd calls the
-// modes are checked too. But two things are not guaranteed:
+// This is the fallback for every platform not in tls_unix.go's build list:
+// Windows, and unixes such as Solaris, illumos and AIX, which have openat but
+// no flock and are simply not built with the descriptor-based code. DIR is
+// handled by path. A file must still be a regular file (Lstat; no symlink, no
+// FIFO), and the set must pass every certificate check; off Windows, DIR's
+// and the files' modes are checked too. Not guaranteed here:
 //
-//   - the file that was checked is the file that is read: a process able to
-//     modify DIR can swap one in between;
-//   - DIR's owner is this user (there is no POSIX owner on Windows), and on
-//     Windows its files' permissions are not checked at all.
+//   - that the file checked is the file read: a process able to modify DIR can
+//     swap one in between;
+//   - who owns anything: neither DIR's owner, the files' owners nor the
+//     ancestors' owners are checked (Windows has no POSIX owner, and the others
+//     are not wired up), and on Windows no modes are checked at all.
 //
 // Keep DIR somewhere only you can write. There is no flock either, so two
 // starts on one DIR can interleave. That fails closed: each process serves the
@@ -43,6 +46,9 @@ func openSelfSignedDir(path string) (*selfSignedDir, error) {
 }
 
 func (d *selfSignedDir) close() {}
+
+// ownerOf cannot be answered here; ancestors are checked by mode alone.
+func ownerOf(os.FileInfo) (uid int, ok bool) { return -1, false }
 
 func (d *selfSignedDir) lock() (unlock func(), err error) { return func() {}, nil }
 

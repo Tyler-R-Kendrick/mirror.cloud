@@ -10,12 +10,22 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
 
 // haveDirLock reports that concurrent starts on one DIR are serialized here.
 const haveDirLock = true
+
+// ownerOf is the uid that owns info's file.
+func ownerOf(info os.FileInfo) (uid int, ok bool) {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || st == nil {
+		return -1, false
+	}
+	return int(st.Uid), true
+}
 
 // maxSelfSignedFile caps what is read from DIR: the files are a few hundred
 // bytes, and anything larger is not ours.

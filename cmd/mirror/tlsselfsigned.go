@@ -75,9 +75,8 @@ func ensureSelfSigned(dir string, now time.Time) (selfSignedFiles, error) {
 
 // ensureSelfSignedFor returns the material in dir for names: reused when
 // validSet accepts it, made afresh otherwise. Every name is checked first, then
-// dir is created 0700, refused when someone else can write it or one of its
-// ancestors without a sticky bit, opened once (selfSignedDir), and locked for
-// the rest of the start. Paths are absolute so a caller may print them.
+// the directories above dir (checkAncestors), then dir is created 0700, opened
+// once and checked (selfSignedDir), and locked for the rest of the start. Paths are absolute so a caller may print them.
 func ensureSelfSignedFor(dir string, names []string, now time.Time) (selfSignedFiles, error) {
 	for _, n := range names {
 		if err := checkName(n); err != nil {
@@ -88,11 +87,11 @@ func ensureSelfSignedFor(dir string, names []string, now time.Time) (selfSignedF
 	if err != nil {
 		return selfSignedFiles{}, err
 	}
-	if err := os.MkdirAll(abs, 0o700); err != nil {
-		return selfSignedFiles{}, fmt.Errorf("--tls-self-signed: %w", err)
-	}
 	if err := checkAncestors(abs); err != nil {
 		return selfSignedFiles{}, err
+	}
+	if err := os.MkdirAll(abs, 0o700); err != nil {
+		return selfSignedFiles{}, fmt.Errorf("--tls-self-signed: %w", err)
 	}
 	d, err := openSelfSignedDir(abs)
 	if err != nil {

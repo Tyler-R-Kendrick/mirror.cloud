@@ -178,7 +178,7 @@ func TestArchiveOfTheHostPlatform(t *testing.T) {
 		t.Fatal(err)
 	}
 	polluted := append(withEpoch("1700000000"), "GOCACHE="+filepath.Join(work, "gocache"), "GOENV="+goenv,
-		"GOFLAGS=-tags=releaseprobe", "GOAMD64=v3", "GOARM64=v9.0", "GOEXPERIMENT=noswissmap")
+		"GOFLAGS=-tags=releaseprobe", "GOAMD64=v3", "GOARM64=v9.0", "GOEXPERIMENT=noswissmap", "GOFIPS140=latest")
 	if _, stderr, err := script(t, polluted, "archive", tag, goos, goarch, two); err != nil {
 		t.Fatalf("second archive: %v\n%s", err, stderr)
 	}

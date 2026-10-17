@@ -83,6 +83,10 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    outputs:
+      # The commit the archives were built from and the check below passed;
+      # publish releases only while the tag still names it.
+      verified-sha: ${{ steps.on-main.outputs.sha }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -90,6 +94,7 @@ jobs:
           # Every branch's history, so origin/main is here for the check below.
           fetch-depth: 0
       - name: the tag is on main
+        id: on-main
         # A release is cut only from a commit main already holds; a tag pushed
         # on any other commit stops here, before anything is published.
         if: github.event_name == 'push'
@@ -98,6 +103,7 @@ jobs:
             echo "::error::$TAG points at $GITHUB_SHA, which is not on main. Tag a commit that main already contains."
             exit 1
           fi
+          echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: archive-*
@@ -123,8 +129,10 @@ jobs:
   # for a tag. It checks nothing out and builds nothing: it hands the files the
   # two jobs above made to GitHub. The release is created as a draft with every
   # file attached and published last, so a download never finds a release that
-  # is missing its checksums. A failed run leaves the draft behind: delete it
-  # and re-run this job. A published asset is never overwritten.
+  # is missing its checksums, and only while the tag still names the commit
+  # that was built and checked (asked of the API before the draft and again
+  # just before it is published). A failed run leaves the draft behind: delete
+  # it and re-run this job. A published asset is never overwritten.
   publish:
     name: publish release
     if: github.event_name == 'push'
@@ -142,7 +150,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          VERIFIED_SHA: ${{ needs.checksums.outputs.verified-sha }}
         run: |
+          # The commit the tag names now, through any annotated tag objects.
+          tag_commit() {
+            local obj type
+            read -r type obj < <(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object.type + " " + .object.sha')
+            while [ "$type" = tag ]; do
+              read -r type obj < <(gh api "repos/$GH_REPO/git/tags/$obj" --jq '.object.type + " " + .object.sha')
+            done
+            [ "$type" = commit ] && echo "$obj"
+          }
+          # Fails unless the tag still names the commit that was built and
+          # checked: a tag moved since then is not released.
+          tag_unmoved() {
+            local now
+            now="$(tag_commit)" || true
+            if [ -z "$VERIFIED_SHA" ] || [ "$now" != "$VERIFIED_SHA" ]; then
+              echo "::error::$TAG now points at ${now:-nothing}, not $VERIFIED_SHA, the commit that was built and checked. Nothing was published."
+              return 1
+            fi
+          }
+          tag_unmoved
           prerelease=()
           case "$TAG" in *-*) prerelease=(--prerelease) ;; esac
           {
@@ -150,6 +179,7 @@ jobs:
             echo '`sha256sum --check --ignore-missing SHA256SUMS`;'
             echo "see docs/RELEASING.md. Built with Go $GO_VERSION."
           } > notes.md
-          gh release create "$TAG" dist/* --draft --verify-tag --title "$TAG" \
-            --notes-file notes.md "${prerelease[@]}"
+          gh release create "$TAG" dist/* --draft --verify-tag --target "$VERIFIED_SHA" \
+            --title "$TAG" --notes-file notes.md "${prerelease[@]}"
+          tag_unmoved
           gh release edit "$TAG" --draft=false

@@ -24,7 +24,9 @@ stops before publishing if the tag's commit is not an ancestor of `main`.
 2. `checksums`: checks that the tagged commit is on `main`, then
    `scripts/release-archive.sh sums` writes one `SHA256SUMS`.
 3. `publish`: the only job with `contents: write`. It creates a draft release
-   holding the four archives and `SHA256SUMS`, then publishes it. No asset is
+   holding the four archives and `SHA256SUMS`, then publishes it, each step
+   only while the tag still points at the commit `checksums` verified (a tag
+   moved in between is refused). No asset is
    ever overwritten; if the job fails, delete the draft release and re-run it.
 
 | Asset | Platform |
@@ -90,15 +92,16 @@ prints the archive's sha256 and writes it to `out/`. What goes into the bytes:
 
 - the binary is built with `CGO_ENABLED=0 -trimpath -buildvcs=false -s -w` and
   the version set by the linker, so it holds no build path, no checkout state
-  and no clock; `GOENV=off`, unset `GOFLAGS` and `GOEXPERIMENT`, `GOAMD64=v1`
-  and `GOARM64=v8.0` keep your Go settings out of it;
+  and no clock; `GOENV=off`, unset `GOFLAGS`, `GOEXPERIMENT`, `GOFIPS140`,
+  `GODEBUG` and the other per-architecture levels, `GOAMD64=v1` and
+  `GOARM64=v8.0` keep your Go settings out of it;
 - the tar is ustar, members sorted by name, every mtime `SOURCE_DATE_EPOCH`,
   owner and group `0` without names, modes `0755` and `0644`; the gzip header
   has no name or time; the zip has no extra attributes and the same mtime.
 
 `test/release` builds the host platform's archive twice on every CI run, the
 second time with an empty build cache (so the compile is repeated, not replayed)
-and with `GOFLAGS`, `GOAMD64`, `GOARM64`, `GOEXPERIMENT` and a `go env` file set
+and with `GOFLAGS`, `GOAMD64`, `GOARM64`, `GOEXPERIMENT`, `GOFIPS140` and a `go env` file set
 to values that would change the binary, and checks that the hashes match, that
 the archive holds exactly the binary and `LICENSE`, and that the binary reports
 the tag. That shows the build is repeatable on one machine. It has not been compared against a hosted runner's

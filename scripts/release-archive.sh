@@ -20,8 +20,10 @@
 #     no clock in it), -s -w, and the version set by the linker to TAG without
 #     its leading v -- the form `mirror version` already prints (0.1.0-dev);
 #     nothing else from the caller reaches the build: GOENV=off ignores a
-#     `go env -w` file (an empty variable would not override one), GOFLAGS and
-#     GOEXPERIMENT are unset, and GOAMD64=v1 and GOARM64=v8.0 are fixed;
+#     `go env -w` file (an empty variable would not override one), every
+#     variable `go help environment` lists as changing a build is unset
+#     (GOFLAGS, GOEXPERIMENT, GOFIPS140, GODEBUG, GO_EXTLINK_ENABLED and the
+#     per-architecture levels), and GOAMD64=v1 and GOARM64=v8.0 are fixed;
 #   - the tar: members sorted by name, every mtime SOURCE_DATE_EPOCH, owner and
 #     group 0 with no names, ustar headers (no pax, so no timestamps of ours),
 #     modes 0755 for the binary and 0644 for LICENSE;
@@ -71,7 +73,9 @@ cmd_archive() {
   bin=$WORK/build/$(binary_name "$goos")
   (
     cd "$ROOT"
-    env -u GOFLAGS -u GOEXPERIMENT GOENV=off GOTOOLCHAIN=local GOWORK=off \
+    env -u GOFLAGS -u GOEXPERIMENT -u GOFIPS140 -u GODEBUG -u GO_EXTLINK_ENABLED \
+      -u GO386 -u GOARM -u GOMIPS -u GOMIPS64 -u GOPPC64 -u GORISCV64 -u GOWASM \
+      GOENV=off GOTOOLCHAIN=local GOWORK=off \
       GOAMD64=v1 GOARM64=v8.0 CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
       "${GO:-go}" build -trimpath -buildvcs=false \
       -ldflags "-s -w -X ${MODULE}/internal/runtime.Version=${tag#v}" \

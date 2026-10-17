@@ -66,7 +66,7 @@ func usage(w io.Writer) {
 
 Usage:
   mirror up [services...] [flags]
-  mirror env
+  mirror env [--bind ADDR] [--tls-cert PATH | --tls-self-signed DIR]
   mirror doctor
   mirror services
   mirror spec sync|pin|add|update|diff
@@ -129,7 +129,7 @@ func cmdUp(args []string) error {
 	var tlsCA string
 	if *tlsSelfSigned != "" {
 		if cfg.TLSCert != "" || cfg.TLSKey != "" {
-			return fmt.Errorf("--tls-self-signed and --tls-cert/--tls-key are mutually exclusive: use one source of TLS material")
+			return errTLSConflict
 		}
 		files, err := ensureSelfSigned(*tlsSelfSigned, clock.Real{}.Now())
 		if err != nil {
@@ -200,24 +200,40 @@ var listen = net.Listen
 func cmdEnv(args []string) error {
 	fs := flag.NewFlagSet("env", flag.ContinueOnError)
 	bind := fs.String("bind", "", "")
+	tlsCert := fs.String("tls-cert", "", "")
+	tlsKey := fs.String("tls-key", "", "")
+	tlsSelfSigned := fs.String("tls-self-signed", "", "")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	scheme, ca := "http", ""
+	if *tlsSelfSigned != "" {
+		if *tlsCert != "" || *tlsKey != "" {
+			return errTLSConflict
+		}
+		abs, err := filepath.Abs(*tlsSelfSigned)
+		if err != nil {
+			return err
+		}
+		scheme, ca = "https", selfSignedIn(abs).CA
+	} else if *tlsCert != "" {
+		scheme = "https"
 	}
 	cfg := config.Load()
 	url := cfg.AdvertiseURL
 	if *bind != "" {
-		url = "http://" + *bind
+		url = *bind
 	}
 	if url == "" {
-		url = "http://" + cfg.Bind
-		if !strings.Contains(cfg.Bind, "://") && !strings.HasPrefix(url, "http") {
-			url = "http://" + cfg.Bind
-		}
+		url = cfg.Bind
 	}
 	if !strings.HasPrefix(url, "http") {
-		url = "http://" + url
+		url = scheme + "://" + url
 	}
 	host := strings.TrimPrefix(strings.TrimPrefix(url, "https://"), "http://")
+	if strings.HasPrefix(url, "https://") {
+		host = url // a GCS client assumes http for a bare host:port
+	}
 	fmt.Printf("export AWS_ENDPOINT_URL=%s\n", url)
 	fmt.Printf("export AWS_ENDPOINT_URL_S3=%s\n", url)
 	fmt.Printf("export AWS_ACCESS_KEY_ID=test\n")
@@ -228,6 +244,10 @@ func cmdEnv(args []string) error {
 	fmt.Printf("export VERCEL_API_URL=%s\n", url)
 	fmt.Printf("export VERCEL_TOKEN=test\n")
 	fmt.Printf("export AWS_S3_FORCE_PATH_STYLE=true\n")
+	if ca != "" {
+		fmt.Printf("export NODE_EXTRA_CA_CERTS=%s\n", shellQuote(ca))
+		fmt.Printf("export AWS_CA_BUNDLE=%s\n", shellQuote(ca))
+	}
 	return nil
 }
 

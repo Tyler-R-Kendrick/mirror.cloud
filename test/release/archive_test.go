@@ -140,12 +140,11 @@ func readZip(t *testing.T, path string) []member {
 	return out
 }
 
-func names(ms []member) string {
-	var n []string
+func names(ms []member) (n string) {
 	for _, m := range ms {
-		n = append(n, m.name)
+		n = strings.TrimSpace(n + " " + m.name)
 	}
-	return strings.Join(n, " ")
+	return n
 }
 
 func hostBinary(t *testing.T, archive string) []byte {
@@ -172,14 +171,22 @@ func TestArchiveOfTheHostPlatform(t *testing.T) {
 	if err != nil {
 		t.Fatalf("archive: %v\n%s", err, stderr)
 	}
-	if _, stderr, err := script(t, withEpoch("1700000000"), "archive", tag, goos, goarch, two); err != nil {
+	// The second build is cold (an empty build cache: the compile is redone)
+	// and its environment, variables and go env file, would change the binary.
+	goenv := filepath.Join(work, "goenv")
+	if err := os.WriteFile(goenv, []byte("GOFLAGS=-tags=releaseprobe\nGOAMD64=v3\nGOARM64=v9.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	polluted := append(withEpoch("1700000000"), "GOCACHE="+filepath.Join(work, "gocache"), "GOENV="+goenv,
+		"GOFLAGS=-tags=releaseprobe", "GOAMD64=v3", "GOARM64=v9.0", "GOEXPERIMENT=noswissmap")
+	if _, stderr, err := script(t, polluted, "archive", tag, goos, goarch, two); err != nil {
 		t.Fatalf("second archive: %v\n%s", err, stderr)
 	}
 
 	name := "mirror_" + tag + "_" + goos + "_" + goarch + ".tar.gz"
 	a, b := filepath.Join(one, name), filepath.Join(two, name)
 	if sha(t, a) != sha(t, b) {
-		t.Fatalf("two runs on the same commit and epoch differ:\n%s\n%s", sha(t, a), sha(t, b))
+		t.Fatalf("two runs on the same commit and epoch differ (the second cold, its environment polluted):\n%s\n%s", sha(t, a), sha(t, b))
 	}
 	if want := sha(t, a) + "  " + name + "\n"; out1 != want {
 		t.Errorf("the script printed %q, want %q", out1, want)
@@ -285,7 +292,7 @@ func TestZipForWindows(t *testing.T) {
 	}
 }
 
-var sumsLine = regexp.MustCompile(`^[0-9a-f]{64}  mirror_[A-Za-z0-9._+-]+\.(tar\.gz|zip)$`)
+var sumsLine = regexp.MustCompile(`^[0-9a-f]{64}  mirror_[A-Za-z0-9._-]+\.(tar\.gz|zip)$`)
 
 func TestSumsFile(t *testing.T) {
 	work := t.TempDir()
@@ -360,16 +367,17 @@ func TestScriptRefusesWhatItCannotTrust(t *testing.T) {
 		env  []string
 		args []string
 	}{
-		"tag without v":          {withEpoch("1"), []string{"pack", "1.2.3", "linux", "amd64", bin, out}},
-		"tag with a space":       {withEpoch("1"), []string{"pack", "v1 2", "linux", "amd64", bin, out}},
-		"tag that is a command":  {withEpoch("1"), []string{"pack", "v1;touch${IFS}pwned", "linux", "amd64", bin, out}},
-		"tag with a path":        {withEpoch("1"), []string{"pack", "v1/../../x", "linux", "amd64", bin, out}},
-		"goos with a slash":      {withEpoch("1"), []string{"pack", "v1.2.3", "linux/x", "amd64", bin, out}},
-		"no epoch":               {[]string{"SOURCE_DATE_EPOCH="}, []string{"pack", "v1.2.3", "linux", "amd64", bin, out}},
-		"epoch that is not time": {withEpoch("yesterday"), []string{"pack", "v1.2.3", "linux", "amd64", bin, out}},
-		"missing binary":         {withEpoch("1"), []string{"pack", "v1.2.3", "linux", "amd64", filepath.Join(work, "nope"), out}},
-		"unknown subcommand":     {withEpoch("1"), []string{"upload"}},
-		"no subcommand":          {withEpoch("1"), nil},
+		"tag without v":           {withEpoch("1"), []string{"pack", "1.2.3", "linux", "amd64", bin, out}},
+		"tag with a space":        {withEpoch("1"), []string{"pack", "v1 2", "linux", "amd64", bin, out}},
+		"tag that is a command":   {withEpoch("1"), []string{"pack", "v1;touch${IFS}pwned", "linux", "amd64", bin, out}},
+		"tag with a path":         {withEpoch("1"), []string{"pack", "v1/../../x", "linux", "amd64", bin, out}},
+		"tag with build metadata": {withEpoch("1"), []string{"pack", "v1.2.3+meta", "linux", "amd64", bin, out}},
+		"goos with a slash":       {withEpoch("1"), []string{"pack", "v1.2.3", "linux/x", "amd64", bin, out}},
+		"no epoch":                {[]string{"SOURCE_DATE_EPOCH="}, []string{"pack", "v1.2.3", "linux", "amd64", bin, out}},
+		"epoch that is not time":  {withEpoch("yesterday"), []string{"pack", "v1.2.3", "linux", "amd64", bin, out}},
+		"missing binary":          {withEpoch("1"), []string{"pack", "v1.2.3", "linux", "amd64", filepath.Join(work, "nope"), out}},
+		"unknown subcommand":      {withEpoch("1"), []string{"upload"}},
+		"no subcommand":           {withEpoch("1"), nil},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

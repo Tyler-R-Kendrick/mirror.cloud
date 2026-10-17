@@ -22,13 +22,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "requestBody": {
@@ -67,13 +60,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -101,13 +87,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -127,15 +106,6 @@
     "/v2/teams": {
       "post": {
         "operationId": "CreateTeam",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -178,13 +148,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -204,15 +167,6 @@
     "/v2/user": {
       "patch": {
         "operationId": "UpdateAuthUser",
-        "parameters": [
-          {
-            "name": "authorization",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -593,6 +547,251 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SupplementDeploymentBuilds"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/env/pull/{idOrName}": {
+      "get": {
+        "operationId": "GetEnvPull",
+        "description": "With no target the development environment, which is what the CLI's dev command and `vercel link` ask for. What `vercel env pull`, `vercel pull` and `vercel link` (which refreshes VERCEL_OIDC_TOKEN with it) read: the project's environment variables for one target, as {\"env\": {KEY: value}}. The pinned document does not list the route. Client-observed: vercel CLI 63.1.2 sends GET /v3/env/pull/{project id}/{target}[/{git branch}]?source=vercel-cli:env:pull (or vercel-cli:pull, vercel-cli:link), and with no target from its dev command, and reads `env` (a `buildEnv` for a deployment id, which is not served). Everything about which variable is included is authored: the CLI writes every key it is given, and treats a key with an empty value as a sensitive one it could not read (it then asks GET /v10/projects/{id}/env for the variable's type), so a sensitive variable is the key with \"\" and never its value. Not compared with api.vercel.com.",
+        "parameters": [
+          {
+            "name": "idOrName",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the variables of the target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementEnvPull"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/env/pull/{idOrName}/{target}": {
+      "get": {
+        "operationId": "GetEnvPullTarget",
+        "description": "For one target: development, preview, production, or the slug or id of one of the project's custom environments. What `vercel env pull`, `vercel pull` and `vercel link` (which refreshes VERCEL_OIDC_TOKEN with it) read: the project's environment variables for one target, as {\"env\": {KEY: value}}. The pinned document does not list the route. Client-observed: vercel CLI 63.1.2 sends GET /v3/env/pull/{project id}/{target}[/{git branch}]?source=vercel-cli:env:pull (or vercel-cli:pull, vercel-cli:link), and with no target from its dev command, and reads `env` (a `buildEnv` for a deployment id, which is not served). Everything about which variable is included is authored: the CLI writes every key it is given, and treats a key with an empty value as a sensitive one it could not read (it then asks GET /v10/projects/{id}/env for the variable's type), so a sensitive variable is the key with \"\" and never its value. Not compared with api.vercel.com.",
+        "parameters": [
+          {
+            "name": "idOrName",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "target",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the variables of the target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementEnvPull"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/env/pull/{idOrName}/{target}/{gitBranch}": {
+      "get": {
+        "operationId": "GetEnvPullBranch",
+        "description": "For a target and a git branch: the variables set for no branch in particular, with those set for the branch laid over them. What `vercel env pull`, `vercel pull` and `vercel link` (which refreshes VERCEL_OIDC_TOKEN with it) read: the project's environment variables for one target, as {\"env\": {KEY: value}}. The pinned document does not list the route. Client-observed: vercel CLI 63.1.2 sends GET /v3/env/pull/{project id}/{target}[/{git branch}]?source=vercel-cli:env:pull (or vercel-cli:pull, vercel-cli:link), and with no target from its dev command, and reads `env` (a `buildEnv` for a deployment id, which is not served). Everything about which variable is included is authored: the CLI writes every key it is given, and treats a key with an empty value as a sensitive one it could not read (it then asks GET /v10/projects/{id}/env for the variable's type), so a sensitive variable is the key with \"\" and never its value. Not compared with api.vercel.com.",
+        "parameters": [
+          {
+            "name": "idOrName",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "target",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "gitBranch",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "the variables of the target",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupplementEnvPull"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/projects/{idOrName}/alias": {
+      "post": {
+        "operationId": "AddProjectAlias",
+        "description": "Adds a domain to a project at the address the CLI still uses. Client-observed: vercel CLI 63.1.2 `domains add <domain> <project>` posts {\"target\": \"PRODUCTION\", \"domain\": host} here and reads the target for that host (`domain`) out of the array it gets back; on 409 ALIAS_DOMAIN_EXIST it reads `project` (id) out of the error to tell \"already on this project\" from \"on another\", and with --force removes it there and posts again. The document's AddProjectDomain (POST /v10/projects/{idOrName}/domains) is the same act at a newer address with a different body and answer; the two share a store here. The array's members beyond `domain` are authored, not observed, and nothing was compared with api.vercel.com.",
+        "parameters": [
+          {
+            "name": "idOrName",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "target": {
+                    "type": "string"
+                  },
+                  "domain": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "the project's alias targets for the host added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SupplementProjectAlias"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "RemoveProjectAlias",
+        "description": "Removes a domain from a project at the address the CLI still uses. Client-observed: vercel CLI 63.1.2 `domains add <domain> <project> --force` sends DELETE /projects/{id}/alias?domain=host to take a host off the project that holds it, and reads nothing from the answer but whether it is an error. The empty object is authored.",
+        "parameters": [
+          {
+            "name": "idOrName",
+            "in": "path",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
                 }
               }
             }
@@ -987,6 +1186,51 @@
                 }
               }
             }
+          }
+        }
+      },
+      "SupplementEnvPull": {
+        "type": "object",
+        "required": [
+          "env"
+        ],
+        "properties": {
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SupplementProjectAlias": {
+        "type": "object",
+        "required": [
+          "domain",
+          "target",
+          "projectId",
+          "verified",
+          "createdAt"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "redirect": {
+            "type": "string",
+            "nullable": true
+          },
+          "verified": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "number"
           }
         }
       }

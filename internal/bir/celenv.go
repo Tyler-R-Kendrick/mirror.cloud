@@ -42,6 +42,7 @@ func envFor(names ...string) (*cel.Env, error) {
 		opts = append(opts, cel.Variable(n, cel.DynType))
 	}
 	opts = append(opts, celFuncs()...)
+	opts = append(opts, cursorFuncs()...)
 	return cel.NewEnv(opts...)
 }
 
@@ -180,7 +181,6 @@ func celFuncs() []cel.EnvOption {
 		// store returns in key order (the keys are random identifiers) is
 		// not the order a client asked for: Vercel lists newest first.
 		ternaryDyn("sortBy", dyn, str, cel.BoolType, dyn),
-
 		// Provider-shaped helpers. These are string manipulation, not provider
 		// logic: the engine stays free of service names.
 		binaryDyn("arn", str, dyn, str),

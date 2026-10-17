@@ -10,12 +10,13 @@ service: vercel.api
 # by; the team itself, the slug index the edge resolves ?slug= through, and the
 # one user have to be found from every one of those scopes.
 #
-# Authentication is not checked here, except where the oracle's own routes did
-# and the recording and tests that were cut from them say so: CreateTeam,
-# ListTeamMembers, UpdateAuthUser and the API-key routes answer 401 to a request
-# carrying no Authorization at all. Vercel's API proper does not -- a client that
-# needs to see ITS refusal (403 forbidden) asks for it with
-# MIRROR_VERCEL_STRICT_AUTH, which refuses at the edge, for every operation alike.
+# Authentication is not checked here. The emulator takes any credential, none
+# included, unless it is started with MIRROR_VERCEL_STRICT_AUTH, which refuses at
+# the edge for every operation alike (403 forbidden, with invalidToken for a token
+# that is not one). CreateTeam, ListTeamMembers, UpdateAuthUser and the API-key
+# routes used to answer their own 401 to a request with no Authorization, as the
+# vendor's emulator does; that sat against the covenant and is gone
+# (test/behavior/vercel/vercel_covenant_test.go holds every one of them to it).
 
 resources:
   # The one caller. The pack answered a fixed identity and patches move it; the
@@ -76,8 +77,6 @@ operations:
         }
 
   UpdateAuthUser:
-    require:
-      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
     reads:
       u: { resource: user }
     effects:
@@ -99,18 +98,17 @@ operations:
   GetTeams:
     let:
       limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+      since: "('since' in input && input.since != null) ? string(input.since) : ''"
+      until: "('until' in input && input.until != null) ? string(input.until) : ''"
+    require:
+      - { cond: "validCursors([since, until])", error: BadRequest, message: "since and until must be a timestamp in milliseconds, as pagination.next of an earlier page is" }
     list:
       resource: team
       member: teams
-      filter: >
-        (!('since' in input && input.since != null && string(input.since) != '') || item.createdAt > int(string(input.since)))
-          && (!('until' in input && input.until != null && string(input.until) != '') || item.createdAt < int(string(input.until)))
     output:
-      teams: "slice(sortBy(items, 'createdAt', true), 0, limit)"
-      pagination: >
-        {'count': size(slice(sortBy(items, 'createdAt', true), 0, limit)),
-         'next': size(items) > limit ? slice(sortBy(items, 'createdAt', true), 0, limit)[limit - 1].createdAt : null,
-         'prev': null}
+      # The sequence is the tie-break, not a member of a team.
+      teams: "pageOf(items, 'createdAt', [since], [until], false, limit).page.map(t, without(t, ['seq']))"
+      pagination: "pageOf(items, 'createdAt', [since], [until], false, limit).pagination"
 
   GetTeam:
     reads:
@@ -195,8 +193,9 @@ operations:
     reads:
       clash: { resource: team_slug, key: "('slug' in input && input.slug != null) ? trim(string(input.slug)) : ''" }
     require:
-      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
-      - { cond: "trim(string(input.slug)) != ''", error: BadRequest, message: "Missing required field: slug" }
+      # A body with no slug is the 400 this says; reading `slug` of one that has none
+      # was an evaluation error (a 500) that the 401 above it used to hide.
+      - { cond: "'slug' in input && input.slug != null && trim(string(input.slug)) != ''", error: BadRequest, message: "Missing required field: slug" }
       - { cond: "!clash_found", error: TeamSlugAlreadyExists, message: "A team with this slug already exists" }
     effects:
       - generate: { bind: tid, kind: hex, bytes: 8 }
@@ -231,6 +230,9 @@ operations:
             stagingPrefix: "trim(string(input.slug))"
             billing: "{'plan': 'hobby'}"
             membership: "{'confirmed': true, 'role': 'OWNER', 'createdAt': now_ms, 'created': now_ms}"
+            # The order teams are listed in (newest first), and what breaks a tie
+            # between teams made in one millisecond when a page ends between them.
+            seq: { counter: "vteam" }
     output:
       id: rec.id
       slug: rec.slug
@@ -247,7 +249,6 @@ operations:
         resource: team
         key: "by_slug_found ? string(by_slug.teamId) : string(input.teamId)"
     require:
-      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
       - { cond: team_found, error: NotFound, message: "Team not found" }
     select:
       binding: members

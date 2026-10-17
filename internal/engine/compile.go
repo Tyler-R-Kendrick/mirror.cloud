@@ -115,6 +115,7 @@ func runtimeEnv(names []string) (*cel.Env, error) {
 		opts = append(opts, cel.Variable(n, cel.DynType))
 	}
 	opts = append(opts, runtimeFuncs()...)
+	opts = append(opts, cursorFuncs()...)
 	return cel.NewEnv(opts...)
 }
 

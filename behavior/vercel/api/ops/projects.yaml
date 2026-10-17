@@ -151,24 +151,25 @@ operations:
   GetProjects:
     let:
       limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+      from: "('from' in input && input.from != null) ? string(input.from) : ''"
+    require:
+      - { cond: "validCursors([from])", error: BadRequest, message: "from must be a timestamp in milliseconds, as pagination.next of an earlier page is" }
     list:
       resource: project
       member: projects
       # `search` is a substring of the name. `from` is the cursor a previous page
       # answered as pagination.next: the document words it "updated after", but
       # it is what a client pages with, so it continues, taking the projects
-      # last touched before it.
+      # created before it. The listing is in the order of creation, so the cursor
+      # is the creation instant (a project's update moves nothing in it).
       filter: >
-        (!('search' in input && input.search != null && string(input.search) != '') || item.name.contains(string(input.search)))
-          && (!('from' in input && input.from != null && string(input.from) != '') || item.updatedAt < int(string(input.from)))
+        !('search' in input && input.search != null && string(input.search) != '') || item.name.contains(string(input.search))
     output:
-      # Newest first. The stored record is the member set the document declares
-      # plus the sequence it is ordered by, which a client never sees.
-      projects: "slice(sortBy(items, 'seq', true), 0, limit).map(i, merge(without(i, ['seq']), {'alias': []}))"
-      pagination: >
-        {'count': size(slice(sortBy(items, 'seq', true), 0, limit)),
-         'next': size(items) > limit ? slice(sortBy(items, 'seq', true), 0, limit)[limit - 1].updatedAt : null,
-         'prev': null}
+      # Newest first, cut by `from` (cursor.go and page.go say how). The stored
+      # record is the member set the document declares plus the sequence it is
+      # ordered by, which a client never sees.
+      projects: "pageOf(items, 'createdAt', [], [from], false, limit).page.map(i, merge(without(i, ['seq']), {'alias': []}))"
+      pagination: "pageOf(items, 'createdAt', [], [from], false, limit).pagination"
 
   GetProject:
     reads: &project_reads

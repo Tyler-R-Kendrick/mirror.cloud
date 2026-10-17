@@ -1,0 +1,390 @@
+{
+  "client": "vercel CLI 63.1.2 (node v22.22.0, linux x64)",
+  "observed": "client-observed: recorded by a proxy between the real CLI and a running emulator (vercel project add, domains add, ls, inspect, rm). Never compared with api.vercel.com; the CLI wrote these requests, and the answers are the emulator's.",
+  "steps": [
+    {
+      "name": "project add",
+      "request": {
+        "method": "POST",
+        "path": "/v1/projects",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"name\":\"cli-domains\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id"
+        ],
+        "equals": {
+          "name": "cli-domains"
+        }
+      },
+      "capture": {
+        "projectId": "id"
+      }
+    },
+    {
+      "name": "domains add <domain>: to the account",
+      "request": {
+        "method": "POST",
+        "path": "/v7/domains",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"name\":\"example.dev\",\"zone\":true}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "domain.id"
+        ],
+        "equals": {
+          "domain.name": "example.dev"
+        }
+      },
+      "note": "POST /v7/domains {name, zone: true}; the document's route, served before this."
+    },
+    {
+      "name": "domains add <domain> again",
+      "request": {
+        "method": "POST",
+        "path": "/v7/domains",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"name\":\"example.dev\",\"zone\":true}"
+      },
+      "want": {
+        "status": 409,
+        "equals": {
+          "error.code": "domain_already_exists"
+        }
+      },
+      "note": "The CLI keys on the code and prints 'already exists under a different context'."
+    },
+    {
+      "name": "domains add <domain> <project>",
+      "request": {
+        "method": "POST",
+        "path": "/projects/cli-domains/alias",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "text/plain;charset=UTF-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"target\":\"PRODUCTION\",\"domain\":\"www.example.dev\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "0.domain"
+        ],
+        "equals": {
+          "0.domain": "www.example.dev",
+          "0.projectId": "{{projectId}}"
+        }
+      },
+      "note": "The older POST /projects/{project}/alias {target, domain}. The CLI reads the target for its host out of an array; without one it reports 'did not return a matching alias'. It was a 404 (NoSuchBucket) before."
+    },
+    {
+      "name": "domains add <domain> <project> again",
+      "request": {
+        "method": "POST",
+        "path": "/projects/cli-domains/alias",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "text/plain;charset=UTF-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"target\":\"PRODUCTION\",\"domain\":\"www.example.dev\"}"
+      },
+      "want": {
+        "status": 409,
+        "equals": {
+          "error.code": "ALIAS_DOMAIN_EXIST",
+          "error.project.id": "{{projectId}}"
+        }
+      },
+      "note": "ALIAS_DOMAIN_EXIST carries the project that holds the host; the CLI compares it with the project asked for."
+    },
+    {
+      "name": "domains add: the CLI asks whether the host is on this project",
+      "request": {
+        "method": "GET",
+        "path": "/v9/projects/cli-domains/domains/www.example.dev",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "equals": {
+          "name": "www.example.dev",
+          "projectId": "{{projectId}}"
+        }
+      }
+    },
+    {
+      "name": "project add (the other)",
+      "request": {
+        "method": "POST",
+        "path": "/v1/projects",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "application/json; charset=utf-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"name\":\"cli-domains-other\"}"
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "id"
+        ],
+        "equals": {
+          "name": "cli-domains-other"
+        }
+      },
+      "capture": {
+        "otherId": "id"
+      }
+    },
+    {
+      "name": "domains add a host another project holds",
+      "request": {
+        "method": "POST",
+        "path": "/projects/cli-domains-other/alias",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "text/plain;charset=UTF-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"target\":\"PRODUCTION\",\"domain\":\"www.example.dev\"}"
+      },
+      "want": {
+        "status": 409,
+        "equals": {
+          "error.code": "ALIAS_DOMAIN_EXIST",
+          "error.project.id": "{{projectId}}"
+        }
+      }
+    },
+    {
+      "name": "domains add: it is not on the other project",
+      "request": {
+        "method": "GET",
+        "path": "/v9/projects/cli-domains-other/domains/www.example.dev",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 404
+      }
+    },
+    {
+      "name": "domains add --force: take it off the holder",
+      "request": {
+        "method": "DELETE",
+        "path": "/projects/{{projectId}}/alias?domain=www.example.dev",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200
+      },
+      "note": "DELETE /projects/{holder id}/alias?domain=host. The CLI reads nothing from the answer but whether it is an error."
+    },
+    {
+      "name": "domains add --force: add it to this project",
+      "request": {
+        "method": "POST",
+        "path": "/projects/cli-domains-other/alias",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "content-type": "text/plain;charset=UTF-8",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        },
+        "body": "{\"target\":\"PRODUCTION\",\"domain\":\"www.example.dev\"}"
+      },
+      "want": {
+        "status": 200,
+        "equals": {
+          "0.domain": "www.example.dev",
+          "0.projectId": "{{otherId}}"
+        }
+      }
+    },
+    {
+      "name": "domains ls",
+      "request": {
+        "method": "GET",
+        "path": "/v5/domains?limit=20",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "domains.0.name"
+        ],
+        "equals": {
+          "domains.0.name": "example.dev"
+        }
+      }
+    },
+    {
+      "name": "domains inspect: the domain",
+      "request": {
+        "method": "GET",
+        "path": "/v5/domains/example.dev",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "equals": {
+          "domain.name": "example.dev"
+        }
+      }
+    },
+    {
+      "name": "domains inspect: the projects under it",
+      "request": {
+        "method": "GET",
+        "path": "/v1/domains/example.dev/project-domains?limit=100",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "projectDomains.0.name",
+          "pagination"
+        ],
+        "equals": {
+          "projectDomains.0.name": "www.example.dev",
+          "projectDomains.0.projectId": "{{otherId}}"
+        }
+      },
+      "note": "GET /v1/domains/{domain}/project-domains?limit=100, the document's route. It was a 404 (NoSuchBucket) before, and `inspect` ended 'Response Error (404)'."
+    },
+    {
+      "name": "domains inspect: each project",
+      "request": {
+        "method": "GET",
+        "path": "/v9/projects/{{otherId}}",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "equals": {
+          "name": "cli-domains-other"
+        }
+      }
+    },
+    {
+      "name": "domains rm",
+      "request": {
+        "method": "DELETE",
+        "path": "/v3/domains/example.dev",
+        "headers": {
+          "user-agent": "vercel 63.1.2 node-v22.22.0 linux (x64)",
+          "accept": "*/*",
+          "accept-language": "*",
+          "sec-fetch-mode": "cors",
+          "accept-encoding": "gzip, deflate",
+          "authorization": "Bearer vtok_dummy_marker_0123456789abcdef"
+        }
+      },
+      "want": {
+        "status": 200,
+        "members": [
+          "uid"
+        ]
+      },
+      "note": "DELETE /v3/domains/{domain}, an older address than the document's /v6. It was a 404 (NoSuchBucket) before."
+    }
+  ]
+}

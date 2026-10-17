@@ -1414,7 +1414,7 @@ The counting contract, frozen by `TestVercelCensusDenominators`: the vendored do
 |---|---:|
 | Vercel REST document operations (vendored) | 417 |
 | Vercel REST document paths (vendored) | 297 |
-| Narrowed `vercel.api` model operations | 117 |
+| Narrowed `vercel.api` model operations | 123 |
 | CI/CD operations served by mirror | 49 / 49 |
 | `vercel.kv` authored-document operations | 1 (`Command`) |
 
@@ -1431,7 +1431,7 @@ Routing is the model's now. The document is 10.7 MB and 297 paths; `specs/mirror
 | Measure | Current evidence |
 |---|---:|
 | Requested test forms wired for the emulated Vercel slice | 6 / 7 (equivalence replay, bundle behaviour, restJson1 contract, BDD HTTP, chaos/race, snapshot/`internal/golden` for the catalog and support matrix; overlay mutation covers the two fault envelopes and the three generic rules this extraction needed) |
-| Vercel REST operations served by the bundle | 117 / 117 narrowed (every narrowed op has a bundle rule; mock-tier leftovers removed from the served model; three of the 117 are mirror's own test-control routes, not Vercel's) |
+| Vercel REST operations served by the bundle | 123 / 123 narrowed (every narrowed op has a bundle rule; mock-tier leftovers removed from the served model; three of the 123 are mirror's own test-control routes, not Vercel's) |
 | CI/CD operations served by mirror | 49 / 49 |
 | Vercel KV commands served | 14 string commands (SET, GET, DEL, EXISTS, PING, INCR, DECR, INCRBY, DECRBY, APPEND, STRLEN, EXPIRE, TTL, SETEX; hashes/lists/sets/pipelines answer 501 `MirrorNotImplemented`) |
 | Live Vercel probe | none (not required) |
@@ -1440,11 +1440,11 @@ Routing is the model's now. The document is 10.7 MB and 297 paths; `specs/mirror
 |---|---|
 | `GET /v2/user` (`GetAuthUser`) | Recording replays the fixed identity; booted `TestBootedServerVercelAPI` reads `user.username`. The four members sit under `user`, which is the one member the response shape declares and which the pack answered at the top level -- superseded in the recording with that reason |
 | `POST /v11/projects` (`CreateProject`) | Recording replays create, a duplicate 409/`conflict`, an absent name 400/`bad_request` and an explicitly empty one, and re-creating a name a delete freed; BDD create; chaos `TestVercelConcurrentDuplicateProjectNames` -- sixteen concurrent creates, one winner |
-| `GET /v10/projects` (`GetProjects`) | Recording replays the two-entry listing and the listing after a delete; BDD lists after create at `/v10`, and asserts `/v99/projects` is NOT served; unpaginated, recorded as a quirk |
+| `GET /v10/projects` (`GetProjects`) | Recording replays the two-entry listing and the listing after a delete; BDD lists after create at `/v10`, and asserts `/v99/projects` is NOT served; pages newest first by creation (`limit`, `from` the cursor a page answered), walked on all eight paged listings by `TestVercelListingsPageWithoutSkippingItemsOfOneMillisecond` and its clock-back, jitter and range companions, recorded as a quirk |
 | `GET /v9/projects/{idOrName}` (`GetProject`) | Recording replays get by id, get by NAME through the name index, an unknown id 404/`not_found`, and a read after delete; booted create/get round-trips the same id. A request carrying no label at all answers 400 where the pack's lookup fell through to 404 -- the document marks the label required, superseded in the recording with that reason |
 | `DELETE /v9/projects/{idOrName}` (`DeleteProject`) | Recording replays delete, a double delete 404/`not_found`, and that the name index goes with the project so the name is free again; booted and BDD DELETE of a missing project are 404 `{error.code: not_found}` without `x-amzn-errortype` |
 | `POST /v10/projects/{idOrName}/env` (`CreateProjectEnv`) | Recording replays create with and without an explicit `target` and `type`, an absent key and an empty one 400/`bad_request`, and an unknown project 404. Answers `{created, failed}`, which the document declares and the pack answered flat -- superseded with that reason. Its members arrive splatted, which is why the engine does not fail a required payload member that is absent under its own name |
-| `GET /v10/projects/{idOrName}/env` (`FilterProjectEnvs`) | Recording replays the two-entry listing, an empty one for a project addressed by NAME, and the listing after a delete; no `pagination`, because the pack answered it only from the two unscoped listings |
+| `GET /v10/projects/{idOrName}/env` (`FilterProjectEnvs`) | Recording replays the two-entry listing, an empty one for a project addressed by NAME, and the listing after a delete; answers one page (`pagination.count`, `next` and `prev` null); `gitBranch`, `target` and the custom environment narrow it, and `TestVercelProjectEnvsAreListedForTheTargetTheCLIAsksAbout` replays the lookup the real CLI recorded |
 | `DELETE /v9/projects/{idOrName}/env/{id}` (`RemoveProjectEnv`) | Recording replays delete by reference to the created variable, a double delete 404/`not_found`, and the listing that shrinks |
 | `POST /v10/projects/{idOrName}/domains` (`AddProjectDomain`) | Recording replays create, an absent name and an empty one 400/`bad_request`, and an unknown project 404. A domain is `verified: true` immediately, which is the pack's behaviour and not the real API's -- recorded as a quirk |
 | `GET /v9/projects/{idOrName}/domains` (`GetProjectDomains`) | Recording replays the listing; `projectId` is projected back onto each row, because a parent-scoped record cannot see its parent |
@@ -1464,7 +1464,7 @@ Routing is the model's now. The document is 10.7 MB and 297 paths; `specs/mirror
 | `PATCH /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}` (`UpdateCustomEnvironment`) | Authored recording step replays a description update; bundle behavior test asserts slug and id survive the patch (addressed by slug, the write must still merge against the id-keyed row) |
 | `DELETE /v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}` (`RemoveCustomEnvironment`) | Authored recording steps replay the remove answering the removed environment and a double remove 404; booted and BDD DELETE then GET 404. `deleteUnassignedEnvironmentVariables` is accepted and read by nothing |
 | `POST /v10/projects/{projectId}/promote/{deploymentId}` (`RequestPromote`) | Sets the project's `productionDeploymentId`. Concurrent promote leaves one pointer. BDD + chaos-style concurrent promote in `TestVercelCICDParity` |
-| `GET /v2/teams` (`GetTeams`) | Authored recording step replays the empty listing -- teams are account fixtures and the vendored document declares no create, so nothing populates them; booted GET over HTTP. Unpaginated, `next`/`prev` null -- recorded as a quirk |
+| `GET /v2/teams` (`GetTeams`) | Authored recording step replays the empty listing; teams are made by the authored `CreateTeam` (the oracle's `POST /v2/teams`, the vendored document's own create answers only `{id, slug}`) and listed newest first, paged by `limit`, `since` and `until` (1024 to 3000 teams made at one instant, a run across the wrap of the cursor's places, and a clock that steps back are walked by `vercel_paging_*_test.go`) -- recorded as a quirk |
 | `GET /v2/teams/{teamId}` (`GetTeam`) | Authored recording step replays the unknown-team 404/`not_found`; booted GET 404. The happy path is unreachable until a team fixture exists |
 | `PATCH /v2/teams/{teamId}` (`PatchTeam`) | Authored recording step replays the unknown-team 404. Honors the four members the oracle's patch does (name, slug, description, avatar); the owner-only 403 and slug-conflict 409 have no counterpart -- recorded as quirks |
 | `POST /v2/teams/{teamId}/members` (`InviteUserToTeam`) | Authored recording step replays the unknown-team 404. With no user store, any well-formed email is invitable and the uid derives from the address -- recorded as a quirk |
@@ -1499,8 +1499,8 @@ Serve state per emulate route group (method+path from `src/routes/*.ts`):
 | `deployments.ts` | 10 | 10 | `GET /v6/deployments` is served from the authored supplement (the oracle runs one handler for both versions) |
 | `domains.ts` (project domains) | 6 | 6 | — |
 | `env.ts` | 5 | 5 | get-one included via the authored supplement |
-| `user.ts` | 9 | 9 | teams create + members, user patch and the registration probe all ride the authored supplement |
-| `api-keys.ts` | 3 | 3 | create/list/delete with the oracle's 401/404 envelope |
+| `user.ts` | 9 | 9 | teams create + members, user patch and the registration probe all ride the authored supplement; the oracle's 401 for a request with no Bearer is not served (any credentials work) |
+| `api-keys.ts` | 3 | 3 | create/list/delete with the oracle's 404 envelope; its 401 for a request with no Bearer is not served, because any credentials work here (`MIRROR_VERCEL_STRICT_AUTH` refuses with Vercel's 403, for every route alike) |
 | `oauth.ts` | 4 | 4 | the local flow end to end: authorize page (mirror's own minimal form markup, recorded as a quirk), callback issues one-shot codes, token exchange with PKCE S256, userinfo |
 | `blob.ts` | 8 | 8 | `vercel.blob` serves the whole data plane: upload (overwrite/ETag/suffix rules), list (folded/cursor/prefix), head, delete, content serving with 304 and `?download=1`; mpu answers the oracle's own 400 refusal |
 

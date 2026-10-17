@@ -1,0 +1,135 @@
+package check
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+)
+
+// The served surface of vercel.api, counted from the documents rather than typed
+// into prose: of the narrowed model's operations, those the vendored document lists,
+// those only a supplement (specs/vercel/api-extra.json) does, and mirror's own
+// test-control routes. docs/VERCEL.md states the first as the figure it measures
+// the unserved remainder against, and specs/urls.tsv names every operation of the
+// supplement, so neither can drift from the bytes they describe.
+
+// operationNames reads the operation ids of an OpenAPI document as the model
+// spells them (the first letter upper-case).
+func operationNames(t *testing.T, doc map[string]any) map[string]bool {
+	t.Helper()
+	out := map[string]bool{}
+	paths, _ := doc["paths"].(map[string]any)
+	for _, item := range paths {
+		for _, op := range item.(map[string]any) {
+			if m, ok := op.(map[string]any); ok {
+				if id, _ := m["operationId"].(string); id != "" {
+					out[strings.ToUpper(id[:1])+id[1:]] = true
+				}
+			}
+		}
+	}
+	return out
+}
+
+func TestVercelServedSurfaceIsCountedFromTheDocuments(t *testing.T) {
+	root := findMod(t)
+	document := operationNames(t, loadJSON(t, filepath.Join(root, "specs", "vercel", "api.json")))
+	supplement := operationNames(t, loadJSON(t, filepath.Join(root, "specs", "vercel", "api-extra.json")))
+	control := operationNames(t, loadJSON(t, filepath.Join(root, "specs", "vercel", "control.json")))
+	model := vercelLoadGzippedJSON(t, filepath.Join(root, "internal", "generated", "vercel", "api", "model.json.gz"))
+
+	served, authored, controls := 0, []string{}, 0
+	for _, o := range model["Operations"].([]any) {
+		name := o.(map[string]any)["Name"].(string)
+		switch {
+		case control[name]:
+			controls++
+		case document[name]:
+			served++
+		default:
+			authored = append(authored, name)
+		}
+	}
+	sort.Strings(authored)
+	if served != 103 || controls != 3 || len(authored) != 17 {
+		t.Fatalf("the model serves %d of the document's operations, %d authored (%v) and %d test-control; want 103, 17 and 3, which docs/VERCEL.md and the census state",
+			served, len(authored), authored, controls)
+	}
+	for _, name := range authored {
+		if !supplement[name] {
+			t.Errorf("%s is authored but is in no supplement document", name)
+		}
+	}
+
+	vercelDoc, err := os.ReadFile(filepath.Join(root, "docs", "VERCEL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("**%d of the document's %d operations are not served** (%d are)", len(document)-served, len(document), served)
+	if !strings.Contains(string(vercelDoc), want) {
+		t.Errorf("docs/VERCEL.md does not say %q", want)
+	}
+
+	urls, err := os.ReadFile(filepath.Join(root, "specs", "urls.tsv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name := range supplement {
+		if !strings.Contains(string(urls), name) {
+			t.Errorf("specs/urls.tsv describes api-extra.json and does not name its operation %s", name)
+		}
+	}
+}
+
+// TestVercelParityDoesNotCallAPagedListingUnpaginated holds the ledger to the
+// listings that page (cursor.go, docs/VERCEL.md § Pagination): a row for one of
+// them that says it does not is a row nobody updated.
+func TestVercelParityDoesNotCallAPagedListingUnpaginated(t *testing.T) {
+	root := findMod(t)
+	raw, err := os.ReadFile(filepath.Join(root, "docs", "PARITY.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := strings.Split(string(raw), "\n")
+	for _, op := range []string{"GetProjects", "GetTeams", "GetDeployments", "GetDeploymentsV6", "ListAliases", "GetDomains", "GetProjectDomains", "GetDomainProjectDomains"} {
+		for _, row := range rows {
+			if !strings.HasPrefix(row, "|") || !strings.Contains(row, "(`"+op+"`)") {
+				continue
+			}
+			if strings.Contains(strings.ToLower(row), "unpaginated") {
+				t.Errorf("PARITY.md calls %s unpaginated, and it pages: %s", op, row)
+			}
+		}
+	}
+}
+
+// TestVercelPaginationDocsStateWhatTheCursorDoes holds the pagination paragraph of
+// docs/VERCEL.md to the measured behavior that three sentences of it once got
+// wrong: what happens past the ceiling (a silent skip, never a repeat), that the
+// cursor is not monotone at the wrap, and the year 2^52 milliseconds is.
+func TestVercelPaginationDocsStateWhatTheCursorDoes(t *testing.T) {
+	root := findMod(t)
+	raw, err := os.ReadFile(filepath.Join(root, "docs", "VERCEL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := strings.Join(strings.Fields(string(raw)), " ") // the paragraph is wrapped
+	for _, want := range []string{
+		"silently skips the items between",
+		"and never serves one twice",
+		"`next` is not monotone",
+		"the year 144,683",
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("docs/VERCEL.md does not say %q", want)
+		}
+	}
+	for _, gone := range []string{"repeat or skip an item", "about the year 144,000"} {
+		if strings.Contains(doc, gone) {
+			t.Errorf("docs/VERCEL.md still says %q", gone)
+		}
+	}
+}

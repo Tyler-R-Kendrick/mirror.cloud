@@ -350,26 +350,30 @@ operations:
   GetDeployments:
     let:
       limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+      since: "('since' in input && input.since != null) ? string(input.since) : ''"
+      until: "('until' in input && input.until != null) ? string(input.until) : ''"
+    require:
+      - { cond: "validCursors([since, until])", error: BadRequest, message: "since and until must be a timestamp in milliseconds, as pagination.next of an earlier page is" }
     list:
       resource: deployment
       member: deployments
       # Every filter is one the document declares: the project (by id, or by
       # name through `app`), the target, the state (comma separated) and the
-      # window `since`/`until`, both exclusive, in milliseconds.
+      # window `since`/`until`, both exclusive: a millisecond timestamp, or the
+      # cursor a page answered (cursor.go says what it carries).
       filter: >
         (!('projectId' in input && input.projectId != null && string(input.projectId) != '') || item.projectId == string(input.projectId))
           && (!('app' in input && input.app != null && string(input.app) != '') || item.projectName == string(input.app))
           && (!('target' in input && input.target != null && string(input.target) != '')
               || (string(input.target) == 'production' ? item.target == 'production' : item.target != 'production'))
           && (!('state' in input && input.state != null && string(input.state) != '') || split(string(input.state), ',').exists(s, s == string(item.__state)))
-          && (!('since' in input && input.since != null && string(input.since) != '') || item.created > int(string(input.since)))
-          && (!('until' in input && input.until != null && string(input.until) != '') || item.created < int(string(input.until)))
     output: &deployments
       # Newest first, which is the order a client pages through. The store lists
-      # by key and the key is a random identifier, so the order is the creation
-      # sequence, and `next` is the instant to ask for as `until`.
+      # by key and the key is a random identifier, so the order is the instant of
+      # creation and then the creation sequence, `since` and `until` cut it, and
+      # `next` is the cursor to ask for as `until` (page.go says how).
       deployments: >
-        slice(sortBy(items, 'seq', true), 0, limit).map(i, merge({
+        pageOf(items, 'created', [since], [until], false, limit).page.map(i, merge({
           'uid': i.uid, 'name': i.name, 'url': i.url, 'projectId': i.projectId,
           'created': i.created, 'createdAt': i.createdAt, 'type': 'LAMBDAS',
           'readyState': string(i.__state), 'state': string(i.__state),
@@ -379,16 +383,19 @@ operations:
         }, i.__state == 'READY' ? {'ready': i.readyAt}
           : (i.__state == 'ERROR' ? {'errorCode': coalesce(i.errorCode, coalesce(i.failureCode, 'BUILD_FAILED'))} : {})))
       pagination: >
-        {'count': size(slice(sortBy(items, 'seq', true), 0, limit)),
-         'next': size(items) > limit ? slice(sortBy(items, 'seq', true), 0, limit)[limit - 1].created : null,
-         'prev': (('since' in input && input.since != null) || ('until' in input && input.until != null)) && size(items) > 0
-           ? sortBy(items, 'seq', true)[0].created : null}
+        merge(pageOf(items, 'created', [since], [until], false, limit).pagination,
+          (('since' in input && input.since != null) || ('until' in input && input.until != null))
+            ? {'prev': pageOf(items, 'created', [since], [until], false, limit).first} : {})
 
   # The older listing keeps the newer one's rules: nothing about an old client
   # asking is a reason to answer it differently.
   GetDeploymentsV6:
     let:
       limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+      since: "('since' in input && input.since != null) ? string(input.since) : ''"
+      until: "('until' in input && input.until != null) ? string(input.until) : ''"
+    require:
+      - { cond: "validCursors([since, until])", error: BadRequest, message: "since and until must be a timestamp in milliseconds, as pagination.next of an earlier page is" }
     list:
       resource: deployment
       member: deployments
@@ -398,8 +405,6 @@ operations:
           && (!('target' in input && input.target != null && string(input.target) != '')
               || (string(input.target) == 'production' ? item.target == 'production' : item.target != 'production'))
           && (!('state' in input && input.state != null && string(input.state) != '') || split(string(input.state), ',').exists(s, s == string(item.__state)))
-          && (!('since' in input && input.since != null && string(input.since) != '') || item.created > int(string(input.since)))
-          && (!('until' in input && input.until != null && string(input.until) != '') || item.created < int(string(input.until)))
     output: *deployments
 
   GetDeployment:

@@ -100,6 +100,11 @@
       "source": "removing an account domain at the versions around the document's /v6; named from the API's version history, not observed against api.vercel.com"
     },
     {
+      "operation": "DeleteDomain",
+      "uris": ["/v3/domains/{domain}"],
+      "source": "client-observed: vercel CLI 63.1.2 `domains rm` sends DELETE /v3/domains/{domain} (and keys on the answer's code: not_found, forbidden, domain_removal_conflict). Not observed against api.vercel.com"
+    },
+    {
       "operation": "AssignAlias",
       "uris": ["/v3/deployments/{id}/aliases"],
       "source": "assigning an alias at the version after the document's /v2; named from the API's version history, not observed against api.vercel.com"

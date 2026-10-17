@@ -70,6 +70,24 @@ func (c *conf) domains(t *testing.T) {
 	c.call(t, http.MethodDelete, "/v5/domains/second.conform.dev", nil, 200)
 	c.call(t, http.MethodDelete, "/v4/domains/second.conform.dev", nil, 404)
 
+	// The older address the CLI adds a domain at (authored: the document has
+	// AddProjectDomain, with another body and answer), and takes one off at.
+	c.call(t, http.MethodPost, "/projects/"+pid+"/alias", map[string]any{"target": "PRODUCTION", "domain": "alias.conform.dev"}, 200)
+	c.call(t, http.MethodPost, "/projects/conform-domains/alias", map[string]any{"target": "PRODUCTION", "domain": "alias.conform.dev"}, 409)
+	c.call(t, http.MethodPost, "/projects/"+pid+"/alias", map[string]any{"domain": "nodots"}, 400)
+	c.call(t, http.MethodPost, "/projects/prj_nope/alias", map[string]any{"domain": "z.conform.dev"}, 404)
+	c.call(t, http.MethodDelete, "/projects/"+pid+"/alias?domain=alias.conform.dev", nil, 200)
+	c.call(t, http.MethodDelete, "/projects/"+pid+"/alias?domain=alias.conform.dev", nil, 404)
+
+	// The project domains under an apex the account holds, which `domains
+	// inspect` shows and `domains rm` counts, and the older address it deletes at.
+	c.call(t, http.MethodPost, "/v7/domains", map[string]any{"name": "conform.dev"}, 200)
+	c.call(t, http.MethodGet, "/v1/domains/conform.dev/project-domains", nil, 200)
+	c.call(t, http.MethodGet, "/v1/domains/conform.dev/project-domains?limit=1&since=1&until=99999999999999", nil, 200)
+	c.call(t, http.MethodGet, "/v1/domains/nope.dev/project-domains", nil, 404)
+	c.call(t, http.MethodDelete, "/v3/domains/conform.dev", nil, 200)
+	c.call(t, http.MethodDelete, "/v3/domains/conform.dev", nil, 404)
+
 	// Removed at each.
 	c.call(t, http.MethodDelete, "/v9/projects/"+pid+"/domains/www.conform.dev", nil, 200)
 	c.call(t, http.MethodDelete, "/v10/projects/"+pid+"/domains/app.conform.dev", nil, 200)

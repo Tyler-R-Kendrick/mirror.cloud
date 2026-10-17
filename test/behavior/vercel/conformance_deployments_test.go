@@ -3,6 +3,7 @@ package vercel
 import (
 	"net/http"
 	"net/url"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -36,6 +37,13 @@ func (c *conf) deployments(t *testing.T) {
 	c.call(t, http.MethodGet, "/v11/deployments/"+id+"/builds", nil, 200) // `vercel inspect`
 	c.call(t, http.MethodGet, "/v11/deployments/dpl_nope/builds", nil, 404)
 	c.call(t, http.MethodGet, "/v7/deployments?limit=1", nil, 200)
+	// The page boundary a listing answers is a number that goes back as it came, and
+	// a bare millisecond timestamp still cuts as it always did. Anything else is a 400.
+	if next := c.call(t, http.MethodGet, "/v7/deployments?limit=1", nil, 200).body["pagination"].(map[string]any)["next"]; next != nil {
+		c.call(t, http.MethodGet, "/v7/deployments?limit=1&until="+strconv.FormatFloat(next.(float64), 'f', -1, 64), nil, 200)
+	}
+	c.call(t, http.MethodGet, "/v7/deployments?until=1700000000000", nil, 200)
+	c.call(t, http.MethodGet, "/v7/deployments?until=yesterday", nil, 400)
 	c.call(t, http.MethodGet, "/v6/deployments", nil, 200)
 	c.call(t, http.MethodGet, "/v3/deployments/"+id+"/events", nil, 200)
 	c.call(t, http.MethodGet, "/v3/now/deployments/"+id+"/events?direction=forward&follow=1&format=lines", nil, 200)

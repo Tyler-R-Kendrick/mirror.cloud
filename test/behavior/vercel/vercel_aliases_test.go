@@ -28,6 +28,10 @@ func deploy(t *testing.T, v *vx, project string, ready bool) string {
 func TestVercelAliasesFollowTheDeployment(t *testing.T) {
 	v := newVX(t, "vercel-aliases")
 	v.do(http.MethodPost, "/v11/projects", map[string]any{"name": "site"})
+	// A hostname is the account's to alias only once it holds the domain.
+	if r := v.do(http.MethodPost, "/v7/domains", map[string]any{"name": "example.com"}); r.status != 200 {
+		t.Fatalf("hold the domain = %d %s", r.status, r.raw)
+	}
 
 	building := deploy(t, v, "site", false)
 	if r := v.do(http.MethodPost, "/v2/deployments/"+building+"/aliases", map[string]any{"alias": "www.example.com"}); r.status != 400 {

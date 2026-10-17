@@ -116,15 +116,26 @@ errors:
     code: domain_already_exists
     http: 409
     fault: client
+  # The document's AssignAlias answers 404 "The domain used for the alias was not
+  # found" and names no code. This one is authored: it is the code the CLI itself
+  # lists beside invalid_domain for a domain the account cannot use
+  # (nextCommandsForDomainsAddFailure), so a client that keys on it finds it.
+  DomainNotFound:
+    code: domain_not_found
+    http: 404
+    fault: client
+  # `vercel domains add <domain> <project>` posts the older
+  # POST /projects/{project}/alias and keys on this code, with the project that
+  # holds the host in the envelope (client-observed, vercel 63.1.2).
+  AliasDomainExist:
+    code: ALIAS_DOMAIN_EXIST
+    http: 409
+    fault: client
   # The oracle's invite route answers a second 409 under its own code; the
   # generic Conflict stays for project names.
   MemberAlreadyExists:
     code: member_already_exists
     http: 409
-    fault: client
-  NotAuthenticated:
-    code: not_authenticated
-    http: 401
     fault: client
   Unauthorized:
     code: unauthorized
@@ -461,9 +472,11 @@ operations:
       protectionBypass: "('protectionBypass' in rec && rec.protectionBypass != null) ? rec.protectionBypass : {}"
 
   # --- Auth supplement: the routes the vendored document never declares and
-  # the vendor's own emulator serves. Auth is enforced on these the way the
-  # oracle enforces it (401 without a Bearer), where the older operations
-  # above predate that and stay open -- the asymmetry is recorded in quirks.
+  # the vendor's own emulator serves. The oracle answers its own 401 to a request
+  # with no Bearer; these do not, because the covenant is that any credentials
+  # work (strict mode, MIRROR_VERCEL_STRICT_AUTH, refuses at the edge for every
+  # operation alike). The one 401 left is OauthUserinfo's, which is the OAuth
+  # protocol's own and not a credential check on the API.
 
   GetRegistration:
     # The oracle's constant: registration is closed.
@@ -471,8 +484,6 @@ operations:
       registration: "false"
 
   CreateApiKey:
-    require:
-      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
     effects:
       - generate: { bind: kid, kind: hex, bytes: 8 }
       - generate: { bind: tok, kind: hex, bytes: 24 }
@@ -489,8 +500,6 @@ operations:
       apiKey: "{'id': rec.id, 'name': rec.name, 'teamId': rec.teamId, 'createdAt': rec.createdAt}"
 
   ListApiKeys:
-    require:
-      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
     list:
       resource: api_key
       member: keys
@@ -502,7 +511,6 @@ operations:
     reads:
       k: { resource: api_key, key: "string(input.keyId)" }
     require:
-      - { cond: "'authorization' in input && input.authorization != null && string(input.authorization) != ''", error: NotAuthenticated, message: "Authentication required" }
       - { cond: k_found, error: NotFound, message: "API key not found" }
     effects:
       - delete: { resource: api_key, key: "string(input.keyId)", missing: ignore }
@@ -692,9 +700,13 @@ quirks:
       which is the same shape as Cloudflare's percent-encoded slash: the
       document is `declared` and the pack's tolerance was `authored`.
 
-      The listing is also unpaginated. `limit`, `from` and the rest are
-      accepted and read by nothing, so every project is on the one page and
-      `pagination.count` is the total rather than the page size.
+      The listing pages: `limit` is the page size and `from` is the cursor a
+      previous page answered as pagination.next, a number that carries the
+      project's place among those created in the same millisecond (see
+      internal/engine/cursor.go), so a boundary between two of them loses
+      neither. Projects page by creation instant, the order of the listing, where
+      the document words `from` as "updated after". A bare integer timestamp
+      still means the projects created before it.
   - operation: DeleteProject
     note: >
       Answers 204 with no body, where the pack answered 200 and an empty
@@ -720,9 +732,14 @@ quirks:
       Lists in creation order, where the pack listed by store key (a random
       identifier). The document does not say what order it lists in; creation
       order is the one a snapshot can reproduce. `gitBranch` narrows to the
-      variables set for that branch and those set for none. `source`,
-      `customEnvironmentId` and `customEnvironmentSlug` are accepted and read by
-      nothing.
+      variables set for that branch and those set for none. `target` (which the
+      document does not declare and `vercel env pull` sends, to ask which of
+      the empty values it was given are sensitive), `customEnvironmentSlug` and
+      `customEnvironmentId` narrow it to the variables that list that
+      environment; a target that is neither a built-in one nor a custom
+      environment of the project lists nothing. Given together (`target` and a
+      custom environment's slug or id) they all apply: a variable must list both.
+      `source` is read by nothing.
   - operation: GetProjectEnv
     note: >
       The document declares this at /v1; the vendored fragment and the pack's
@@ -867,14 +884,15 @@ quirks:
       The document declares an empty 201.
   - operation: GetTeams
     note: >
-      Lists whatever team records exist, which is initially none: teams are
-      account fixtures, and the vendored document declares no create (the
-      oracle's POST /v2/teams has no counterpart in it). Unpaginated, as
-      GetProjects is: limit/since/until are accepted and read by nothing, and
-      pagination.next/prev answer null.
+      Lists the teams there are, newest first, which is initially none: a team
+      is made by CreateTeam (the oracle's POST /v2/teams, authored; the vendored
+      document's own create answers only {id, slug}). Pages like every other
+      listing: `limit` is the page size, `until` and `since` take a bare
+      millisecond timestamp or the cursor pagination.next answered, which tells
+      teams made in one millisecond apart.
   - operation: GetTeam
     note: >
-      404 for any id until a team record exists, which nothing here creates.
+      404 for any id until a team record exists (CreateTeam makes one).
       Members a bare row would not carry answer null -- or the oracle's
       defaults for membership, billing and resourceConfig -- rather than
       failing the read.
@@ -915,10 +933,11 @@ quirks:
       listing the hostname.
   - operation: GetDeploymentEvents
     note: >
-      Newest first, the oracle's default direction; `direction`, `limit`,
-      `since`/`until` and the rest are accepted and read by nothing. Events
-      are the ones the create and cancel write -- created, building, ready,
-      canceled -- not a build log.
+      Newest first, the oracle's default direction; `direction`, `limit` and
+      `since`/`until` (inclusive instants) are read, and `follow`, `format` and
+      the rest are accepted and read by nothing. Events are the ones the
+      create and cancel write -- created, building, ready, canceled -- not a
+      build log.
   - operation: ListDeploymentFiles
     note: >
       Answers the document's bare FileTree array where the oracle wraps the
@@ -953,3 +972,48 @@ quirks:
       never reaches a listing. Generate honors a caller-chosen secret when the
       document's body carries one, and the scope is the document's
       `automation-bypass` enum value where the oracle writes `deployment`.
+  - operation: AssignAlias
+    note: >
+      A hostname is the account's to alias only if it holds the domain: a
+      *.vercel.app name needs none, and anything else must be a domain of the
+      account, sit under one (its apex), or be a hostname one of its projects
+      holds. Otherwise 404 under the code domain_not_found. The document says
+      "The domain used for the alias was not found" and names no code; this one
+      is authored, chosen because the CLI lists it beside invalid_domain for a
+      domain the account cannot use. This bundle accepted any hostname until
+      now. The check runs after the hostname is known valid and before the
+      deployment's state is looked at.
+  - operation: AddProjectAlias
+    note: >
+      Not in the document: vercel 63.1.2 `domains add <domain> <project>` posts
+      it. The answer is an array of alias targets; the CLI reads the entry for its
+      host, so the members beyond `domain` are authored. The host is held in lower
+      case and the entry keeps the spelling that was posted (the CLI compares it
+      with ===; what Vercel echoes is not known). The host is `domain`, and `name` where
+      there is none (the document's own add names it `name`), for the echo, the
+      stored name, the apex and the ownership key alike; a body that gives both
+      as different hosts is a 400 on either address. A host another project
+      holds is 409 ALIAS_DOMAIN_EXIST with `project: {id}` in the envelope, which
+      is what the CLI reads to tell "already on this project" from "on another".
+      The holder is named by id only: a name kept in the envelope would go stale
+      on a project rename. The host lands in the store AddProjectDomain writes.
+  - operation: RemoveProjectAlias
+    note: >
+      Not in the document: `domains add --force` sends it to take a host off the
+      project that holds it. The CLI reads nothing from the answer but whether it
+      is an error, so the empty object is authored.
+  - operation: GetDomainProjectDomains
+    note: >
+      The document's route, which the CLI's `domains inspect` and `rm` read. It
+      lists the project domains of every project of the account under one apex,
+      and is a 404 for an apex the account does not hold. The account-wide
+      hostname index (domain_owner) carries the whole project domain so that no
+      per-project collection has to be asked.
+  - operation: GetEnvPull
+    note: >
+      Not in the document: `vercel env pull`, `pull` and `link` read it. See the
+      header of ops/envpull.yaml for what the CLI does with the answer. A
+      sensitive variable is its key with "" (its value is not stored); which
+      variables a real target includes beyond the project's own is not known.
+      GetEnvPullTarget and GetEnvPullBranch are the same definition at the
+      address with a target, and a target and a git branch.

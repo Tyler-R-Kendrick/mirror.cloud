@@ -50,6 +50,13 @@ for (let i = 0; i < 30 && state !== "READY"; i++) {
 }
 assert.equal(state, "READY");
 
+// A hostname is the account's to alias only once it holds the domain.
+await assert.rejects(
+  vercel.aliases.assignAlias({ id: deployment.id, requestBody: { alias: "sdk.example.test" } }),
+  (error) => error.statusCode === 404,
+  "an alias to a domain the account does not hold is refused",
+);
+await vercel.domains.createOrTransferDomain({ requestBody: { method: "add", name: "sdk.example.test" } });
 const alias = await vercel.aliases.assignAlias({ id: deployment.id, requestBody: { alias: "sdk.example.test" } });
 assert.equal(alias.alias, "sdk.example.test");
 

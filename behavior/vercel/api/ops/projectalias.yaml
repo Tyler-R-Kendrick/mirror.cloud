@@ -1,0 +1,54 @@
+schema: bir/1
+service: vercel.api
+
+# What `vercel domains add --force`, `inspect` and `rm` read besides the add
+# (AddProjectAlias, in domains.yaml, which shares its reads and effects with the
+# document's AddProjectDomain): taking a host off the project that holds it, and
+# listing the project domains that sit under an account domain.
+
+operations:
+  # The inverse: the project stops holding the host, and the host is free.
+  RemoveProjectAlias:
+    reads:
+      by_name: { resource: project_name }
+      proj:
+        resource: project
+        key: >
+          by_name_found ? string(by_name.project)
+            : (('idOrName' in input && input.idOrName != null) ? string(input.idOrName) : '')
+      dom: { resource: domain }
+    require:
+      - { cond: proj_found, error: NotFound, message: "The requested resource was not found." }
+      - { cond: dom_found, error: NotFound, message: "The requested resource was not found." }
+    effects:
+      - delete: { resource: domain }
+      - delete: { resource: domain_owner, missing: ignore }
+    output: {}
+
+  # The project domains of every project that sit under one apex domain of the
+  # account: what `vercel domains inspect` shows and `vercel domains rm` counts.
+  GetDomainProjectDomains:
+    reads:
+      held: { resource: account_domain }
+    let:
+      limit: "('limit' in input && input.limit != null && string(input.limit) != '') ? clamp(int(string(input.limit)), 1, 100) : 20"
+      since: "('since' in input && input.since != null) ? string(input.since) : ''"
+      until: "('until' in input && input.until != null) ? string(input.until) : ''"
+      apex: "('domain' in input && input.domain != null) ? lower(string(input.domain)) : ''"
+    require:
+      - { cond: "validCursors([since, until])", error: BadRequest, message: "since and until must be a timestamp in milliseconds, as pagination.next of an earlier page is" }
+      - { cond: held_found, error: NotFound, message: "Domain not found" }
+    list:
+      resource: domain_owner
+      member: projectDomains
+      filter: "item.apexName == apex"
+    output:
+      projectDomains: >
+        pageOf(items, 'createdAt', [since], [until], false, limit).page.map(i, {
+          'name': i.name, 'apexName': i.apexName, 'projectId': i.projectId, 'redirect': i.redirect,
+          'redirectStatusCode': i.redirectStatusCode, 'gitBranch': i.gitBranch, 'customEnvironmentId': i.customEnvironmentId,
+          'updatedAt': i.updatedAt, 'createdAt': i.createdAt, 'verified': i.verified,
+          'verification': i.verified ? [] : [{'type': 'TXT', 'domain': '_vercel.' + i.apexName,
+            'value': 'vc-domain-verify=' + i.name + ',' + substr(sha256hex(identity.account + ':' + i.name), 0, 16),
+            'reason': 'Add the TXT record above to verify domain ownership'}]})
+      pagination: "pageOf(items, 'createdAt', [since], [until], false, limit).pagination"

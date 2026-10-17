@@ -70,8 +70,9 @@ const vercel = new Vercel({ bearerToken: "anything", serverURL: process.env.MIRR
 `scripts/vercel-acceptance.sh` is the whole deploy path in curl, and the thing to
 read to see what a client sends: a project created at `v9` and at `v11`, a
 variable, `POST /v2/files` with the SHA-1 in `x-vercel-digest`, `POST /v13/deployments`
-naming that file, a poll to READY, an alias, the deployment read back by id and
-by URL, and the project deleted. `TestTheAcceptanceScriptDeploysAndItsAnswersAreTheDocuments`
+naming that file, a poll to READY, an alias (refused until the account holds the
+domain, then allowed), the deployment read back by id and by URL, and the project
+deleted. `TestTheAcceptanceScriptDeploysAndItsAnswersAreTheDocuments`
 runs it against a booted emulator and checks each answer against the document.
 
 The emulator takes any token. For a real deploy, hand the token to the command
@@ -92,12 +93,25 @@ recorded, and the deployment's URL is not served. Upload files first, by the SHA
 of their bytes (`POST /v2/files`), or send them inline (`{"file": "index.html",
 "data": "..."}`); naming a file that was neither uploaded nor inlined is the 400
 `missing_files` with the list of what is missing, which is how the CLI knows what
-to upload. A deployment for a project name nobody has made creates the project;
-Vercel answers 404 there, and this is the one place the emulator is kinder.
+to upload. A deployment that gives only a `name` nobody has made a project of creates
+the project, where Vercel answers 404, and this is the one place the emulator is kinder;
+one that names a `project` that does not exist is the 404.
 
 Aliases need a `READY` deployment. Assigning a hostname that already names another
 deployment moves it. A production deployment is aliased to `<project>.vercel.app`
 once it is ready.
+
+A hostname is the account's to alias only if it holds the domain: a `*.vercel.app` name
+needs none, and any other host must be a domain of the account, sit under one (the apex,
+which is the last two labels, three under the ccTLD second levels `apexOf` knows), or be a
+hostname one of its projects holds. "Holds" means only that a record exists: the domain need
+not be verified and nothing proves the account owns the name (see Known gaps, Domains), so a
+project given `www.google.com` can alias at that name. Otherwise the answer is the document's `404` ("The
+domain used for the alias was not found"), under the code `domain_not_found`, which the
+document does not name: the CLI itself lists it beside `invalid_domain` for a domain the
+account cannot use, which makes it a reasoned choice and not an observed one. The check comes after the
+hostname is known to be valid and before the deployment's state is looked at. Each team
+holds its own domains, so one team cannot alias under another's.
 
 ## Versions
 
@@ -111,6 +125,47 @@ address of an operation reaches the same store, so a project made with the CLI's
 with `Host: api.vercel.com` it is a 501 `MirrorNotImplemented`, never a silent success
 (without the host, a path no service claims falls to S3's routes, whose 501 it gets). The Edge Config routes answer at `/v1/edge-config`, which the API
 serves, and at `/v1/global-config`, which the document spells.
+
+## Pulling variables
+
+`vercel env pull`, `vercel pull` and `vercel link` (which refreshes `VERCEL_OIDC_TOKEN` the same
+way) read `GET /v3/env/pull/{project}[/{target}[/{gitBranch}]]`, a route the pinned document does
+not list. It is authored from what the CLI does with the answer (vercel 63.1.2, read from its
+JavaScript): it takes `env`, an object of `KEY: value`, and writes every key it is given. A
+sensitive variable is the key with `""` (its value is not stored, so it cannot come back); the CLI
+takes an empty value for one it could not read, asks `GET /v10/projects/{id}/env?target=<environment>`
+which are sensitive (the listing narrows to that environment, so a sensitive production variable does
+not make a legitimately empty development one look unreadable; `customEnvironmentSlug` and
+`customEnvironmentId` narrow it too, all that are given apply together, so a variable must list both a
+`target` and a custom environment named with it, and a target that names nothing lists nothing), and writes
+`[SENSITIVE]` in their place. The target is `development` (also what a pull
+with no target gets), `preview`, `production`, or the slug or id of one of the project's custom
+environments; anything else is a 400 rather than an empty file. A git branch adds the variables set
+for it over the ones set for none, and without one they are left out. Nothing here was compared with
+api.vercel.com: which variables a real target includes (system variables, for one) is not known.
+
+## Domains the CLI adds to a project
+
+`vercel domains add <domain>` adds a domain to the account (`POST /v7/domains`, the document's).
+`vercel domains add <domain> <project>` does not use the document's `AddProjectDomain`: vercel
+63.1.2 posts the older `POST /projects/{project}/alias` with `{"target": "PRODUCTION", "domain": host}`
+and reads the entry for its host out of the array it gets back, so that is what the authored
+`AddProjectAlias` answers (the entry's members beyond `domain` are not observed). A host is held and
+listed in lower case, and the entry the add answers keeps the spelling that was posted, because the
+CLI compares it with `===` (`domains add WWW2.Example.Dev app` failed with "did not return a matching
+alias" when it was lower-cased); what api.vercel.com echoes is not known. The host is read `domain` first and `name` where there is none (the
+document's own add names it `name`), the same everywhere it is read, and a body that gives both as
+different hosts is a `400` on either address. The host lands in
+the same store the document's routes use, so `GET /v9/projects/{id}/domains/{host}` finds it and
+`AddProjectDomain` refuses it. When another project holds the host the answer is `409` with the code
+`ALIAS_DOMAIN_EXIST` and `project: {id}` in the envelope, which is what the CLI reads to tell "already
+on this project" from "on another", and what `--force` answers by taking the host off the holder
+(`DELETE /projects/{id}/alias?domain=host`, `RemoveProjectAlias`) and posting again. The holder is named
+by id only: a name kept beside it would go stale on a rename. `vercel domains inspect` and `rm` list the
+projects under a domain with the document's `GET /v1/domains/{domain}/project-domains` (a 404 for a
+domain the account does not hold), and `rm` deletes at `DELETE /v3/domains/{domain}`, an older address
+of `DeleteDomain`. A domain still on a project is deleted all the same: the CLI knows a
+`domain_removal_conflict`, and nothing here raises it.
 
 ## Errors
 
@@ -147,6 +202,12 @@ With `MIRROR_VERCEL_STRICT_AUTH=1`, a request with no `Authorization: Bearer` he
 is a 403 `forbidden` ("Not authenticated"); a token that starts with `invalid` is a
 403 `forbidden` carrying `invalidToken: true`, which is what the CLI keys on to ask
 you to log in again.
+No route is exempt in either mode: `CreateTeam`, `ListTeamMembers`, `UpdateAuthUser` and the
+API-key routes, which the vendor's own emulator guards with a 401 of its own, are served to a
+request with no credential like every other (`vercel_covenant_test.go` calls each with no
+header, an arbitrary bearer, one that starts with `invalid` and basic credentials, in both
+modes). The one 401 left is the OAuth `userinfo` route's, which is the protocol's and not a
+credential check on the API.
 
 ## Persistence and determinism
 
@@ -169,14 +230,16 @@ from one revision of Vercel's document and the CLI's addresses move between rele
 | `@vercel/sdk` | 1.28.43 | the same |
 
 Both are client-observed (see the top of this page). Install them into a directory with
-your package manager and name it:
+your package manager and name it (the CLI wants its dependencies there too, and the
+journeys call `node_modules/.bin/vercel` and `node_modules/@vercel/sdk`):
 
 ```sh
 MIRROR_VERCEL_CLIENT_DIR=~/vercel-clients go test ./test/behavior/vercel -run TestVercelsOwnClientsDeploy -v
 ```
 
 Without the variable the test skips and says so. With it, both journeys
-(`test/vercel-clients/`) pass: the SDK one in about 7 s, the CLI one in about 26 s.
+(`test/vercel-clients/`) pass: the SDK one in 4 to 7 s, the CLI one in 40 to 50 s (it walks about
+forty commands).
 The CLI's native binary (its default on macOS, opt-in on Linux) was not run. A newer
 SDK is generated from a newer document than the one pinned here and may ask for more.
 
@@ -184,15 +247,17 @@ What each journey walks, and how it ends now:
 
 | Step | Result |
 |---|---|
-| CLI `whoami`, `project add`, `link` | pass; `link` warns that it could not refresh `VERCEL_OIDC_TOKEN` (below) |
+| CLI `whoami`, `project add`, `link` | pass; `link` asks for the development variables to refresh `VERCEL_OIDC_TOKEN`, and none is issued |
 | CLI `env add`, `env ls`, `env rm` | pass |
 | CLI `deploy --prod`, `deploy` (preview) | pass; files go inline or by the upload protocol (`missing_files`, then `POST /v2/files`, the digest in `x-now-digest`) |
 | CLI `inspect`, `ls`, `project ls`, `alias set\|ls\|rm`, `remove` | pass |
 | CLI `redeploy`, `promote` | pass when run by hand; not in the journey script |
-| SDK projects, variables, deployments, aliases, domains, Edge Config, and the listings that carry a pagination object | pass |
-| CLI `env pull`, `pull` | **fail**: `GET /v3/env/pull/{id}/{target}` is not in the document, and the CLI exits "Response Error" |
-| CLI `build` | **not run**: it needs `pull` first and the builders it loads |
-| CLI `domains add`, `alias set` to a hostname the account does not hold | **fail**: `domains add` posts to `POST /projects/{project}/alias` with `{domain}` (an older address and body than the document's `AddProjectDomain`); `alias set` asks the registrar (`GET /v1/registrar/domains/{host}/availability`) whether the name is for sale, and the registrar is not served |
+| SDK projects, variables, deployments, aliases (refused for a domain the account lacks, then allowed once it holds it with `createOrTransferDomain`), domains, Edge Config, and the listings that carry a pagination object | pass |
+| CLI `env pull` (all three targets, a git branch), `pull` | pass; `GET /v3/env/pull/{project}[/{target}[/{branch}]]` is authored, the document does not list it (below) |
+| CLI `build` | **not run**: it loads the framework builders, which the toolchain does not carry |
+| CLI `domains add`, `domains add <domain> <project>` (also against a host another project holds, and `--force`), `domains ls`, `domains inspect`, `domains rm` | pass; the project form posts the older `POST /projects/{project}/alias`, authored (below) |
+| CLI `alias set` to a `*.vercel.app` name, or to a domain the account holds | pass |
+| CLI `alias set` to a hostname the account does not hold, or to a subdomain of one it does | **fail**: the CLI looks the name up as a domain (`GET /v5/domains/{host}`, a 404 for a subdomain) and then asks the registrar (`GET /v1/registrar/domains/{host}/availability`) whether it is for sale, and the registrar is not served. The API's own refusal is held by the Go tests, the acceptance script and the SDK journey |
 
 What running them changed, one entry per finding (the commit that made each change
 carries the request and the failure it fixed):
@@ -218,6 +283,17 @@ carries the request and the failure it fixed):
 - `vercel inspect` reads `GET /v11/deployments/{id}/builds`, an operation the document
   does not list; it is authored (`GetDeploymentBuilds`) and answers an empty list, since
   nothing builds.
+- `vercel env pull`, `vercel pull` and `vercel link`'s token refresh read
+  `GET /v3/env/pull/{project}[/{target}[/{branch}]]`, which the document does not list
+  (authored: `GetEnvPull`, `GetEnvPullTarget`, `GetEnvPullBranch`; see
+  [Pulling variables](#pulling-variables)).
+- `vercel domains add <domain> <project>` posts the older `POST /projects/{project}/alias`
+  and keys on `ALIAS_DOMAIN_EXIST`; `domains inspect` and `rm` read the document's
+  `GET /v1/domains/{domain}/project-domains`, and `rm` deletes at `DELETE /v3/domains/{domain}`
+  (see [Domains the CLI adds to a project](#domains-the-cli-adds-to-a-project)).
+- Not a client's finding but the document's: an alias to a hostname the account does not hold
+  is the 404 "The domain used for the alias was not found", and the emulator accepted it. It
+  refuses now (see [What a deployment does](#what-a-deployment-does)).
 
 The recorded journeys are replayed without node or the clients by
 `TestRealClientFixturesReplay`: every request exactly as it was sent, against a fresh
@@ -274,6 +350,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 
 | Operation | Method and address | Also answers at | Status |
 |---|---|---|---|
+| `AddProjectAlias` | POST `/projects/{idOrName}/alias` | - | authored (held to the supplement's schema) |
 | `AddProjectDomain` | POST `/v10/projects/{idOrName}/domains` | `/v8/projects/{idOrName}/domains`, `/v9/projects/{idOrName}/domains` | spec-validated |
 | `ApproveRollingReleaseStage` | POST `/v1/projects/{idOrName}/rolling-release/approve-stage` | - | spec-validated |
 | `ArtifactExists` | HEAD `/v8/artifacts/{hash}` | - | spec-validated |
@@ -298,7 +375,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `DeleteAllArtifacts` | DELETE `/v8/artifacts` | - | spec-validated |
 | `DeleteApiKey` | DELETE `/v1/api-keys/{keyId}` | - | authored (held to the supplement's schema) |
 | `DeleteDeployment` | DELETE `/v13/deployments/{id}` | - | spec-validated |
-| `DeleteDomain` | DELETE `/v6/domains/{domain}` | `/v4/domains/{domain}`, `/v5/domains/{domain}` | spec-validated |
+| `DeleteDomain` | DELETE `/v6/domains/{domain}` | `/v3/domains/{domain}`, `/v4/domains/{domain}`, `/v5/domains/{domain}` | spec-validated |
 | `DeleteEdgeConfig` | DELETE `/v1/global-config/{edgeConfigId}` | `/v1/edge-config/{edgeConfigId}` | spec-validated |
 | `DeleteEdgeConfigSchema` | DELETE `/v1/global-config/{edgeConfigId}/schema` | `/v1/edge-config/{edgeConfigId}/schema` | spec-validated |
 | `DeleteEdgeConfigTokens` | DELETE `/v1/global-config/{edgeConfigId}/tokens` | `/v1/edge-config/{edgeConfigId}/tokens` | spec-validated |
@@ -322,6 +399,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `GetDeploymentsV6` | GET `/v6/deployments` | - | authored (held to the supplement's schema) |
 | `GetDomain` | GET `/v5/domains/{domain}` | `/v4/domains/{domain}`, `/v6/domains/{domain}` | spec-validated |
 | `GetDomainConfig` | GET `/v6/domains/{domain}/config` | - | spec-validated |
+| `GetDomainProjectDomains` | GET `/v1/domains/{domain}/project-domains` | - | spec-validated |
 | `GetDomainVerificationRecord` | GET `/v9/domains/{domain}/verification` | - | spec-validated |
 | `GetDomains` | GET `/v5/domains` | `/v4/domains`, `/v6/domains` | spec-validated |
 | `GetEdgeConfig` | GET `/v1/global-config/{edgeConfigId}` | `/v1/edge-config/{edgeConfigId}` | spec-validated |
@@ -331,6 +409,9 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `GetEdgeConfigToken` | GET `/v1/global-config/{edgeConfigId}/token/{token}` | `/v1/edge-config/{edgeConfigId}/token/{token}` | spec-validated |
 | `GetEdgeConfigTokens` | GET `/v1/global-config/{edgeConfigId}/tokens` | `/v1/edge-config/{edgeConfigId}/tokens` | authored (held to the supplement's schema) |
 | `GetEdgeConfigs` | GET `/v1/global-config` | `/v1/edge-config` | authored (held to the supplement's schema) |
+| `GetEnvPull` | GET `/v3/env/pull/{idOrName}` | - | authored (held to the supplement's schema) |
+| `GetEnvPullBranch` | GET `/v3/env/pull/{idOrName}/{target}/{gitBranch}` | - | authored (held to the supplement's schema) |
+| `GetEnvPullTarget` | GET `/v3/env/pull/{idOrName}/{target}` | - | authored (held to the supplement's schema) |
 | `GetProject` | GET `/v9/projects/{idOrName}` | - | spec-validated |
 | `GetProjectCheck` | GET `/v2/projects/{projectIdOrName}/checks/{checkId}` | - | spec-validated |
 | `GetProjectDomain` | GET `/v9/projects/{idOrName}/domains/{domain}` | `/v10/projects/{idOrName}/domains/{domain}`, `/v8/projects/{idOrName}/domains/{domain}` | spec-validated |
@@ -370,6 +451,7 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 | `PatchUrlProtectionBypass` | PATCH `/aliases/{id}/protection-bypass` | - | spec-validated |
 | `RecordEvents` | POST `/v8/artifacts/events` | - | spec-validated |
 | `RemoveCustomEnvironment` | DELETE `/v9/projects/{idOrName}/custom-environments/{environmentSlugOrId}` | - | spec-validated |
+| `RemoveProjectAlias` | DELETE `/projects/{idOrName}/alias` | - | authored (held to the supplement's schema) |
 | `RemoveProjectDomain` | DELETE `/v9/projects/{idOrName}/domains/{domain}` | `/v10/projects/{idOrName}/domains/{domain}`, `/v8/projects/{idOrName}/domains/{domain}` | spec-validated |
 | `RemoveProjectEnv` | DELETE `/v9/projects/{idOrName}/env/{id}` | `/v10/projects/{idOrName}/env/{id}`, `/v8/projects/{idOrName}/env/{id}` | spec-validated |
 | `RequestPromote` | POST `/v10/projects/{projectId}/promote/{deploymentId}` | - | spec-validated |
@@ -397,35 +479,46 @@ rewrites it. `docs/SUPPORT.md` is generated separately, by `mirror support-matri
 ## Known gaps
 
 What a person deploying through this will run into, roughly in the order they will.
+Each is a thing that is not served or not known, said as such; nothing here was
+compared with api.vercel.com.
 
 - **No build, no serving.** A deployment's files are recorded and its URL answers
   nothing. `GetDeploymentFileContents` is an empty object; a file's bytes are not
-  kept (the remote cache's are).
+  kept (the remote cache's are). `vercel build` was not run: it loads the framework
+  builders, which the toolchain does not carry, and a deployment is made from source
+  (`vercel deploy`), not from prebuilt output.
 - **Build logs do not stream.** `GET /v3/deployments/{id}/events` answers the events
   the emulator records (created, building, ready, canceled) as a finite list;
-  `follow=1` and the other query members are accepted and read by nothing, and
-  there is no build output to follow.
-- **About 300 of the document's 417 operations are not served**: the marketplace and
-  integrations, log drains and webhooks, sandboxes, storage, firewall, feature
+  `direction`, `limit`, `since` and `until` are read, `follow=1` and the other query
+  members are accepted and read by nothing, and there is no build output to follow.
+- **314 of the document's 417 operations are not served** (103 are): the marketplace
+  and integrations, log drains and webhooks, sandboxes, storage, firewall, feature
   flags, certificates, DNS records, domain purchase and transfer (the registrar),
   access groups, shared variables, and the rest. They answer 501 when sent with
   `Host: api.vercel.com`; a client pointed at `http://127.0.0.1:PORT` sends its own
   host, and an address no model claims then falls through to S3 and answers its
   `NoSuchBucket`.
-- **`vercel env pull`, `vercel pull` and so `vercel build`** do not work: the CLI asks
-  `GET /v3/env/pull/{projectId}/{target}` (and `/{gitBranch}`), which the document does not
-  list, so nothing here knows what to answer, and the first failure ends the command. `vercel
-  link` makes the same request to refresh `VERCEL_OIDC_TOKEN` and only warns. `vercel build`
-  also loads the framework builders and was not run. A deployment is made from source
-  (`vercel deploy`), not from prebuilt output.
-- **`vercel domains add`** posts the older `POST /projects/{project}/alias` with `{domain}`;
-  `vercel alias set` to a hostname the account does not hold asks the registrar
-  whether it is for sale. Neither is served. A custom domain is added with the SDK's
-  `addProjectDomain` (or `POST /v10/projects/{id}/domains`); an alias to a `*.vercel.app` name
-  needs none.
-- **A domain is never resolved.** Verifying a project domain takes the TXT challenge
-  as met; there is no DNS to ask. An alias to a hostname the account does not hold is
-  accepted, where Vercel answers 404.
+- **Pulling variables** (above) is the project's own variables for one target. A pull of a
+  deployment id (`env pull --id dpl_...`, which reads `buildEnv`) is not served, no
+  `VERCEL_OIDC_TOKEN` is issued, and which variables beyond the project's own a real
+  target includes (system variables, for one) is not known. A sensitive variable comes
+  back as its key with `""`; whether a real one is that or absent is not known either.
+- **The registrar is not served**, so `vercel alias set` to a hostname the account does
+  not hold, or to a subdomain of one it does, ends there: the CLI looks the name up as a
+  domain (`GET /v5/domains/{host}`, a 404), then asks whether it is for sale. What the
+  real CLI does for a subdomain of a domain it holds is not known. `vercel domains
+  inspect` asks the registrar for a renewal price, gets a 404 and prints `-`. The alias
+  route itself refuses an unheld hostname, and `vercel alias set` to a `*.vercel.app` name
+  or to a domain the account holds reaches it.
+- **Domains.** A domain is never resolved: verifying a project domain takes the TXT
+  challenge as met and there is no DNS to ask. Holding a domain means only that the
+  account has a record of it, so an alias is accepted under a domain, or at a project
+  hostname such as `www.google.com`, whether or not it is verified and whoever owns the
+  name. A domain still on a project is deleted all the same; the CLI knows a
+  `domain_removal_conflict` that nothing raises. `domains add --force` falls back on
+  `GET /project-domains/{domain}` when the error does not name the holder; the error
+  always does, so that address is not served. An alias target's members beyond `domain`,
+  and what `DELETE /projects/{id}/alias` answers, are authored.
 - **Edge Config:** the control plane only. Its data plane
   (`edge-config.vercel.com`, what an application reads through with a token) is
   another host and another product. Backups are not served. A config's schema is
@@ -435,9 +528,41 @@ What a person deploying through this will run into, roughly in the order they wi
   split. Billing is "unlimited".
 - **Teams** are created, read, renamed and given members by email; there is no
   invitation to accept, no roles beyond the stored string, no billing.
-- **Pagination** cursors are millisecond timestamps, as Vercel's are. Items created
-  within one millisecond of each other can be missed between pages; on a
-  controllable clock that is every item until the clock moves.
+- **Pagination.** `pagination.next` is a number, as the document types it, and carries more
+  than the timestamp: the creation instant of the last item on the page, with that item's
+  place among those made in the same millisecond as the fraction. Sent back as `until`
+  (`from` for projects) it continues without a skip or a repeat, which a bare timestamp
+  cannot do for items that share one, and every item does on a controllable clock that is
+  not moving. A listing runs newest first, the later instant first and, of two made at one
+  instant, the later made, and every cut is a cut of that order, so a clock that steps back
+  does not drop an item. The fraction has the bits a float64 leaves the timestamp: 12 today,
+  which is 4095 places, halving each time the timestamp gains a bit (2039, 2109, ...), and
+  none from 2^52 milliseconds from 1970, either way (the year 144,683, and as far before the epoch), where a
+  cursor is a whole timestamp; the instants before 1970 a wound clock can reach have as many places as the same
+  distance after it.
+  The ceiling is that the items of one listing made in one millisecond lie within that many
+  creations of each other (a creation counts for every listing that draws on its counter, so a
+  clock stepped back to an earlier instant after more than that many creations reaches it with
+  a handful of items). Past it two items share a place and the cursor of the newer is read as
+  the older: a walk silently skips the items between, up to one slot count of them at each wrap
+  (6000 items of one instant, paged by 50, serve 1905; 9000 serve 810), and never serves one
+  twice; there is no error. Because a place is a sequence modulo the count, `next` is not
+  monotone: items 4096, 4095 and 4094 of one millisecond answer 2/4096, 1/4096 and 4095/4096
+  past it, so a client loop that insists on a decreasing cursor would see one step that is not,
+  once per 4095 creations of an instant; the listing resolves it. A cursor keeps its position when the item it names is deleted between pages: what was
+  older than it is the next page and what was newer does not come back, exactly for a run of up
+  to half that many creations (a longer one whose named item and every neighbour on one side
+  are all gone can be placed on the wrong side). A bare integer timestamp still means what it did (the items strictly before it for
+  `until`, after it for `since`), a number past what a float64 holds as an integer (beyond
+  2^53 either way) is the bound it is, every item being before 1e19 and after -1e19, and
+  anything that is not a decimal number, in the form a client prints one (a minus sign, digits
+  with no leading zero, a fraction, an exponent: not `.5`, `1_000`, `0x10`, `+5`, `00012`,
+  padding, NaN or Inf), is a 400, as is a fraction that names no place. Projects page
+  by creation, since that is the order of the listing (an update moves nothing in it); the
+  document words `from` as "updated after". The paged listings are teams, projects,
+  deployments (`/v6` and `/v7`), aliases, the account's domains, a project's domains and the
+  project domains of an apex; the others (project variables, team members, Edge Config)
+  answer one page with `next: null`.
 - **The OAuth flow** is the oracle's local login (a page, a callback, a token
   exchange, userinfo), not Vercel's.
 - **Rate limiting** is the armed 429s and nothing else; there is no accounting.

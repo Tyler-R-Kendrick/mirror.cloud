@@ -42,6 +42,15 @@ func (c *conf) env(t *testing.T) {
 	c.call(t, http.MethodGet, "/v8/projects/"+pid+"/env?gitBranch=feature", nil, 200)
 	c.call(t, http.MethodGet, "/v10/projects/prj_nope/env", nil, 404)
 
+	// Pulled for one target, at each spelling the CLI sends: with no target,
+	// with one, and with a branch. The route is authored (the document does not
+	// list it), so the answer is held to the supplement's schema.
+	c.call(t, http.MethodGet, "/v3/env/pull/"+pid, nil, 200)
+	c.call(t, http.MethodGet, "/v3/env/pull/conform-env/production?source=vercel-cli%3Aenv%3Apull", nil, 200)
+	c.call(t, http.MethodGet, "/v3/env/pull/"+pid+"/preview/feature", nil, 200)
+	c.call(t, http.MethodGet, "/v3/env/pull/prj_nope/development", nil, 404)
+	c.call(t, http.MethodGet, "/v3/env/pull/"+pid+"/nowhere", nil, 400)
+
 	// One variable, at each version it is read at.
 	id := str(plain.body["created"].(map[string]any), "id")
 	c.call(t, http.MethodGet, "/v1/projects/"+pid+"/env/"+id, nil, 200)

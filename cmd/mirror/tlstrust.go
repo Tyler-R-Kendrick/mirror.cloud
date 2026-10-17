@@ -45,32 +45,59 @@ func fileRule(mine bool, perm os.FileMode, private bool) bool {
 	return mine && perm&mask == 0
 }
 
-// checkAncestors refuses a DIR below a directory that others can write and
-// that has no sticky bit: anyone who can write it can rename DIR away and put
-// their own in its place between starts. A sticky one, as /tmp is, only lets
-// owners rename their entries. Both the path given and the one it resolves to
-// are walked, up to the root.
+// checkAncestors applies ssh's StrictModes rule to every directory above DIR,
+// on the path given and on the path it resolves to, up to the root: each must
+// belong to root or this user, and must not be writable by group or others
+// unless it is sticky. Anyone else who can write such a directory, and its
+// owner, can rename DIR away between starts and put their own in its place;
+// clients that trust DIR/ca.pem by path would then trust their CA. (The sticky
+// bit stops other users renaming entries they do not own, but a directory's
+// owner can still rename anything in it, hence the owner rule.) DIR need not
+// exist yet: the deepest part of its path that does is checked, with all above
+// it, before anything is created.
 func checkAncestors(dir string) error {
 	if runtime.GOOS == "windows" {
 		return nil
 	}
-	paths := []string{dir}
-	if real, err := filepath.EvalSymlinks(dir); err == nil && real != dir {
+	start := filepath.Dir(dir)
+	for p := dir; ; p = filepath.Dir(p) {
+		if _, err := os.Lstat(p); err == nil {
+			if p != dir {
+				start = p
+			}
+			break
+		}
+		if p == filepath.Dir(p) {
+			break
+		}
+	}
+	paths := []string{start}
+	if real, err := filepath.EvalSymlinks(start); err == nil && real != start {
 		paths = append(paths, real)
 	}
 	for _, p := range paths {
-		for a := filepath.Dir(p); ; a = filepath.Dir(a) {
-			info, err := os.Stat(a)
-			if err != nil {
-				return fmt.Errorf("--tls-self-signed: %w", err)
-			}
-			if info.Mode().Perm()&0o002 != 0 && info.Mode()&os.ModeSticky == 0 {
-				return fmt.Errorf("--tls-self-signed: %s is inside %s, which anyone can write and which has no sticky bit, so DIR could be replaced; use a directory below ones only you can write", dir, a)
+		for a := p; ; a = filepath.Dir(a) {
+			if err := ancestorRule(dir, a); err != nil {
+				return err
 			}
 			if a == filepath.Dir(a) {
 				break
 			}
 		}
+	}
+	return nil
+}
+
+func ancestorRule(dir, a string) error {
+	info, err := os.Stat(a)
+	if err != nil {
+		return fmt.Errorf("--tls-self-signed: %w", err)
+	}
+	if uid, ok := ownerOf(info); ok && uid != 0 && uid != os.Geteuid() {
+		return fmt.Errorf("--tls-self-signed: %s is inside %s, which belongs to uid %d (neither root nor you), who could replace DIR; use a directory below ones only root or you own", dir, a, uid)
+	}
+	if m := info.Mode(); m.Perm()&0o022 != 0 && m&os.ModeSticky == 0 {
+		return fmt.Errorf("--tls-self-signed: %s is inside %s, which group or others can write (mode %#o) and which has no sticky bit, so DIR could be replaced; use a directory below ones only you can write", dir, a, m.Perm())
 	}
 	return nil
 }
@@ -83,14 +110,18 @@ func isStaleTemp(name string) bool { return staleTemp.MatchString(name) }
 
 // checkName refuses a host the CA cannot be constrained to, before anything is
 // made: an address with a zone, a wildcard, a non-ASCII name, or anything that
-// is not dot-separated letter-digit-hyphen labels. A single label is a host
-// like any other; a DNS name constraint always covers the name's subtree too.
+// is not dot-separated labels of letters, digits, hyphens and underscores (an
+// underscore is not a hostname character, but Compose service names use it and
+// Go and OpenSSL verify it). A single label is a host like any other; a DNS
+// name constraint always covers the name's subtree too.
 func checkName(n string) error {
 	fail := func(why string) error { return fmt.Errorf("--tls-self-signed: host %q %s", n, why) }
-	if a, err := netip.ParseAddr(n); err == nil {
-		if a.Zone() != "" {
-			return fail("carries an IPv6 zone, which a certificate cannot name")
+	if i := strings.IndexByte(n, '%'); i >= 0 {
+		if _, err := netip.ParseAddr(n[:i]); err == nil {
+			return fail("carries a zone, which a certificate cannot name")
 		}
+	}
+	if _, err := netip.ParseAddr(n); err == nil {
 		return nil
 	}
 	if strings.Contains(n, "*") {
@@ -104,10 +135,10 @@ func checkName(n string) error {
 	bad := len(n) == 0 || len(n) > 253
 	for _, label := range strings.Split(n, ".") {
 		bad = bad || len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' ||
-			strings.Trim(label, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-") != ""
+			strings.Trim(label, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") != ""
 	}
 	if bad {
-		return fail("is not a valid DNS name (dot-separated labels of 1 to 63 letters, digits and hyphens)")
+		return fail("is not a valid DNS name (dot-separated labels of 1 to 63 letters, digits, hyphens and underscores)")
 	}
 	return nil
 }

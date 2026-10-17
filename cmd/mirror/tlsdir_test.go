@@ -91,7 +91,8 @@ func TestSelfSignedRefusesHostsItCannotCertify(t *testing.T) {
 		"*.example.com":                 "wildcard",
 		"a..b":                          "DNS name",
 		"-a.test":                       "DNS name",
-		"under_score.test":              "DNS name",
+		"bad!.test":                     "DNS name",
+		"1.2.3.4%eth0":                  "zone",
 		strings.Repeat("a", 64) + ".tt": "DNS name",
 	} {
 		dir := filepath.Join(t.TempDir(), "tls")
@@ -103,8 +104,11 @@ func TestSelfSignedRefusesHostsItCannotCertify(t *testing.T) {
 			t.Errorf("%q: DIR was created before the refusal", host)
 		}
 	}
-	// A single label is a host too; its constraint covers its subtree.
-	if _, err := ensureSelfSignedFor(t.TempDir(), append(append([]string{}, selfSignedNames...), "mirror"), clock.Real{}.Now()); err != nil {
-		t.Errorf("single-label host: %v", err)
+	// A single label is a host too (its constraint covers its subtree), and so
+	// is a name with an underscore, as Compose service names have.
+	for _, host := range []string{"mirror", "my_service", "under_score.test"} {
+		if _, err := ensureSelfSignedFor(t.TempDir(), append(append([]string{}, selfSignedNames...), host), clock.Real{}.Now()); err != nil {
+			t.Errorf("%s: %v", host, err)
+		}
 	}
 }

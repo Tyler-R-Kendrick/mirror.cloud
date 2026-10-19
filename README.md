@@ -29,6 +29,12 @@ AWS is where the pipeline gets validated, because it has the best-published spec
 
 v1 spine is in tree: frozen interfaces, edge + codecs, emulate-tier packs, mock synthesizer, CLI. The process boots from the committed generated models (`internal/generated`, pinned by `specs/mirror.lock`); the three AWS services with no published model are described by hand in `internal/specboot`.
 
+- **[GOVERNANCE.md](GOVERNANCE.md)** — scope covenant, gating covenant, changes, maintainer.
+- **[COVENANT.md](COVENANT.md)** — binding product policy.
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — build, test, pull requests.
+- **[SECURITY.md](SECURITY.md)** — private vulnerability reports.
+- **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — community conduct.
+
 ## Quick start
 
 ```bash
@@ -65,11 +71,15 @@ See [docs/SUPPORT.md](docs/SUPPORT.md) (generated; do not hand-edit), [docs/DAY2
 
 ## Covenants
 
-These are binding project policy, decided at founding because they cannot be retrofitted:
+[`COVENANT.md`](COVENANT.md) is binding product policy, decided at founding because it cannot be retrofitted. It is not a code of conduct; conduct is [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 
 - No capability will ever require an auth token, an account, or a license key.
 - No telemetry, no phone-home, no usage counting.
 - Scope is **spec-complete by generation, behavior-complete only where declared** — and the declaration is generated from the model, so it cannot drift into marketing.
+
+## AI usage disclosure
+
+Coding agents are used under human direction and review. Disclose significant AI-generated content in pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Development
 

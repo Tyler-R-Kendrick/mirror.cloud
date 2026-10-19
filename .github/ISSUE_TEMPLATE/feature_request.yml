@@ -1,0 +1,36 @@
+name: Feature request
+description: Propose a change to mirror.cloud
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A change that would violate [COVENANT.md](https://github.com/tyler-r-kendrick/mirror.cloud/blob/main/COVENANT.md) or [GOVERNANCE.md](https://github.com/tyler-r-kendrick/mirror.cloud/blob/main/GOVERNANCE.md) is out of scope. COVENANT.md is product policy, not the [code of conduct](https://github.com/tyler-r-kendrick/mirror.cloud/blob/main/CODE_OF_CONDUCT.md).
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What you want and why.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should happen if this is built.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happens today, if this is a gap in current behavior. Leave blank for a new capability.
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Provider, service, command, OS, or version this applies to.
+    validations:
+      required: false

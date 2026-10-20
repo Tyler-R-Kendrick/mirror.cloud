@@ -1,6 +1,6 @@
 module github.com/tyler-r-kendrick/mirror.cloud
 
-go 1.23.0
+go 1.24
 
 require (
 	cel.dev/cel-go v0.32.0
@@ -8,7 +8,7 @@ require (
 	github.com/golang/snappy v1.0.0
 	github.com/itchyny/gojq v0.12.17
 	github.com/jsonata-go/jsonata v0.0.0-20250709164031-599f35f32e5f
-	github.com/klauspost/compress v1.17.9
+	github.com/klauspost/compress v1.18.7
 	github.com/parquet-go/parquet-go v0.25.1
 	github.com/zeebo/xxh3 v1.1.0
 	golang.org/x/sys v0.30.0

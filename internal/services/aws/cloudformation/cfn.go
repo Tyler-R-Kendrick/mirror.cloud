@@ -9,7 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"maps"
 	"net/url"
@@ -327,7 +326,7 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 
 var unnameable = regexp.MustCompile(`[^A-Za-z0-9-]+`)
 
-func fifo(p map[string]any) bool { return p["FifoQueue"] == true || str(p["FifoQueue"]) == "true" }
+func fifo(p map[string]any) bool { b, _ := coerce(p["FifoQueue"], "Boolean"); return b == true }
 
 // physicalName is the name of a resource the template leaves unnamed, in the modelled form
 // <stack>-<logical id>-<suffix>. The suffix is twelve hex digits of a hash of the stack id and logical
@@ -555,14 +554,35 @@ func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket str
 	return nil
 }
 
-// given sets on in each of members the template's props carry, and answers in.
+// given sets on in each of members, all Strings, the template's props carry, and answers in.
 func given(in, props map[string]any, members ...string) map[string]any {
 	for _, member := range members {
 		if v, ok := props[member]; ok {
-			in[member] = v
+			in[member], _ = coerce(v, "String")
 		}
 	}
 	return in
+}
+
+// coerce reads a template's value as a property of type want (the template reference's Boolean,
+// Integer or String), itself or its text as a Ref to a parameter gives it ("the parameter value
+// becomes a string", User Guide, Parameters), and answers whether it is one. A Boolean is true or
+// false in any case, as YAML 1.1, the templates' YAML, spells it true, True or TRUE; an Integer is
+// decimal digits, as a Number parameter's text is ("016" is 16; "16.0", "1e1", "+16" and " 16" are
+// none); a String is a scalar's text (123 is "123"). Anything else is answered as it was given.
+func coerce(v any, want string) (any, bool) {
+	switch v.(type) {
+	case string, bool, float64, int, int64, uint64:
+	default:
+		return v, false
+	}
+	if text, yes := jsonText(v), strings.EqualFold(jsonText(v), "true"); want == "Boolean" {
+		return yes, yes || strings.EqualFold(text, "false")
+	} else if n, err := strconv.Atoi(text); want == "Integer" {
+		return n, err == nil && strings.TrimLeft(text, "0123456789") == ""
+	} else {
+		return text, true
+	}
 }
 
 // generated is the value GenerateSecretString asks for: a password made as GetRandomPassword makes one,
@@ -589,20 +609,13 @@ func generated(props map[string]any, seed string) (string, error) {
 	}
 	params := map[string]any{}
 	for member, v := range spec {
-		// A template's number or boolean may be its text ("16", "true"), as a Ref to a parameter always is.
-		want, text := generateTypes[member], str(v)
-		if n, err := strconv.ParseFloat(text, 64); want == "number" && err == nil {
-			v = n
-		} else if want == "boolean" && (text == "true" || text == "false") {
-			v = text == "true"
-		}
-		if want == "" {
+		typed, ok := coerce(v, generateTypes[member])
+		if generateTypes[member] == "" {
 			return "", invalid("GenerateSecretString has no property " + member)
+		} else if !ok {
+			return "", invalid("GenerateSecretString." + member + " must be " + generateTypes[member] + ", not " + jsonText(v))
 		}
-		if got := map[string]string{"float64": "number", "int": "number", "bool": "boolean", "string": "string"}[fmt.Sprintf("%T", v)]; got != want {
-			return "", invalid("GenerateSecretString." + member + " must be a " + want + ", not " + jsonText(v))
-		}
-		params[member] = v
+		params[member] = typed
 	}
 	value, err := prim.RandomPassword(params, seed)
 	if err != nil {
@@ -615,10 +628,10 @@ func generated(props map[string]any, seed string) (string, error) {
 	return string(raw), err
 }
 
-// generateTypes are GenerateSecretString's properties and their types.
-var generateTypes = map[string]string{"PasswordLength": "number", "ExcludeCharacters": "string", "GenerateStringKey": "string",
-	"SecretStringTemplate": "string", "ExcludeLowercase": "boolean", "ExcludeUppercase": "boolean", "ExcludeNumbers": "boolean",
-	"ExcludePunctuation": "boolean", "IncludeSpace": "boolean", "RequireEachIncludedType": "boolean"}
+// generateTypes are GenerateSecretString's properties and their types, as its template reference gives them.
+var generateTypes = map[string]string{"PasswordLength": "Integer", "ExcludeCharacters": "String", "GenerateStringKey": "String",
+	"SecretStringTemplate": "String", "ExcludeLowercase": "Boolean", "ExcludeUppercase": "Boolean", "ExcludeNumbers": "Boolean",
+	"ExcludePunctuation": "Boolean", "IncludeSpace": "Boolean", "RequireEachIncludedType": "Boolean"}
 
 func invalid(message string) *spi.Fault { return fault("ValidationError", message) }
 
@@ -797,7 +810,8 @@ func advertise(req *spi.Request) string {
 	return "http://127.0.0.1:4566"
 }
 
-func str(v any) string { s, _ := v.(string); return s }
+// str is a String property's value: a scalar's text (coerce), nothing for anything else.
+func str(v any) string { s, _ := coerce(v, "String"); t, _ := s.(string); return t }
 
 func lastSlash(s string) string { return s[strings.LastIndex(s, "/")+1:] }
 

@@ -628,7 +628,7 @@ func TestCloudFormationReadsGenerateSecretStringAsATemplateDoes(t *testing.T) {
 		}
 		seen[f.Message] = c.cause
 	}
-	for member, value := range map[string]any{"PasswordLength": "sixteen", "ExcludePunctuation": "yes", "IncludeSpace": 1.0, "ExcludeCharacters": true} {
+	for member, value := range map[string]any{"PasswordLength": "sixteen", "ExcludePunctuation": "yes", "IncludeSpace": 1.0, "ExcludeCharacters": []any{"!"}} {
 		if _, err := generate(spec(member, value), nil); code(err) != "ValidationError" || !strings.Contains(err.Error(), member) {
 			t.Errorf("%s %v answered %v, want a ValidationError naming %s", member, value, err, member)
 		}
@@ -1000,5 +1000,64 @@ func TestCloudFormationConcurrentCreatesMakeOneStack(t *testing.T) {
 	secrets, _ := h.service("aws.secretsmanager", "ListSecrets", map[string]any{})
 	if q, s := queues["QueueUrls"], secrets["SecretList"]; q != nil && len(q.([]any)) > 0 || len(s.([]any)) > 0 {
 		t.Errorf("after DeleteStack, queues %v and secrets %v are left", q, s)
+	}
+}
+
+// Every property is read as the type the template reference gives it, by one
+// helper, whether the template gives the value itself or its text (as a Ref to
+// a parameter always does: "the parameter value becomes a string", User Guide,
+// Parameters). A Boolean is true or false in any case (YAML 1.1, the
+// templates' YAML, spells it true, True or TRUE), so FifoQueue "True" makes a
+// FIFO queue. An Integer is decimal digits, as a Number parameter's text is:
+// "016" is 16, and "16.0", "1e1", "+16" and " 16" are none. A String is a
+// scalar's text: ExcludeCharacters 123 is "123", an SSM Parameter's Value 123
+// is "123". Before, "True" made a standard queue, "16.0", "1e1" and "+16" made
+// 16, 10 and 16 characters, ExcludeCharacters 123 was refused and Value 123
+// was "".
+func TestCloudFormationReadsEveryPropertyAsItsType(t *testing.T) {
+	h := newStacks(t)
+	make1 := func(stack, typ string, props map[string]any) (res, error) {
+		t.Helper()
+		tpl, _ := json.Marshal(map[string]any{"Resources": map[string]any{"R": map[string]any{"Type": typ, "Properties": props}}})
+		if _, err := h.invoke("CreateStack", map[string]any{"StackName": stack, "TemplateBody": string(tpl)}); err != nil {
+			return res{}, err
+		}
+		return h.resources(stack)[0], nil
+	}
+	secret := func(stack string, spec map[string]any) (string, error) {
+		t.Helper()
+		r, err := make1(stack, "AWS::SecretsManager::Secret", map[string]any{"GenerateSecretString": spec})
+		if err != nil {
+			return "", err
+		}
+		out, err := h.service("aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": r.Physical})
+		return str(out["SecretString"]), err
+	}
+	for i, given := range []string{"True", "TRUE", "true"} {
+		r, err := make1(fmt.Sprintf("fifo%d", i), "AWS::SQS::Queue", map[string]any{"FifoQueue": given})
+		if err != nil {
+			t.Errorf("FifoQueue %q: %v", given, err)
+			continue
+		}
+		out, err := h.service("aws.sqs", "GetQueueAttributes", map[string]any{"QueueUrl": r.Physical, "AttributeNames": []any{"All"}})
+		if !strings.HasSuffix(r.Physical, ".fifo") || err != nil || asMap(out["Attributes"])["FifoQueue"] != "true" {
+			t.Errorf("FifoQueue %q made %s, attributes %v (%v), want a FIFO queue", given, r.Physical, out["Attributes"], err)
+		}
+	}
+	if v, err := secret("len016", map[string]any{"PasswordLength": "016"}); err != nil || len(v) != 16 {
+		t.Errorf("PasswordLength \"016\" generated %q (%v), want 16 characters", v, err)
+	}
+	for i, given := range []string{"16.0", "1e1", "+16", " 16"} {
+		if v, err := secret(fmt.Sprintf("badlen%d", i), map[string]any{"PasswordLength": given}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "PasswordLength") {
+			t.Errorf("PasswordLength %q generated %q (%v), want a ValidationError naming PasswordLength", given, v, err)
+		}
+	}
+	if v, err := secret("exclude123", map[string]any{"PasswordLength": 200, "ExcludeCharacters": 123}); err != nil || len(v) != 200 || strings.ContainsAny(v, "123") {
+		t.Errorf("ExcludeCharacters 123 generated %q (%v), want 200 characters and no 1, 2 or 3", v, err)
+	}
+	if r, err := make1("ssm123", "AWS::SSM::Parameter", map[string]any{"Value": 123}); err != nil {
+		t.Errorf("an SSM Parameter of Value 123: %v", err)
+	} else if out, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": r.Physical}); err != nil || asMap(out["Parameter"])["Value"] != "123" {
+		t.Errorf("an SSM Parameter of Value 123 holds %v (%v), want \"123\"", out["Parameter"], err)
 	}
 }

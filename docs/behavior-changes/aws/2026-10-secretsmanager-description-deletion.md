@@ -223,9 +223,18 @@ The oracle is AWS's documentation as it ships in the vendored model
     are never made.
   - `GenerateSecretString` makes the value with `GetRandomPassword`'s generator,
     seeded by the stack id and logical id, and puts it under `GenerateStringKey`
-    in `SecretStringTemplate` when the template gives one. Its properties are
-    read as a template's are: a number or boolean may be given as its text
-    (`"16"`, `"true"`), which is how a `Ref` to a parameter gives one. A
+    in `SecretStringTemplate` when the template gives one. Its properties,
+    and every other property the engine reads, are read by one rule as the
+    type the template reference gives them, the value itself or its text,
+    which is how a `Ref` to a parameter gives one. A Boolean is `true` or
+    `false` in any case (YAML 1.1, the templates' YAML, spells it `true`,
+    `True` or `TRUE`), so `FifoQueue: "True"` makes a FIFO queue; an Integer
+    is decimal digits, as a Number parameter's text is, so `"016"` is 16 and
+    `"16.0"`, `"1e1"`, `"+16"` and `" 16"` are refused; a String is a
+    scalar's text, so `ExcludeCharacters: 123` is `"123"` and an SSM
+    Parameter's `Value: 123` is `"123"`. Before, `"True"` made a standard
+    queue, `"16.0"`, `"1e1"` and `"+16"` were read as numbers, a number was
+    refused as `ExcludeCharacters` and an SSM `Value: 123` was empty. A
     parameter is a string ("the parameter value becomes a string", User
     Guide, Parameters), so a numeric `Default`, `Default: 16` in JSON or
     YAML, is its text `"16"`; before, it became `""`. Each

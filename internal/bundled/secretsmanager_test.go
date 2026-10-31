@@ -1006,3 +1006,29 @@ func TestSecretsManagerGetRandomPasswordHonoursItsParameters(t *testing.T) {
 		fault(t, err, "InvalidParameterException")
 	}
 }
+
+// ticking is a clock that moves a millisecond every time it is read, as a
+// real one may between two readings within one request.
+type ticking struct{ spi.Clock }
+
+func (c ticking) Now() time.Time {
+	now := c.Clock.Now()
+	_ = c.Clock.Advance(time.Millisecond)
+	return now
+}
+
+// DeleteSecretResponse.DeletionDate: "the date and time of the delete request
+// plus the number of days in RecoveryWindowInDays". DeletedDate is that same
+// request time (the bundle's reading), so the two differ by exactly the window
+// however the clock moves while the request is served.
+func TestSecretsManagerDeletionDatesComeFromOneRequestTime(t *testing.T) {
+	deps := spitest.Deps(t)
+	deps.Clock = ticking{deps.Clock}
+	_, ok, _ := secretsManagerOn(t, deps)
+	ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v"})
+	deletion, _ := ok(t, "DeleteSecret", map[string]any{"SecretId": "s", "RecoveryWindowInDays": 7})["DeletionDate"].(float64)
+	deleted, _ := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"})["DeletedDate"].(float64)
+	if deletion-deleted != 7*86400 {
+		t.Fatalf("DeletionDate %v - DeletedDate %v = %v, want exactly 7 days (604800)", deletion, deleted, deletion-deleted)
+	}
+}

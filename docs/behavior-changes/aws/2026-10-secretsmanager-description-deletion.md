@@ -192,7 +192,10 @@ The oracle is AWS's documentation as it ships in the vendored model
   there and answered no `DeletedDate` at all. The first commit on this branch
   answered `DeletedDate` as a string too, and that is fixed with it. They carry
   milliseconds where the clock has them (`1.5`, `2592001.5`), as the model's
-  examples do ("CreatedDate": 1523477145.713); they were whole seconds.
+  examples do ("CreatedDate": 1523477145.713); they were whole seconds. Both
+  come from one reading of the clock per request, so `DeletionDate` is
+  `DeletedDate` plus the window exactly; the engine reads the clock afresh
+  for every expression, and they drifted apart by a millisecond.
 
 Equivalence trace `aws.secretsmanager`, steps counted from 0. Step 48, the
 pack's delete of `primary`, is refused now, because `primary` has had a

@@ -356,8 +356,22 @@ operations:
   # secret is the Region it was created in, and no secret here is owned by a
   # service. Which values combine how is this bundle's reading; the model
   # says only what each key matches.
-  # BatchGetSecretValue's Filters reuse this as *filtersMatch.
+  # BatchGetSecretValue's Filters reuse this as *filtersMatch, and its check
+  # of Filter.Key as *filterKeys: the key is a FilterNameStringType, an enum,
+  # so any other is ValidationException in the framework's wording.
   ListSecrets:
+    require:
+      - &filterKeys
+        cond: >-
+          !('Filters' in input && input.Filters != null) || input.Filters.all(f, !('Key' in f) || f.Key == null
+            || string(f.Key) in ['description', 'name', 'tag-key', 'tag-value', 'primary-region', 'owning-service', 'all'])
+        error: Validation
+        message_expr: >-
+          indices(input.Filters).filter(i, 'Key' in input.Filters[i] && input.Filters[i].Key != null
+            && !(string(input.Filters[i].Key) in ['description', 'name', 'tag-key', 'tag-value', 'primary-region', 'owning-service', 'all']))
+            .map(i, "1 validation error detected: Value '" + string(input.Filters[i].Key) + "' at 'filters."
+              + string(i + 1) + ".member.key' failed to satisfy constraint: Member must satisfy enum value set:"
+              + " [description, name, tag-key, tag-value, primary-region, owning-service, all]")[0]
     list:
       resource: secret
       member: SecretList
@@ -611,6 +625,7 @@ operations:
           "1 validation error detected: Value '" + string(int(input.MaxResults))
           + "' at 'maxResults' failed to satisfy constraint: Member must have value "
           + (int(input.MaxResults) < 1 ? "greater than or equal to 1" : "less than or equal to 20")
+      - *filterKeys
       - cond: "!('Filters' in input && input.Filters != null && 'SecretIdList' in input && input.SecretIdList != null)"
         error: InvalidParameter
         message: "You must include Filters or SecretIdList, but not both."

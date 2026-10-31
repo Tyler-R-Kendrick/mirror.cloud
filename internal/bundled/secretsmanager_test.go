@@ -1109,3 +1109,30 @@ func TestSecretsManagerIncludeSpaceNeverRequiresASpace(t *testing.T) {
 		t.Errorf("IncludeSpace drew no space in 4096 characters")
 	}
 }
+
+// Filter.Key is a FilterNameStringType, an enum of description, name,
+// tag-key, tag-value, primary-region, owning-service and all, so any other
+// key is ValidationException in ListSecrets and BatchGetSecretValue, in the
+// framework's "1 validation error detected" wording, naming the value and
+// where it is. Before, an unknown key matched nothing.
+func TestSecretsManagerRefusesAnUnknownFilterKey(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "app", "SecretString": "v"})
+	filters := func(keys ...string) []any {
+		var out []any
+		for _, k := range keys {
+			out = append(out, map[string]any{"Key": k, "Values": []any{"a"}})
+		}
+		return out
+	}
+	for _, op := range []string{"ListSecrets", "BatchGetSecretValue"} {
+		_, err := call(op, map[string]any{"Filters": filters("name", "nmae")})
+		f, isFault := err.(*spi.Fault)
+		if !isFault || f.Code != "ValidationException" || !strings.Contains(f.Message, "Value 'nmae' at 'filters.2.member.key' failed to satisfy constraint: Member must satisfy enum value set") {
+			t.Errorf("%s with the key nmae answered %v, want ValidationException naming it", op, err)
+		}
+		if _, err := call(op, map[string]any{"Filters": filters("description", "name", "tag-key", "tag-value", "primary-region", "owning-service", "all")}); err != nil {
+			t.Errorf("%s refused the model's keys: %v", op, err)
+		}
+	}
+}

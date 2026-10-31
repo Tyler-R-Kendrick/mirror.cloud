@@ -217,8 +217,13 @@ The oracle is AWS's documentation as it ships in the vendored model
   case-sensitive." A value starting with `!` negates. Every filter must
   match, a filter matches when any of its values does, and with `all` every
   word must start a word of some attribute; the model does not say how
-  values combine, so that is this note's reading. Before, both operations
-  ignored `Filters`.
+  values combine, so that is this note's reading. `Filter.Key` is an enum
+  (`description`, `name`, `tag-key`, `tag-value`, `primary-region`,
+  `owning-service`, `all`), so any other key is `ValidationException`, in the
+  framework's wording: "1 validation error detected: Value 'nmae' at
+  'filters.2.member.key' failed to satisfy constraint: Member must satisfy
+  enum value set: [...]". No secret here has an owning service, so
+  `owning-service` matches none. Before, both operations ignored `Filters`.
   - `BatchGetSecretValue` refuses `Filters` with `SecretIdList` ("You must
     include Filters or SecretIdList, but not both") and a request with
     neither, with `InvalidParameterException`. The filter form pages with

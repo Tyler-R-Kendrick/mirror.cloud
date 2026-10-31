@@ -327,3 +327,36 @@ func TestCloudFormationRefusesANameItDidNotMake(t *testing.T) {
 		}
 	}
 }
+
+// A resource made before part of its create failed -- a bucket whose
+// configuration S3 refused, a rule whose targets EventBridge refused -- is
+// recorded the moment it exists, so the rollback deletes it with the rest.
+// Before, a resource was recorded only once its whole create succeeded, and
+// a half-made one outlived the rollback.
+func TestCloudFormationARollbackDeletesAHalfMadeResource(t *testing.T) {
+	h := newStacks(t)
+	for stack, props := range map[string]map[string]any{
+		"versioning": {"BucketName": "half-versioning", "VersioningConfiguration": map[string]any{"Status": "Bogus"}},
+		"tags":       {"BucketName": "half-tags", "Tags": "notalist"},
+		"ownership":  {"BucketName": "half-ownership", "OwnershipControls": map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": "Nope"}}}},
+	} {
+		// SQS refuses a queue name deleted in the last 60 seconds, so each stack's queue has its own.
+		queue := map[string]any{"Type": "AWS::SQS::Queue", "Properties": map[string]any{"QueueName": "before-" + stack}}
+		if err := h.create(stack, map[string]map[string]any{"A": queue, "B": {"Type": "AWS::S3::Bucket", "Properties": props}}); code(err) != "MalformedXML" {
+			t.Fatalf("%s: a bucket S3 refused to configure answered %v, want S3's MalformedXML", stack, err)
+		}
+		if _, err := h.service("aws.s3", "HeadBucket", map[string]any{"Bucket": props["BucketName"]}); err == nil {
+			t.Errorf("%s: the half-made bucket %s outlived the rollback", stack, props["BucketName"])
+		}
+		if _, err := h.service("aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "before-" + stack}); err == nil {
+			t.Errorf("%s: the queue made before the bucket outlived the rollback", stack)
+		}
+	}
+	rule := map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"Name": "half-rule", "ScheduleExpression": "rate(5 minutes)", "Targets": "notalist"}}
+	if err := h.create("rule", map[string]map[string]any{"R": rule}); code(err) != "ValidationException" {
+		t.Fatalf("a rule whose targets EventBridge refused answered %v, want its ValidationException", err)
+	}
+	if _, err := h.service("aws.events", "DescribeRule", map[string]any{"Name": "half-rule"}); err == nil {
+		t.Error("the half-made rule outlived the rollback")
+	}
+}

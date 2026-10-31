@@ -133,7 +133,11 @@ The oracle is AWS's documentation as it ships in the vendored model
     the stack's rollback or `DeleteStack` deleted it.
   - A `CreateStack` that fails rolls back what it had created, as
     CloudFormation's default `OnFailure` (`ROLLBACK`) does, deleting a secret
-    without a recovery window so its name is free again. The emulator keeps no
+    without a recovery window so its name is free again. A resource is
+    recorded the moment it exists, so one whose create failed partway (a
+    bucket whose configuration S3 refused, a rule whose targets EventBridge
+    refused) is deleted with the rest, and a create that failed outright
+    records nothing. The emulator keeps no
     stack record for a failed create, so `DO_NOTHING` and `DELETE` are not
     distinguished. A failed `UpdateStack` is not rolled back.
   - `GenerateSecretString` makes the value with `GetRandomPassword`'s generator,

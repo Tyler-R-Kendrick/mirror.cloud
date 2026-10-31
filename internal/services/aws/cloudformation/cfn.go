@@ -171,14 +171,16 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		if n, err = p.claim(ctx, req, st, old, logical, typ, props); err == nil { // again: a name may come from a resource made before it
 			phys, err = p.provision(ctx, req, typ, logical, n, props, old.Refs[logical], id)
 		}
+		if phys != "" { // recorded once it exists, so a rollback finds a half-made one too
+			st.Refs[logical] = phys
+			st.Resources = append(st.Resources, res{Logical: logical, Physical: phys, Type: typ, Name: n})
+		}
 		if err != nil {
 			if !update { // a failed create rolls back what it made: OnFailure ROLLBACK, the default
 				p.deprovision(ctx, req, st.Resources...)
 			}
 			return nil, err
 		}
-		st.Refs[logical] = phys
-		st.Resources = append(st.Resources, res{Logical: logical, Physical: phys, Type: typ, Name: n})
 	}
 	if outs, ok := tpl["Outputs"].(map[string]any); ok {
 		for _, k := range slices.Sorted(maps.Keys(outs)) {
@@ -348,13 +350,13 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		in := maps.Clone(props)
 		in["TableName"] = n
 		_, err := p.call(ctx, req, "aws.dynamodb", "CreateTable", in)
-		return n, err
+		return made(n, err)
 	case "AWS::IAM::Role":
 		out, err := p.call(ctx, req, "aws.iam", "CreateRole", map[string]any{"RoleName": n, "AssumeRolePolicyDocument": jsonText(props["AssumeRolePolicyDocument"])})
 		return str(asMap(out["Role"])["Arn"]), err
 	case "AWS::SSM::Parameter":
 		_, err := p.call(ctx, req, "aws.ssm", "PutParameter", map[string]any{"Name": n, "Value": str(props["Value"]), "Type": cmp.Or(str(props["Type"]), "String")})
-		return n, err
+		return made(n, err)
 	case "AWS::SecretsManager::Secret":
 		// existing is what an update finds; a second CreateSecret of its name is ResourceExistsException.
 		op, in := "CreateSecret", map[string]any{"Name": n}
@@ -375,7 +377,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		return str(asMap(out["KeyMetadata"])["KeyId"]), err
 	case "AWS::Logs::LogGroup":
 		_, err := p.call(ctx, req, "aws.logs", "CreateLogGroup", map[string]any{"logGroupName": n})
-		return n, err
+		return made(n, err)
 	case "AWS::Events::Rule":
 		in := given(map[string]any{"Name": n}, props, "ScheduleExpression", "State", "Description", "EventBusName")
 		if pattern, ok := props["EventPattern"]; ok {
@@ -393,7 +395,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		return str(out["FunctionArn"]), err
 	case "AWS::Kinesis::Stream":
 		_, err := p.call(ctx, req, "aws.kinesis", "CreateStream", map[string]any{"StreamName": n})
-		return n, err
+		return made(n, err)
 	case "AWS::Kinesis::ResourcePolicy":
 		arn := cmp.Or(str(props["ResourceArn"]), str(props["ResourceARN"]))
 		policy := props["ResourcePolicy"]
@@ -401,13 +403,21 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 			policy = props["Policy"]
 		}
 		_, err := p.call(ctx, req, "aws.kinesis", "PutResourcePolicy", map[string]any{"ResourceARN": arn, "Policy": jsonText(policy)})
-		return arn, err
+		return made(arn, err)
 	case "AWS::ApiGateway::RestApi":
 		out, err := p.call(ctx, req, "aws.apigateway", "CreateRestApi", map[string]any{"name": n})
 		return str(out["id"]), err
 	default:
 		return "", invalid("unsupported resource type " + typ)
 	}
+}
+
+// made answers the id of what a create made: none when it failed.
+func made(id string, err error) (string, error) {
+	if err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 // deprovision deletes resources through their owners, newest first. Failures

@@ -1917,3 +1917,35 @@ func TestCloudFormationContinueUpdateRollbackFinishesTheRollback(t *testing.T) {
 		t.Errorf("ResourcesToSkip naming a resource not UPDATE_FAILED answered %v, want ValidationError", err)
 	}
 }
+
+// A Ref or Fn::GetAtt in the Resources block must name a resource or (for a
+// Ref) a parameter or pseudo parameter the template declares; one that names
+// neither is CloudFormation's "Template format error: Unresolved resource
+// dependencies [Q] in the Resources block of the template", on CreateStack,
+// UpdateStack, ValidateTemplate and ExecuteChangeSet, and nothing is made.
+// Before, such a Ref answered its own text, so a parameter was named "Q".
+func TestCloudFormationRefusesAnUnresolvedDependency(t *testing.T) {
+	h := newStacks(t)
+	h.mustCreate("ok", map[string]map[string]any{"P": {"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Value": "v"}}})
+	const want = "Template format error: Unresolved resource dependencies [Missing, Q] in the Resources block of the template"
+	bad, _ := json.Marshal(map[string]any{"Parameters": map[string]any{"Env": map[string]any{"Type": "String", "Default": "dev"}},
+		"Resources": map[string]any{"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{
+			"Name": map[string]any{"Ref": "Q"}, "Value": map[string]any{"Fn::GetAtt": []any{"Missing", "Arn"}}, "Description": map[string]any{"Ref": "Env"}, "Tier": map[string]any{"Ref": "AWS::Region"}}}}})
+	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "ok", "ChangeSetName": "cs", "TemplateBody": string(bad)}); err != nil {
+		t.Fatal(err)
+	}
+	for op, in := range map[string]map[string]any{
+		"CreateStack": {"StackName": "unres", "TemplateBody": string(bad)}, "UpdateStack": {"StackName": "ok", "TemplateBody": string(bad)},
+		"ValidateTemplate": {"TemplateBody": string(bad)}, "ExecuteChangeSet": {"StackName": "ok", "ChangeSetName": "cs"},
+	} {
+		if _, err := h.invoke(op, in); code(err) != "ValidationError" || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s answered %v, want ValidationError: %s", op, err, want)
+		}
+	}
+	if _, _, err := h.status("unres"); err == nil {
+		t.Error("a template with unresolved dependencies made a stack")
+	}
+	if _, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": "Q"}); err == nil {
+		t.Error("a parameter was named for the unresolved Ref")
+	}
+}

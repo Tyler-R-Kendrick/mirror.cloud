@@ -965,6 +965,9 @@ func parseTemplate(body string) (map[string]any, error) {
 	if len(asMap(m["Resources"])) == 0 { // "The Resources section is required in every CloudFormation template"
 		return nil, invalid("Template format error: At least one Resources member must be defined.")
 	}
+	if names := unresolved(m["Resources"], m, map[string]bool{}); len(names) > 0 {
+		return nil, invalid("Template format error: Unresolved resource dependencies [" + strings.Join(slices.Sorted(maps.Keys(names)), ", ") + "] in the Resources block of the template")
+	}
 	// DeletionPolicy's options and UpdateReplacePolicy's (Template Reference): DeletionPolicy's Snapshot is
 	// for the types it lists, none of which the engine makes; UpdateReplacePolicy's "reverts to ... Delete".
 	for logical, r := range asMap(m["Resources"]) {
@@ -975,6 +978,30 @@ func parseTemplate(body string) (map[string]any, error) {
 		}
 	}
 	return m, nil
+}
+
+// unresolved adds to names each logical id a Ref or Fn::GetAtt in v names that tpl declares as no resource
+// nor, for a Ref, parameter or pseudo parameter (AWS::...), and answers names.
+func unresolved(v any, tpl map[string]any, names map[string]bool) map[string]bool {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, x := range t {
+			target, _, _ := strings.Cut(str(x), ".")
+			if l, ok := x.([]any); ok && len(l) > 0 {
+				target = str(l[0])
+			}
+			_, resource := asMap(tpl["Resources"])[target]
+			if _, param := asMap(tpl["Parameters"])[target]; k == "Fn::GetAtt" && !resource || k == "Ref" && !resource && !param && !strings.HasPrefix(target, "AWS::") {
+				names[target] = true
+			}
+			unresolved(x, tpl, names)
+		}
+	case []any:
+		for _, x := range t {
+			unresolved(x, tpl, names)
+		}
+	}
+	return names
 }
 
 func formParams(in map[string]any) map[string]string {

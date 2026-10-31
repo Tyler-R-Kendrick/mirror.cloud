@@ -254,6 +254,15 @@ The oracle is AWS's documentation as it ships in the vendored model
     error is the first entry's code, with a message naming every failed entry,
     and the stack rolls back, on create and on update. Before, the stack
     finished `CREATE_COMPLETE` or `UPDATE_COMPLETE` without those targets.
+  - A `Ref` or `Fn::GetAtt` in the Resources block must name a resource the
+    template declares, or, for a `Ref`, a parameter it declares or a pseudo
+    parameter; one that names neither is CloudFormation's `ValidationError`,
+    "Template format error: Unresolved resource dependencies [Q] in the
+    Resources block of the template", every such name listed, on
+    `CreateStack`, `UpdateStack`, `ValidateTemplate`, `GetTemplateSummary`
+    and `ExecuteChangeSet`, and nothing is made. (`CreateChangeSet` records
+    the body unparsed, so its change set is refused when executed.) Before,
+    such a `Ref` answered its own text.
   - "The Resources section is required in every CloudFormation template"
     (User Guide, Template sections), so a template without one is
     `ValidationError`, "Template format error: At least one Resources member

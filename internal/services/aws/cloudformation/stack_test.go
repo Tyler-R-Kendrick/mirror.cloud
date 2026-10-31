@@ -3,6 +3,7 @@ package cloudformation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -236,6 +237,93 @@ func TestCloudFormationARollbackLeavesAnotherStacksResources(t *testing.T) {
 	for _, r := range owner {
 		if _, err := h.lookup(r); err != nil {
 			t.Errorf("the failed stack deleted owner's %s %s: %v", r.Type, r.Physical, err)
+		}
+	}
+}
+
+// code is the fault code of err, or "" when it carries none.
+func code(err error) string {
+	var f *spi.Fault
+	if errors.As(err, &f) {
+		return f.Code
+	}
+	return ""
+}
+
+// A name the template gives that a resource the stack did not make already
+// holds fails the stack, before anything is made, with the error that
+// resource's service answers for a name taken (CloudFormation's own
+// AlreadyExistsException, "The resource with the name requested already
+// exists.", for a topic: CreateTopic "is idempotent" and has none). The
+// resource is left as it was. Before, a create the service answers with
+// what it holds (a queue, topic, rule, role, stream or log group) took the
+// resource over, and the stack's rollback, or a DeleteStack, deleted it.
+func TestCloudFormationRefusesANameItDidNotMake(t *testing.T) {
+	h := newStacks(t)
+	queues := func() int {
+		t.Helper()
+		out, err := h.service("aws.sqs", "ListQueues", map[string]any{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		urls, _ := out["QueueUrls"].([]any)
+		return len(urls)
+	}
+	if _, err := h.service("aws.sqs", "CreateQueue", map[string]any{"QueueName": "handmade"}); err != nil {
+		t.Fatal(err)
+	}
+	all := nameable()
+	handmade := map[string]any{"Type": "AWS::SQS::Queue", "Properties": map[string]any{"QueueName": "handmade"}}
+	err := h.create("ex", map[string]map[string]any{"A": all["Queue"], "Q": handmade, "ZZZ": {"Type": "AWS::Nope::Thing"}})
+	if code(err) != "QueueAlreadyExists" {
+		t.Errorf("a template naming a queue made outside CloudFormation answered %v, want QueueAlreadyExists", err)
+	}
+	if _, err := h.service("aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "handmade"}); err != nil {
+		t.Errorf("the failed stack deleted the queue it named: %v", err)
+	}
+	if n := queues(); n != 1 {
+		t.Errorf("%d queues after the refused stack, want only handmade", n)
+	}
+
+	member := map[string]string{
+		"AWS::S3::Bucket": "BucketName", "AWS::SQS::Queue": "QueueName", "AWS::SNS::Topic": "TopicName", "AWS::DynamoDB::Table": "TableName",
+		"AWS::IAM::Role": "RoleName", "AWS::SSM::Parameter": "Name", "AWS::SecretsManager::Secret": "Name", "AWS::Logs::LogGroup": "LogGroupName",
+		"AWS::Events::Rule": "Name", "AWS::Lambda::Function": "FunctionName", "AWS::Kinesis::Stream": "Name", "AWS::ApiGateway::RestApi": "Name",
+	}
+	taken := map[string]string{
+		"AWS::S3::Bucket": "BucketAlreadyOwnedByYou", "AWS::SQS::Queue": "QueueAlreadyExists", "AWS::SNS::Topic": "AlreadyExistsException",
+		"AWS::DynamoDB::Table": "ResourceInUseException", "AWS::IAM::Role": "EntityAlreadyExists", "AWS::SSM::Parameter": "ParameterAlreadyExists",
+		"AWS::SecretsManager::Secret": "ResourceExistsException", "AWS::Logs::LogGroup": "ResourceAlreadyExistsException",
+		"AWS::Events::Rule": "ResourceAlreadyExistsException", "AWS::Lambda::Function": "ResourceConflictException",
+		"AWS::Kinesis::Stream": "ResourceInUseException",
+	}
+	named := map[string]map[string]any{}
+	for logical, r := range all {
+		props := map[string]any{}
+		for k, v := range r["Properties"].(map[string]any) {
+			props[k] = v
+		}
+		props[member[r["Type"].(string)]] = "taken-" + strings.ToLower(logical)
+		named[logical] = map[string]any{"Type": r["Type"], "Properties": props}
+	}
+	h.mustCreate("first", named)
+	first := h.resources("first")
+	for logical, r := range named {
+		typ := r["Type"].(string)
+		if typ == "AWS::ApiGateway::RestApi" {
+			continue // API Gateway does not hold a REST API's name to one API
+		}
+		err := h.create("second-"+strings.ToLower(logical), map[string]map[string]any{"A": all["Queue"], logical: r})
+		if code(err) != taken[typ] {
+			t.Errorf("a second stack naming %s's %s answered %v, want %s", "first", logical, err, taken[typ])
+		}
+	}
+	if n := queues(); n != 2 {
+		t.Errorf("%d queues after the refused stacks, want handmade and first's", n)
+	}
+	for _, r := range first {
+		if _, err := h.lookup(r); err != nil {
+			t.Errorf("a refused stack deleted first's %s: %v", r.Logical, err)
 		}
 	}
 }

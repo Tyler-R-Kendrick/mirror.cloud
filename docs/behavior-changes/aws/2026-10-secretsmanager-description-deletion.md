@@ -119,6 +119,18 @@ The oracle is AWS's documentation as it ships in the vendored model
     parameter and a log group under a path with the stack name), so a second
     stack from one template failed on its table, or took over the first
     stack's queue, topic and rule and deleted them when it rolled back.
+  - A name the template gives that a resource the stack did not make already
+    holds fails the stack before anything is made, with that service's error
+    for a name taken (`QueueAlreadyExists`, `BucketAlreadyOwnedByYou`,
+    `EntityAlreadyExists`, `ResourceInUseException` and so on; for a topic,
+    whose `CreateTopic` "is idempotent" and has none, CloudFormation's own
+    `AlreadyExistsException`, "The resource with the name requested already
+    exists."). The resource is left as it was. It is checked again just
+    before each create, since a name can come from a resource made before it.
+    A REST API is not checked: API Gateway holds no name to one API. Before, a
+    create that a service answers with what it already holds (a queue, topic,
+    rule, role, stream, log group or bucket here) took the resource over, and
+    the stack's rollback or `DeleteStack` deleted it.
   - A `CreateStack` that fails rolls back what it had created, as
     CloudFormation's default `OnFailure` (`ROLLBACK`) does, deleting a secret
     without a recovery window so its name is free again. The emulator keeps no

@@ -120,8 +120,10 @@ type stack struct {
 	Protect                    bool
 }
 
+// res is a resource a stack made, and the name it was made under.
 type res struct {
 	Logical, Physical, Type string
+	Name                    string `json:",omitempty"`
 }
 
 func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool) (*spi.Response, error) {
@@ -151,15 +153,24 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		st.Status = "UPDATE_COMPLETE"
 	}
 	resources, _ := tpl["Resources"].(map[string]any)
-	for _, logical := range slices.Sorted(maps.Keys(resources)) {
+	order := slices.Sorted(maps.Keys(resources))
+	for _, logical := range order { // a name taken fails the stack before anything is made
+		rm := asMap(resources[logical])
+		if _, err := p.claim(ctx, req, st, old, logical, str(rm["Type"]), asMap(p.resolve(rm["Properties"], st.Refs, req, name))); err != nil {
+			return nil, err
+		}
+	}
+	for _, logical := range order {
 		rm, _ := resources[logical].(map[string]any)
 		typ := str(rm["Type"])
 		props, _ := p.resolve(rm["Properties"], st.Refs, req, name).(map[string]any)
 		if props == nil {
 			props = map[string]any{}
 		}
-		n := cmp.Or(str(props[kinds[typ].member]), physicalName(name, logical, id, typ, props))
-		phys, err := p.provision(ctx, req, typ, logical, n, props, old.Refs[logical], id)
+		phys, n, err := "", "", error(nil)
+		if n, err = p.claim(ctx, req, st, old, logical, typ, props); err == nil { // again: a name may come from a resource made before it
+			phys, err = p.provision(ctx, req, typ, logical, n, props, old.Refs[logical], id)
+		}
 		if err != nil {
 			if !update { // a failed create rolls back what it made: OnFailure ROLLBACK, the default
 				p.deprovision(ctx, req, st.Resources...)
@@ -167,7 +178,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			return nil, err
 		}
 		st.Refs[logical] = phys
-		st.Resources = append(st.Resources, res{Logical: logical, Physical: phys, Type: typ})
+		st.Resources = append(st.Resources, res{Logical: logical, Physical: phys, Type: typ, Name: n})
 	}
 	if outs, ok := tpl["Outputs"].(map[string]any); ok {
 		for _, k := range slices.Sorted(maps.Keys(outs)) {
@@ -236,17 +247,51 @@ func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, 
 	return st, nil
 }
 
-// kinds are the types provision names: the property that names one, and the
-// longest name its service takes (API Gateway sets none for a REST API; 1024
-// only bounds it).
+// kinds are the types provision names: the property that names one, the
+// longest name its service takes (API Gateway sets none for a REST API, and
+// holds no name to one API; 1024 only bounds it), a read that finds one by
+// name, and the service's error for a name taken (SNS has none, its
+// CreateTopic "is idempotent", so CloudFormation's own).
 var kinds = map[string]struct {
-	member string
-	max    int
+	member            string
+	max               int
+	svc, op, in, code string
 }{
-	"AWS::S3::Bucket": {"BucketName", 63}, "AWS::SQS::Queue": {"QueueName", 80}, "AWS::SNS::Topic": {"TopicName", 256},
-	"AWS::DynamoDB::Table": {"TableName", 255}, "AWS::IAM::Role": {"RoleName", 64}, "AWS::SSM::Parameter": {"Name", 2048},
-	"AWS::SecretsManager::Secret": {"Name", 512}, "AWS::Logs::LogGroup": {"LogGroupName", 512}, "AWS::Events::Rule": {"Name", 64},
-	"AWS::Lambda::Function": {"FunctionName", 64}, "AWS::Kinesis::Stream": {"Name", 128}, "AWS::ApiGateway::RestApi": {"Name", 1024},
+	"AWS::S3::Bucket":             {"BucketName", 63, "aws.s3", "HeadBucket", "Bucket", "BucketAlreadyOwnedByYou"},
+	"AWS::SQS::Queue":             {"QueueName", 80, "aws.sqs", "GetQueueUrl", "QueueName", "QueueAlreadyExists"},
+	"AWS::SNS::Topic":             {"TopicName", 256, "aws.sns", "GetTopicAttributes", "TopicArn", "AlreadyExistsException"},
+	"AWS::DynamoDB::Table":        {"TableName", 255, "aws.dynamodb", "DescribeTable", "TableName", "ResourceInUseException"},
+	"AWS::IAM::Role":              {"RoleName", 64, "aws.iam", "GetRole", "RoleName", "EntityAlreadyExists"},
+	"AWS::SSM::Parameter":         {"Name", 2048, "aws.ssm", "GetParameter", "Name", "ParameterAlreadyExists"},
+	"AWS::SecretsManager::Secret": {"Name", 512, "aws.secretsmanager", "DescribeSecret", "SecretId", "ResourceExistsException"},
+	"AWS::Logs::LogGroup":         {"LogGroupName", 512, "aws.logs", "DescribeLogGroups", "logGroupNamePrefix", "ResourceAlreadyExistsException"},
+	"AWS::Events::Rule":           {"Name", 64, "aws.events", "DescribeRule", "Name", "ResourceAlreadyExistsException"},
+	"AWS::Lambda::Function":       {"FunctionName", 64, "aws.lambda", "GetFunction", "FunctionName", "ResourceConflictException"},
+	"AWS::Kinesis::Stream":        {"Name", 128, "aws.kinesis", "DescribeStreamSummary", "StreamName", "ResourceInUseException"},
+	"AWS::ApiGateway::RestApi":    {"Name", 1024, "", "", "", ""},
+}
+
+// claim answers the name a resource is made under: the template's, or else
+// physicalName's. A given name that a resource the stack did not make under
+// it already holds is the service's error for a name taken: several services
+// answer a create of a name they hold with what they hold, so the stack
+// would take the resource over, and its rollback or DeleteStack delete it.
+func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logical, typ string, props map[string]any) (string, error) {
+	k, n := kinds[typ], str(props[kinds[typ].member])
+	if n == "" {
+		return physicalName(st.Name, logical, st.ID, typ, props), nil
+	}
+	id := n
+	if k.in == "TopicArn" {
+		id = "arn:aws:sns:" + req.Identity.Region + ":" + req.Identity.Account + ":" + n
+	}
+	out, err := p.call(ctx, req, k.svc, k.op, map[string]any{k.in: id})
+	groups, list := out["logGroups"].([]any) // DescribeLogGroups answers a list by prefix, never a fault
+	if err != nil || list && !slices.ContainsFunc(groups, func(g any) bool { return str(asMap(g)["logGroupName"]) == n }) ||
+		slices.ContainsFunc(old.Resources, func(r res) bool { return r.Logical == logical && r.Name == n }) {
+		return n, nil
+	}
+	return "", fault(k.code, "Resource of type '"+typ+"' with identifier '"+n+"' already exists.")
 }
 
 var unnameable = regexp.MustCompile(`[^A-Za-z0-9-]+`)
@@ -492,8 +537,10 @@ func generated(props map[string]any, seed string) (string, error) {
 	return string(raw), err
 }
 
-func invalid(message string) *spi.Fault {
-	return &spi.Fault{Code: "ValidationError", Message: message, HTTPStatus: 400, Fault: "client"}
+func invalid(message string) *spi.Fault { return fault("ValidationError", message) }
+
+func fault(code, message string) *spi.Fault {
+	return &spi.Fault{Code: code, Message: message, HTTPStatus: 400, Fault: "client"}
 }
 
 func asMap(v any) map[string]any {

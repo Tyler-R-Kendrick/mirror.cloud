@@ -1188,3 +1188,28 @@ func TestSecretsManagerCreateSecretKeepsItsTags(t *testing.T) {
 		t.Errorf("after TagResource DescribeSecret answered Tags %v, want env and team", got)
 	}
 }
+
+// MaxResults is an integer: BatchGetSecretValue's "Type: Integer Valid Range:
+// Minimum value of 1. Maximum value of 20" (API reference), and ListSecrets'
+// MaxResultsType likewise. A value the awsJson1_1 codec cannot read as an
+// integer ("abc", "5", 1.5, true) is SerializationException, as a
+// RecoveryWindowInDays that is not a whole number is. Before, "abc" was an
+// internal error (HTTP 500) and "5" and 1.5 were taken.
+func TestSecretsManagerMaxResultsIsAnInteger(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "a", "SecretString": "v"})
+	filters := []any{map[string]any{"Key": "name", "Values": []any{"a"}}}
+	for _, op := range []string{"BatchGetSecretValue", "ListSecrets"} {
+		for _, v := range []any{"abc", "5", 1.5, true} {
+			_, err := call(op, map[string]any{"Filters": filters, "MaxResults": v})
+			if f, isFault := err.(*spi.Fault); !isFault || f.Code != "SerializationException" {
+				t.Errorf("%s with MaxResults %#v answered %v, want SerializationException", op, v, err)
+			}
+		}
+		for _, v := range []any{5.0, int64(5), 5} {
+			if _, err := call(op, map[string]any{"Filters": filters, "MaxResults": v}); err != nil {
+				t.Errorf("%s with MaxResults %#v answered %v", op, v, err)
+			}
+		}
+	}
+}

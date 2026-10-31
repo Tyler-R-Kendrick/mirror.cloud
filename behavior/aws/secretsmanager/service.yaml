@@ -363,6 +363,16 @@ operations:
   # so any other is ValidationException in the framework's wording.
   ListSecrets:
     require:
+      # MaxResults is an integer (MaxResultsType; BatchGetSecretValue's is
+      # MaxResultsBatchType): a value the awsJson1_1 codec cannot read as one
+      # is SerializationException, as a fractional RecoveryWindowInDays is.
+      - &maxIsInteger
+        cond: >-
+          !('MaxResults' in input && input.MaxResults != null) || type(input.MaxResults) == int
+          || (type(input.MaxResults) == double && input.MaxResults >= -2147483648.0 && input.MaxResults <= 2147483647.0
+              && double(int(input.MaxResults)) == input.MaxResults)
+        error: Serialization
+        message: "MaxResults must be a whole number."
       - &filterKeys
         cond: >-
           !('Filters' in input && input.Filters != null) || input.Filters.all(f, !('Key' in f) || f.Key == null
@@ -621,6 +631,7 @@ operations:
   # value as a not-found Errors row.
   BatchGetSecretValue:
     require:
+      - *maxIsInteger
       - cond: "!('MaxResults' in input && input.MaxResults != null) || (int(input.MaxResults) >= 1 && int(input.MaxResults) <= 20)"
         error: Validation
         message_expr: >-

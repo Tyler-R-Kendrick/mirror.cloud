@@ -282,7 +282,11 @@ The oracle is AWS's documentation as it ships in the vendored model
     `NextToken`, which only the filter form answers, is
     `InvalidParameterException`, and the `SecretIdList` form never answers a
     `NextToken`. `MaxResults` outside its range, 1 to 20, is
-    `ValidationException` in either form. Before, the `SecretIdList` form with
+    `ValidationException` in either form. `MaxResults` is an integer ("Type:
+    Integer", in `ListSecrets` too), so a value the awsJson1_1 codec cannot
+    read as one (`"abc"`, `"5"`, `1.5`, `true`) is `SerializationException`,
+    as a fractional `RecoveryWindowInDays` is; before, `"abc"` was an internal
+    error and `"5"` and `1.5` were taken. Before, the `SecretIdList` form with
     `MaxResults` answered a `NextToken` whenever more secrets were stored than
     the page held, and every page repeated the same values, so a caller
     following it paged forever.

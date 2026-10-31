@@ -49,6 +49,10 @@ The oracle is AWS's documentation as it ships in the vendored model
   `GetSecretValue` refused it already ("When a secret is scheduled for
   deletion, you cannot retrieve the secret value. You must first cancel the
   deletion with RestoreSecret").
+- **BatchGetSecretValue leaves out a secret scheduled for deletion.** Its value
+  is not answered; it is an `Errors` row, an `APIErrorType` of `SecretId`,
+  `ErrorCode` `InvalidRequestException` and `Message`. Before, its value was
+  answered in `SecretValues`.
 - **Timestamps are epoch seconds.** `DeletionDate` and `DeletedDate` are
   timestamps (`DeletionDateType`, `DeletedDateType`) on an `awsJson1_1`
   service with no `timestampFormat` trait, so they are written as epoch

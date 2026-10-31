@@ -406,3 +406,32 @@ func TestSecretsManagerRefusesWritesToASecretScheduledForDeletion(t *testing.T) 
 		})
 	}
 }
+
+// BatchGetSecretValue: "If Secrets Manager encounters errors ... while
+// attempting to retrieve any of the secrets, you can see the errors in Errors
+// in the response." APIErrorType is "The error Secrets Manager encountered
+// while retrieving an individual secret as part of BatchGetSecretValue", with
+// SecretId, ErrorCode ("for example ResourceNotFoundException,
+// InvalidParameterException, InvalidRequestException ...") and Message. A secret
+// scheduled for deletion is one whose value "you cannot retrieve" (DeleteSecret),
+// so it is an Errors row, not a value.
+func TestSecretsManagerBatchGetLeavesOutASecretScheduledForDeletion(t *testing.T) {
+	_, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "gone", "SecretString": "hidden"})
+	ok(t, "CreateSecret", map[string]any{"Name": "kept", "SecretString": "shown"})
+	ok(t, "DeleteSecret", map[string]any{"SecretId": "gone"})
+
+	got := ok(t, "BatchGetSecretValue", map[string]any{"SecretIdList": []any{"gone", "kept"}})
+	values, _ := got["SecretValues"].([]any)
+	if len(values) != 1 || values[0].(map[string]any)["Name"] != "kept" || values[0].(map[string]any)["SecretString"] != "shown" {
+		t.Fatalf("SecretValues = %#v, want only kept", got["SecretValues"])
+	}
+	errs, _ := got["Errors"].([]any)
+	if len(errs) != 1 {
+		t.Fatalf("Errors = %#v, want one row for gone", got["Errors"])
+	}
+	row := errs[0].(map[string]any)
+	if row["SecretId"] != "gone" || row["ErrorCode"] != "InvalidRequestException" || row["Message"] == nil || row["Message"] == "" {
+		t.Fatalf("Errors row = %#v, want SecretId gone, ErrorCode InvalidRequestException and a Message", row)
+	}
+}

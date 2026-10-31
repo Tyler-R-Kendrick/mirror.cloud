@@ -931,7 +931,8 @@ func TestSecretsManagerFiltersChooseSecrets(t *testing.T) {
 	_, err = call("BatchGetSecretValue", map[string]any{})
 	fault(t, err, "InvalidParameterException")
 
-	// The SecretIdList form is unchanged.
+	// The SecretIdList form answers each id it names, and only the filter
+	// form pages (TestSecretsManagerBatchGetSecretIdListNeverPages).
 	rows := ok(t, "BatchGetSecretValue", map[string]any{"SecretIdList": []any{"app/db", "app/gone", "missing"}})
 	if values, errs := names(rows["SecretValues"], "Name"), names(rows["Errors"], "ErrorCode"); !reflect.DeepEqual(values, []string{"app/db"}) ||
 		!reflect.DeepEqual(errs, []string{"InvalidRequestException", "ResourceNotFoundException"}) {
@@ -1030,5 +1031,50 @@ func TestSecretsManagerDeletionDatesComeFromOneRequestTime(t *testing.T) {
 	deleted, _ := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"})["DeletedDate"].(float64)
 	if deletion-deleted != 7*86400 {
 		t.Fatalf("DeletionDate %v - DeletedDate %v = %v, want exactly 7 days (604800)", deletion, deleted, deletion-deleted)
+	}
+}
+
+// BatchGetSecretValue's MaxResults: "To use this parameter, you must also use
+// the Filters parameter." The SecretIdList form with MaxResults, or with a
+// NextToken, which only the Filters form answers, is
+// InvalidParameterException, and the SecretIdList form never answers a
+// NextToken. MaxResults outside MaxResultsBatchType's range, 1 to 20, is
+// ValidationException. Before, SecretIdList with MaxResults answered a
+// NextToken whenever more secrets were stored than the page held, and every
+// page repeated the same values, so a caller following it paged forever.
+func TestSecretsManagerBatchGetSecretIdListNeverPages(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	var ids []any
+	for i := range 25 {
+		ok(t, "CreateSecret", map[string]any{"Name": fmt.Sprintf("s%02d", i), "SecretString": "v"})
+		ids = append(ids, fmt.Sprintf("s%02d", i))
+	}
+	code := func(err error) string {
+		if f, isFault := err.(*spi.Fault); isFault {
+			return f.Code
+		}
+		return ""
+	}
+	for _, tc := range []struct {
+		in   map[string]any
+		want string
+	}{
+		{map[string]any{"SecretIdList": ids[:2], "MaxResults": 1}, "InvalidParameterException"},
+		{map[string]any{"SecretIdList": ids[:2], "NextToken": "s00"}, "InvalidParameterException"},
+		{map[string]any{"Filters": []any{map[string]any{"Key": "name", "Values": []any{"s"}}}, "MaxResults": 0}, "ValidationException"},
+		{map[string]any{"Filters": []any{map[string]any{"Key": "name", "Values": []any{"s"}}}, "MaxResults": 21}, "ValidationException"},
+		{map[string]any{"SecretIdList": ids[:2], "MaxResults": 21}, "ValidationException"},
+	} {
+		if out, err := call("BatchGetSecretValue", tc.in); code(err) != tc.want {
+			t.Errorf("BatchGetSecretValue %v answered %v (%v), want %s", tc.in, out, err, tc.want)
+		}
+	}
+	rows := ok(t, "BatchGetSecretValue", map[string]any{"SecretIdList": ids})
+	if values, _ := rows["SecretValues"].([]any); len(values) != 25 || rows["NextToken"] != nil {
+		t.Errorf("SecretIdList of 25 answered %d values and NextToken %v, want all 25 and none", len(values), rows["NextToken"])
+	}
+	page := ok(t, "BatchGetSecretValue", map[string]any{"Filters": []any{map[string]any{"Key": "name", "Values": []any{"s"}}}, "MaxResults": 20})
+	if values, _ := page["SecretValues"].([]any); len(values) != 20 || page["NextToken"] == nil {
+		t.Errorf("Filters with MaxResults 20 answered %d values and NextToken %v, want 20 and a token", len(values), page["NextToken"])
 	}
 }

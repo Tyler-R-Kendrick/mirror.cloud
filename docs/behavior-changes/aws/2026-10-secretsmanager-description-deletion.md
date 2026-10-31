@@ -221,7 +221,16 @@ The oracle is AWS's documentation as it ships in the vendored model
     neither, with `InvalidParameterException`. The filter form pages with
     `MaxResults` and `NextToken` as `ListSecrets` does, leaves out a secret
     scheduled for deletion as `ListSecrets` does, and answers a secret with no
-    value as a not-found `Errors` row. The `SecretIdList` form is unchanged.
+    value as a not-found `Errors` row. Only the filter form pages:
+    `MaxResults` says "To use this parameter, you must also use the Filters
+    parameter", so the `SecretIdList` form with `MaxResults`, or with a
+    `NextToken`, which only the filter form answers, is
+    `InvalidParameterException`, and the `SecretIdList` form never answers a
+    `NextToken`. `MaxResults` outside its range, 1 to 20, is
+    `ValidationException` in either form. Before, the `SecretIdList` form with
+    `MaxResults` answered a `NextToken` whenever more secrets were stored than
+    the page held, and every page repeated the same values, so a caller
+    following it paged forever.
   - A listing page that keeps nothing while more secrets follow now moves
     `NextToken` past what it read; before, `ListSecrets` with a scheduled
     secret between two listed ones lost the second (an engine fix).

@@ -595,22 +595,39 @@ operations:
   #
   # Filters choose the secrets the way ListSecrets' do (*filtersMatch): "You
   # must include Filters or SecretIdList, but not both", so both, or neither,
-  # is InvalidParameterException. The filter form pages as ListSecrets does
-  # (MaxResults: "To use this parameter, you must also use the Filters
-  # parameter"), leaves out a secret scheduled for deletion as ListSecrets
-  # does, and answers a secret with no value as a not-found Errors row.
+  # is InvalidParameterException. Only the filter form pages, as ListSecrets
+  # does: MaxResults (MaxResultsBatchType, 1 to 20) says "To use this
+  # parameter, you must also use the Filters parameter", so the SecretIdList
+  # form with MaxResults, or with a NextToken only the filter form answers, is
+  # InvalidParameterException, and its list reads one record and keeps none,
+  # so it never answers a NextToken. The filter form leaves out a secret
+  # scheduled for deletion as ListSecrets does, and answers a secret with no
+  # value as a not-found Errors row.
   BatchGetSecretValue:
     require:
+      - cond: "!('MaxResults' in input && input.MaxResults != null) || (int(input.MaxResults) >= 1 && int(input.MaxResults) <= 20)"
+        error: Validation
+        message_expr: >-
+          "1 validation error detected: Value '" + string(int(input.MaxResults))
+          + "' at 'maxResults' failed to satisfy constraint: Member must have value "
+          + (int(input.MaxResults) < 1 ? "greater than or equal to 1" : "less than or equal to 20")
       - cond: "!('Filters' in input && input.Filters != null && 'SecretIdList' in input && input.SecretIdList != null)"
         error: InvalidParameter
         message: "You must include Filters or SecretIdList, but not both."
       - cond: "('Filters' in input && input.Filters != null) || size(bids) > 0"
         error: InvalidParameter
         message: "You must include Filters or SecretIdList."
+      - cond: "('Filters' in input && input.Filters != null) || !('MaxResults' in input && input.MaxResults != null)"
+        error: InvalidParameter
+        message: "To use MaxResults, you must also use the Filters parameter."
+      - cond: "('Filters' in input && input.Filters != null) || !('NextToken' in input && input.NextToken != null && input.NextToken != '')"
+        error: InvalidParameter
+        message: "To use NextToken, you must also use the Filters parameter."
     list:
       resource: secret
       member: SecretValues
       paginate: model
+      key: "'Filters' in input && input.Filters != null ? '' : 'SecretIdList'"
       let:
         matched: *filtersMatch
       filter: "'Filters' in input && input.Filters != null && matched && !('Deleted' in item && item.Deleted == true)"

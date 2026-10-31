@@ -990,9 +990,6 @@ func TestSecretsManagerGetRandomPasswordHonoursItsParameters(t *testing.T) {
 			t.Fatalf("%s answered %q", member, pw)
 		}
 	}
-	if pw := password(map[string]any{"PasswordLength": 200, "IncludeSpace": true}); !has(pw, " ") {
-		t.Fatalf("IncludeSpace with RequireEachIncludedType answered no space in %q", pw)
-	}
 	if pw := password(map[string]any{"PasswordLength": 1, "RequireEachIncludedType": false}); len(pw) != 1 {
 		t.Fatalf("a one-character password answered %q", pw)
 	}
@@ -1076,5 +1073,39 @@ func TestSecretsManagerBatchGetSecretIdListNeverPages(t *testing.T) {
 	page := ok(t, "BatchGetSecretValue", map[string]any{"Filters": []any{map[string]any{"Key": "name", "Values": []any{"s"}}}, "MaxResults": 20})
 	if values, _ := page["SecretValues"].([]any); len(values) != 20 || page["NextToken"] == nil {
 		t.Errorf("Filters with MaxResults 20 answered %d values and NextToken %v, want 20 and a token", len(values), page["NextToken"])
+	}
+}
+
+// IncludeSpace: "If you include this switch, the password can contain space
+// characters." RequireEachIncludedType asks for "at least one upper and
+// lowercase letter, one number, and one punctuation", not a space. So a space
+// may be drawn but is never required: {"PasswordLength": 4, "IncludeSpace":
+// true} is one of each of the four types, and a one-character password whose
+// only type is punctuation is a punctuation mark. Before, the space counted
+// as a fifth required type, which refused both.
+func TestSecretsManagerIncludeSpaceNeverRequiresASpace(t *testing.T) {
+	call, _, _ := secretsManager(t)
+	const punctuation = "!\"#$%&'()*+,-./:;?@[\\]^_`{|}~"
+	password := func(in map[string]any) string {
+		t.Helper()
+		out, err := call("GetRandomPassword", in)
+		if err != nil {
+			t.Errorf("GetRandomPassword %v: %v", in, err)
+			return ""
+		}
+		return fmt.Sprint(out["RandomPassword"])
+	}
+	for range 20 {
+		if pw := password(map[string]any{"PasswordLength": 4, "IncludeSpace": true}); len(pw) == 4 && (!strings.ContainsAny(pw, "abcdefghijklmnopqrstuvwxyz") ||
+			!strings.ContainsAny(pw, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") || !strings.ContainsAny(pw, "0123456789") || !strings.ContainsAny(pw, punctuation)) {
+			t.Errorf("PasswordLength 4 with IncludeSpace answered %q, want one of each of the four types", pw)
+		}
+		one := map[string]any{"PasswordLength": 1, "IncludeSpace": true, "ExcludeLowercase": true, "ExcludeUppercase": true, "ExcludeNumbers": true}
+		if pw := password(one); pw != "" && !strings.Contains(punctuation, pw) {
+			t.Errorf("a one-character punctuation password with IncludeSpace answered %q", pw)
+		}
+	}
+	if pw := password(map[string]any{"PasswordLength": 4096, "IncludeSpace": true}); !strings.Contains(pw, " ") {
+		t.Errorf("IncludeSpace drew no space in 4096 characters")
 	}
 }

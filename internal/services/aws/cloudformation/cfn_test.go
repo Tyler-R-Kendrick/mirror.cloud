@@ -723,8 +723,8 @@ func TestCloudFormationGeneratesASecretString(t *testing.T) {
 			t.Errorf("%s generated %q", member, v)
 		}
 	}
-	if v := must(map[string]any{"PasswordLength": 200, "IncludeSpace": true}); !strings.Contains(v, " ") {
-		t.Errorf("IncludeSpace generated no space in %q", v)
+	if v := must(map[string]any{"PasswordLength": 4096, "IncludeSpace": true}); !strings.Contains(v, " ") {
+		t.Errorf("IncludeSpace drew no space in 4096 characters") // may, not must: a space is never required
 	}
 	var doc map[string]any
 	v := must(map[string]any{"SecretStringTemplate": `{"username":"admin"}`, "GenerateStringKey": "password", "PasswordLength": 20})

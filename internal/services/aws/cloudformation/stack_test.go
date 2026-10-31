@@ -676,3 +676,46 @@ func TestCloudFormationRefusesYAMLAliases(t *testing.T) {
 		t.Errorf("a template of 90 levels and 90,000 nodes was refused: %v", err)
 	}
 }
+
+// A rollback that deletes everything leaves a stack with no resources, and
+// every read of the stack answers it. Before, the record held a null
+// Resources and ListStackResources and DescribeStackEvents failed on it
+// ("expected iterable type"), an HTTP 500. And "The Resources section is
+// required in every CloudFormation template" (User Guide, Template sections):
+// a template without one is ValidationError, "Template format error: At least
+// one Resources member must be defined.", on create, update, ValidateTemplate
+// and GetTemplateSummary. Before, such a stack was created.
+func TestCloudFormationAStackWithNoResourcesReads(t *testing.T) {
+	h := newStacks(t)
+	if err := h.create("rc", map[string]map[string]any{"Q": nameable()["Queue"], "ZZZ": {"Type": "AWS::Nope::Thing"}}); err == nil {
+		t.Fatal("a template with an unsupported resource type was created")
+	}
+	for _, op := range []string{"DescribeStacks", "ListStacks", "DescribeStackResources", "ListStackResources", "DescribeStackEvents", "GetTemplate"} {
+		if _, err := h.invoke(op, map[string]any{"StackName": "rc"}); err != nil {
+			t.Errorf("%s of the rolled-back rc answered %v", op, err)
+		}
+	}
+	if _, err := h.invoke("DescribeStackResource", map[string]any{"StackName": "rc", "LogicalResourceId": "Q"}); code(err) != "ValidationError" {
+		t.Errorf("DescribeStackResource of a resource rc no longer has answered %v, want ValidationError", err)
+	}
+	h.mustCreate("upd", map[string]map[string]any{"Q": nameable()["Queue"]})
+	const msg = "Template format error: At least one Resources member must be defined."
+	for _, body := range []string{`{}`, `{"Resources":{}}`, `{"Resources":null}`, "Resources: {}\n", "AWSTemplateFormatVersion: '2010-09-09'\n"} {
+		for _, call := range []struct {
+			op string
+			in map[string]any
+		}{
+			{"ValidateTemplate", map[string]any{"TemplateBody": body}},
+			{"GetTemplateSummary", map[string]any{"TemplateBody": body}},
+			{"CreateStack", map[string]any{"StackName": "none", "TemplateBody": body}},
+			{"UpdateStack", map[string]any{"StackName": "upd", "TemplateBody": body}},
+		} {
+			if _, err := h.invoke(call.op, call.in); code(err) != "ValidationError" || !strings.Contains(err.Error(), msg) {
+				t.Errorf("%s of %q answered %v, want ValidationError: %s", call.op, body, err, msg)
+			}
+		}
+	}
+	if _, _, err := h.status("none"); code(err) != "ValidationError" {
+		t.Errorf("a refused template left the stack none: %v", err)
+	}
+}

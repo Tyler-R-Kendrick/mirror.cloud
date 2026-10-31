@@ -244,7 +244,7 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 // resources left listed as DELETE_FAILED for the next DeleteStack to try
 // again and the first error, which unwind answers, its StackStatusReason.
 func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, done, failed string) error {
-	var left []res
+	left := []res{} // never null: every read of the stack lists its resources
 	var first error
 	for _, r := range slices.Backward(st.Resources) {
 		if err := p.deprovision(ctx, req, r); err != nil {
@@ -725,16 +725,18 @@ func parseTemplate(body string) (map[string]any, error) {
 	if body == "" {
 		return nil, invalid("empty TemplateBody")
 	}
+	var m map[string]any
 	if body[0] == '{' {
-		var m map[string]any
 		if err := json.Unmarshal([]byte(body), &m); err != nil {
 			return nil, invalid(err.Error())
 		}
-		return m, nil
-	}
-	m, err := parseYAML(body)
-	if err != nil {
+	} else if yml, err := parseYAML(body); err != nil {
 		return nil, invalid("TemplateBody YAML: " + err.Error())
+	} else {
+		m = yml
+	}
+	if len(asMap(m["Resources"])) == 0 { // "The Resources section is required in every CloudFormation template"
+		return nil, invalid("Template format error: At least one Resources member must be defined.")
 	}
 	return m, nil
 }

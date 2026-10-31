@@ -159,8 +159,14 @@ The oracle is AWS's documentation as it ships in the vendored model
     already holds is refused before anything is made (above). `OnFailure` is
     not read, so every failed create rolls back. A failed `UpdateStack` is not
     rolled back.
+  - "The Resources section is required in every CloudFormation template"
+    (User Guide, Template sections), so a template without one is
+    `ValidationError`, "Template format error: At least one Resources member
+    must be defined.", on `CreateStack`, `UpdateStack`, `ValidateTemplate`
+    and `GetTemplateSummary`. Before, such a stack was created.
   - A failed create keeps its stack, `ROLLBACK_COMPLETE` once the rollback
-    has deleted everything it made. The name stays taken (`CreateStack` is
+    has deleted everything it made, and every read of it answers it with no
+    resources (the record never holds a null list). The name stays taken (`CreateStack` is
     `AlreadyExistsException`; `UpdateStack` is `ValidationError`, "Stack:...
     is in ROLLBACK_COMPLETE state and can not be updated.") until
     `DeleteStack` removes the stack ("Deleted stacks don't show up in the

@@ -172,7 +172,7 @@ operations:
       - { cond: s_found, error: Validation }
     output:
       StackResourceSummaries: >-
-        s.Resources.map(r, {'LogicalResourceId': r.Logical,
+        ('Resources' in s && s.Resources != null ? s.Resources : []).map(r, {'LogicalResourceId': r.Logical,
           'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
           'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'})
 
@@ -183,7 +183,7 @@ operations:
       - { cond: s_found, error: Validation }
     output:
       StackEvents: >-
-        s.Resources.map(r, {'LogicalResourceId': r.Logical,
+        ('Resources' in s && s.Resources != null ? s.Resources : []).map(r, {'LogicalResourceId': r.Logical,
           'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
           'ResourceStatus': 'CREATE_COMPLETE', 'StackName': s.Name,
           'StackId': s.ID})
@@ -194,13 +194,15 @@ operations:
   DescribeStackResource:
     reads:
       s: { resource: stack }
+    let:
+      rs: "s_found && 'Resources' in s && s.Resources != null ? s.Resources : []"
     require:
       - { cond: s_found, error: Validation }
-      - cond: "s.Resources.exists(r, r.Logical == string(input.LogicalResourceId))"
+      - cond: "rs.exists(r, r.Logical == string(input.LogicalResourceId))"
         error: Validation
     output:
       StackResourceDetail: >-
-        s.Resources.filter(r, r.Logical ==
+        rs.filter(r, r.Logical ==
           string(input.LogicalResourceId)).map(r, {'LogicalResourceId':
           r.Logical, 'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
           'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE',

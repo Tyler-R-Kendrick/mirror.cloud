@@ -172,12 +172,19 @@ func printTLSCA(ca string) {
 
 // serve listens on addr and serves h, over TLS with pair when it is set. The
 // pair is served from memory: nothing is read from disk after it was checked.
-func serve(addr string, h http.Handler, pair *tls.Certificate) error {
+//
+// ready runs once the port is bound and before anything is served. It is where
+// the startup banner is printed: a test runner that waits for the banner takes
+// it to mean the port is this process's and accepting, which is only true once
+// the listener exists. A bind that fails returns before ready, so it prints
+// nothing but its error.
+func serve(addr string, h http.Handler, pair *tls.Certificate, ready func()) error {
 	srv := &http.Server{Addr: addr, Handler: h}
 	ln, err := listen("tcp", addr)
 	if err != nil {
 		return err
 	}
+	ready()
 	if pair != nil {
 		srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{*pair}}
 		return srv.ServeTLS(ln, "", "")

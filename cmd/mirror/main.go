@@ -140,22 +140,22 @@ func cmdUp(args []string) error {
 		_ = rt.Close()
 	}()
 
-	if strings.HasPrefix(cfg.Bind, "0.0.0.0") || strings.HasPrefix(cfg.Bind, "[::]") || strings.HasPrefix(cfg.Bind, ":") {
-		fmt.Fprintln(os.Stderr, "WARNING: no authentication. Do not expose this process to untrusted networks. Isolation is network-level and account+region namespacing. An auth token will never be added.")
-	}
-
 	addr := cfg.Bind
 	if !strings.Contains(addr, ":") {
 		addr += ":4566"
 	}
-	fmt.Fprintf(os.Stderr, "mirror %s listening on %s://%s\n", runtime.Version, tlsScheme(cfg.TLSCert), addr)
-	if len(cfg.Services) == 0 {
-		fmt.Fprintln(os.Stderr, "services: all")
-	} else {
-		fmt.Fprintln(os.Stderr, "services:", strings.Join(cfg.Services, ", "))
-	}
-	printTLSCA(tlsCA)
-	return serve(addr, rt.Handler(), tlsPair)
+	return serve(addr, rt.Handler(), tlsPair, func() {
+		if strings.HasPrefix(cfg.Bind, "0.0.0.0") || strings.HasPrefix(cfg.Bind, "[::]") || strings.HasPrefix(cfg.Bind, ":") {
+			fmt.Fprintln(os.Stderr, "WARNING: no authentication. Do not expose this process to untrusted networks. Isolation is network-level and account+region namespacing. An auth token will never be added.")
+		}
+		fmt.Fprintf(os.Stderr, "mirror %s listening on %s://%s\n", runtime.Version, tlsScheme(cfg.TLSCert), addr)
+		if len(cfg.Services) == 0 {
+			fmt.Fprintln(os.Stderr, "services: all")
+		} else {
+			fmt.Fprintln(os.Stderr, "services:", strings.Join(cfg.Services, ", "))
+		}
+		printTLSCA(tlsCA)
+	})
 }
 
 func cmdEnv(args []string) error {

@@ -90,6 +90,12 @@ The oracle is AWS's documentation as it ships in the vendored model
     repository refuses a wrongly typed member, so the codec's answer is the
     convention used. Before, `7.5` and `"7"` were read as 7. A whole number
     sent as a JSON float (`7.0`) is still 7.
+  - A primary secret replicated to another Region is not deleted, forced or
+    not: "You can't delete a primary secret that is replicated to other
+    Regions. You must first delete the replicas using
+    RemoveRegionsFromReplication, and then delete the primary secret." It is
+    `InvalidRequestException`, the error for the secret's current state.
+    Before, it was deleted with its replicas.
 - **RestoreSecret** clears `DeletedDate` and answers `ARN` and `Name`.
 - **A secret scheduled for deletion refuses writes.** Every operation that
   writes to a secret answers `InvalidRequestException` ("Possible causes: The
@@ -130,11 +136,15 @@ The oracle is AWS's documentation as it ships in the vendored model
   milliseconds where the clock has them (`1.5`, `2592001.5`), as the model's
   examples do ("CreatedDate": 1523477145.713); they were whole seconds.
 
-Equivalence trace `aws.secretsmanager`, steps counted from 0: steps 49 to 57
-are added, each against the secret scheduled at step 48 (a `PutSecretValue`, a
-`BatchGetSecretValue`, then one each of `UpdateSecretVersionStage`,
+Equivalence trace `aws.secretsmanager`, steps counted from 0. Step 48, the
+pack's delete of `primary`, is refused now, because `primary` has had a
+replica in us-west-2 since step 35. Steps 49 to 59 are added. Step 49 removes
+the replica and step 50 schedules `primary` for deletion. Each of steps 51 to
+59 is then made against the scheduled secret: a `PutSecretValue`, a
+`BatchGetSecretValue`, and one each of `UpdateSecretVersionStage`,
 `PutResourcePolicy`, `DeleteResourcePolicy`, `ReplicateSecretToRegions`,
 `RemoveRegionsFromReplication`, `StopReplicationToReplica` and
-`CancelRotateSecret`), and steps 45, 46, 47, 48, 59, 60, 61, 62 and 65 are
-re-cut. Each carries the sentence above that it now follows. The added steps
-moved the first commit's re-cuts at 52, 53 and 56 to 61, 62 and 65.
+`CancelRotateSecret`. Steps 37, 45, 46, 47, 48, 61, 62, 63, 64 and 67 are
+re-cut, and every step whose reason names another step was re-cut again to
+name it where it now is. Each carries the sentence above that it now follows.
+The first commit's re-cuts at 52, 53 and 56 are now at 63, 64 and 67.

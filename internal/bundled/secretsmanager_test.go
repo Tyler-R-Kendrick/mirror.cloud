@@ -621,7 +621,11 @@ func TestSecretsManagerRefusesEveryOtherWriteToASecretScheduledForDeletion(t *te
 			first := ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v1"})["VersionId"].(string)
 			second := ok(t, "PutSecretValue", map[string]any{"SecretId": "s", "SecretString": "v2"})["VersionId"].(string)
 			ok(t, "PutResourcePolicy", map[string]any{"SecretId": "s", "ResourcePolicy": `{"Version":"2012-10-17","Statement":[]}`})
+			// A replicated primary cannot be scheduled for deletion, so the
+			// replica goes before the delete; a refused replication call must
+			// still leave none.
 			ok(t, "ReplicateSecretToRegions", map[string]any{"SecretId": "s", "AddReplicaRegions": []any{map[string]any{"Region": "us-west-2"}}})
+			ok(t, "RemoveRegionsFromReplication", map[string]any{"SecretId": "s", "RemoveReplicaRegions": []any{"us-west-2"}})
 			state := func() []map[string]any {
 				return []map[string]any{
 					ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}),
@@ -805,5 +809,30 @@ func TestSecretsManagerStageMapsLeaveOutDeprecatedVersions(t *testing.T) {
 	listed := ok(t, "ListSecrets", map[string]any{})["SecretList"].([]any)[0].(map[string]any)["SecretVersionsToStages"].(map[string]any)
 	if _, has := listed[first]; has || len(listed) != 2 {
 		t.Errorf("ListSecrets SecretVersionsToStages = %#v, want the two labelled versions only", listed)
+	}
+}
+
+// DeleteSecret: "You can't delete a primary secret that is replicated to other
+// Regions. You must first delete the replicas using RemoveRegionsFromReplication,
+// and then delete the primary secret." The refusal is the model's error for the
+// secret's current state, InvalidRequestException, forced or not.
+func TestSecretsManagerRefusesToDeleteAReplicatedPrimary(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		t.Run(fmt.Sprintf("force=%v", force), func(t *testing.T) {
+			call, ok, fault := secretsManager(t)
+			ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v"})
+			ok(t, "ReplicateSecretToRegions", map[string]any{"SecretId": "s", "AddReplicaRegions": []any{map[string]any{"Region": "us-west-2"}}})
+			in := map[string]any{"SecretId": "s"}
+			if force {
+				in["ForceDeleteWithoutRecovery"] = true
+			}
+			_, err := call("DeleteSecret", in)
+			fault(t, err, "InvalidRequestException")
+			if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}); got["DeletedDate"] != nil {
+				t.Fatalf("a refused delete scheduled the secret: %#v", got)
+			}
+			ok(t, "RemoveRegionsFromReplication", map[string]any{"SecretId": "s", "RemoveReplicaRegions": []any{"us-west-2"}})
+			ok(t, "DeleteSecret", in)
+		})
 	}
 }

@@ -423,6 +423,14 @@ operations:
         error: InvalidParameter
         message: "The RecoveryWindowInDays value must be between 7 and 30 days (inclusive)."
       - { cond: "s_found || force", error: NotFound }
+      # DeleteSecret: "You can't delete a primary secret that is replicated to
+      # other Regions. You must first delete the replicas using
+      # RemoveRegionsFromReplication, and then delete the primary secret."
+      # Forced or not; InvalidRequestException is the error for the secret's
+      # current state.
+      - cond: "!s_found || !('ReplicaRegions' in s && s.ReplicaRegions != null && size(s.ReplicaRegions) > 0)"
+        error: InvalidRequest
+        message: "You can't delete a primary secret that is replicated to other Regions. You must first delete the replicas using RemoveRegionsFromReplication, and then delete the primary secret."
       - cond: "force || !scheduled"
         error: InvalidRequest
         message: "The secret is scheduled for deletion."

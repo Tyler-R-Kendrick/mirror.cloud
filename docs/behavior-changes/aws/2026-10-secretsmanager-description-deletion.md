@@ -119,7 +119,13 @@ The oracle is AWS's documentation as it ships in the vendored model
     block scalars and every short-form intrinsic (`!Ref`, `!GetAtt`, `!Sub`,
     and `!Name` for any other `Fn::Name`). The hand-written subset it replaced
     read a flow sequence such as `Tags: [{Key: env, Value: dev}]` as a string
-    and refused a block scalar.
+    and refused a block scalar. CloudFormation "doesn't support the following
+    features: ... Aliases[,] Hash merges" (User Guide, Template formats), so
+    an anchor, an alias or a merge key is `ValidationError`, and a template
+    nesting deeper than 100 levels or holding more than 100,000 nodes is
+    refused too. Without that, the library's aliases let a template refer to
+    itself (`a: &a [*a]`, which overflowed the stack) or multiply (a billion
+    laughs, which ran without end).
   - A resource the template does not name, of any type, is made under
     `<stack>-<logical id>-<suffix>`, the modelled form: the suffix is twelve
     hex digits of a hash of the stack id and logical id, so no two stacks, and
@@ -141,17 +147,48 @@ The oracle is AWS's documentation as it ships in the vendored model
     `EntityAlreadyExists`, `ResourceInUseException` and so on; for a topic,
     whose `CreateTopic` "is idempotent" and has none, CloudFormation's own
     `AlreadyExistsException`, "The resource with the name requested already
-    exists."). The resource is left as it was. It is checked again just
-    before each create, since a name can come from a resource made before it.
-    A REST API is not checked: API Gateway holds no name to one API. Before, a
+    exists."). The resource is left as it was. A name built on another
+    resource's id is checked by the id that resource will be made with: before
+    anything is made, each resource's id is planned in the order resources are
+    made, so a `Ref` answers what the type's `Ref` will answer (a bucket's
+    name, a topic's, role's, rule's, function's or secret's ARN), never the
+    logical id. A queue's URL (its endpoint's business), a KMS key's id and a
+    REST API's id are known only once made, so a name built on one is checked
+    just before its create instead. Resources are made in dependency order,
+    each after those its properties name by `Ref`, `Fn::GetAtt` or `Fn::Sub`
+    ("Resource B is created before resource A", Template Reference, DependsOn
+    attribute), and otherwise by logical id; `DependsOn` itself is not read.
+    A cycle is `ValidationError` ("Circular dependency between resources:
+    [A, B]") on `CreateStack`, `UpdateStack`, `ValidateTemplate` and
+    `GetTemplateSummary`, and makes no stack. Before, a `Ref` to a resource
+    not yet made answered its logical id: beside an SSM parameter named
+    `ABucket`, a parameter named for an unnamed bucket `ABucket` was refused
+    as taken, and a resource that sorted before the one it named was made
+    with the logical id, and a cycle was made in alphabetical order.
+    A REST API is not checked: API Gateway holds no name to one API. A stack
+    recorded before resources kept the name they were made under is read by
+    each resource's physical id, which is the name or ends in it (a queue's
+    URL, a secret's ARN), so such a stack still updates. Before, a
     create that a service answers with what it already holds (a queue, topic,
     rule, role, stream, log group or bucket here) took the resource over, and
     the stack's rollback or `DeleteStack` deleted it.
+  - EventBridge keys a rule by its event bus and its name, and the rule's
+    ARN carries the bus (`rule/<bus>/<name>`), so the check of a rule's name,
+    its `PutTargets` and its delete all carry the bus: the `EventBusName`
+    property, or the bus in the ARN. A named rule already on bus `b` fails
+    the stack and is left as it was, a rule of that name on the default bus
+    does not block it, and `DeleteStack` deletes the stack's own rule on its
+    bus, never a same-named rule on the default bus. Before, all three
+    looked at the default bus.
   - A stack name "must be unique in the Region in which you are creating the
     stack", so `CreateStack` of a name a stack already has is
     `AlreadyExistsException` ("Stack [name] already exists") and makes
-    nothing. Before, it made a second set of resources and wrote its record
-    over the first, which then belonged to no stack.
+    nothing. The name is reserved, a `CREATE_IN_PROGRESS` record written in
+    the same store transaction that found it free, before any resource is
+    made, so of concurrent creates of one name exactly one makes anything.
+    Before, it made a second set of resources and wrote its record over the
+    first, which then belonged to no stack, and creates racing on one name
+    each made a set.
   - A `CreateStack` that fails rolls back what it had created, as
     CloudFormation's default `OnFailure` (`ROLLBACK`) does, deleting a secret
     without a recovery window so its name is free again. A resource is
@@ -180,14 +217,26 @@ The oracle is AWS's documentation as it ships in the vendored model
     error is the first entry's code, with a message naming every failed entry,
     and the stack rolls back, on create and on update. Before, the stack
     finished `CREATE_COMPLETE` or `UPDATE_COMPLETE` without those targets.
+  - "The Resources section is required in every CloudFormation template"
+    (User Guide, Template sections), so a template without one is
+    `ValidationError`, "Template format error: At least one Resources member
+    must be defined.", on `CreateStack`, `UpdateStack`, `ValidateTemplate`
+    and `GetTemplateSummary`. Before, such a stack was created.
   - A failed create keeps its stack, `ROLLBACK_COMPLETE` once the rollback
-    has deleted everything it made. The name stays taken (`CreateStack` is
+    has deleted everything it made, with the create's error as its
+    `StackStatusReason` (which `ListStacks` answers too, as the model's
+    `StackSummary` has it), and every read of it answers it with no
+    resources (the record never holds a null list). The name stays taken (`CreateStack` is
     `AlreadyExistsException`; `UpdateStack` is `ValidationError`, "Stack:...
     is in ROLLBACK_COMPLETE state and can not be updated.") until
     `DeleteStack` removes the stack ("Deleted stacks don't show up in the
     DescribeStacks operation if the deletion has been completed
     successfully"). A resource the rollback cannot delete stays listed by
-    `DescribeStackResources` as `DELETE_FAILED`, the stack is
+    `DescribeStackResources` as `DELETE_FAILED`, with the error as its
+    `ResourceStatusReason` ("Success/failure message associated with the
+    resource"); `ListStackResources`, `DescribeStackResource` and
+    `DescribeStackEvents` answer the same status and reason from the same
+    record, where events said `CREATE_COMPLETE` whatever happened. The stack is
     `ROLLBACK_FAILED`, and the service's error is its `StackStatusReason`
     ("Success/failure message associated with the stack status");
     `DeleteStack` tries the resource again. A `DeleteStack` that cannot delete
@@ -227,11 +276,40 @@ The oracle is AWS's documentation as it ships in the vendored model
     the rest. Stack statuses here have no `_IN_PROGRESS` grain, so
     `UPDATE_COMPLETE_CLEANUP_IN_PROGRESS` is never seen. Before, an update
     never deleted what it replaced or dropped.
+  - The rollback family accepts only the states the API reference gives
+    each operation: `RollbackStack` rolls back "from CREATE_FAILED or
+    UPDATE_FAILED stack statuses", `ContinueUpdateRollback` "from
+    UPDATE_ROLLBACK_FAILED to UPDATE_ROLLBACK_COMPLETE state", and
+    `CancelUpdateStack` "only stacks that are in the UPDATE_IN_PROGRESS
+    state". Nothing here runs asynchronously and a failed create rolls back at
+    once, so no stack rests in the first, second or last of those states:
+    every call on another stack, a `ROLLBACK_FAILED` one with its
+    `DELETE_FAILED` orphan included (its way forward is `DeleteStack`), is
+    `ValidationError` ("RollbackStack cannot be called from current stack
+    status", in the words `CancelUpdateStack` uses) and changes nothing, and
+    an absent stack "does not exist". `ContinueUpdateRollback` never marks a
+    stack complete while a `DELETE_FAILED` resource remains, since it cannot
+    retry the delete. Before, each operation marked any stack complete,
+    orphans and all, and made a stack out of a name that had none. The
+    CloudFormation trace's steps 9 to 22 are re-cut accordingly: s1 and s2
+    are never made.
   - `GenerateSecretString` makes the value with `GetRandomPassword`'s generator,
     seeded by the stack id and logical id, and puts it under `GenerateStringKey`
-    in `SecretStringTemplate` when the template gives one. Its properties are
-    read as a template's are: a number or boolean may be given as its text
-    (`"16"`, `"true"`), which is how a `Ref` to a parameter gives one. Each
+    in `SecretStringTemplate` when the template gives one. Its properties,
+    and every other property the engine reads, are read by one rule as the
+    type the template reference gives them, the value itself or its text,
+    which is how a `Ref` to a parameter gives one. A Boolean is `true` or
+    `false` in any case (YAML 1.1, the templates' YAML, spells it `true`,
+    `True` or `TRUE`), so `FifoQueue: "True"` makes a FIFO queue; an Integer
+    is decimal digits, as a Number parameter's text is, so `"016"` is 16 and
+    `"16.0"`, `"1e1"`, `"+16"` and `" 16"` are refused; a String is a
+    scalar's text, so `ExcludeCharacters: 123` is `"123"` and an SSM
+    Parameter's `Value: 123` is `"123"`. Before, `"True"` made a standard
+    queue, `"16.0"`, `"1e1"` and `"+16"` were read as numbers, a number was
+    refused as `ExcludeCharacters` and an SSM `Value: 123` was empty. A
+    parameter is a string ("the parameter value becomes a string", User
+    Guide, Parameters), so a numeric `Default`, `Default: 16` in JSON or
+    YAML, is its text `"16"`; before, it became `""`. Each
     way it can be wrong is `ValidationError` with its own message: not an
     object; `SecretString` beside it; `GenerateStringKey` without
     `SecretStringTemplate`, or the reverse; a template that is not JSON, or
@@ -296,11 +374,20 @@ The oracle is AWS's documentation as it ships in the vendored model
     scheduled for deletion as `ListSecrets` does, and answers a secret with no
     value as a not-found `Errors` row. Only the filter form pages:
     `MaxResults` says "To use this parameter, you must also use the Filters
-    parameter", so the `SecretIdList` form with `MaxResults`, or with a
-    `NextToken`, which only the filter form answers, is
-    `InvalidParameterException`, and the `SecretIdList` form never answers a
-    `NextToken`. `MaxResults` outside its range, 1 to 20, is
-    `ValidationException` in either form. Before, the `SecretIdList` form with
+    parameter", so the `SecretIdList` form with `MaxResults` is
+    `InvalidParameterException`, and that form never answers a `NextToken`.
+    Of a `NextToken` beside `SecretIdList` the API reference says nothing
+    specific; no listing of that form answers one, so it is
+    `InvalidNextTokenException` ("The NextToken value is invalid."), which the
+    operation lists. `SecretIdList` holds "Minimum number of 1 item. Maximum
+    number of 20 items.", so an empty list (beside `Filters` too) or 21 ids is
+    `ValidationException`, ahead of the rules on the two forms, and
+    `ListSecrets`' `MaxResults` outside 1 to 100 is `ValidationException`. `MaxResults` outside its range, 1 to 20, is
+    `ValidationException` in either form. `MaxResults` is an integer ("Type:
+    Integer", in `ListSecrets` too), so a value the awsJson1_1 codec cannot
+    read as one (`"abc"`, `"5"`, `1.5`, `true`) is `SerializationException`,
+    as a fractional `RecoveryWindowInDays` is; before, `"abc"` was an internal
+    error and `"5"` and `1.5` were taken. Before, the `SecretIdList` form with
     `MaxResults` answered a `NextToken` whenever more secrets were stored than
     the page held, and every page repeated the same values, so a caller
     following it paged forever.

@@ -1148,7 +1148,7 @@ func TestSecretsManagerBatchGetSecretIdListNeverPages(t *testing.T) {
 		want string
 	}{
 		{map[string]any{"SecretIdList": ids[:2], "MaxResults": 1}, "InvalidParameterException"},
-		{map[string]any{"SecretIdList": ids[:2], "NextToken": "s00"}, "InvalidParameterException"},
+		{map[string]any{"SecretIdList": ids[:2], "NextToken": "s00"}, "InvalidNextTokenException"}, // TestSecretsManagerListBoundsAndTokens
 		{map[string]any{"Filters": []any{map[string]any{"Key": "name", "Values": []any{"s"}}}, "MaxResults": 0}, "ValidationException"},
 		{map[string]any{"Filters": []any{map[string]any{"Key": "name", "Values": []any{"s"}}}, "MaxResults": 21}, "ValidationException"},
 		{map[string]any{"SecretIdList": ids[:2], "MaxResults": 21}, "ValidationException"},
@@ -1157,9 +1157,10 @@ func TestSecretsManagerBatchGetSecretIdListNeverPages(t *testing.T) {
 			t.Errorf("BatchGetSecretValue %v answered %v (%v), want %s", tc.in, out, err, tc.want)
 		}
 	}
-	rows := ok(t, "BatchGetSecretValue", map[string]any{"SecretIdList": ids})
-	if values, _ := rows["SecretValues"].([]any); len(values) != 25 || rows["NextToken"] != nil {
-		t.Errorf("SecretIdList of 25 answered %d values and NextToken %v, want all 25 and none", len(values), rows["NextToken"])
+	// 25 secrets are stored; a SecretIdList holds at most 20 of them.
+	rows := ok(t, "BatchGetSecretValue", map[string]any{"SecretIdList": ids[:20]})
+	if values, _ := rows["SecretValues"].([]any); len(values) != 20 || rows["NextToken"] != nil {
+		t.Errorf("SecretIdList of 20 answered %d values and NextToken %v, want all 20 and none", len(values), rows["NextToken"])
 	}
 	page := ok(t, "BatchGetSecretValue", map[string]any{"Filters": []any{map[string]any{"Key": "name", "Values": []any{"s"}}}, "MaxResults": 20})
 	if values, _ := page["SecretValues"].([]any); len(values) != 20 || page["NextToken"] == nil {
@@ -1278,4 +1279,75 @@ func TestSecretsManagerCreateSecretKeepsItsTags(t *testing.T) {
 	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "a"})["Tags"]; !reflect.DeepEqual(got, []any{env, team}) {
 		t.Errorf("after TagResource DescribeSecret answered Tags %v, want env and team", got)
 	}
+}
+
+// MaxResults is an integer: BatchGetSecretValue's "Type: Integer Valid Range:
+// Minimum value of 1. Maximum value of 20" (API reference), and ListSecrets'
+// MaxResultsType likewise. A value the awsJson1_1 codec cannot read as an
+// integer ("abc", "5", 1.5, true) is SerializationException, as a
+// RecoveryWindowInDays that is not a whole number is. Before, "abc" was an
+// internal error (HTTP 500) and "5" and 1.5 were taken.
+func TestSecretsManagerMaxResultsIsAnInteger(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "a", "SecretString": "v"})
+	filters := []any{map[string]any{"Key": "name", "Values": []any{"a"}}}
+	for _, op := range []string{"BatchGetSecretValue", "ListSecrets"} {
+		for _, v := range []any{"abc", "5", 1.5, true} {
+			_, err := call(op, map[string]any{"Filters": filters, "MaxResults": v})
+			if f, isFault := err.(*spi.Fault); !isFault || f.Code != "SerializationException" {
+				t.Errorf("%s with MaxResults %#v answered %v, want SerializationException", op, v, err)
+			}
+		}
+		for _, v := range []any{5.0, int64(5), 5} {
+			if _, err := call(op, map[string]any{"Filters": filters, "MaxResults": v}); err != nil {
+				t.Errorf("%s with MaxResults %#v answered %v", op, v, err)
+			}
+		}
+	}
+}
+
+// BatchGetSecretValue's SecretIdList holds "Minimum number of 1 item.
+// Maximum number of 20 items." (API reference), so an empty list, beside
+// Filters or alone, or a list of 21 ids is ValidationException, before the
+// Filters-or-SecretIdList rules; ListSecrets' MaxResults is 1 to 100
+// (MaxResultsType), so 0 or 101 is ValidationException. Of a NextToken beside
+// SecretIdList the API reference says nothing specific, so it is
+// InvalidNextTokenException ("The NextToken value is invalid."), an error
+// BatchGetSecretValue lists. Before, [] beside Filters was
+// InvalidParameterException, 21 ids were answered, ListSecrets took any
+// MaxResults, and the NextToken case was InvalidParameterException.
+func TestSecretsManagerListBoundsAndTokens(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "a", "SecretString": "v"})
+	filters := []any{map[string]any{"Key": "name", "Values": []any{"a"}}}
+	var ids []any
+	for i := range 21 {
+		ids = append(ids, fmt.Sprintf("id%d", i))
+	}
+	codeOf := func(err error) string {
+		if f, isFault := err.(*spi.Fault); isFault {
+			return f.Code
+		}
+		return ""
+	}
+	for _, c := range []struct {
+		op   string
+		in   map[string]any
+		want string
+	}{
+		{"BatchGetSecretValue", map[string]any{"Filters": filters, "SecretIdList": []any{}}, "ValidationException"},
+		{"BatchGetSecretValue", map[string]any{"SecretIdList": []any{}}, "ValidationException"},
+		{"BatchGetSecretValue", map[string]any{"SecretIdList": ids}, "ValidationException"},
+		{"BatchGetSecretValue", map[string]any{"SecretIdList": ids[:2], "NextToken": "id0"}, "InvalidNextTokenException"},
+		{"ListSecrets", map[string]any{"MaxResults": 0}, "ValidationException"},
+		{"ListSecrets", map[string]any{"MaxResults": 101}, "ValidationException"},
+	} {
+		if _, err := call(c.op, c.in); codeOf(err) != c.want {
+			t.Errorf("%s %v answered %v, want %s", c.op, c.in, err, c.want)
+		}
+	}
+	if got := ok(t, "BatchGetSecretValue", map[string]any{"SecretIdList": ids[:20]})["Errors"].([]any); len(got) != 20 {
+		t.Errorf("20 ids answered %d rows, want 20", len(got))
+	}
+	ok(t, "ListSecrets", map[string]any{"MaxResults": 100})
 }

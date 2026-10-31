@@ -1,6 +1,7 @@
 package cloudformation
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,7 +10,9 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
@@ -626,7 +629,7 @@ func TestCloudFormationReadsGenerateSecretStringAsATemplateDoes(t *testing.T) {
 		}
 		seen[f.Message] = c.cause
 	}
-	for member, value := range map[string]any{"PasswordLength": "sixteen", "ExcludePunctuation": "yes", "IncludeSpace": 1.0, "ExcludeCharacters": true} {
+	for member, value := range map[string]any{"PasswordLength": "sixteen", "ExcludePunctuation": "yes", "IncludeSpace": 1.0, "ExcludeCharacters": []any{"!"}} {
 		if _, err := generate(spec(member, value), nil); code(err) != "ValidationError" || !strings.Contains(err.Error(), member) {
 			t.Errorf("%s %v answered %v, want a ValidationError naming %s", member, value, err, member)
 		}
@@ -854,5 +857,520 @@ func TestCloudFormationAnUpdateDeletesWhatItReplaced(t *testing.T) {
 	}
 	if alive("aws.s3", "HeadBucket", "Bucket", "old-b") {
 		t.Error("DeleteStack left the bucket the cleanup could not delete")
+	}
+}
+
+// "CloudFormation supports the YAML Version 1.1 specification with a few
+// exceptions. CloudFormation doesn't support the following features: ...
+// Aliases[,] Hash merges" (User Guide, Template formats). An anchor, an alias
+// or a merge key is ValidationError, so no alias can recurse (a: &a [*a]),
+// multiply (a billion laughs) or carry a tag away from its node; and a
+// template nesting deeper than 100 levels or holding more than 100,000 nodes
+// is ValidationError too, whatever its shape. Before, the self-alias
+// overflowed the stack and killed the process, the billion laughs ran without
+// end, and a !Ref behind an alias became a plain string.
+func TestCloudFormationRefusesYAMLAliases(t *testing.T) {
+	h := newStacks(t)
+	queue := "Resources:\n  Q:\n    Type: AWS::SQS::Queue\n    Properties:\n      Tags: "
+	laughs := "a0: &a0 [x, x, x, x, x, x, x, x, x, x]\n"
+	for i := 1; i < 10; i++ {
+		laughs += fmt.Sprintf("a%d: &a%d [%s]\n", i, i, strings.TrimSuffix(strings.Repeat(fmt.Sprintf("*a%d, ", i-1), 10), ", "))
+	}
+	for _, c := range []struct{ name, body, says string }{
+		{"self-alias", "a: &a [*a]\n" + queue + "[]\n", "aliases"},
+		{"billion laughs", laughs + queue + "*a9\n", "aliases"},
+		{"tag behind an alias", "Resources:\n  Q:\n    Type: AWS::SQS::Queue\n    Properties:\n      QueueName: &x !Ref AWS::StackName\n      RedrivePolicy: *x\n", "aliases"},
+		{"merge key", "Resources:\n  Q:\n    <<: {Type: AWS::SQS::Queue}\n", "merge"},
+		{"101 levels", queue + strings.Repeat("[", 101) + strings.Repeat("]", 101) + "\n", "levels"},
+		{"100,001 nodes", queue + "[" + strings.Repeat("1, ", 100_000) + "1]\n", "nodes"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			for _, op := range []string{"ValidateTemplate", "CreateStack", "GetTemplateSummary"} {
+				answered := make(chan error, 1)
+				go func() {
+					_, err := h.invoke(op, map[string]any{"StackName": "y", "TemplateBody": c.body})
+					answered <- err
+				}()
+				select {
+				case err := <-answered:
+					if code(err) != "ValidationError" || !strings.Contains(err.Error(), c.says) {
+						t.Errorf("%s answered %v, want a ValidationError about %s", op, err, c.says)
+					}
+				case <-time.After(2 * time.Second):
+					t.Errorf("%s did not answer within 2s", op)
+				}
+			}
+		})
+	}
+	within := queue + strings.Repeat("[", 90) + strings.Repeat("]", 90) + "\n  W:\n    Type: AWS::SQS::Queue\n    Properties:\n      Tags: [" + strings.Repeat("1, ", 90_000) + "1]\n"
+	if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": within}); err != nil {
+		t.Errorf("a template of 90 levels and 90,000 nodes was refused: %v", err)
+	}
+}
+
+// A rollback that deletes everything leaves a stack with no resources, and
+// every read of the stack answers it. Before, the record held a null
+// Resources and ListStackResources and DescribeStackEvents failed on it
+// ("expected iterable type"), an HTTP 500. And "The Resources section is
+// required in every CloudFormation template" (User Guide, Template sections):
+// a template without one is ValidationError, "Template format error: At least
+// one Resources member must be defined.", on create, update, ValidateTemplate
+// and GetTemplateSummary. Before, such a stack was created.
+func TestCloudFormationAStackWithNoResourcesReads(t *testing.T) {
+	h := newStacks(t)
+	if err := h.create("rc", map[string]map[string]any{"Q": nameable()["Queue"], "ZZZ": {"Type": "AWS::Nope::Thing"}}); err == nil {
+		t.Fatal("a template with an unsupported resource type was created")
+	}
+	for _, op := range []string{"DescribeStacks", "ListStacks", "DescribeStackResources", "ListStackResources", "DescribeStackEvents", "GetTemplate"} {
+		if _, err := h.invoke(op, map[string]any{"StackName": "rc"}); err != nil {
+			t.Errorf("%s of the rolled-back rc answered %v", op, err)
+		}
+	}
+	if _, err := h.invoke("DescribeStackResource", map[string]any{"StackName": "rc", "LogicalResourceId": "Q"}); code(err) != "ValidationError" {
+		t.Errorf("DescribeStackResource of a resource rc no longer has answered %v, want ValidationError", err)
+	}
+	h.mustCreate("upd", map[string]map[string]any{"Q": nameable()["Queue"]})
+	const msg = "Template format error: At least one Resources member must be defined."
+	for _, body := range []string{`{}`, `{"Resources":{}}`, `{"Resources":null}`, "Resources: {}\n", "AWSTemplateFormatVersion: '2010-09-09'\n"} {
+		for _, call := range []struct {
+			op string
+			in map[string]any
+		}{
+			{"ValidateTemplate", map[string]any{"TemplateBody": body}},
+			{"GetTemplateSummary", map[string]any{"TemplateBody": body}},
+			{"CreateStack", map[string]any{"StackName": "none", "TemplateBody": body}},
+			{"UpdateStack", map[string]any{"StackName": "upd", "TemplateBody": body}},
+		} {
+			if _, err := h.invoke(call.op, call.in); code(err) != "ValidationError" || !strings.Contains(err.Error(), msg) {
+				t.Errorf("%s of %q answered %v, want ValidationError: %s", call.op, body, err, msg)
+			}
+		}
+	}
+	if _, _, err := h.status("none"); code(err) != "ValidationError" {
+		t.Errorf("a refused template left the stack none: %v", err)
+	}
+}
+
+// A parameter is a string: for a Number, "when you use the parameter
+// elsewhere in your template (for example, by using the Ref intrinsic
+// function), the parameter value becomes a string" (User Guide, Parameters).
+// So a numeric Default is its text, Default: 16 is "16", and a Ref to it
+// feeds PasswordLength like any other. Before, a Default that was not a
+// string became "", in a JSON template and a YAML one alike.
+func TestCloudFormationANumericDefaultIsItsText(t *testing.T) {
+	h := newStacks(t)
+	json1 := `{"Parameters":{"Len":{"Type":"Number","Default":16}},"Resources":{"S":{"Type":"AWS::SecretsManager::Secret","Properties":{"GenerateSecretString":{"PasswordLength":{"Ref":"Len"}}}}}}`
+	yaml1 := "Parameters:\n  Len:\n    Type: Number\n    Default: 16\nResources:\n  S:\n    Type: AWS::SecretsManager::Secret\n    Properties:\n      GenerateSecretString:\n        PasswordLength: !Ref Len\n"
+	for stack, body := range map[string]string{"json-default": json1, "yaml-default": yaml1} {
+		if _, err := h.invoke("CreateStack", map[string]any{"StackName": stack, "TemplateBody": body}); err != nil {
+			t.Errorf("%s: %v", stack, err)
+			continue
+		}
+		out, err := h.service("aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": h.resources(stack)[0].Physical})
+		if err != nil || len(str(out["SecretString"])) != 16 {
+			t.Errorf("%s generated %v (%v), want 16 characters", stack, out["SecretString"], err)
+		}
+	}
+}
+
+// DescribeStackEvents answers each resource's status as the other resource
+// reads do, DELETE_FAILED included, with its ResourceStatusReason
+// ("Success/failure message associated with the resource", a member of the
+// model's StackEvent): all four reads derive both from the stack's record.
+// Before, every event said CREATE_COMPLETE and none carried a reason.
+func TestCloudFormationStackEventsAgreeWithTheResources(t *testing.T) {
+	h := newStacks(t)
+	all := nameable()
+	h.mustCreate("ev", map[string]map[string]any{"Bucket": all["Bucket"], "Queue": all["Queue"]})
+	var bucket string
+	for _, r := range h.resources("ev") {
+		if r.Logical == "Bucket" {
+			bucket = r.Physical
+		}
+	}
+	h.fill(bucket, true)
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "ev"}); code(err) != "BucketNotEmpty" {
+		t.Fatalf("DeleteStack answered %v, want BucketNotEmpty", err)
+	}
+	read := func(op, member string, in map[string]any) []any {
+		t.Helper()
+		out, err := h.invoke(op, in)
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		if one, ok := out[member].(map[string]any); ok {
+			return []any{one}
+		}
+		return out[member].([]any)
+	}
+	for _, c := range []struct {
+		op, member string
+		in         map[string]any
+	}{
+		{"DescribeStackEvents", "StackEvents", map[string]any{"StackName": "ev"}},
+		{"DescribeStackResources", "StackResources", map[string]any{"StackName": "ev"}},
+		{"ListStackResources", "StackResourceSummaries", map[string]any{"StackName": "ev"}},
+		{"DescribeStackResource", "StackResourceDetail", map[string]any{"StackName": "ev", "LogicalResourceId": "Bucket"}},
+	} {
+		found := false
+		for _, raw := range read(c.op, c.member, c.in) {
+			if r := raw.(map[string]any); r["LogicalResourceId"] == "Bucket" {
+				found = r["ResourceStatus"] == "DELETE_FAILED" && strings.Contains(str(r["ResourceStatusReason"]), "BucketNotEmpty")
+				if !found {
+					t.Errorf("%s answered the bucket as %v / %v, want DELETE_FAILED with S3's error", c.op, r["ResourceStatus"], r["ResourceStatusReason"])
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s did not answer the bucket as DELETE_FAILED with S3's error", c.op)
+		}
+	}
+}
+
+// A ROLLBACK_COMPLETE stack keeps why its create failed as its
+// StackStatusReason, and ListStacks answers the reason as DescribeStacks
+// does: the model's StackSummary has it ("Success/Failure message associated
+// with the stack status"). Before, the reason was cleared once the rollback
+// completed, and ListStacks never answered one.
+func TestCloudFormationAStackKeepsWhyItFailed(t *testing.T) {
+	h := newStacks(t)
+	if err := h.create("why", map[string]map[string]any{"Q": nameable()["Queue"], "ZZZ": {"Type": "AWS::Nope::Thing"}}); err == nil {
+		t.Fatal("a template with an unsupported resource type was created")
+	}
+	if status, reason, err := h.status("why"); status != "ROLLBACK_COMPLETE" || !strings.Contains(reason, "unsupported resource type") || err != nil {
+		t.Errorf("why is %q, reason %q (%v), want ROLLBACK_COMPLETE with the create's error", status, reason, err)
+	}
+	listed, err := h.invoke("ListStacks", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range listed["StackSummaries"].([]any) {
+		if s := raw.(map[string]any); s["StackName"] == "why" && !strings.Contains(str(s["StackStatusReason"]), "unsupported resource type") {
+			t.Errorf("ListStacks answered why with %v, want its reason", s)
+		}
+	}
+}
+
+// The rollback family follows the states the API reference gives each
+// operation. RollbackStack "Rolls back the specified stack to the last known
+// stable state from CREATE_FAILED or UPDATE_FAILED stack statuses";
+// ContinueUpdateRollback "Continues rolling back a stack from
+// UPDATE_ROLLBACK_FAILED to UPDATE_ROLLBACK_COMPLETE state"; and of
+// CancelUpdateStack, "You can cancel only stacks that are in the
+// UPDATE_IN_PROGRESS state". Every other stack is ValidationError and is left
+// as it was, a ROLLBACK_FAILED one with its DELETE_FAILED orphan included
+// (its way forward is DeleteStack), and an absent one "does not exist".
+// Before, each marked any stack complete, orphans and all, and made a stack
+// out of a name that had none.
+func TestCloudFormationTheRollbackFamilyFollowsItsStates(t *testing.T) {
+	h := newStacks(t)
+	objects := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("objects")
+	if err := objects.Put(h.ctx, "stuck/k", []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	bucket := map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "stuck"}}
+	if err := h.create("failed", map[string]map[string]any{"Bucket": bucket, "ZZZ": {"Type": "AWS::Nope::Thing"}}); err == nil {
+		t.Fatal("a template with an unsupported resource type was created")
+	}
+	h.mustCreate("fine", map[string]map[string]any{"Q": nameable()["Queue"]})
+	want := map[string]string{"failed": "ROLLBACK_FAILED", "fine": "CREATE_COMPLETE"}
+	for _, op := range []string{"RollbackStack", "ContinueUpdateRollback", "CancelUpdateStack"} {
+		for stack, status := range want {
+			if _, err := h.invoke(op, map[string]any{"StackName": stack}); code(err) != "ValidationError" {
+				t.Errorf("%s of the %s stack %s answered %v, want ValidationError", op, status, stack, err)
+			}
+			if got, _, _ := h.status(stack); got != status {
+				t.Errorf("after %s, %s is %s, want %s", op, stack, got, status)
+			}
+		}
+		if _, err := h.invoke(op, map[string]any{"StackName": "absent"}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "does not exist") {
+			t.Errorf("%s of an absent stack answered %v, want ValidationError: does not exist", op, err)
+		}
+		if _, _, err := h.status("absent"); err == nil {
+			t.Errorf("%s made a stack out of the name absent", op)
+		}
+	}
+	if left := h.statuses("failed"); !reflect.DeepEqual(left, map[string]string{"Bucket": "DELETE_FAILED"}) {
+		t.Errorf("failed lists %v, want its bucket, DELETE_FAILED", left)
+	}
+}
+
+// A stack recorded before resources carried the name they were made under
+// still updates: a resource with no recorded name is known by its physical
+// id, which is its name or ends in it (a queue's URL, a secret's ARN), so
+// the update's check of a name the template gives finds it the stack's own.
+// Before, the check found the stack's own queue taken, and the update failed.
+func TestCloudFormationAnOldRecordStillUpdates(t *testing.T) {
+	h := newStacks(t)
+	q, err := h.service("aws.sqs", "CreateQueue", map[string]any{"QueueName": "legacy-q"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := h.service("aws.secretsmanager", "CreateSecret", map[string]any{"Name": "legacy-s", "SecretString": "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := func(value string) string {
+		return `{"Resources":{"Q":{"Type":"AWS::SQS::Queue","Properties":{"QueueName":"legacy-q"}},` +
+			`"S":{"Type":"AWS::SecretsManager::Secret","Properties":{"Name":"legacy-s","SecretString":"` + value + `"}}}}`
+	}
+	record, _ := json.Marshal(map[string]any{ // the shape a stack was stored in before res.Name
+		"Name": "old", "ID": "arn:aws:cloudformation:us-east-1:000000000000:stack/old/1", "Status": "CREATE_COMPLETE", "Template": tpl("v1"),
+		"Resources": []any{
+			map[string]any{"Logical": "Q", "Physical": str(q["QueueUrl"]), "Type": "AWS::SQS::Queue"},
+			map[string]any{"Logical": "S", "Physical": str(s["ARN"]), "Type": "AWS::SecretsManager::Secret"},
+		},
+		"Refs": map[string]any{"Q": str(q["QueueUrl"]), "S": str(s["ARN"])},
+	})
+	if err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "old", record); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "old", "TemplateBody": tpl("v2")}); err != nil {
+		t.Fatalf("UpdateStack of an old record: %v", err)
+	}
+	if out, err := h.service("aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": "legacy-s"}); err != nil || out["SecretString"] != "v2" {
+		t.Errorf("after the update the secret holds %v (%v), want v2", out["SecretString"], err)
+	}
+}
+
+// EventBridge keys a rule by its event bus and its name, and the rule's ARN
+// carries the bus (rule/<bus>/<name>), so every check, write and delete of a
+// rule carries its bus: the EventBusName property, or the bus in the ARN. A
+// named rule already on bus b fails the stack, a rule of that name on the
+// default bus does not, a rule's targets go to the rule on its own bus, and
+// DeleteStack deletes the stack's rule on bus b, never a same-named rule on
+// the default bus. Before, the check, PutTargets and the delete looked at the
+// default bus whatever the rule's bus was.
+func TestCloudFormationARuleLivesOnItsBus(t *testing.T) {
+	h := newStacks(t)
+	events := func(op string, in map[string]any) (map[string]any, error) { return h.service("aws.events", op, in) }
+	if _, err := events("CreateEventBus", map[string]any{"Name": "b"}); err != nil {
+		t.Fatal(err)
+	}
+	queue := "arn:aws:sqs:us-east-1:000000000000:q"
+	rule := func(name string, targets bool) map[string]map[string]any {
+		props := map[string]any{"EventBusName": "b", "EventPattern": map[string]any{"source": []any{"app"}}} // a schedule is the default bus's
+		if name != "" {
+			props["Name"] = name
+		}
+		if targets {
+			props["Targets"] = []any{map[string]any{"Id": "t", "Arn": queue}}
+		}
+		return map[string]map[string]any{"R": {"Type": "AWS::Events::Rule", "Properties": props}}
+	}
+	onBus := func(name, bus string) bool {
+		_, err := events("DescribeRule", map[string]any{"Name": name, "EventBusName": bus})
+		return err == nil
+	}
+	for _, in := range []map[string]any{{"Name": "x", "EventBusName": "b", "EventPattern": `{"source":["app"]}`}, {"Name": "y", "ScheduleExpression": "rate(1 hour)"}} {
+		if _, err := events("PutRule", in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := h.create("taken", rule("x", false)); code(err) != "ResourceAlreadyExistsException" {
+		t.Errorf("a rule named for one already on bus b answered %v, want ResourceAlreadyExistsException", err)
+	}
+	if !onBus("x", "b") {
+		t.Error("the refused stack touched the rule already on bus b")
+	}
+	h.mustCreate("ony", rule("y", true))
+	targets, err := events("ListTargetsByRule", map[string]any{"Rule": "y", "EventBusName": "b"})
+	if err != nil || len(targets["Targets"].([]any)) != 1 {
+		t.Errorf("the bus-b rule y has targets %v (%v), want the template's one", targets["Targets"], err)
+	}
+	h.mustCreate("unnamed", rule("", false))
+	unnamed := lastSlash(h.resources("unnamed")[0].Physical)
+	for _, stack := range []string{"ony", "unnamed"} {
+		if _, err := h.invoke("DeleteStack", map[string]any{"StackName": stack}); err != nil {
+			t.Fatalf("DeleteStack %s: %v", stack, err)
+		}
+	}
+	if onBus("y", "b") || onBus(unnamed, "b") {
+		t.Error("DeleteStack left a stack's rule on bus b")
+	}
+	if !onBus("y", "default") {
+		t.Error("DeleteStack deleted the default bus's rule y, which no stack made")
+	}
+}
+
+// A stack name is reserved before any resource is made: the record is
+// written, CREATE_IN_PROGRESS, in the same transaction that finds no stack
+// of that name. Of eight CreateStacks of one name at once, exactly one makes
+// the stack and seven are AlreadyExistsException with nothing made for them.
+// Before, all eight passed the check and made their resources, and seven
+// sets were left behind when the last record written won.
+func TestCloudFormationConcurrentCreatesMakeOneStack(t *testing.T) {
+	h := newStacks(t)
+	all := nameable()
+	errs := make([]error, 8)
+	var wg sync.WaitGroup
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = h.create("race", map[string]map[string]any{"Q": all["Queue"], "S": all["Secret"]})
+		}()
+	}
+	wg.Wait()
+	made := 0
+	for _, err := range errs {
+		if err == nil {
+			made++
+		} else if code(err) != "AlreadyExistsException" {
+			t.Errorf("a concurrent CreateStack answered %v, want AlreadyExistsException", err)
+		}
+	}
+	if made != 1 {
+		t.Errorf("%d of 8 concurrent CreateStacks of one name succeeded, want 1", made)
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "race"}); err != nil {
+		t.Fatal(err)
+	}
+	queues, _ := h.service("aws.sqs", "ListQueues", map[string]any{})
+	secrets, _ := h.service("aws.secretsmanager", "ListSecrets", map[string]any{})
+	if q, s := queues["QueueUrls"], secrets["SecretList"]; q != nil && len(q.([]any)) > 0 || len(s.([]any)) > 0 {
+		t.Errorf("after DeleteStack, queues %v and secrets %v are left", q, s)
+	}
+}
+
+// Every property is read as the type the template reference gives it, by one
+// helper, whether the template gives the value itself or its text (as a Ref to
+// a parameter always does: "the parameter value becomes a string", User Guide,
+// Parameters). A Boolean is true or false in any case (YAML 1.1, the
+// templates' YAML, spells it true, True or TRUE), so FifoQueue "True" makes a
+// FIFO queue. An Integer is decimal digits, as a Number parameter's text is:
+// "016" is 16, and "16.0", "1e1", "+16" and " 16" are none. A String is a
+// scalar's text: ExcludeCharacters 123 is "123", an SSM Parameter's Value 123
+// is "123". Before, "True" made a standard queue, "16.0", "1e1" and "+16" made
+// 16, 10 and 16 characters, ExcludeCharacters 123 was refused and Value 123
+// was "".
+func TestCloudFormationReadsEveryPropertyAsItsType(t *testing.T) {
+	h := newStacks(t)
+	make1 := func(stack, typ string, props map[string]any) (res, error) {
+		t.Helper()
+		tpl, _ := json.Marshal(map[string]any{"Resources": map[string]any{"R": map[string]any{"Type": typ, "Properties": props}}})
+		if _, err := h.invoke("CreateStack", map[string]any{"StackName": stack, "TemplateBody": string(tpl)}); err != nil {
+			return res{}, err
+		}
+		return h.resources(stack)[0], nil
+	}
+	secret := func(stack string, spec map[string]any) (string, error) {
+		t.Helper()
+		r, err := make1(stack, "AWS::SecretsManager::Secret", map[string]any{"GenerateSecretString": spec})
+		if err != nil {
+			return "", err
+		}
+		out, err := h.service("aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": r.Physical})
+		return str(out["SecretString"]), err
+	}
+	for i, given := range []string{"True", "TRUE", "true"} {
+		r, err := make1(fmt.Sprintf("fifo%d", i), "AWS::SQS::Queue", map[string]any{"FifoQueue": given})
+		if err != nil {
+			t.Errorf("FifoQueue %q: %v", given, err)
+			continue
+		}
+		out, err := h.service("aws.sqs", "GetQueueAttributes", map[string]any{"QueueUrl": r.Physical, "AttributeNames": []any{"All"}})
+		if !strings.HasSuffix(r.Physical, ".fifo") || err != nil || asMap(out["Attributes"])["FifoQueue"] != "true" {
+			t.Errorf("FifoQueue %q made %s, attributes %v (%v), want a FIFO queue", given, r.Physical, out["Attributes"], err)
+		}
+	}
+	if v, err := secret("len016", map[string]any{"PasswordLength": "016"}); err != nil || len(v) != 16 {
+		t.Errorf("PasswordLength \"016\" generated %q (%v), want 16 characters", v, err)
+	}
+	for i, given := range []string{"16.0", "1e1", "+16", " 16"} {
+		if v, err := secret(fmt.Sprintf("badlen%d", i), map[string]any{"PasswordLength": given}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "PasswordLength") {
+			t.Errorf("PasswordLength %q generated %q (%v), want a ValidationError naming PasswordLength", given, v, err)
+		}
+	}
+	if v, err := secret("exclude123", map[string]any{"PasswordLength": 200, "ExcludeCharacters": 123}); err != nil || len(v) != 200 || strings.ContainsAny(v, "123") {
+		t.Errorf("ExcludeCharacters 123 generated %q (%v), want 200 characters and no 1, 2 or 3", v, err)
+	}
+	if r, err := make1("ssm123", "AWS::SSM::Parameter", map[string]any{"Value": 123}); err != nil {
+		t.Errorf("an SSM Parameter of Value 123: %v", err)
+	} else if out, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": r.Physical}); err != nil || asMap(out["Parameter"])["Value"] != "123" {
+		t.Errorf("an SSM Parameter of Value 123 holds %v (%v), want \"123\"", out["Parameter"], err)
+	}
+}
+
+// A Ref answers what its resource's Ref really answers, never its logical id.
+// Before anything is made, each resource's id is planned (planID) in the
+// order resources are made, each after those its properties name ("if the
+// properties of resource A use a !Ref to resource B ... Resource B is created
+// before resource A", Template Reference, DependsOn attribute), so the check
+// of a name built on another resource's id checks that id; one built on an id
+// known only once made (a KMS key's) is checked as it is made. A cycle is
+// ValidationError and makes no stack. Before, a Ref to a resource not yet made
+// answered its logical id: a parameter named for a bucket was checked, and
+// made, as "ABucket", and a parameter sorted before the key it names held
+// "ZKey".
+func TestCloudFormationPlansEveryIdBeforeMakingIt(t *testing.T) {
+	h := newStacks(t)
+	if _, err := h.service("aws.ssm", "PutParameter", map[string]any{"Name": "ABucket", "Value": "x", "Type": "String"}); err != nil {
+		t.Fatal(err)
+	}
+	ref := func(logical string) map[string]any { return map[string]any{"Ref": logical} }
+	if err := h.create("named-for", map[string]map[string]any{
+		"ABucket": {"Type": "AWS::S3::Bucket"},
+		"ZParam":  {"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": ref("ABucket"), "Value": "v"}},
+	}); err != nil {
+		t.Errorf("a parameter named for an unnamed bucket, beside a parameter named ABucket: %v", err)
+	} else {
+		rs := map[string]string{}
+		for _, r := range h.resources("named-for") {
+			rs[r.Logical] = r.Physical
+		}
+		if rs["ZParam"] != rs["ABucket"] || rs["ZParam"] == "ABucket" {
+			t.Errorf("ZParam is %q, want the bucket's name %q", rs["ZParam"], rs["ABucket"])
+		}
+	}
+
+	if err := h.create("before", map[string]map[string]any{
+		"AParam":  {"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": ref("ZBucket"), "Value": ref("ZKey")}},
+		"BParam":  {"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": map[string]any{"Fn::Sub": "p-${ZKey}"}, "Value": "v"}},
+		"ZBucket": {"Type": "AWS::S3::Bucket"},
+		"ZKey":    {"Type": "AWS::KMS::Key", "Properties": map[string]any{"Description": "d"}},
+	}); err != nil {
+		t.Errorf("parameters named for a bucket and a key made after them: %v", err)
+	} else {
+		rs := map[string]string{}
+		for _, r := range h.resources("before") {
+			rs[r.Logical] = r.Physical
+		}
+		out, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": rs["AParam"]})
+		if rs["AParam"] != rs["ZBucket"] || err != nil || asMap(out["Parameter"])["Value"] != rs["ZKey"] || rs["BParam"] != "p-"+rs["ZKey"] {
+			t.Errorf("AParam %q holds %v (%v) and BParam is %q, want the bucket's name %q holding the key's id %q, and p-%s", rs["AParam"], out["Parameter"], err, rs["BParam"], rs["ZBucket"], rs["ZKey"], rs["ZKey"])
+		}
+	}
+
+	cycle := `{"Resources":{"A":{"Type":"AWS::SSM::Parameter","Properties":{"Name":{"Ref":"B"},"Value":"v"}},"B":{"Type":"AWS::SSM::Parameter","Properties":{"Name":{"Fn::Sub":"${A}-b"},"Value":"v"}}}}`
+	for _, op := range []string{"CreateStack", "ValidateTemplate"} {
+		if _, err := h.invoke(op, map[string]any{"StackName": "cycle", "TemplateBody": cycle}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Circular dependency between resources: [A, B]") {
+			t.Errorf("%s of a cycle answered %v, want ValidationError naming A and B", op, err)
+		}
+	}
+	if _, _, err := h.status("cycle"); err == nil {
+		t.Error("a cycle made a stack")
+	}
+
+	if _, err := h.service("aws.events", "CreateEventBus", map[string]any{"Name": "b"}); err != nil {
+		t.Fatal(err)
+	}
+	all := nameable()
+	all["BusRule"] = map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"EventBusName": "b", "EventPattern": map[string]any{"source": []any{"app"}}}}
+	all["Key"] = map[string]any{"Type": "AWS::KMS::Key", "Properties": map[string]any{}}
+	all["Named"] = map[string]any{"Type": "AWS::SNS::Topic", "Properties": map[string]any{"TopicName": "named-topic"}}
+	h.mustCreate("every", all)
+	out, err := h.invoke("DescribeStacks", map[string]any{"StackName": "every"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := str(asMap(out["Stacks"].([]any)[0])["StackId"])
+	for _, r := range h.resources("every") {
+		props := asMap(all[r.Logical]["Properties"])
+		n := cmp.Or(str(props[kinds[r.Type].member]), physicalName("every", r.Logical, id, r.Type, props))
+		got, unknowable := planID(&spi.Request{Identity: h.id}, r.Type, n, props), r.Type == "AWS::SQS::Queue" || r.Type == "AWS::KMS::Key" || r.Type == "AWS::ApiGateway::RestApi"
+		if unknowable && got != unknown || !unknowable && got != r.Physical {
+			t.Errorf("%s (%s) was planned as %q and made as %q", r.Logical, r.Type, got, r.Physical)
+		}
 	}
 }

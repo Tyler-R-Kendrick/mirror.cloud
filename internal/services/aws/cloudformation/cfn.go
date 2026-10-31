@@ -1,5 +1,4 @@
-// Package cloudformation is CloudFormation's template engine: the operations
-// behavior/aws/cloudformation lists as native.
+// Package cloudformation is CloudFormation's template engine: the operations behavior/aws/cloudformation lists as native.
 package cloudformation
 
 import (
@@ -9,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"maps"
 	"net/url"
@@ -24,10 +22,9 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
-// natives are the operations behavior/aws/cloudformation lists as native:
-// the template engine. Parsing a template, resolving its intrinsics and
-// provisioning resources through their owning services is Go; the stack,
-// change set, stack set and type bookkeeping is the bundle's.
+// natives are the operations behavior/aws/cloudformation lists as native: the template engine. Parsing a
+// template, resolving its intrinsics and provisioning resources through their owning services is Go; the
+// stack, change set, stack set and type bookkeeping is the bundle's.
 var natives = []string{"CreateStack", "UpdateStack", "DeleteStack", "ExecuteChangeSet", "ValidateTemplate", "GetTemplateSummary", "ListExports"}
 
 func init() {
@@ -133,39 +130,43 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	params := formParams(req.Input)
 	mergeParamDefaults(tpl, params)
 	id := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name + "/" + p.deps.Rand.Hex(8)
-	var old stack // what an update finds already provisioned
-	if found, err := p.load(ctx, req, name); err == nil && !update {
-		return nil, fault("AlreadyExistsException", "Stack ["+name+"] already exists")
-	} else if err == nil && (strings.HasPrefix(found.Status, "ROLLBACK_") || strings.HasSuffix(found.Status, "_FAILED")) {
-		return nil, invalid("Stack:" + found.ID + " is in " + found.Status + " state and can not be updated.")
-	} else if err == nil {
-		old, id = found, found.ID
+	var old stack // what an update finds; a create reserves the name, CREATE_IN_PROGRESS, in the same transaction
+	if err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
+		raw, found, _ := tx.Get(name)
+		if _ = json.Unmarshal(raw, &old); found && !update {
+			return fault("AlreadyExistsException", "Stack ["+name+"] already exists")
+		} else if found && (strings.HasPrefix(old.Status, "ROLLBACK_") || strings.HasSuffix(old.Status, "_FAILED")) {
+			return invalid("Stack:" + old.ID + " is in " + old.Status + " state and can not be updated.")
+		} else if id = cmp.Or(old.ID, id); found || update { // an update reserves nothing
+			return nil
+		}
+		raw, _ = json.Marshal(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS"})
+		return tx.Put(name, raw)
+	}); err != nil {
+		return nil, err
 	}
-	st := stack{Name: name, ID: id, Status: "CREATE_COMPLETE", Template: body, Refs: params}
-	if update {
-		st.Status = "UPDATE_COMPLETE"
-	}
+	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: params}
 	fail := func(err error) (*spi.Response, error) {
-		if !update || old.ID == "" { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack
+		if st.Reason, old.Reason = err.Error(), err.Error(); !update || old.ID == "" { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, nil, st.Resources, nil, "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
 		} else {
 			_ = p.rollback(ctx, req, old, st.Resources)
 		}
 		return nil, err
 	}
-	resources, _ := tpl["Resources"].(map[string]any)
-	order := slices.Sorted(maps.Keys(resources))
-	for _, logical := range order { // a name taken fails the stack before anything is made
+	resources, planned := asMap(tpl["Resources"]), maps.Clone(st.Refs)
+	order, _ := p.order(req, tpl)
+	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
-		if _, err := p.claim(ctx, req, st, old, logical, str(rm["Type"]), asMap(p.resolve(rm["Properties"], st.Refs, req, name))); err != nil {
+		typ, props := str(rm["Type"]), asMap(p.resolve(rm["Properties"], planned, req, name))
+		n, err := p.claim(ctx, req, st, old, logical, typ, props)
+		if planned[logical] = planID(req, typ, n, props); err != nil {
 			return fail(err)
 		}
 	}
 	for _, logical := range order {
-		rm, _ := resources[logical].(map[string]any)
-		typ := str(rm["Type"])
-		props := map[string]any{}
-		maps.Copy(props, asMap(p.resolve(rm["Properties"], st.Refs, req, name)))
+		rm := asMap(resources[logical]) // props is never nil: provision adds to it
+		typ, props := str(rm["Type"]), maps.Collect(maps.All(asMap(p.resolve(rm["Properties"], st.Refs, req, name))))
 		phys, n, err := "", "", error(nil)
 		if n, err = p.claim(ctx, req, st, old, logical, typ, props); err == nil { // again: a name may come from a resource made before it
 			phys, err = p.provision(ctx, req, typ, logical, n, props, old.Refs[logical], id)
@@ -198,6 +199,9 @@ func (p *Pack) template(ctx context.Context, req *spi.Request) (string, map[stri
 		return "", nil, err
 	}
 	tpl, err := parseTemplate(body)
+	if err == nil {
+		_, err = p.order(req, tpl)
+	}
 	return body, tpl, err
 }
 
@@ -234,29 +238,30 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 	st, err := p.load(ctx, req, name)
 	if nameErr := checkStackName(name, true); nameErr != nil || err != nil {
 		return nil, cmp.Or(nameErr, err)
+	} else if st.Protect {
+		err = invalid("stack has termination protection")
+	} else {
+		err = p.unwind(ctx, req, st, nil, st.Resources, nil, "DELETE_COMPLETE", "DELETE_FAILED")
 	}
-	if st.Protect {
-		return nil, invalid("stack has termination protection")
-	}
-	if err := p.unwind(ctx, req, st, nil, st.Resources, nil, "DELETE_COMPLETE", "DELETE_FAILED"); err != nil {
+	if err != nil {
 		return nil, err
 	}
 	return &spi.Response{Output: map[string]any{}}, nil
 }
 
-// unwind deletes the doomed resources, newest first, for a rollback or DeleteStack, and records the
-// outcome on st, which keeps kept: done (a DELETE_COMPLETE stack is removed) with nothing left and no
-// earlier error (first); else failed, what it could not delete listed as DELETE_FAILED for the next
+// unwind deletes the doomed resources, newest first, for a rollback or DeleteStack, and records the outcome on
+// st, which keeps kept: done, keeping st's reason (a DELETE_COMPLETE stack is removed), with nothing left and
+// no earlier error (first); else failed, what it could not delete listed as DELETE_FAILED for the next
 // DeleteStack to try again, and the first error, which it answers, as StackStatusReason.
 func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, kept, doomed []res, first error, done, failed string) error {
-	st.Resources = slices.Clip(kept)
+	st.Resources = append([]res{}, kept...) // never null: every read of the stack lists its resources
 	for _, r := range slices.Backward(doomed) {
 		if err := p.deprovision(ctx, req, r); err != nil {
 			r.Status, r.Reason, first = "DELETE_FAILED", err.Error(), cmp.Or(first, err)
 			st.Resources = slices.Insert(st.Resources, len(kept), r)
 		}
 	}
-	st.Status, st.Reason = done, ""
+	st.Status = done
 	if first != nil {
 		st.Status, st.Reason = failed, first.Error()
 	}
@@ -294,26 +299,63 @@ func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, 
 	return st, nil
 }
 
-// kinds are the types provision names: the property that names one, the longest name its service takes
-// (API Gateway sets none for a REST API, nor holds a name to one; 1024 only bounds it), a read that finds
-// one by name, and the service's error for a name taken (SNS's CreateTopic "is idempotent": CloudFormation's).
+// kinds are the types provision names: the property that names one, the longest name its service takes (API
+// Gateway sets none for a REST API, nor holds a name to one; 1024 only bounds it), a read that finds one by
+// name, the service's error for a name taken (SNS's CreateTopic "is idempotent": CloudFormation's), its id.
 var kinds = map[string]struct {
-	member            string
-	max               int
-	svc, op, in, code string
+	member                 string
+	max                    int
+	svc, op, in, code, ref string
 }{
-	"AWS::S3::Bucket":             {"BucketName", 63, "aws.s3", "HeadBucket", "Bucket", "BucketAlreadyOwnedByYou"},
-	"AWS::SQS::Queue":             {"QueueName", 80, "aws.sqs", "GetQueueUrl", "QueueName", "QueueAlreadyExists"},
-	"AWS::SNS::Topic":             {"TopicName", 256, "aws.sns", "GetTopicAttributes", "TopicArn", "AlreadyExistsException"},
-	"AWS::DynamoDB::Table":        {"TableName", 255, "aws.dynamodb", "DescribeTable", "TableName", "ResourceInUseException"},
-	"AWS::IAM::Role":              {"RoleName", 64, "aws.iam", "GetRole", "RoleName", "EntityAlreadyExists"},
-	"AWS::SSM::Parameter":         {"Name", 2048, "aws.ssm", "GetParameter", "Name", "ParameterAlreadyExists"},
-	"AWS::SecretsManager::Secret": {"Name", 512, "aws.secretsmanager", "DescribeSecret", "SecretId", "ResourceExistsException"},
-	"AWS::Logs::LogGroup":         {"LogGroupName", 512, "aws.logs", "DescribeLogGroups", "logGroupNamePrefix", "ResourceAlreadyExistsException"},
-	"AWS::Events::Rule":           {"Name", 64, "aws.events", "DescribeRule", "Name", "ResourceAlreadyExistsException"},
-	"AWS::Lambda::Function":       {"FunctionName", 64, "aws.lambda", "GetFunction", "FunctionName", "ResourceConflictException"},
-	"AWS::Kinesis::Stream":        {"Name", 128, "aws.kinesis", "DescribeStreamSummary", "StreamName", "ResourceInUseException"},
-	"AWS::ApiGateway::RestApi":    {"Name", 1024, "", "", "", ""},
+	"AWS::S3::Bucket":             {"BucketName", 63, "aws.s3", "HeadBucket", "Bucket", "BucketAlreadyOwnedByYou", "{n}"},
+	"AWS::SQS::Queue":             {"QueueName", 80, "aws.sqs", "GetQueueUrl", "QueueName", "QueueAlreadyExists", ""},
+	"AWS::SNS::Topic":             {"TopicName", 256, "aws.sns", "GetTopicAttributes", "TopicArn", "AlreadyExistsException", "arn:aws:sns:{r}:{a}:{n}"},
+	"AWS::DynamoDB::Table":        {"TableName", 255, "aws.dynamodb", "DescribeTable", "TableName", "ResourceInUseException", "{n}"},
+	"AWS::IAM::Role":              {"RoleName", 64, "aws.iam", "GetRole", "RoleName", "EntityAlreadyExists", "arn:aws:iam::{a}:role/{n}"},
+	"AWS::SSM::Parameter":         {"Name", 2048, "aws.ssm", "GetParameter", "Name", "ParameterAlreadyExists", "{n}"},
+	"AWS::SecretsManager::Secret": {"Name", 512, "aws.secretsmanager", "DescribeSecret", "SecretId", "ResourceExistsException", "arn:aws:secretsmanager:{r}:{a}:secret:{n}"},
+	"AWS::Logs::LogGroup":         {"LogGroupName", 512, "aws.logs", "DescribeLogGroups", "logGroupNamePrefix", "ResourceAlreadyExistsException", "{n}"},
+	"AWS::Events::Rule":           {"Name", 64, "aws.events", "DescribeRule", "Name", "ResourceAlreadyExistsException", "arn:aws:events:{r}:{a}:rule/{n}"},
+	"AWS::Lambda::Function":       {"FunctionName", 64, "aws.lambda", "GetFunction", "FunctionName", "ResourceConflictException", "arn:aws:lambda:{r}:{a}:function:{n}"},
+	"AWS::Kinesis::Stream":        {"Name", 128, "aws.kinesis", "DescribeStreamSummary", "StreamName", "ResourceInUseException", "{n}"},
+	"AWS::ApiGateway::RestApi":    {"Name", 1024, "", "", "", "", ""},
+}
+
+// unknown stands for an id known only once its resource is made, and in order for one not yet ordered.
+const unknown = "\uffff"
+
+// planID is the id a resource named n is made with, which a Ref to it answers: n in the form its
+// service gives it back. A queue's URL (its endpoint's business), a KMS key's id and a REST API's are
+// known only once made, as is an id built on one: unknown. A Kinesis resource policy's is its ARN.
+func planID(req *spi.Request, typ, n string, props map[string]any) string {
+	if bus := lastSlash(str(props["EventBusName"])); typ == "AWS::Events::Rule" && bus != "" && bus != "default" {
+		n = bus + "/" + n
+	}
+	if f := kinds[typ].ref; f != "" && !strings.Contains(n, unknown) {
+		return strings.NewReplacer("{r}", req.Identity.Region, "{a}", req.Identity.Account, "{n}", n).Replace(f)
+	}
+	return cmp.Or(str(props["ResourceArn"]), str(props["ResourceARN"]), unknown)
+}
+
+// order is the order a template's resources are made in: each after those its properties name, by Ref,
+// Fn::GetAtt or Fn::Sub ("Resource B is created before resource A", Template Reference, DependsOn
+// attribute), else by logical id. A cycle orders none, and is CloudFormation's error.
+func (p *Pack) order(req *spi.Request, tpl map[string]any) ([]string, error) {
+	resources, marks, order := asMap(tpl["Resources"]), map[string]string{}, []string(nil)
+	todo := slices.Sorted(maps.Keys(resources))
+	for _, logical := range todo {
+		marks[logical] = unknown
+	}
+	for len(todo) > 0 {
+		i := slices.IndexFunc(todo, func(l string) bool {
+			return !strings.Contains(jsonText(p.resolve(asMap(resources[l])["Properties"], marks, req, "")), unknown)
+		})
+		if i < 0 {
+			return nil, invalid("Circular dependency between resources: [" + strings.Join(todo, ", ") + "]")
+		}
+		marks[todo[i]], order, todo = "", append(order, todo[i]), slices.Delete(slices.Clone(todo), i, i+1)
+	}
+	return order, nil
 }
 
 // claim answers the name a resource is made under: the template's, or else physicalName's. A given name
@@ -321,17 +363,19 @@ var kinds = map[string]struct {
 // services answer such a create with what they hold, which a rollback or DeleteStack would then delete.
 func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logical, typ string, props map[string]any) (string, error) {
 	k, n := kinds[typ], str(props[kinds[typ].member])
-	if n == "" {
-		return physicalName(st.Name, logical, st.ID, typ, props), nil
+	if n == "" || strings.Contains(n, unknown) { // one built on an id known only once made is checked as it is made
+		return cmp.Or(n, physicalName(st.Name, logical, st.ID, typ, props)), nil
 	}
 	id := n
-	if k.in == "TopicArn" {
-		id = "arn:aws:sns:" + req.Identity.Region + ":" + req.Identity.Account + ":" + n
+	if k.in == "TopicArn" { // GetTopicAttributes finds a topic by its ARN
+		id = planID(req, typ, n, props)
 	}
-	out, err := p.call(ctx, req, k.svc, k.op, map[string]any{k.in: id})
+	out, err := p.call(ctx, req, k.svc, k.op, given(map[string]any{k.in: id}, props, "EventBusName"))
 	groups, list := out["logGroups"].([]any) // DescribeLogGroups answers a list by prefix, never a fault
 	if err != nil || list && !slices.ContainsFunc(groups, func(g any) bool { return str(asMap(g)["logGroupName"]) == n }) ||
-		slices.ContainsFunc(old.Resources, func(r res) bool { return r.Logical == logical && r.Name == n }) {
+		slices.ContainsFunc(old.Resources, func(r res) bool { // a record from before res.Name: by the physical id, which ends in the name
+			return r.Logical == logical && (r.Name == n || r.Name == "" && (r.Physical == n || strings.HasSuffix(r.Physical, "/"+n) || strings.HasSuffix(r.Physical, ":"+n)))
+		}) {
 		return n, nil
 	}
 	return "", fault(k.code, "Resource of type '"+typ+"' with identifier '"+n+"' already exists.")
@@ -339,7 +383,7 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 
 var unnameable = regexp.MustCompile(`[^A-Za-z0-9-]+`)
 
-func fifo(p map[string]any) bool { return p["FifoQueue"] == true || str(p["FifoQueue"]) == "true" }
+func fifo(p map[string]any) bool { b, _ := coerce(p["FifoQueue"], "Boolean"); return b == true }
 
 // physicalName is the name of a resource the template leaves unnamed, in the modelled form
 // <stack>-<logical id>-<suffix>. The suffix is twelve hex digits of a hash of the stack id and logical
@@ -365,9 +409,8 @@ func physicalName(stack, logical, stackID, typ string, props map[string]any) str
 	return n
 }
 
-// provision creates a resource through the service that owns it, and answers
-// the resource's physical id. Going through the owner's API keeps its store
-// layout, validation and cascades that service's business.
+// provision creates a resource through the service that owns it, and answers the resource's physical id.
+// Going through the owner's API keeps its store layout, validation and cascades that service's business.
 func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n string, props map[string]any, existing, stackID string) (string, error) {
 	switch typ {
 	case "AWS::S3::Bucket":
@@ -426,7 +469,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		if targets, ok := props["Targets"]; ok && err == nil {
 			// "each entry in FailedEntries provides the ID of the failed target and the error code":
 			// a target not added fails the rule, as its error does.
-			put, putErr := p.call(ctx, req, "aws.events", "PutTargets", map[string]any{"Rule": in["Name"], "Targets": targets})
+			put, putErr := p.call(ctx, req, "aws.events", "PutTargets", given(map[string]any{"Rule": in["Name"], "Targets": targets}, props, "EventBusName"))
 			if failed, _ := put["FailedEntries"].([]any); putErr == nil && len(failed) > 0 {
 				putErr = fault(cmp.Or(str(asMap(failed[0])["ErrorCode"]), "ValidationError"), "PutTargets failed to add targets: "+jsonText(failed))
 			}
@@ -476,6 +519,12 @@ func (p *Pack) rollback(ctx context.Context, req *spi.Request, old stack, made [
 	return p.unwind(ctx, req, old, old.Resources, doomed, first, "UPDATE_ROLLBACK_COMPLETE", "UPDATE_ROLLBACK_FAILED")
 }
 
+// ruleBus is the event bus in a rule's ARN, rule/<bus>/<name>: none for the default bus.
+func ruleBus(arn string) string {
+	_, path, _ := strings.Cut(arn, ":rule/")
+	return path[:max(strings.LastIndex(path, "/"), 0)]
+}
+
 // made answers the id of what a create made: none when it failed.
 func made(id string, err error) (string, error) {
 	if err != nil {
@@ -501,7 +550,7 @@ func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) error {
 		"AWS::SecretsManager::Secret":  {"aws.secretsmanager", "DeleteSecret", map[string]any{"SecretId": id, "ForceDeleteWithoutRecovery": true}},
 		"AWS::KMS::Key":                {"aws.kms", "ScheduleKeyDeletion", map[string]any{"KeyId": id, "PendingWindowInDays": 7}},
 		"AWS::Logs::LogGroup":          {"aws.logs", "DeleteLogGroup", map[string]any{"logGroupName": id}},
-		"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": lastSlash(id), "Force": true}},
+		"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": lastSlash(id), "Force": true, "EventBusName": ruleBus(id)}},
 		"AWS::Lambda::Function":        {"aws.lambda", "DeleteFunction", map[string]any{"FunctionName": lastColon(id)}},
 		"AWS::Kinesis::Stream":         {"aws.kinesis", "DeleteStream", map[string]any{"StreamName": id}},
 		"AWS::Kinesis::ResourcePolicy": {"aws.kinesis", "DeleteResourcePolicy", map[string]any{"ResourceARN": id}},
@@ -518,9 +567,8 @@ func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) error {
 	return err
 }
 
-// call invokes another service the way the edge would: through whatever the
-// registry serves it with, pack or bundle. A pack that runs a worker is
-// closed again, since this construction is per call.
+// call invokes another service the way the edge would: through whatever the registry serves it with, pack
+// or bundle. A pack that runs a worker is closed again, since this construction is per call.
 func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map[string]any) (map[string]any, error) {
 	for _, f := range registry.Factories() {
 		if f.ServiceID != id {
@@ -542,37 +590,26 @@ func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map
 	return nil, spi.NotImplemented(id, op, "emulate")
 }
 
-// configureBucket applies the bucket properties that map one to one onto an
-// S3 operation, and stores the rest (below).
+// configureBucket applies the bucket properties that map one to one onto an S3 operation, and stores the
+// rest as they are given.
 func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket string, props map[string]any) error {
-	// The S3 pack reads Status and TagSet lifted to the top of the input, as
-	// the restXml decoder hands them over (its liftedMembers debt).
-	for property, apply := range map[string]func(v any) (string, map[string]any){
-		"VersioningConfiguration": func(v any) (string, map[string]any) {
-			return "PutBucketVersioning", map[string]any{"VersioningConfiguration": v, "Status": asMap(v)["Status"]}
-		},
-		"Tags": func(v any) (string, map[string]any) {
-			return "PutBucketTagging", map[string]any{"Tagging": map[string]any{"TagSet": v}, "TagSet": v}
-		},
-		"PublicAccessBlockConfiguration": func(v any) (string, map[string]any) {
-			return "PutPublicAccessBlock", map[string]any{"PublicAccessBlockConfiguration": v}
-		},
-		"OwnershipControls": func(v any) (string, map[string]any) {
-			return "PutBucketOwnershipControls", map[string]any{"OwnershipControls": v}
-		},
-	} {
+	for property, op := range map[string]string{"VersioningConfiguration": "PutBucketVersioning", "Tags": "PutBucketTagging",
+		"PublicAccessBlockConfiguration": "PutPublicAccessBlock", "OwnershipControls": "PutBucketOwnershipControls"} {
 		if v, ok := props[property]; ok {
-			op, in := apply(v)
-			in["Bucket"] = bucket
+			in := map[string]any{"Bucket": bucket, property: v}
+			if property == "VersioningConfiguration" { // S3 reads Status and TagSet lifted to the top, as restXml hands them over (its liftedMembers debt)
+				in["Status"] = asMap(v)["Status"]
+			} else if property == "Tags" {
+				in = map[string]any{"Bucket": bucket, "Tagging": map[string]any{"TagSet": v}, "TagSet": v}
+			}
 			if _, err := p.call(ctx, req, "aws.s3", op, in); err != nil {
 				return err
 			}
 		}
 	}
-	// ponytail: the configurations with no one-to-one S3 operation are stored
-	// in CloudFormation's own shape, which S3 does not read and Cloud Control
-	// reads back. Mapping each onto its S3 operation (CorsRules to CORSRules,
-	// and so on) is the upgrade, in both directions.
+	// ponytail: the configurations with no one-to-one S3 operation are stored in CloudFormation's own
+	// shape, which S3 does not read and Cloud Control reads back. Mapping each onto its S3 operation
+	// (CorsRules to CORSRules, and so on) is the upgrade, in both directions.
 	for property, kind := range map[string]string{
 		"CorsConfiguration": "cors", "BucketEncryption": "encryption", "LifecycleConfiguration": "lifecycle",
 		"ReplicationConfiguration": "replication", "NotificationConfiguration": "notification", "WebsiteConfiguration": "website",
@@ -585,14 +622,35 @@ func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket str
 	return nil
 }
 
-// given sets on in each of members the template's props carry, and answers in.
+// given sets on in each of members, all Strings, the template's props carry, and answers in.
 func given(in, props map[string]any, members ...string) map[string]any {
 	for _, member := range members {
 		if v, ok := props[member]; ok {
-			in[member] = v
+			in[member], _ = coerce(v, "String")
 		}
 	}
 	return in
+}
+
+// coerce reads a template's value as a property of type want (the template reference's Boolean,
+// Integer or String), itself or its text as a Ref to a parameter gives it ("the parameter value
+// becomes a string", User Guide, Parameters), and answers whether it is one. A Boolean is true or
+// false in any case, as YAML 1.1, the templates' YAML, spells it true, True or TRUE; an Integer is
+// decimal digits, as a Number parameter's text is ("016" is 16; "16.0", "1e1", "+16" and " 16" are
+// none); a String is a scalar's text (123 is "123"). Anything else is answered as it was given.
+func coerce(v any, want string) (any, bool) {
+	switch v.(type) {
+	case string, bool, float64, int, int64, uint64:
+	default:
+		return v, false
+	}
+	if text, yes := jsonText(v), strings.EqualFold(jsonText(v), "true"); want == "Boolean" {
+		return yes, yes || strings.EqualFold(text, "false")
+	} else if n, err := strconv.Atoi(text); want == "Integer" {
+		return n, err == nil && strings.TrimLeft(text, "0123456789") == ""
+	} else {
+		return text, true
+	}
 }
 
 // generated is the value GenerateSecretString asks for: a password made as GetRandomPassword makes one,
@@ -619,20 +677,13 @@ func generated(props map[string]any, seed string) (string, error) {
 	}
 	params := map[string]any{}
 	for member, v := range spec {
-		// A template's number or boolean may be its text ("16", "true"), as a Ref to a parameter always is.
-		want, text := generateTypes[member], str(v)
-		if n, err := strconv.ParseFloat(text, 64); want == "number" && err == nil {
-			v = n
-		} else if want == "boolean" && (text == "true" || text == "false") {
-			v = text == "true"
-		}
-		if want == "" {
+		typed, ok := coerce(v, generateTypes[member])
+		if generateTypes[member] == "" {
 			return "", invalid("GenerateSecretString has no property " + member)
+		} else if !ok {
+			return "", invalid("GenerateSecretString." + member + " must be " + generateTypes[member] + ", not " + jsonText(v))
 		}
-		if got := map[string]string{"float64": "number", "int": "number", "bool": "boolean", "string": "string"}[fmt.Sprintf("%T", v)]; got != want {
-			return "", invalid("GenerateSecretString." + member + " must be a " + want + ", not " + jsonText(v))
-		}
-		params[member] = v
+		params[member] = typed
 	}
 	value, err := prim.RandomPassword(params, seed)
 	if err != nil {
@@ -645,10 +696,10 @@ func generated(props map[string]any, seed string) (string, error) {
 	return string(raw), err
 }
 
-// generateTypes are GenerateSecretString's properties and their types.
-var generateTypes = map[string]string{"PasswordLength": "number", "ExcludeCharacters": "string", "GenerateStringKey": "string",
-	"SecretStringTemplate": "string", "ExcludeLowercase": "boolean", "ExcludeUppercase": "boolean", "ExcludeNumbers": "boolean",
-	"ExcludePunctuation": "boolean", "IncludeSpace": "boolean", "RequireEachIncludedType": "boolean"}
+// generateTypes are GenerateSecretString's properties and their types, as its template reference gives them.
+var generateTypes = map[string]string{"PasswordLength": "Integer", "ExcludeCharacters": "String", "GenerateStringKey": "String",
+	"SecretStringTemplate": "String", "ExcludeLowercase": "Boolean", "ExcludeUppercase": "Boolean", "ExcludeNumbers": "Boolean",
+	"ExcludePunctuation": "Boolean", "IncludeSpace": "Boolean", "RequireEachIncludedType": "Boolean"}
 
 func invalid(message string) *spi.Fault { return fault("ValidationError", message) }
 
@@ -658,8 +709,7 @@ func fault(code, message string) *spi.Fault {
 
 func asMap(v any) map[string]any { m, _ := v.(map[string]any); return m }
 
-// jsonText answers a policy-like property as the JSON text an API takes; a
-// template may give it as an object or as a string already.
+// jsonText is a policy-like property as the JSON text an API takes: an object's, or a string as given.
 func jsonText(v any) string {
 	if text, ok := v.(string); ok {
 		return text
@@ -712,11 +762,8 @@ func (p *Pack) ref(name string, refs map[string]string, req *spi.Request, stack 
 }
 
 func (p *Pack) getAtt(g any, refs map[string]string, req *spi.Request) string {
-	var logical, attr string
-	switch t := g.(type) {
-	case string:
-		logical, attr, _ = strings.Cut(t, ".")
-	case []any:
+	logical, attr, _ := strings.Cut(str(g), ".") // "A.B", or [A, B]
+	if t, ok := g.([]any); ok {
 		t = append(slices.Clip(t), nil, nil)
 		logical, attr = str(t[0]), str(t[1])
 	}
@@ -752,10 +799,8 @@ func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack str
 }
 
 func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack string) string {
-	out := str(s)
-	if arr, ok := s.([]any); ok && len(arr) > 0 {
-		out = str(arr[0])
-	}
+	arr, _ := s.([]any) // "text", or ["text", {variables}]
+	out := str(append(slices.Clip(arr), s)[0])
 	for k, v := range refs {
 		out = strings.ReplaceAll(out, "${"+k+"}", v)
 	}
@@ -770,42 +815,36 @@ func parseTemplate(body string) (map[string]any, error) {
 	if body == "" {
 		return nil, invalid("empty TemplateBody")
 	}
+	var m map[string]any
 	if body[0] == '{' {
-		var m map[string]any
 		if err := json.Unmarshal([]byte(body), &m); err != nil {
 			return nil, invalid(err.Error())
 		}
-		return m, nil
-	}
-	m, err := parseYAML(body)
-	if err != nil {
+	} else if yml, err := parseYAML(body); err != nil {
 		return nil, invalid("TemplateBody YAML: " + err.Error())
+	} else {
+		m = yml
+	}
+	if len(asMap(m["Resources"])) == 0 { // "The Resources section is required in every CloudFormation template"
+		return nil, invalid("Template format error: At least one Resources member must be defined.")
 	}
 	return m, nil
 }
 
 func formParams(in map[string]any) map[string]string {
-	keys, vals := map[string]string{}, map[string]string{}
+	out := map[string]string{}
 	for k, v := range in {
 		if pfx, ok := strings.CutSuffix(k, ".ParameterKey"); ok && strings.HasPrefix(k, "Parameters.member.") {
-			keys[pfx] = str(v)
-		} else if pfx, ok := strings.CutSuffix(k, ".ParameterValue"); ok && strings.HasPrefix(k, "Parameters.member.") {
-			vals[pfx] = str(v)
+			out[str(v)] = str(in[pfx+".ParameterValue"])
 		}
-	}
-	out := map[string]string{}
-	for pfx, k := range keys {
-		out[k] = vals[pfx]
 	}
 	return out
 }
 
 func mergeParamDefaults(tpl map[string]any, params map[string]string) {
 	for k, v := range asMap(tpl["Parameters"]) {
-		if _, given := params[k]; !given {
-			if d, ok := asMap(v)["Default"]; ok {
-				params[k] = str(d)
-			}
+		if _, given := params[k]; !given && asMap(v)["Default"] != nil {
+			params[k] = jsonText(asMap(v)["Default"]) // a parameter "becomes a string": Default 16 is "16"
 		}
 	}
 }
@@ -825,7 +864,8 @@ func advertise(req *spi.Request) string {
 	return "http://127.0.0.1:4566"
 }
 
-func str(v any) string { s, _ := v.(string); return s }
+// str is a String property's value: a scalar's text (coerce), nothing for anything else.
+func str(v any) string { s, _ := coerce(v, "String"); t, _ := s.(string); return t }
 
 func lastSlash(s string) string { return s[strings.LastIndex(s, "/")+1:] }
 

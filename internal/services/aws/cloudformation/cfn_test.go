@@ -541,3 +541,28 @@ func TestCloudFormationUpdateStackUpdatesItsSecret(t *testing.T) {
 		t.Fatalf("after UpdateStack, %d versions, want 2", len(versions))
 	}
 }
+
+// A template's AWS::SecretsManager::Secret without a SecretString makes a
+// secret with no value. CreateSecret makes a version only "If you include
+// SecretString or SecretBinary". CloudFormation sent "" in its place, which
+// stored a version holding the empty string; the real service refuses that
+// value outright (SecretStringType has a minimum length of 1).
+func TestCloudFormationSecretWithoutAValue(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := bundled.Handler("aws.cloudformation", deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	template := `{"Resources":{"Secret":{"Type":"AWS::SecretsManager::Secret","Properties":{"Name":"bare","Description":"value set elsewhere"}}}}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "bare", "TemplateBody": template}}); err != nil {
+		t.Fatalf("CreateStack: %v", err)
+	}
+	secrets := New(deps)
+	described, err := secrets.call(ctx, &spi.Request{Identity: id}, "aws.secretsmanager", "DescribeSecret", map[string]any{"SecretId": "bare"})
+	if err != nil || described["Description"] != "value set elsewhere" {
+		t.Fatalf("DescribeSecret: %#v %v", described, err)
+	}
+	_, err = secrets.call(ctx, &spi.Request{Identity: id}, "aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": "bare"})
+	if f, isFault := err.(*spi.Fault); !isFault || f.Code != "ResourceNotFoundException" {
+		t.Fatalf("GetSecretValue of a secret the template gave no value: want ResourceNotFoundException, got %v", err)
+	}
+}

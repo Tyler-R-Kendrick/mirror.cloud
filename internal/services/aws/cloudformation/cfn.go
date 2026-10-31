@@ -279,7 +279,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 		return n, err
 	case "AWS::SecretsManager::Secret":
 		// existing is what an update finds; a second CreateSecret of its name is ResourceExistsException.
-		op, in := "CreateSecret", map[string]any{"Name": name("Name", logical), "SecretString": str(props["SecretString"])}
+		op, in := "CreateSecret", map[string]any{"Name": name("Name", logical)}
 		if strings.HasSuffix(existing, ":secret:"+name("Name", logical)) {
 			op, in = "UpdateSecret", map[string]any{"SecretId": existing}
 		}

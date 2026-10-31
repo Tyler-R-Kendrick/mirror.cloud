@@ -485,3 +485,59 @@ func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
 		t.Fatal("scalar helpers")
 	}
 }
+
+// An UpdateStack that changes an AWS::SecretsManager::Secret's value and
+// description updates the secret it made: UpdateSecret, which carries both,
+// rather than CreateSecret again on a name that exists. Secrets Manager answers
+// a second CreateSecret of one name with ResourceExistsException ("A resource
+// with the ID you requested already exists").
+func TestCloudFormationUpdateStackUpdatesItsSecret(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := bundled.Handler("aws.cloudformation", deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	template := func(value, description string) string {
+		raw, _ := json.Marshal(map[string]any{"Resources": map[string]any{"Secret": map[string]any{
+			"Type": "AWS::SecretsManager::Secret", "Properties": map[string]any{"Name": "app", "SecretString": value, "Description": description},
+		}}})
+		return string(raw)
+	}
+	physical := func() any {
+		t.Helper()
+		out, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeStackResources", Input: map[string]any{"StackName": "app"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.Output["StackResources"].([]any)[0].(map[string]any)["PhysicalResourceId"]
+	}
+	secrets := func(op string, in map[string]any) map[string]any {
+		t.Helper()
+		out, err := New(deps).call(ctx, &spi.Request{Identity: id}, "aws.secretsmanager", op, in)
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return out
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "app", "TemplateBody": template("v1", "first")}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := secrets("DescribeSecret", map[string]any{"SecretId": "app"}); got["Description"] != "first" {
+		t.Fatalf("after CreateStack, Description = %#v", got["Description"])
+	}
+	before := physical()
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "UpdateStack", Input: map[string]any{"StackName": "app", "TemplateBody": template("v2", "second")}}); err != nil {
+		t.Fatalf("UpdateStack: %v", err)
+	}
+	if after := physical(); after != before {
+		t.Fatalf("UpdateStack replaced the secret: %v, then %v", before, after)
+	}
+	if got := secrets("GetSecretValue", map[string]any{"SecretId": "app"}); got["SecretString"] != "v2" {
+		t.Fatalf("after UpdateStack, the value is %#v", got["SecretString"])
+	}
+	if got := secrets("DescribeSecret", map[string]any{"SecretId": "app"}); got["Description"] != "second" {
+		t.Fatalf("after UpdateStack, Description = %#v", got["Description"])
+	}
+	if versions, _ := secrets("ListSecretVersionIds", map[string]any{"SecretId": "app"})["Versions"].([]any); len(versions) != 2 {
+		t.Fatalf("after UpdateStack, %d versions, want 2", len(versions))
+	}
+}

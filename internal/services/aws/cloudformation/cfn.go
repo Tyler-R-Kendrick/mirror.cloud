@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 
@@ -146,32 +147,26 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	params := formParams(req.Input)
 	mergeParamDefaults(tpl, params)
 	id := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name + "/" + p.deps.Rand.Hex(8)
+	var old stack // what an update finds already provisioned
 	if update {
-		if old, err := p.load(ctx, req, name); err == nil {
-			id = old.ID
+		if found, err := p.load(ctx, req, name); err == nil {
+			old, id = found, found.ID
 		}
 	}
 	st := stack{Name: name, ID: id, Status: "CREATE_COMPLETE", Template: body, Refs: map[string]string{}}
-	for k, v := range params {
-		st.Refs[k] = v
-	}
+	maps.Copy(st.Refs, params)
 	if update {
 		st.Status = "UPDATE_COMPLETE"
 	}
 	resources, _ := tpl["Resources"].(map[string]any)
-	keys := make([]string, 0, len(resources))
-	for k := range resources {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, logical := range keys {
+	for _, logical := range slices.Sorted(maps.Keys(resources)) {
 		rm, _ := resources[logical].(map[string]any)
 		typ := str(rm["Type"])
 		props, _ := p.resolve(rm["Properties"], st.Refs, req, name).(map[string]any)
 		if props == nil {
 			props = map[string]any{}
 		}
-		phys, err := p.provision(ctx, req, typ, logical, name, props)
+		phys, err := p.provision(ctx, req, typ, logical, name, props, old.Refs[logical])
 		if err != nil {
 			return nil, err
 		}
@@ -179,12 +174,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		st.Resources = append(st.Resources, res{Logical: logical, Physical: phys, Type: typ})
 	}
 	if outs, ok := tpl["Outputs"].(map[string]any); ok {
-		okeys := make([]string, 0, len(outs))
-		for k := range outs {
-			okeys = append(okeys, k)
-		}
-		sort.Strings(okeys)
-		for _, k := range okeys {
+		for _, k := range slices.Sorted(maps.Keys(outs)) {
 			om, _ := outs[k].(map[string]any)
 			val := p.resolve(om["Value"], st.Refs, req, name)
 			st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": val})
@@ -255,7 +245,7 @@ func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, 
 // provision creates a resource through the service that owns it, and answers
 // the resource's physical id. Going through the owner's API keeps its store
 // layout, validation and cascades that service's business.
-func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, stack string, props map[string]any) (string, error) {
+func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, stack string, props map[string]any, existing string) (string, error) {
 	name := func(member, fallback string) string {
 		if n := str(props[member]); n != "" {
 			return n
@@ -288,7 +278,12 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 		_, err := p.call(ctx, req, "aws.ssm", "PutParameter", map[string]any{"Name": n, "Value": str(props["Value"]), "Type": name("Type", "String")})
 		return n, err
 	case "AWS::SecretsManager::Secret":
-		out, err := p.call(ctx, req, "aws.secretsmanager", "CreateSecret", map[string]any{"Name": name("Name", logical), "SecretString": str(props["SecretString"])})
+		// existing is what an update finds; a second CreateSecret of its name is ResourceExistsException.
+		op, in := "CreateSecret", map[string]any{"Name": name("Name", logical), "SecretString": str(props["SecretString"])}
+		if strings.HasSuffix(existing, ":secret:"+name("Name", logical)) {
+			op, in = "UpdateSecret", map[string]any{"SecretId": existing}
+		}
+		out, err := p.call(ctx, req, "aws.secretsmanager", op, given(in, props, "SecretString", "Description"))
 		return str(out["ARN"]), err
 	case "AWS::KMS::Key":
 		out, err := p.call(ctx, req, "aws.kms", "CreateKey", map[string]any{"Description": str(props["Description"])})
@@ -298,12 +293,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 		_, err := p.call(ctx, req, "aws.logs", "CreateLogGroup", map[string]any{"logGroupName": n})
 		return n, err
 	case "AWS::Events::Rule":
-		in := map[string]any{"Name": name("Name", logical)}
-		for _, member := range []string{"ScheduleExpression", "State", "Description", "EventBusName"} {
-			if v, ok := props[member]; ok {
-				in[member] = v
-			}
-		}
+		in := given(map[string]any{"Name": name("Name", logical)}, props, "ScheduleExpression", "State", "Description", "EventBusName")
 		if pattern, ok := props["EventPattern"]; ok {
 			in["EventPattern"] = jsonText(pattern)
 		}
@@ -431,6 +421,16 @@ func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket str
 		}
 	}
 	return nil
+}
+
+// given sets on in each of members the template's props carry, and answers in.
+func given(in, props map[string]any, members ...string) map[string]any {
+	for _, member := range members {
+		if v, ok := props[member]; ok {
+			in[member] = v
+		}
+	}
+	return in
 }
 
 func asMap(v any) map[string]any {

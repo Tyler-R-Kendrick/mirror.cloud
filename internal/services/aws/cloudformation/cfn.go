@@ -148,7 +148,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	var old stack // what an update finds already provisioned
 	if found, err := p.load(ctx, req, name); err == nil && !update {
 		return nil, fault("AlreadyExistsException", "Stack ["+name+"] already exists")
-	} else if err == nil && (strings.HasPrefix(found.Status, "ROLLBACK_") || found.Status == "DELETE_FAILED") {
+	} else if err == nil && (strings.HasPrefix(found.Status, "ROLLBACK_") || strings.HasSuffix(found.Status, "_FAILED")) {
 		return nil, invalid("Stack:" + found.ID + " is in " + found.Status + " state and can not be updated.")
 	} else if err == nil {
 		old, id = found, found.ID
@@ -160,9 +160,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}
 	fail := func(err error) (*spi.Response, error) {
 		if !update || old.ID == "" { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack
-			_ = p.unwind(ctx, req, st, "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
+			_ = p.unwind(ctx, req, st, nil, st.Resources, nil, "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
 		} else {
-			p.rollback(ctx, req, name, old, st.Resources)
+			_ = p.rollback(ctx, req, old, st.Resources)
 		}
 		return nil, err
 	}
@@ -226,10 +226,7 @@ func (p *Pack) templateBody(ctx context.Context, req *spi.Request) (string, erro
 	}
 	defer reader.Close()
 	body, err := io.ReadAll(reader)
-	if err != nil {
-		return "", err
-	}
-	return string(body), nil
+	return string(body), err
 }
 
 func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Response, error) {
@@ -240,27 +237,27 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 	if st.Protect {
 		return nil, invalid("stack has termination protection")
 	}
-	if err := p.unwind(ctx, req, st, "DELETE_COMPLETE", "DELETE_FAILED"); err != nil {
+	if err := p.unwind(ctx, req, st, nil, st.Resources, nil, "DELETE_COMPLETE", "DELETE_FAILED"); err != nil {
 		return nil, err
 	}
 	return &spi.Response{Output: map[string]any{}}, nil
 }
 
-// unwind deletes a stack's resources, newest first, as a rollback or a
-// DeleteStack does, and records the outcome. With nothing left the stack is
-// done (a DELETE_COMPLETE stack is removed); otherwise it is failed, the
-// resources left listed as DELETE_FAILED for the next DeleteStack to try
-// again and the first error, which unwind answers, its StackStatusReason.
-func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, done, failed string) error {
-	var left []res
-	var first error
-	for _, r := range slices.Backward(st.Resources) {
+// unwind deletes the doomed resources, newest first, as a rollback or a
+// DeleteStack does, and records the outcome on st, which keeps kept. With
+// nothing left over and no earlier error (first) the stack is done (a
+// DELETE_COMPLETE stack is removed); otherwise it is failed, any resource it
+// could not delete listed as DELETE_FAILED for the next DeleteStack to try
+// again, and the first error, which unwind answers, its StackStatusReason.
+func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, kept, doomed []res, first error, done, failed string) error {
+	st.Resources = slices.Clip(kept)
+	for _, r := range slices.Backward(doomed) {
 		if err := p.deprovision(ctx, req, r); err != nil {
 			r.Status, first = "DELETE_FAILED", cmp.Or(first, err)
-			left = append([]res{r}, left...)
+			st.Resources = slices.Insert(st.Resources, len(kept), r)
 		}
 	}
-	st.Resources, st.Status, st.Reason = left, done, ""
+	st.Status, st.Reason = done, ""
 	if first != nil {
 		st.Status, st.Reason = failed, first.Error()
 	}
@@ -444,31 +441,34 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	}
 }
 
-// rollback undoes a failed update as UPDATE_ROLLBACK does: what it made is
-// deleted, what it changed is provisioned again from the previous template,
-// and the stack keeps that template and its resources as
-// UPDATE_ROLLBACK_COMPLETE. An update never deletes a replaced resource, so
+// rollback undoes a failed update as UPDATE_ROLLBACK does. What the update
+// changed in place is provisioned again from the previous template; what it
+// made, half-made ones included, is deleted; and the stack keeps the
+// previous template and resources, UPDATE_ROLLBACK_COMPLETE, or
+// UPDATE_ROLLBACK_FAILED with whatever it could not delete still listed, so
+// DeleteStack removes it. An update never deletes a replaced resource, so
 // none is recreated.
-func (p *Pack) rollback(ctx context.Context, req *spi.Request, name string, old stack, made []res) {
+func (p *Pack) rollback(ctx context.Context, req *spi.Request, old stack, made []res) error {
 	tpl, _ := parseTemplate(old.Template)
-	for _, r := range slices.Backward(made) {
+	var doomed []res
+	var first error
+	for _, r := range made {
 		if old.Refs[r.Logical] != r.Physical {
-			_ = p.deprovision(ctx, req, r)
-		} else if props := asMap(p.resolve(asMap(asMap(tpl["Resources"])[r.Logical])["Properties"], old.Refs, req, name)); props != nil {
-			_, _ = p.provision(ctx, req, r.Type, r.Logical, r.Name, props, r.Physical, old.ID)
+			doomed = append(doomed, r)
+		} else if props := asMap(p.resolve(asMap(asMap(tpl["Resources"])[r.Logical])["Properties"], old.Refs, req, old.Name)); props != nil {
+			_, err := p.provision(ctx, req, r.Type, r.Logical, r.Name, props, r.Physical, old.ID)
+			first = cmp.Or(first, err)
 		}
 	}
-	old.Status = "UPDATE_ROLLBACK_COMPLETE"
-	raw, _ := json.Marshal(old)
-	_ = p.col(req, "cfn").Put(ctx, name, raw)
+	return p.unwind(ctx, req, old, old.Resources, doomed, first, "UPDATE_ROLLBACK_COMPLETE", "UPDATE_ROLLBACK_FAILED")
 }
 
 // made answers the id of what a create made: none when it failed.
 func made(id string, err error) (string, error) {
 	if err != nil {
-		return "", err
+		id = ""
 	}
-	return id, nil
+	return id, err
 }
 
 // deprovision deletes a resource through its owner. One already gone (the
@@ -800,9 +800,8 @@ func mergeParamDefaults(tpl map[string]any, params map[string]string) {
 }
 
 func paramDecls(tpl map[string]any) []any {
-	pm, _ := tpl["Parameters"].(map[string]any)
 	var out []any
-	for _, k := range slices.Sorted(maps.Keys(pm)) {
+	for _, k := range slices.Sorted(maps.Keys(asMap(tpl["Parameters"]))) {
 		out = append(out, map[string]any{"ParameterKey": k})
 	}
 	return out

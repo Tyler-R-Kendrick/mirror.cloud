@@ -185,8 +185,15 @@ The oracle is AWS's documentation as it ships in the vendored model
     previous template (a secret gets its previous value and description back
     through `UpdateSecret`, as a new version), and the stack keeps its
     previous template and resources as `UPDATE_ROLLBACK_COMPLETE`. An update
-    here never deletes a replaced resource, so none needs recreating. Before,
-    the changes stayed and the new resources were left behind.
+    here never deletes a replaced resource, so none needs recreating. What the
+    update made is recorded the moment it exists, so a half-made one is
+    deleted too. A resource the rollback cannot delete stays listed by
+    `DescribeStackResources` as `DELETE_FAILED`, the stack is
+    `UPDATE_ROLLBACK_FAILED` with the error as its `StackStatusReason` (an
+    `UpdateStack` of it is `ValidationError`, as of any stack in a
+    `ROLLBACK_` or `_FAILED` state), and `DeleteStack` removes the resource
+    with the rest. Before, the changes stayed and the new resources were left
+    behind.
   - `GenerateSecretString` makes the value with `GetRandomPassword`'s generator,
     seeded by the stack id and logical id, and puts it under `GenerateStringKey`
     in `SecretStringTemplate` when the template gives one. Its properties are

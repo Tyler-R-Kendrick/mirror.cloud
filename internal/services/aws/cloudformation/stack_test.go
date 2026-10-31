@@ -631,3 +631,59 @@ func TestCloudFormationReadsGenerateSecretStringAsATemplateDoes(t *testing.T) {
 		}
 	}
 }
+
+// A failed UpdateStack keeps every resource it made that its rollback could
+// not delete: the stack is UPDATE_ROLLBACK_FAILED, with the resource listed
+// as DELETE_FAILED and the error as StackStatusReason, an UpdateStack of it
+// is refused, and DeleteStack removes the resource with the rest. A resource
+// the update half made is rolled back too. Here an object lands in the
+// update's new bucket before the rollback runs, so S3 refuses to delete it,
+// and the update's rule is half made (EventBridge refuses its targets).
+// Before, the rollback dropped the delete's error and wrote the previous
+// stack without the bucket, which no DeleteStack would then reach.
+func TestCloudFormationAFailedUpdateKeepsWhatItCouldNotRollBack(t *testing.T) {
+	h := newStacks(t)
+	secret := func(value string) map[string]any {
+		return map[string]any{"Type": "AWS::SecretsManager::Secret", "Properties": map[string]any{"Name": "a", "SecretString": value}}
+	}
+	h.mustCreate("u", map[string]map[string]any{"A": secret("v1")})
+	objects := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("objects")
+	if err := objects.Put(h.ctx, "landed-u/k", []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	update, _ := json.Marshal(map[string]any{"Resources": map[string]any{
+		"A": secret("v2"),
+		"B": map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "landed-u"}},
+		"C": map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"Name": "half-u", "ScheduleExpression": "rate(5 minutes)", "Targets": "notalist"}},
+	}})
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "u", "TemplateBody": string(update)}); code(err) != "ValidationException" {
+		t.Fatalf("the update answered %v, want EventBridge's ValidationException for the targets", err)
+	}
+	if status, reason, err := h.status("u"); status != "UPDATE_ROLLBACK_FAILED" || !strings.Contains(reason, "BucketNotEmpty") || err != nil {
+		t.Errorf("u is %q, reason %q (%v), want UPDATE_ROLLBACK_FAILED with S3's error", status, reason, err)
+	}
+	if left := h.statuses("u"); !reflect.DeepEqual(left, map[string]string{"A": "CREATE_COMPLETE", "B": "DELETE_FAILED"}) {
+		t.Errorf("u lists %v, want its secret and the bucket the rollback could not delete", left)
+	}
+	if _, err := h.service("aws.events", "DescribeRule", map[string]any{"Name": "half-u"}); err == nil {
+		t.Error("the rule the update half made outlived the rollback")
+	}
+	if out, err := h.service("aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": "a"}); err != nil || out["SecretString"] != "v1" {
+		t.Errorf("after the rollback the secret holds %v (%v), want v1", out["SecretString"], err)
+	}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "u", "TemplateBody": string(update)}); code(err) != "ValidationError" {
+		t.Errorf("UpdateStack of the UPDATE_ROLLBACK_FAILED u answered %v, want ValidationError", err)
+	}
+	if err := objects.Delete(h.ctx, "landed-u/k"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "u"}); err != nil {
+		t.Fatalf("DeleteStack u: %v", err)
+	}
+	if _, err := h.service("aws.s3", "HeadBucket", map[string]any{"Bucket": "landed-u"}); err == nil {
+		t.Error("DeleteStack left the bucket the failed update made")
+	}
+	if _, err := h.service("aws.secretsmanager", "DescribeSecret", map[string]any{"SecretId": "a"}); err == nil {
+		t.Error("DeleteStack left the stack's secret")
+	}
+}

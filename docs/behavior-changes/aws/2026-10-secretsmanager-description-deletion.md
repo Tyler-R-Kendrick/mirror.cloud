@@ -86,5 +86,8 @@ The oracle is AWS's documentation as it ships in the vendored model
   secret scheduled for deletion failed in every Go SDK v2 client, Terraform's
   included. `main` wrote `DeletionDate` as a string too.
 
-Equivalence trace `aws.secretsmanager` re-cut at steps 48, 52, 53 and 56, each
-citing the sentence above that it now follows.
+Equivalence trace `aws.secretsmanager`, steps counted from 0: steps 49 and 50
+are added (a `PutSecretValue` to, and a `BatchGetSecretValue` of, the secret
+scheduled at step 48), and steps 45, 46, 47, 48, 52, 53, 54, 55 and 58 are
+re-cut. Each carries the sentence above that it now follows. The two added
+steps moved the earlier re-cuts at 52, 53 and 56 to 54, 55 and 58.

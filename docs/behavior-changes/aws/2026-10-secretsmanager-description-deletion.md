@@ -1,0 +1,30 @@
+# Secrets Manager: description and scheduled deletion (2026-10)
+
+The oracle is AWS's documentation as it ships in the vendored model
+(`secrets-manager-2017-10-17.json`, sha256 `2738bd8d…`, pinned in
+`specs/mirror.lock`).
+
+- **Description.** `CreateSecret` and `UpdateSecret` keep `Description`, and
+  `DescribeSecret` answers it. Before, it was accepted and dropped. A write
+  that names no description keeps the one already stored.
+- **UpdateSecret without a value.** A description-only `UpdateSecret` adds no
+  version and answers no `VersionId`. Only an update that carries
+  `SecretString` or `SecretBinary` creates a version. Before, every update
+  appended a version holding `""` and made it `AWSCURRENT`.
+- **A secret scheduled for deletion is described.** `DescribeSecret` answers it
+  with `DeletedDate`, "the date the secret is scheduled for deletion", where it
+  answered `InvalidRequestException` before. `GetSecretValue` still refuses it.
+- **DeleteSecret.**
+  - The answer is `ARN`, `Name` and `DeletionDate`. `DeletionDate` is the
+    request time plus `RecoveryWindowInDays`, 30 when not given; before, it was
+    the request time.
+  - A second unforced delete is `InvalidRequestException` ("The secret is
+    scheduled for deletion"). Before, it was scheduled again.
+  - A forced delete of a secret that is already deleted or never existed
+    succeeds.
+  - `ForceDeleteWithoutRecovery` together with `RecoveryWindowInDays` is
+    `InvalidParameterException`.
+- **RestoreSecret** clears `DeletedDate` and answers `ARN` and `Name`.
+
+Equivalence trace `aws.secretsmanager` re-cut at steps 48, 52, 53 and 56, each
+citing the sentence above that it now follows.

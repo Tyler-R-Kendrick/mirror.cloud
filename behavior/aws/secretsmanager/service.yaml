@@ -32,6 +32,10 @@ errors:
     code: MalformedPolicyDocumentException
     http: 400
     fault: client
+  InvalidParameter:
+    code: InvalidParameterException
+    http: 400
+    fault: client
 
 operations:
   # CreateSecret, PutSecretValue and UpdateSecret are one code path in the
@@ -59,6 +63,9 @@ operations:
             VersionId: fx.ver
             SecretString: val
             VersionStages: "['AWSCURRENT']"
+            # The description is metadata beside the value (DescribeSecretResponse:
+            # "The description of the secret."): a write that names none keeps it.
+            Description: "'Description' in input && input.Description != null ? input.Description : ('Description' in s ? s.Description : dyn(null))"
             Deleted: "false"
     output:
       ARN: rec.ARN
@@ -92,10 +99,18 @@ operations:
       Name: rec.Name
       VersionId: fx.ver
 
+  # UpdateSecret changes metadata and, only when it carries one, the value:
+  # "If you include SecretString or SecretBinary to create a new secret
+  # version, Secrets Manager automatically moves the staging label AWSCURRENT
+  # to the new version", and its VersionId is answered only "If Secrets
+  # Manager created a new version of the secret during this operation"
+  # (UpdateSecret and UpdateSecretResponse in the vendored model). A
+  # description-only update neither adds a version nor touches the value.
   UpdateSecret:
     reads:
       s: { resource: secret }
     let:
+      hasval: "('SecretString' in input && input.SecretString != null) || ('SecretBinary' in input && input.SecretBinary != null)"
       val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
       prior: "'Versions' in s ? s.Versions : []"
     effects:
@@ -106,18 +121,22 @@ operations:
             Name: id
             ARN: "arn('aws', ['secretsmanager', string(identity.region), string(identity.account), 'secret:' + id])"
             Versions: >-
+              !hasval ? prior :
               prior.map(v, merge(v, {'VersionStages':
                 ('VersionStages' in v ? v.VersionStages : []).filter(st, st != 'AWSCURRENT' && st != 'AWSPREVIOUS')
                 + (('VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')) ? ['AWSPREVIOUS'] : [])}))
               + [{'VersionId': fx.ver, 'SecretString': val, 'VersionStages': ['AWSCURRENT']}]
-            VersionId: fx.ver
-            SecretString: val
+            VersionId: "hasval ? fx.ver : ('VersionId' in s ? s.VersionId : dyn(null))"
+            SecretString: "hasval ? val : ('SecretString' in s ? s.SecretString : '')"
             VersionStages: "['AWSCURRENT']"
+            # The description is metadata beside the value (DescribeSecretResponse:
+            # "The description of the secret."): a write that names none keeps it.
+            Description: "'Description' in input && input.Description != null ? input.Description : ('Description' in s ? s.Description : dyn(null))"
             Deleted: "false"
     output:
       ARN: rec.ARN
       Name: rec.Name
-      VersionId: fx.ver
+      VersionId: "hasval ? fx.ver : dyn(null)"
 
   # The pack's RotateSecret is PutSecretValue with the value defaulted to the
   # current one: it re-seats the same SecretString under a fresh version. On a
@@ -197,17 +216,21 @@ operations:
       VersionId: "'VersionId' in picked ? picked.VersionId : null"
       VersionStages: "'VersionStages' in picked ? picked.VersionStages : null"
 
+  # A secret scheduled for deletion is described, with its DeletedDate:
+  # "The date the secret is scheduled for deletion. If it is not scheduled for
+  # deletion, this field is omitted." (DescribeSecretResponse.DeletedDate in
+  # the vendored model). It is the value, not the description, that is out of
+  # reach until RestoreSecret.
   DescribeSecret:
     reads:
       s: { resource: secret }
     require:
       - { cond: s_found, error: NotFound }
-      - cond: "!('Deleted' in s && s.Deleted == true)"
-        error: InvalidRequest
-        message: "secret scheduled for deletion"
     output:
       ARN: s.ARN
       Name: s.Name
+      Description: "'Description' in s ? s.Description : dyn(null)"
+      DeletedDate: "'Deleted' in s && s.Deleted == true && 'DeletedDate' in s ? s.DeletedDate : dyn(null)"
       VersionIdsToStages: "rollup('Versions' in s ? s.Versions : [], 'VersionId', 'VersionStages')"
       Tags: "'Tags' in s ? s.Tags : null"
       ReplicationStatus: "'ReplicaRegions' in s ? s.ReplicaRegions : null"
@@ -237,9 +260,21 @@ operations:
           'SecretVersionsToStages': rollup('Versions' in m ? m.Versions : [], 'VersionId', 'VersionStages')
         })
 
-  # Force delete drops the record; otherwise it is marked Deleted and keeps
-  # answering to RestoreSecret. The output never carries ARN, and DeletionDate
-  # only in the soft case.
+  # Force delete drops the record; otherwise it is marked Deleted, stamped with
+  # the end of its recovery window, and keeps answering to RestoreSecret. From
+  # the vendored model's documentation:
+  # - DeleteSecret: "Secrets Manager attaches a DeletionDate stamp to the
+  #   secret that specifies the end of the recovery window."
+  # - RecoveryWindowInDays: "If you don't use either, then by default Secrets
+  #   Manager uses a 30 day recovery window", and "You can't use both this
+  #   parameter and ForceDeleteWithoutRecovery in the same call."
+  # - DeleteSecretResponse.DeletionDate: "the date and time of the delete
+  #   request plus the number of days in RecoveryWindowInDays."
+  # - InvalidRequestException, possible causes: "The secret is scheduled for
+  #   deletion." So a second unforced delete is refused, not repeated.
+  # - ForceDeleteWithoutRecovery: "If you forcibly delete an already deleted or
+  #   nonexistent secret, the operation does not return
+  #   ResourceNotFoundException."
   DeleteSecret:
     reads:
       s: { resource: secret }
@@ -248,18 +283,31 @@ operations:
         'ForceDeleteWithoutRecovery' in input
         && (input.ForceDeleteWithoutRecovery == true || input.ForceDeleteWithoutRecovery == 'true'
             || input.ForceDeleteWithoutRecovery == 'True' || input.ForceDeleteWithoutRecovery == '1')
+      windowed: "'RecoveryWindowInDays' in input && input.RecoveryWindowInDays != null"
+      days: "windowed ? int(input.RecoveryWindowInDays) : 30"
+      deletion: "string(now + duration(string(days * 24) + 'h'))"
+      scheduled: "'Deleted' in s && s.Deleted == true"
     require:
-      - { cond: s_found, error: NotFound }
+      - cond: "!(force && windowed)"
+        error: InvalidParameter
+        message: "You can't use ForceDeleteWithoutRecovery in conjunction with RecoveryWindowInDays."
+      - { cond: "s_found || force", error: NotFound }
+      - cond: "force || !scheduled"
+        error: InvalidRequest
+        message: "The secret is scheduled for deletion."
     effects:
-      - delete: { resource: secret, when: force }
+      - delete: { resource: secret, when: "force && s_found" }
       - patch:
           resource: secret
           when: "!force"
-          record: { Deleted: "true" }
+          record: { Deleted: "true", DeletedDate: deletion }
     output:
+      ARN: "s_found ? s.ARN : dyn(null)"
       Name: id
-      DeletionDate: "force ? dyn(null) : string(now)"
+      DeletionDate: "force ? dyn(null) : deletion"
 
+  # RestoreSecret: "Cancels the scheduled deletion of a secret by removing the
+  # DeletedDate time stamp." Its response is the secret's ARN and Name.
   RestoreSecret:
     reads:
       s: { resource: secret }
@@ -268,8 +316,9 @@ operations:
     effects:
       - patch:
           resource: secret
-          record: { Deleted: "false" }
+          record: { Deleted: "false", DeletedDate: "dyn(null)" }
     output:
+      ARN: s.ARN
       Name: id
 
   # An unknown secret is not a fault here: the pack answers an empty version
@@ -487,7 +536,9 @@ quirks:
       A VersionId or VersionStage that matches no stored version is not a
       fault: the pack falls back to the record's top-level members, answering
       the current version as though asked for it. A secret scheduled for
-      deletion reads as InvalidRequestException here and on DescribeSecret.
+      deletion reads as InvalidRequestException here, as the documentation says
+      it does ("When a secret is scheduled for deletion, you cannot retrieve
+      the secret value"). DescribeSecret answers it, with its DeletedDate.
   - operation: ListSecrets
     note: >
       The pack skipped records whose key ends in ':tags' -- a sidecar record
@@ -498,12 +549,12 @@ quirks:
       fails rather than skipping it.
   - operation: DeleteSecret
     note: >
-      Deleting a secret already scheduled for deletion succeeds again, where
-      the real service answers InvalidRequestException. The pack's truthy
-      accepts ForceDeleteWithoutRecovery as the strings 'true', 'True' and '1'
-      as well as the boolean; the transcription keeps all four. The answer
-      never carries ARN, and carries DeletionDate only when the record is
-      kept.
+      The pack's truthy accepts ForceDeleteWithoutRecovery as the strings
+      'true', 'True' and '1' as well as the boolean; the transcription keeps
+      all four. A forced delete answers no DeletionDate, and no ARN when the
+      secret did not exist. DescribeSecret's DeletedDate is the same instant
+      as the DeletionDate the delete answered: the documentation calls it "the
+      date the secret is scheduled for deletion".
   - operation: TagResource
     note: >
       A request carrying the same tag key twice resolves first-wins here; the

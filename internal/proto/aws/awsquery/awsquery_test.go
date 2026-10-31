@@ -84,7 +84,11 @@ func shapedService() *model.Service {
 				"People":     {Shape: "InnerList"},
 				"Attributes": {Shape: "NamedValueMap", Binding: model.MemberBinding{Name: "Attribute", XMLFlattened: true}},
 				"Labels":     {Shape: "LabelledMap"},
+				"Groups":     {Shape: "GroupIdList"},
+				"Options":    {Shape: "OptionList"},
 			}},
+			"GroupIdList":   {Kind: model.KindList, Member: "String", MemberBinding: model.MemberBinding{Name: "GroupId"}},
+			"OptionList":    {Kind: model.KindList, Member: "Inner", MemberBinding: model.MemberBinding{Name: "Option"}},
 			"NamedValueMap": {Kind: model.KindMap, Key: "String", Member: "String", KeyBinding: model.MemberBinding{Name: "Name"}, MemberBinding: model.MemberBinding{Name: "Value"}},
 			"StringList":    {Kind: model.KindList, Member: "String"},
 			"StringMap":     {Kind: model.KindMap, Key: "String", Member: "String"},
@@ -181,6 +185,52 @@ func TestDecodeReadsMapEntryNames(t *testing.T) {
 	}
 	if got := in["Labels"]; !reflect.DeepEqual(got, map[string]any{"a": "b"}) {
 		t.Errorf("Labels = %#v, want {a:b}: the entry's own names, and nothing under key/value", got)
+	}
+}
+
+// A named map read as key and value, which is what the decoder asked for
+// before it read the entry's own names, still decodes: a caller that sent
+// Attribute.1.key worked then and must not stop working.
+func TestDecodeStillReadsANamedMapAsKeyAndValue(t *testing.T) {
+	in := decodeForm(t, shapedService(), url.Values{
+		"Attribute.1.key":   {"FifoQueue"},
+		"Attribute.1.value": {"true"},
+	})
+	if got := in["Attributes"]; !reflect.DeepEqual(got, map[string]any{"FifoQueue": "true"}) {
+		t.Errorf("Attributes = %#v, want {FifoQueue:true} read under key/value", got)
+	}
+}
+
+// A list whose member carries an xmlName arrives under that name, not as
+// member: RDS's VpcSecurityGroupIds (member VpcSecurityGroupId) is
+// VpcSecurityGroupIds.VpcSecurityGroupId.1 on the wire, which is what botocore
+// and every SDK generated from the model send. A list of structures is named
+// the same way, with each element's fields beneath its index.
+func TestDecodeReadsListMemberNames(t *testing.T) {
+	in := decodeForm(t, shapedService(), url.Values{
+		"Groups.GroupId.1":       {"sg-1"},
+		"Groups.GroupId.2":       {"sg-2"},
+		"Options.Option.1.First": {"ada"},
+		"Options.Option.2.First": {"grace"},
+	})
+	if got := in["Groups"]; !reflect.DeepEqual(got, []any{"sg-1", "sg-2"}) {
+		t.Errorf("Groups = %#v, want [sg-1 sg-2] read under the member name GroupId", got)
+	}
+	want := []any{map[string]any{"First": "ada"}, map[string]any{"First": "grace"}}
+	if got := in["Options"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("Options = %#v, want %#v", got, want)
+	}
+}
+
+// The decoder read every non-flattened list as member before it read member
+// names, so a named list sent as member decoded then and still does.
+func TestDecodeStillReadsANamedListAsMember(t *testing.T) {
+	in := decodeForm(t, shapedService(), url.Values{
+		"Groups.member.1": {"sg-1"},
+		"Groups.member.2": {"sg-2"},
+	})
+	if got := in["Groups"]; !reflect.DeepEqual(got, []any{"sg-1", "sg-2"}) {
+		t.Errorf("Groups = %#v, want [sg-1 sg-2] read under member", got)
 	}
 }
 
@@ -342,14 +392,20 @@ func TestDecodeReadsEC2RequestNames(t *testing.T) {
 	input.Members["Renamed"] = model.Member{Shape: "String", Binding: model.MemberBinding{Name: "onTheWire"}}
 	input.Members["Explicit"] = model.Member{Shape: "String", Binding: model.MemberBinding{Name: "dryRun", QueryName: "DryRun"}}
 	input.Members["Identities"] = model.Member{Shape: "StringList", Binding: model.MemberBinding{Name: "vpcId"}}
+	// ec2Query writes a list as Name.N whatever its member is called.
+	input.Members["Groups"] = model.Member{Shape: "GroupIdList", Binding: model.MemberBinding{QueryName: "SecurityGroupId"}}
 	svc.Shapes["DoInput"] = input
 
 	in := decodeForm(t, svc, url.Values{
-		"OnTheWire": {"capitalized"},
-		"DryRun":    {"true"},
-		"VpcId.1":   {"vpc-1"},
-		"VpcId.2":   {"vpc-2"},
+		"OnTheWire":         {"capitalized"},
+		"DryRun":            {"true"},
+		"VpcId.1":           {"vpc-1"},
+		"VpcId.2":           {"vpc-2"},
+		"SecurityGroupId.1": {"sg-1"},
 	})
+	if got := in["Groups"]; !reflect.DeepEqual(got, []any{"sg-1"}) {
+		t.Errorf("Groups = %#v, want the flattened list [sg-1], the member name unread", got)
+	}
 	if got := in["Renamed"]; got != "capitalized" {
 		t.Errorf("Renamed = %#v, want the capitalized xmlName to be read", got)
 	}

@@ -270,7 +270,10 @@ func TestBootedServerCloudFormationRemainder(t *testing.T) {
 	call(url.Values{"Action": {"SetStackPolicy"}, "Version": {"2010-05-15"}, "StackName": {"rem"}, "StackPolicyBody": {"{}"}})
 	call(url.Values{"Action": {"GetStackPolicy"}, "Version": {"2010-05-15"}, "StackName": {"rem"}})
 	call(url.Values{"Action": {"DetectStackDrift"}, "Version": {"2010-05-15"}, "StackName": {"rem"}})
-	call(url.Values{"Action": {"CreateStack"}, "Version": {"2010-05-15"}, "StackName": {"rem2"}, "TemplateBody": {tpl}})
+	// The change set put cfn-rem-b2 in cfn-rem-b's place without deleting
+	// cfn-rem-b, which still holds its name, so rem2's bucket is unnamed.
+	unnamed := `{"Resources":{"B":{"Type":"AWS::S3::Bucket"}}}`
+	call(url.Values{"Action": {"CreateStack"}, "Version": {"2010-05-15"}, "StackName": {"rem2"}, "TemplateBody": {unnamed}})
 	call(url.Values{"Action": {"RollbackStack"}, "Version": {"2010-05-15"}, "StackName": {"rem2"}})
 }
 
@@ -386,10 +389,12 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 	if err != nil || len(stackResources.Output["StackResources"].([]any)) != len(resources) {
 		t.Fatalf("DescribeStackResources %#v %v", stackResources, err)
 	}
+	physical := map[string]string{} // unnamed, each is <stack>-<logical id>-<suffix>
 	for _, raw := range stackResources.Output["StackResources"].([]any) {
 		if r := raw.(map[string]any); r["PhysicalResourceId"] == "" || r["ResourceType"] == "" {
 			t.Fatalf("stack resource %#v", r)
 		}
+		physical[str(raw.(map[string]any)["LogicalResourceId"])] = str(raw.(map[string]any)["PhysicalResourceId"])
 	}
 	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListStackResources", Input: map[string]any{"StackName": "all"}})
 	if err != nil || len(listed.Output["StackResourceSummaries"].([]any)) != len(resources) {
@@ -400,7 +405,7 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 		_, err := New(deps).call(ctx, &spi.Request{Identity: id}, svc, op, in)
 		return err
 	}
-	versioning, err := New(deps).call(ctx, &spi.Request{Identity: id}, "aws.s3", "GetBucketVersioning", map[string]any{"Bucket": "all-bucket"})
+	versioning, err := New(deps).call(ctx, &spi.Request{Identity: id}, "aws.s3", "GetBucketVersioning", map[string]any{"Bucket": physical["Bucket"]})
 	if err != nil || versioning["Status"] != "Enabled" {
 		t.Fatalf("bucket versioning %#v %v", versioning, err)
 	}
@@ -408,10 +413,10 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 		svc, op string
 		in      map[string]any
 	}{
-		{"aws.iam", "GetRole", map[string]any{"RoleName": "Role"}},
-		{"aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "Queue"}},
-		{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": "Table"}},
-		{"aws.logs", "DescribeLogGroups", map[string]any{"logGroupNamePrefix": "/aws/all/Log"}},
+		{"aws.iam", "GetRole", map[string]any{"RoleName": lastSlash(physical["Role"])}},
+		{"aws.sqs", "GetQueueUrl", map[string]any{"QueueName": lastSlash(physical["Queue"])}},
+		{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": physical["Table"]}},
+		{"aws.logs", "DescribeLogGroups", map[string]any{"logGroupNamePrefix": physical["Log"]}},
 	} {
 		if err := owned(check.svc, check.op, check.in); err != nil {
 			t.Errorf("%s %s after CreateStack: %v", check.svc, check.op, err)
@@ -424,9 +429,9 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 		svc, op string
 		in      map[string]any
 	}{
-		{"aws.iam", "GetRole", map[string]any{"RoleName": "Role"}},
-		{"aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "Queue"}},
-		{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": "Table"}},
+		{"aws.iam", "GetRole", map[string]any{"RoleName": lastSlash(physical["Role"])}},
+		{"aws.sqs", "GetQueueUrl", map[string]any{"QueueName": lastSlash(physical["Queue"])}},
+		{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": physical["Table"]}},
 	} {
 		if err := owned(check.svc, check.op, check.in); err == nil {
 			t.Errorf("%s %s still answers after DeleteStack", check.svc, check.op)
@@ -569,9 +574,9 @@ func TestCloudFormationSecretWithoutAValue(t *testing.T) {
 	}
 }
 
-// A secret a template does not name is named for its stack, as CloudFormation
-// names it: <stack>-<logical id>-<suffix>, the suffix taken from the stack id
-// so a stack is reproducible. Two stacks from one template each get their own
+// A secret a template does not name is named for its stack, in the modelled
+// form <stack>-<logical id>-<suffix>, the suffix a hash of the stack id and
+// logical id, so an update finds the same name. Two stacks from one template each get their own
 // secret, which a second CreateSecret of one bare logical id refused.
 func TestCloudFormationNamesAnUnnamedSecretForItsStack(t *testing.T) {
 	deps := spitest.Deps(t)
@@ -620,7 +625,8 @@ func TestCloudFormationNamesAnUnnamedSecretForItsStack(t *testing.T) {
 // A CreateStack that fails rolls back what it had created, as CloudFormation
 // does by default (OnFailure ROLLBACK). Rolled-back resources are deleted the
 // way DeleteStack deletes them -- a secret without a recovery window -- so a
-// later stack can take their names.
+// later stack can take their names; the stack itself stays, ROLLBACK_COMPLETE,
+// until DeleteStack removes it.
 func TestCloudFormationAFailedCreateRollsBack(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := bundled.Handler("aws.cloudformation", deps)
@@ -643,9 +649,21 @@ func TestCloudFormationAFailedCreateRollsBack(t *testing.T) {
 	if err := owned("aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "rq"}); err == nil {
 		t.Error("the failed stack's queue is still there")
 	}
+	// The rolled-back stack keeps its name until DeleteStack removes it; a
+	// stack of another name can take the names its resources had.
 	retry := `{"Resources":{"Secret":{"Type":"AWS::SecretsManager::Secret","Properties":{"Name":"retry","SecretString":"v"}}}}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "r", "TemplateBody": retry}}); err == nil {
+		t.Fatal("re-creating r before DeleteStack removed the rolled-back stack succeeded")
+	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "r2", "TemplateBody": retry}}); err != nil {
-		t.Fatalf("re-creating after the rollback: %v", err)
+		t.Fatalf("creating r2 after the rollback: %v", err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteStack", Input: map[string]any{"StackName": "r"}}); err != nil {
+		t.Fatalf("DeleteStack of the rolled-back r: %v", err)
+	}
+	unnamed := `{"Resources":{"Secret":{"Type":"AWS::SecretsManager::Secret","Properties":{"SecretString":"v"}}}}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "r", "TemplateBody": unnamed}}); err != nil {
+		t.Fatalf("re-creating r after DeleteStack: %v", err)
 	}
 }
 
@@ -654,7 +672,7 @@ func TestCloudFormationAFailedCreateRollsBack(t *testing.T) {
 // classes, IncludeSpace, RequireEachIncludedType -- seeded by the stack and
 // logical id. With SecretStringTemplate and GenerateStringKey, the password
 // goes into the template's JSON under that key. A template that also gives
-// SecretString is refused, as CloudFormation refuses it.
+// SecretString is refused.
 func TestCloudFormationGeneratesASecretString(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := bundled.Handler("aws.cloudformation", deps)
@@ -705,8 +723,8 @@ func TestCloudFormationGeneratesASecretString(t *testing.T) {
 			t.Errorf("%s generated %q", member, v)
 		}
 	}
-	if v := must(map[string]any{"PasswordLength": 200, "IncludeSpace": true}); !strings.Contains(v, " ") {
-		t.Errorf("IncludeSpace generated no space in %q", v)
+	if v := must(map[string]any{"PasswordLength": 4096, "IncludeSpace": true}); !strings.Contains(v, " ") {
+		t.Errorf("IncludeSpace drew no space in 4096 characters") // may, not must: a space is never required
 	}
 	var doc map[string]any
 	v := must(map[string]any{"SecretStringTemplate": `{"username":"admin"}`, "GenerateStringKey": "password", "PasswordLength": 20})
@@ -791,5 +809,40 @@ func TestCloudFormationAFailedUpdateRollsBack(t *testing.T) {
 	}
 	if status := stacks["Stacks"].([]any)[0].(map[string]any)["StackStatus"]; status != "UPDATE_ROLLBACK_COMPLETE" {
 		t.Errorf("the stack's status is %v, want UPDATE_ROLLBACK_COMPLETE", status)
+	}
+}
+
+// A YAML template is YAML: flow collections, block scalars and the short-form
+// intrinsics (!Ref, !GetAtt, !Sub, and !Name for any other Fn::Name) all read
+// as their JSON-template equivalents. The hand-written subset this replaced
+// read a flow sequence as a string and refused a block scalar.
+func TestParseYAMLReadsYAML(t *testing.T) {
+	m, err := parseYAML(`Resources:
+  Q:
+    Type: AWS::SQS::Queue
+    Properties:
+      Tags: [{Key: env, Value: dev}, {Key: team, Value: "a: b"}]
+      Policy: |
+        line one
+        line two
+      Arn: !GetAtt [Other, Arn]
+      Joined: !Join ["-", [a, !Ref B]]
+      Port: 8080
+      Ratio: 0.5
+      On: true
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	props := m["Resources"].(map[string]any)["Q"].(map[string]any)["Properties"].(map[string]any)
+	want := map[string]any{
+		"Tags":   []any{map[string]any{"Key": "env", "Value": "dev"}, map[string]any{"Key": "team", "Value": "a: b"}},
+		"Policy": "line one\nline two\n",
+		"Arn":    map[string]any{"Fn::GetAtt": []any{"Other", "Arn"}},
+		"Joined": map[string]any{"Fn::Join": []any{"-", []any{"a", map[string]any{"Ref": "B"}}}},
+		"Port":   8080, "Ratio": 0.5, "On": true,
+	}
+	if !reflect.DeepEqual(props, want) {
+		t.Fatalf("parsed %#v\nwant   %#v", props, want)
 	}
 }

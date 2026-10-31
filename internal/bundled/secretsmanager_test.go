@@ -932,7 +932,8 @@ func TestSecretsManagerFiltersChooseSecrets(t *testing.T) {
 	_, err = call("BatchGetSecretValue", map[string]any{})
 	fault(t, err, "InvalidParameterException")
 
-	// The SecretIdList form is unchanged.
+	// The SecretIdList form answers each id it names, and only the filter
+	// form pages (TestSecretsManagerBatchGetSecretIdListNeverPages).
 	rows := ok(t, "BatchGetSecretValue", map[string]any{"SecretIdList": []any{"app/db", "app/gone", "missing"}})
 	if values, errs := names(rows["SecretValues"], "Name"), names(rows["Errors"], "ErrorCode"); !reflect.DeepEqual(values, []string{"app/db"}) ||
 		!reflect.DeepEqual(errs, []string{"InvalidRequestException", "ResourceNotFoundException"}) {
@@ -989,9 +990,6 @@ func TestSecretsManagerGetRandomPasswordHonoursItsParameters(t *testing.T) {
 		if pw := password(map[string]any{"PasswordLength": 200, member: true}); has(pw, set) || len(pw) != 200 {
 			t.Fatalf("%s answered %q", member, pw)
 		}
-	}
-	if pw := password(map[string]any{"PasswordLength": 200, "IncludeSpace": true}); !has(pw, " ") {
-		t.Fatalf("IncludeSpace with RequireEachIncludedType answered no space in %q", pw)
 	}
 	if pw := password(map[string]any{"PasswordLength": 1, "RequireEachIncludedType": false}); len(pw) != 1 {
 		t.Fatalf("a one-character password answered %q", pw)
@@ -1121,5 +1119,163 @@ func TestSecretsManagerRotateSecretRefusesASecretWithNoValue(t *testing.T) {
 	ok(t, "PutSecretValue", map[string]any{"SecretId": "empty", "SecretString": "v"})
 	if rotated := ok(t, "RotateSecret", map[string]any{"SecretId": "empty"}); rotated["VersionId"] == nil {
 		t.Fatalf("RotateSecret of a secret with a value answered %#v", rotated)
+	}
+}
+
+// BatchGetSecretValue's MaxResults: "To use this parameter, you must also use
+// the Filters parameter." The SecretIdList form with MaxResults, or with a
+// NextToken, which only the Filters form answers, is
+// InvalidParameterException, and the SecretIdList form never answers a
+// NextToken. MaxResults outside MaxResultsBatchType's range, 1 to 20, is
+// ValidationException. Before, SecretIdList with MaxResults answered a
+// NextToken whenever more secrets were stored than the page held, and every
+// page repeated the same values, so a caller following it paged forever.
+func TestSecretsManagerBatchGetSecretIdListNeverPages(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	var ids []any
+	for i := range 25 {
+		ok(t, "CreateSecret", map[string]any{"Name": fmt.Sprintf("s%02d", i), "SecretString": "v"})
+		ids = append(ids, fmt.Sprintf("s%02d", i))
+	}
+	code := func(err error) string {
+		if f, isFault := err.(*spi.Fault); isFault {
+			return f.Code
+		}
+		return ""
+	}
+	for _, tc := range []struct {
+		in   map[string]any
+		want string
+	}{
+		{map[string]any{"SecretIdList": ids[:2], "MaxResults": 1}, "InvalidParameterException"},
+		{map[string]any{"SecretIdList": ids[:2], "NextToken": "s00"}, "InvalidParameterException"},
+		{map[string]any{"Filters": []any{map[string]any{"Key": "name", "Values": []any{"s"}}}, "MaxResults": 0}, "ValidationException"},
+		{map[string]any{"Filters": []any{map[string]any{"Key": "name", "Values": []any{"s"}}}, "MaxResults": 21}, "ValidationException"},
+		{map[string]any{"SecretIdList": ids[:2], "MaxResults": 21}, "ValidationException"},
+	} {
+		if out, err := call("BatchGetSecretValue", tc.in); code(err) != tc.want {
+			t.Errorf("BatchGetSecretValue %v answered %v (%v), want %s", tc.in, out, err, tc.want)
+		}
+	}
+	rows := ok(t, "BatchGetSecretValue", map[string]any{"SecretIdList": ids})
+	if values, _ := rows["SecretValues"].([]any); len(values) != 25 || rows["NextToken"] != nil {
+		t.Errorf("SecretIdList of 25 answered %d values and NextToken %v, want all 25 and none", len(values), rows["NextToken"])
+	}
+	page := ok(t, "BatchGetSecretValue", map[string]any{"Filters": []any{map[string]any{"Key": "name", "Values": []any{"s"}}}, "MaxResults": 20})
+	if values, _ := page["SecretValues"].([]any); len(values) != 20 || page["NextToken"] == nil {
+		t.Errorf("Filters with MaxResults 20 answered %d values and NextToken %v, want 20 and a token", len(values), page["NextToken"])
+	}
+}
+
+// IncludeSpace: "If you include this switch, the password can contain space
+// characters." RequireEachIncludedType asks for "at least one upper and
+// lowercase letter, one number, and one punctuation", not a space. So a space
+// may be drawn but is never required: {"PasswordLength": 4, "IncludeSpace":
+// true} is one of each of the four types, and a one-character password whose
+// only type is punctuation is a punctuation mark. Before, the space counted
+// as a fifth required type, which refused both.
+func TestSecretsManagerIncludeSpaceNeverRequiresASpace(t *testing.T) {
+	call, _, _ := secretsManager(t)
+	const punctuation = "!\"#$%&'()*+,-./:;?@[\\]^_`{|}~"
+	password := func(in map[string]any) string {
+		t.Helper()
+		out, err := call("GetRandomPassword", in)
+		if err != nil {
+			t.Errorf("GetRandomPassword %v: %v", in, err)
+			return ""
+		}
+		return fmt.Sprint(out["RandomPassword"])
+	}
+	for range 20 {
+		if pw := password(map[string]any{"PasswordLength": 4, "IncludeSpace": true}); len(pw) == 4 && (!strings.ContainsAny(pw, "abcdefghijklmnopqrstuvwxyz") ||
+			!strings.ContainsAny(pw, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") || !strings.ContainsAny(pw, "0123456789") || !strings.ContainsAny(pw, punctuation)) {
+			t.Errorf("PasswordLength 4 with IncludeSpace answered %q, want one of each of the four types", pw)
+		}
+		one := map[string]any{"PasswordLength": 1, "IncludeSpace": true, "ExcludeLowercase": true, "ExcludeUppercase": true, "ExcludeNumbers": true}
+		if pw := password(one); pw != "" && !strings.Contains(punctuation, pw) {
+			t.Errorf("a one-character punctuation password with IncludeSpace answered %q", pw)
+		}
+	}
+	if pw := password(map[string]any{"PasswordLength": 4096, "IncludeSpace": true}); !strings.Contains(pw, " ") {
+		t.Errorf("IncludeSpace drew no space in 4096 characters")
+	}
+}
+
+// Filter.Key is a FilterNameStringType, an enum of description, name,
+// tag-key, tag-value, primary-region, owning-service and all, so any other
+// key is ValidationException in ListSecrets and BatchGetSecretValue, in the
+// framework's "1 validation error detected" wording, naming the value and
+// where it is. Before, an unknown key matched nothing.
+func TestSecretsManagerRefusesAnUnknownFilterKey(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "app", "SecretString": "v"})
+	filters := func(keys ...string) []any {
+		var out []any
+		for _, k := range keys {
+			out = append(out, map[string]any{"Key": k, "Values": []any{"a"}})
+		}
+		return out
+	}
+	for _, op := range []string{"ListSecrets", "BatchGetSecretValue"} {
+		_, err := call(op, map[string]any{"Filters": filters("name", "nmae")})
+		f, isFault := err.(*spi.Fault)
+		if !isFault || f.Code != "ValidationException" || !strings.Contains(f.Message, "Value 'nmae' at 'filters.2.member.key' failed to satisfy constraint: Member must satisfy enum value set") {
+			t.Errorf("%s with the key nmae answered %v, want ValidationException naming it", op, err)
+		}
+		if _, err := call(op, map[string]any{"Filters": filters("description", "name", "tag-key", "tag-value", "primary-region", "owning-service", "all")}); err != nil {
+			t.Errorf("%s refused the model's keys: %v", op, err)
+		}
+	}
+}
+
+// DescribeSecret "only returns fields that have a value in the response", so
+// a secret whose last replica was removed has no ReplicationStatus. Before,
+// it answered "ReplicationStatus": [].
+func TestSecretsManagerLeavesOutAnEmptyReplicationStatus(t *testing.T) {
+	_, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "r", "SecretString": "1"})
+	ok(t, "ReplicateSecretToRegions", map[string]any{"SecretId": "r", "AddReplicaRegions": []any{map[string]any{"Region": "us-west-2"}}})
+	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "r"}); got["ReplicationStatus"] == nil {
+		t.Fatalf("a replicated secret has no ReplicationStatus: %v", got)
+	}
+	ok(t, "RemoveRegionsFromReplication", map[string]any{"SecretId": "r", "RemoveReplicaRegions": []any{"us-west-2"}})
+	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "r"}); hasKey(got, "ReplicationStatus") {
+		t.Errorf("with its last replica removed, DescribeSecret answered ReplicationStatus %#v, want none", got["ReplicationStatus"])
+	}
+}
+
+// CreateSecret's Tags: "A list of tags to attach to the secret. Each tag is a
+// key and value pair of strings". They are kept as TagResource keeps them, so
+// DescribeSecret answers them, the tag-key and tag-value filters find the
+// secret, and a later TagResource adds to them. Before, CreateSecret dropped
+// them.
+func TestSecretsManagerCreateSecretKeepsItsTags(t *testing.T) {
+	_, ok, _ := secretsManager(t)
+	env := map[string]any{"Key": "env", "Value": "prod"}
+	ok(t, "CreateSecret", map[string]any{"Name": "a", "SecretString": "1", "Tags": []any{env}})
+	ok(t, "CreateSecret", map[string]any{"Name": "b", "SecretString": "1"})
+	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "a"})["Tags"]; !reflect.DeepEqual(got, []any{env}) {
+		t.Errorf("DescribeSecret answered Tags %v, want those CreateSecret gave", got)
+	}
+	names := func(rows any) []string {
+		var out []string
+		list, _ := rows.([]any)
+		for _, r := range list {
+			out = append(out, fmt.Sprint(r.(map[string]any)["Name"]))
+		}
+		return out
+	}
+	for _, f := range []map[string]any{{"Key": "tag-key", "Values": []any{"env"}}, {"Key": "tag-value", "Values": []any{"prod"}}} {
+		if got := names(ok(t, "ListSecrets", map[string]any{"Filters": []any{f}})["SecretList"]); !reflect.DeepEqual(got, []string{"a"}) {
+			t.Errorf("ListSecrets %v listed %v, want a", f, got)
+		}
+		if got := names(ok(t, "BatchGetSecretValue", map[string]any{"Filters": []any{f}})["SecretValues"]); !reflect.DeepEqual(got, []string{"a"}) {
+			t.Errorf("BatchGetSecretValue %v answered %v, want a", f, got)
+		}
+	}
+	team := map[string]any{"Key": "team", "Value": "core"}
+	ok(t, "TagResource", map[string]any{"SecretId": "a", "Tags": []any{team}})
+	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "a"})["Tags"]; !reflect.DeepEqual(got, []any{env, team}) {
+		t.Errorf("after TagResource DescribeSecret answered Tags %v, want env and team", got)
 	}
 }

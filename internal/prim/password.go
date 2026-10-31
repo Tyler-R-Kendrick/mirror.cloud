@@ -11,8 +11,10 @@ import (
 // The character classes of Secrets Manager's GetRandomPassword, as its
 // documentation lists them: "By default, Secrets Manager uses uppercase and
 // lowercase letters, numbers, and the following characters in passwords:
-// !\"#$%&'()*+,-./:;?@[\\]^_`{|}~". A space is a class of its own, used only
-// with IncludeSpace.
+// !\"#$%&'()*+,-./:;?@[\\]^_`{|}~". IncludeSpace adds a space to what a
+// password is drawn from, but not to the types RequireEachIncludedType
+// requires ("at least one upper and lowercase letter, one number, and one
+// punctuation"): "the password can contain space characters".
 var passwordClasses = []struct{ exclude, chars string }{
 	{"ExcludeLowercase", "abcdefghijklmnopqrstuvwxyz"},
 	{"ExcludeUppercase", "ABCDEFGHIJKLMNOPQRSTUVWXYZ"},
@@ -53,9 +55,6 @@ func RandomPassword(params map[string]any, seed string) (string, error) {
 			classes = append(classes, c.chars)
 		}
 	}
-	if on("IncludeSpace") {
-		classes = append(classes, " ")
-	}
 	var pool []string
 	for _, chars := range classes {
 		if kept := strings.Map(func(r rune) rune {
@@ -82,6 +81,9 @@ func RandomPassword(params map[string]any, seed string) (string, error) {
 	// randomness of its own.
 	rng := rand.New(seed)
 	all := strings.Join(pool, "")
+	if on("IncludeSpace") && !strings.Contains(excluded, " ") {
+		all += " "
+	}
 	out := make([]byte, 0, length)
 	if require {
 		for _, chars := range pool {

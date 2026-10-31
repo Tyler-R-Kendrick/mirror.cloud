@@ -115,14 +115,71 @@ The oracle is AWS's documentation as it ships in the vendored model
     name again.
   - `CreateSecret` gets `SecretString` and `Description` only when the template
     gives them.
-  - A secret the template does not name is `<stack>-<logical id>-<suffix>`,
-    the suffix the stack id's own random part, as CloudFormation names one; it
-    was the bare logical id, so a second stack from one template collided.
+  - A YAML template is read as YAML, with a YAML library: flow collections,
+    block scalars and every short-form intrinsic (`!Ref`, `!GetAtt`, `!Sub`,
+    and `!Name` for any other `Fn::Name`). The hand-written subset it replaced
+    read a flow sequence such as `Tags: [{Key: env, Value: dev}]` as a string
+    and refused a block scalar.
+  - A resource the template does not name, of any type, is made under
+    `<stack>-<logical id>-<suffix>`, the modelled form: the suffix is twelve
+    hex digits of a hash of the stack id and logical id, so no two stacks, and
+    no two resources of one stack, share a name. A bucket's name is lower
+    case. A queue with `FifoQueue` true is made a FIFO queue (`FifoQueue` was
+    not passed to `CreateQueue` before), and its name, when the engine makes
+    it, ends in `.fifo`. Characters other than letters, digits and hyphens are
+    dropped, and the stack name and logical id are cut, never the suffix, to
+    fit the service's longest name: 80 for a queue, 64 for a rule, a role or a
+    function, 128 for a stream, 255 for a table, 256 for a topic and 63 for a
+    bucket. Before, a secret's suffix was the stack id's, and most other types
+    were named for the bare logical id (a bucket `<stack>-<logical id>`, a
+    parameter and a log group under a path with the stack name), so a second
+    stack from one template failed on its table, or took over the first
+    stack's queue, topic and rule and deleted them when it rolled back.
+  - A name the template gives that a resource the stack did not make already
+    holds fails the stack before anything is made, with that service's error
+    for a name taken (`QueueAlreadyExists`, `BucketAlreadyOwnedByYou`,
+    `EntityAlreadyExists`, `ResourceInUseException` and so on; for a topic,
+    whose `CreateTopic` "is idempotent" and has none, CloudFormation's own
+    `AlreadyExistsException`, "The resource with the name requested already
+    exists."). The resource is left as it was. It is checked again just
+    before each create, since a name can come from a resource made before it.
+    A REST API is not checked: API Gateway holds no name to one API. Before, a
+    create that a service answers with what it already holds (a queue, topic,
+    rule, role, stream, log group or bucket here) took the resource over, and
+    the stack's rollback or `DeleteStack` deleted it.
+  - A stack name "must be unique in the Region in which you are creating the
+    stack", so `CreateStack` of a name a stack already has is
+    `AlreadyExistsException` ("Stack [name] already exists") and makes
+    nothing. Before, it made a second set of resources and wrote its record
+    over the first, which then belonged to no stack.
   - A `CreateStack` that fails rolls back what it had created, as
     CloudFormation's default `OnFailure` (`ROLLBACK`) does, deleting a secret
-    without a recovery window so its name is free again. The emulator keeps no
-    stack record for a failed create, so `DO_NOTHING` and `DELETE` are not
-    distinguished.
+    without a recovery window so its name is free again. A resource is
+    recorded the moment it exists, so one whose create failed partway (a
+    bucket whose configuration S3 refused, a rule whose targets EventBridge
+    refused) is deleted with the rest, and a create that failed outright
+    records nothing. The rollback deletes only what this create made: no two
+    stacks share a name the engine makes, and a given name another resource
+    already holds is refused before anything is made (above). `OnFailure` is
+    not read, so every failed create rolls back.
+  - A failed create keeps its stack, `ROLLBACK_COMPLETE` once the rollback
+    has deleted everything it made. The name stays taken (`CreateStack` is
+    `AlreadyExistsException`; `UpdateStack` is `ValidationError`, "Stack:...
+    is in ROLLBACK_COMPLETE state and can not be updated.") until
+    `DeleteStack` removes the stack ("Deleted stacks don't show up in the
+    DescribeStacks operation if the deletion has been completed
+    successfully"). A resource the rollback cannot delete stays listed by
+    `DescribeStackResources` as `DELETE_FAILED`, the stack is
+    `ROLLBACK_FAILED`, and the service's error is its `StackStatusReason`
+    ("Success/failure message associated with the stack status");
+    `DeleteStack` tries the resource again. A `DeleteStack` that cannot delete
+    a resource likewise leaves the stack `DELETE_FAILED`, listing what is
+    left, and answers the service's error at once, as this emulator's
+    `CreateStack` answers a provisioning error, where CloudFormation would
+    report it only in the stack's status. A resource already gone (its
+    service's not-found error) counts as deleted. Before, a failed create left
+    no stack, and `DeleteStack` dropped every delete error and removed the
+    stack whatever was left.
   - A failed `UpdateStack` rolls back as `UPDATE_ROLLBACK` does: what it
     created is deleted, what it changed is provisioned again from the
     previous template (a secret gets its previous value and description back
@@ -132,9 +189,15 @@ The oracle is AWS's documentation as it ships in the vendored model
     the changes stayed and the new resources were left behind.
   - `GenerateSecretString` makes the value with `GetRandomPassword`'s generator,
     seeded by the stack id and logical id, and puts it under `GenerateStringKey`
-    in `SecretStringTemplate` when the template gives one. `SecretString` beside
-    it, or only one of `GenerateStringKey` and `SecretStringTemplate`, is
-    `ValidationError`. Before, such a secret had no value.
+    in `SecretStringTemplate` when the template gives one. Its properties are
+    read as a template's are: a number or boolean may be given as its text
+    (`"16"`, `"true"`), which is how a `Ref` to a parameter gives one. Each
+    way it can be wrong is `ValidationError` with its own message: not an
+    object; `SecretString` beside it; `GenerateStringKey` without
+    `SecretStringTemplate`, or the reverse; a template that is not JSON, or
+    not a JSON object; a property of the wrong type or one it does not have,
+    named; and parameters no password meets, with the generator's reason.
+    Before, such a secret had no value.
 - **A secret scheduled for deletion refuses writes.** Every operation that
   writes to a secret answers `InvalidRequestException` ("Possible causes: The
   secret is scheduled for deletion."), which each of them lists among its
@@ -161,9 +224,12 @@ The oracle is AWS's documentation as it ships in the vendored model
   deletion with RestoreSecret").
 - **GetRandomPassword honours its parameters.** It answers `PasswordLength`
   characters (32 when absent) from the documented classes, minus
-  `ExcludeCharacters` and any class an `Exclude*` switch drops, plus a space
-  with `IncludeSpace`, and at least one of each class unless
-  `RequireEachIncludedType` is false. Parameters no password satisfies (a
+  `ExcludeCharacters` and any class an `Exclude*` switch drops, and at least
+  one of each class unless `RequireEachIncludedType` is false. With
+  `IncludeSpace` "the password can contain space characters": a space is
+  drawn like any other character but never required, since
+  `RequireEachIncludedType` asks for "at least one upper and lowercase
+  letter, one number, and one punctuation". Parameters no password satisfies (a
   length outside 1 to 4096, every class excluded, fewer characters than
   required classes) are `InvalidParameterException`. Before, it answered 32
   hex digits whatever it was asked. The generator is seeded, so a seed
@@ -176,17 +242,35 @@ The oracle is AWS's documentation as it ships in the vendored model
   case-sensitive." A value starting with `!` negates. Every filter must
   match, a filter matches when any of its values does, and with `all` every
   word must start a word of some attribute; the model does not say how
-  values combine, so that is this note's reading. Before, both operations
-  ignored `Filters`.
+  values combine, so that is this note's reading. `Filter.Key` is an enum
+  (`description`, `name`, `tag-key`, `tag-value`, `primary-region`,
+  `owning-service`, `all`), so any other key is `ValidationException`, in the
+  framework's wording: "1 validation error detected: Value 'nmae' at
+  'filters.2.member.key' failed to satisfy constraint: Member must satisfy
+  enum value set: [...]". No secret here has an owning service, so
+  `owning-service` matches none. Before, both operations ignored `Filters`.
   - `BatchGetSecretValue` refuses `Filters` with `SecretIdList` ("You must
     include Filters or SecretIdList, but not both") and a request with
     neither, with `InvalidParameterException`. The filter form pages with
     `MaxResults` and `NextToken` as `ListSecrets` does, leaves out a secret
     scheduled for deletion as `ListSecrets` does, and answers a secret with no
-    value as a not-found `Errors` row. The `SecretIdList` form is unchanged.
+    value as a not-found `Errors` row. Only the filter form pages:
+    `MaxResults` says "To use this parameter, you must also use the Filters
+    parameter", so the `SecretIdList` form with `MaxResults`, or with a
+    `NextToken`, which only the filter form answers, is
+    `InvalidParameterException`, and the `SecretIdList` form never answers a
+    `NextToken`. `MaxResults` outside its range, 1 to 20, is
+    `ValidationException` in either form. Before, the `SecretIdList` form with
+    `MaxResults` answered a `NextToken` whenever more secrets were stored than
+    the page held, and every page repeated the same values, so a caller
+    following it paged forever.
   - A listing page that keeps nothing while more secrets follow now moves
     `NextToken` past what it read; before, `ListSecrets` with a scheduled
     secret between two listed ones lost the second (an engine fix).
+- **CreateSecret keeps its Tags** ("A list of tags to attach to the
+  secret"), as `TagResource` keeps them, so `DescribeSecret` answers them, the
+  `tag-key` and `tag-value` filters find the secret and a later `TagResource`
+  adds to them. Before, `CreateSecret` dropped them.
 - **BatchGetSecretValue leaves out a secret scheduled for deletion.** Its value
   is not answered; it is an `Errors` row, an `APIErrorType` of `SecretId`,
   `ErrorCode` `InvalidRequestException` and `Message`. Before, its value was
@@ -206,7 +290,8 @@ The oracle is AWS's documentation as it ships in the vendored model
   `DeleteSecret`'s `ARN` for a secret that never existed. `Tags` is left out of
   a `ListSecrets` entry and of `DescribeSecret` when the secret has none,
   including after its last tag is removed; the listing wrote `"Tags": null`
-  and both wrote `[]`.
+  and both wrote `[]`. `ReplicationStatus` is likewise left out once the last
+  replica is removed; `DescribeSecret` wrote `[]`.
 - **Timestamps are epoch seconds.** `DeletionDate` and `DeletedDate` are
   timestamps (`DeletionDateType`, `DeletedDateType`) on an `awsJson1_1`
   service with no `timestampFormat` trait, so they are written as epoch

@@ -5,11 +5,17 @@ package cloudformation
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/url"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
@@ -110,13 +116,19 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 
 type stack struct {
 	Name, ID, Status, Template string
+	Reason                     string `json:",omitempty"` // StackStatusReason
 	Resources                  []res
 	Outputs                    []any
 	Refs                       map[string]string
 	Protect                    bool
 }
 
-type res struct{ Logical, Physical, Type string }
+// res is a resource a stack made, the name it was made under and, once a
+// delete of it failed, DELETE_FAILED.
+type res struct {
+	Logical, Physical, Type string
+	Name, Status            string `json:",omitempty"`
+}
 
 func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool) (*spi.Response, error) {
 	if name == "" {
@@ -134,29 +146,50 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	mergeParamDefaults(tpl, params)
 	id := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name + "/" + p.deps.Rand.Hex(8)
 	var old stack // what an update finds already provisioned
-	if update {
-		if found, err := p.load(ctx, req, name); err == nil {
-			old, id = found, found.ID
-		}
+	if found, err := p.load(ctx, req, name); err == nil && !update {
+		return nil, fault("AlreadyExistsException", "Stack ["+name+"] already exists")
+	} else if err == nil && (strings.HasPrefix(found.Status, "ROLLBACK_") || found.Status == "DELETE_FAILED") {
+		return nil, invalid("Stack:" + found.ID + " is in " + found.Status + " state and can not be updated.")
+	} else if err == nil {
+		old, id = found, found.ID
 	}
 	st := stack{Name: name, ID: id, Status: "CREATE_COMPLETE", Template: body, Refs: map[string]string{}}
 	maps.Copy(st.Refs, params)
 	if update {
 		st.Status = "UPDATE_COMPLETE"
 	}
+	fail := func(err error) (*spi.Response, error) {
+		if !update || old.ID == "" { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack
+			_ = p.unwind(ctx, req, st, "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
+		} else {
+			p.rollback(ctx, req, name, old, st.Resources)
+		}
+		return nil, err
+	}
 	resources, _ := tpl["Resources"].(map[string]any)
-	for _, logical := range slices.Sorted(maps.Keys(resources)) {
+	order := slices.Sorted(maps.Keys(resources))
+	for _, logical := range order { // a name taken fails the stack before anything is made
+		rm := asMap(resources[logical])
+		if _, err := p.claim(ctx, req, st, old, logical, str(rm["Type"]), asMap(p.resolve(rm["Properties"], st.Refs, req, name))); err != nil {
+			return fail(err)
+		}
+	}
+	for _, logical := range order {
 		rm, _ := resources[logical].(map[string]any)
 		typ := str(rm["Type"])
 		props := map[string]any{}
 		maps.Copy(props, asMap(p.resolve(rm["Properties"], st.Refs, req, name)))
-		phys, err := p.provision(ctx, req, typ, logical, name, props, old.Refs[logical], id)
-		if err != nil {
-			p.rollback(ctx, req, name, old, st.Resources)
-			return nil, err
+		phys, n, err := "", "", error(nil)
+		if n, err = p.claim(ctx, req, st, old, logical, typ, props); err == nil { // again: a name may come from a resource made before it
+			phys, err = p.provision(ctx, req, typ, logical, n, props, old.Refs[logical], id)
 		}
-		st.Refs[logical] = phys
-		st.Resources = append(st.Resources, res{Logical: logical, Physical: phys, Type: typ})
+		if phys != "" { // recorded once it exists, so a rollback finds a half-made one too
+			st.Refs[logical] = phys
+			st.Resources = append(st.Resources, res{Logical: logical, Physical: phys, Type: typ, Name: n})
+		}
+		if err != nil {
+			return fail(err)
+		}
 	}
 	outs := asMap(tpl["Outputs"])
 	for _, k := range slices.Sorted(maps.Keys(outs)) {
@@ -207,9 +240,35 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 	if st.Protect {
 		return nil, invalid("stack has termination protection")
 	}
-	p.deprovision(ctx, req, st.Resources...)
-	_ = p.col(req, "cfn").Delete(ctx, name)
+	if err := p.unwind(ctx, req, st, "DELETE_COMPLETE", "DELETE_FAILED"); err != nil {
+		return nil, err
+	}
 	return &spi.Response{Output: map[string]any{}}, nil
+}
+
+// unwind deletes a stack's resources, newest first, as a rollback or a
+// DeleteStack does, and records the outcome. With nothing left the stack is
+// done (a DELETE_COMPLETE stack is removed); otherwise it is failed, the
+// resources left listed as DELETE_FAILED for the next DeleteStack to try
+// again and the first error, which unwind answers, its StackStatusReason.
+func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, done, failed string) error {
+	var left []res
+	var first error
+	for _, r := range slices.Backward(st.Resources) {
+		if err := p.deprovision(ctx, req, r); err != nil {
+			r.Status, first = "DELETE_FAILED", cmp.Or(first, err)
+			left = append([]res{r}, left...)
+		}
+	}
+	st.Resources, st.Status, st.Reason = left, done, ""
+	if first != nil {
+		st.Status, st.Reason = failed, first.Error()
+	}
+	if st.Status == "DELETE_COMPLETE" {
+		return p.col(req, "cfn").Delete(ctx, st.Name)
+	}
+	raw, _ := json.Marshal(st)
+	return cmp.Or(first, p.col(req, "cfn").Put(ctx, st.Name, raw))
 }
 
 func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, error) {
@@ -222,40 +281,116 @@ func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, 
 	return st, nil
 }
 
+// kinds are the types provision names: the property that names one, the
+// longest name its service takes (API Gateway sets none for a REST API, and
+// holds no name to one API; 1024 only bounds it), a read that finds one by
+// name, and the service's error for a name taken (SNS has none, its
+// CreateTopic "is idempotent", so CloudFormation's own).
+var kinds = map[string]struct {
+	member            string
+	max               int
+	svc, op, in, code string
+}{
+	"AWS::S3::Bucket":             {"BucketName", 63, "aws.s3", "HeadBucket", "Bucket", "BucketAlreadyOwnedByYou"},
+	"AWS::SQS::Queue":             {"QueueName", 80, "aws.sqs", "GetQueueUrl", "QueueName", "QueueAlreadyExists"},
+	"AWS::SNS::Topic":             {"TopicName", 256, "aws.sns", "GetTopicAttributes", "TopicArn", "AlreadyExistsException"},
+	"AWS::DynamoDB::Table":        {"TableName", 255, "aws.dynamodb", "DescribeTable", "TableName", "ResourceInUseException"},
+	"AWS::IAM::Role":              {"RoleName", 64, "aws.iam", "GetRole", "RoleName", "EntityAlreadyExists"},
+	"AWS::SSM::Parameter":         {"Name", 2048, "aws.ssm", "GetParameter", "Name", "ParameterAlreadyExists"},
+	"AWS::SecretsManager::Secret": {"Name", 512, "aws.secretsmanager", "DescribeSecret", "SecretId", "ResourceExistsException"},
+	"AWS::Logs::LogGroup":         {"LogGroupName", 512, "aws.logs", "DescribeLogGroups", "logGroupNamePrefix", "ResourceAlreadyExistsException"},
+	"AWS::Events::Rule":           {"Name", 64, "aws.events", "DescribeRule", "Name", "ResourceAlreadyExistsException"},
+	"AWS::Lambda::Function":       {"FunctionName", 64, "aws.lambda", "GetFunction", "FunctionName", "ResourceConflictException"},
+	"AWS::Kinesis::Stream":        {"Name", 128, "aws.kinesis", "DescribeStreamSummary", "StreamName", "ResourceInUseException"},
+	"AWS::ApiGateway::RestApi":    {"Name", 1024, "", "", "", ""},
+}
+
+// claim answers the name a resource is made under: the template's, or else
+// physicalName's. A given name that a resource the stack did not make under
+// it already holds is the service's error for a name taken: several services
+// answer a create of a name they hold with what they hold, so the stack
+// would take the resource over, and its rollback or DeleteStack delete it.
+func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logical, typ string, props map[string]any) (string, error) {
+	k, n := kinds[typ], str(props[kinds[typ].member])
+	if n == "" {
+		return physicalName(st.Name, logical, st.ID, typ, props), nil
+	}
+	id := n
+	if k.in == "TopicArn" {
+		id = "arn:aws:sns:" + req.Identity.Region + ":" + req.Identity.Account + ":" + n
+	}
+	out, err := p.call(ctx, req, k.svc, k.op, map[string]any{k.in: id})
+	groups, list := out["logGroups"].([]any) // DescribeLogGroups answers a list by prefix, never a fault
+	if err != nil || list && !slices.ContainsFunc(groups, func(g any) bool { return str(asMap(g)["logGroupName"]) == n }) ||
+		slices.ContainsFunc(old.Resources, func(r res) bool { return r.Logical == logical && r.Name == n }) {
+		return n, nil
+	}
+	return "", fault(k.code, "Resource of type '"+typ+"' with identifier '"+n+"' already exists.")
+}
+
+var unnameable = regexp.MustCompile(`[^A-Za-z0-9-]+`)
+
+func fifo(p map[string]any) bool { return p["FifoQueue"] == true || str(p["FifoQueue"]) == "true" }
+
+// physicalName is the name of a resource the template leaves unnamed, in
+// the modelled form <stack>-<logical id>-<suffix>. The suffix is twelve hex
+// digits of a hash of the stack id and logical id, so no two stacks, and no
+// two resources of one stack, share a name, and an update finds the name
+// its create made. Only letters, digits and hyphens are kept; a bucket's
+// name is lower case and a FIFO queue's ends in .fifo; and the stack name
+// and logical id, never the suffix, are cut to fit the service's longest.
+func physicalName(stack, logical, stackID, typ string, props map[string]any) string {
+	k, named := kinds[typ]
+	if !named {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(stackID + "/" + logical))
+	end := "-" + hex.EncodeToString(sum[:6])
+	if typ == "AWS::SQS::Queue" && fifo(props) {
+		end += ".fifo"
+	}
+	s, l, room := unnameable.ReplaceAllString(stack, ""), unnameable.ReplaceAllString(logical, ""), k.max-len(end)-1
+	l = l[:min(len(l), max(room/2, room-len(s)))]
+	n := s[:min(len(s), room-len(l))] + "-" + l + end
+	if typ == "AWS::S3::Bucket" {
+		return strings.ToLower(n)
+	}
+	return n
+}
+
 // provision creates a resource through the service that owns it, and answers
 // the resource's physical id. Going through the owner's API keeps its store
 // layout, validation and cascades that service's business.
-func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, stack string, props map[string]any, existing, stackID string) (string, error) {
-	name := func(member, fallback string) string { return cmp.Or(str(props[member]), fallback) }
+func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n string, props map[string]any, existing, stackID string) (string, error) {
 	switch typ {
 	case "AWS::S3::Bucket":
-		n := name("BucketName", strings.ToLower(stack+"-"+logical))
 		if _, err := p.call(ctx, req, "aws.s3", "CreateBucket", map[string]any{"Bucket": n}); err != nil {
 			return "", err
 		}
 		return n, p.configureBucket(ctx, req, n, props)
 	case "AWS::SQS::Queue":
-		out, err := p.call(ctx, req, "aws.sqs", "CreateQueue", map[string]any{"QueueName": name("QueueName", logical)})
+		in := map[string]any{"QueueName": n}
+		if fifo(props) {
+			in["Attributes"] = map[string]any{"FifoQueue": "true"}
+		}
+		out, err := p.call(ctx, req, "aws.sqs", "CreateQueue", in)
 		return str(out["QueueUrl"]), err
 	case "AWS::SNS::Topic":
-		out, err := p.call(ctx, req, "aws.sns", "CreateTopic", map[string]any{"Name": name("TopicName", logical)})
+		out, err := p.call(ctx, req, "aws.sns", "CreateTopic", map[string]any{"Name": n})
 		return str(out["TopicArn"]), err
 	case "AWS::DynamoDB::Table":
 		in := maps.Clone(props)
-		in["TableName"] = name("TableName", logical)
+		in["TableName"] = n
 		_, err := p.call(ctx, req, "aws.dynamodb", "CreateTable", in)
-		return str(in["TableName"]), err
+		return made(n, err)
 	case "AWS::IAM::Role":
-		out, err := p.call(ctx, req, "aws.iam", "CreateRole", map[string]any{"RoleName": name("RoleName", logical), "AssumeRolePolicyDocument": jsonText(props["AssumeRolePolicyDocument"])})
+		out, err := p.call(ctx, req, "aws.iam", "CreateRole", map[string]any{"RoleName": n, "AssumeRolePolicyDocument": jsonText(props["AssumeRolePolicyDocument"])})
 		return str(asMap(out["Role"])["Arn"]), err
 	case "AWS::SSM::Parameter":
-		n := name("Name", "/"+stack+"/"+logical)
-		_, err := p.call(ctx, req, "aws.ssm", "PutParameter", map[string]any{"Name": n, "Value": str(props["Value"]), "Type": name("Type", "String")})
-		return n, err
+		_, err := p.call(ctx, req, "aws.ssm", "PutParameter", map[string]any{"Name": n, "Value": str(props["Value"]), "Type": cmp.Or(str(props["Type"]), "String")})
+		return made(n, err)
 	case "AWS::SecretsManager::Secret":
 		// existing is what an update finds; a second CreateSecret of its name is ResourceExistsException.
-		// Unnamed, it is <stack>-<logical id>-<suffix> as CloudFormation names it, the suffix the stack id's.
-		n := name("Name", stack+"-"+logical+"-"+lastSlash(stackID))
 		op, in := "CreateSecret", map[string]any{"Name": n}
 		if strings.HasSuffix(existing, ":secret:"+n) {
 			op, in = "UpdateSecret", map[string]any{"SecretId": existing}
@@ -273,11 +408,10 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 		out, err := p.call(ctx, req, "aws.kms", "CreateKey", map[string]any{"Description": str(props["Description"])})
 		return str(asMap(out["KeyMetadata"])["KeyId"]), err
 	case "AWS::Logs::LogGroup":
-		n := name("LogGroupName", "/aws/"+stack+"/"+logical)
 		_, err := p.call(ctx, req, "aws.logs", "CreateLogGroup", map[string]any{"logGroupName": n})
-		return n, err
+		return made(n, err)
 	case "AWS::Events::Rule":
-		in := given(map[string]any{"Name": name("Name", logical)}, props, "ScheduleExpression", "State", "Description", "EventBusName")
+		in := given(map[string]any{"Name": n}, props, "ScheduleExpression", "State", "Description", "EventBusName")
 		if pattern, ok := props["EventPattern"]; ok {
 			in["EventPattern"] = jsonText(pattern)
 		}
@@ -288,43 +422,40 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 		return str(out["RuleArn"]), err
 	case "AWS::Lambda::Function":
 		in := maps.Clone(props)
-		in["FunctionName"] = name("FunctionName", logical)
+		in["FunctionName"] = n
 		out, err := p.call(ctx, req, "aws.lambda", "CreateFunction", in)
 		return str(out["FunctionArn"]), err
 	case "AWS::Kinesis::Stream":
-		n := name("Name", logical)
 		_, err := p.call(ctx, req, "aws.kinesis", "CreateStream", map[string]any{"StreamName": n})
-		return n, err
+		return made(n, err)
 	case "AWS::Kinesis::ResourcePolicy":
-		arn := name("ResourceArn", str(props["ResourceARN"]))
+		arn := cmp.Or(str(props["ResourceArn"]), str(props["ResourceARN"]))
 		policy := props["ResourcePolicy"]
 		if policy == nil {
 			policy = props["Policy"]
 		}
 		_, err := p.call(ctx, req, "aws.kinesis", "PutResourcePolicy", map[string]any{"ResourceARN": arn, "Policy": jsonText(policy)})
-		return arn, err
+		return made(arn, err)
 	case "AWS::ApiGateway::RestApi":
-		out, err := p.call(ctx, req, "aws.apigateway", "CreateRestApi", map[string]any{"name": name("Name", logical)})
+		out, err := p.call(ctx, req, "aws.apigateway", "CreateRestApi", map[string]any{"name": n})
 		return str(out["id"]), err
 	default:
 		return "", invalid("unsupported resource type " + typ)
 	}
 }
 
-// rollback undoes a failed create (OnFailure ROLLBACK: delete what it made) or update (UPDATE_ROLLBACK:
-// delete what it made, provision what it changed from the previous template, keep that template and its
-// resources as UPDATE_ROLLBACK_COMPLETE; an update never deletes a replaced resource, so none is recreated).
+// rollback undoes a failed update as UPDATE_ROLLBACK does: what it made is
+// deleted, what it changed is provisioned again from the previous template,
+// and the stack keeps that template and its resources as
+// UPDATE_ROLLBACK_COMPLETE. An update never deletes a replaced resource, so
+// none is recreated.
 func (p *Pack) rollback(ctx context.Context, req *spi.Request, name string, old stack, made []res) {
-	if old.ID == "" {
-		p.deprovision(ctx, req, made...)
-		return
-	}
 	tpl, _ := parseTemplate(old.Template)
-	for i := len(made) - 1; i >= 0; i-- {
-		if r := made[i]; old.Refs[r.Logical] != r.Physical {
-			p.deprovision(ctx, req, r)
+	for _, r := range slices.Backward(made) {
+		if old.Refs[r.Logical] != r.Physical {
+			_ = p.deprovision(ctx, req, r)
 		} else if props := asMap(p.resolve(asMap(asMap(tpl["Resources"])[r.Logical])["Properties"], old.Refs, req, name)); props != nil {
-			_, _ = p.provision(ctx, req, r.Type, r.Logical, name, props, r.Physical, old.ID)
+			_, _ = p.provision(ctx, req, r.Type, r.Logical, r.Name, props, r.Physical, old.ID)
 		}
 	}
 	old.Status = "UPDATE_ROLLBACK_COMPLETE"
@@ -332,35 +463,46 @@ func (p *Pack) rollback(ctx context.Context, req *spi.Request, name string, old 
 	_ = p.col(req, "cfn").Put(ctx, name, raw)
 }
 
-// deprovision deletes resources through their owners, newest first. Failures
-// are ignored, as a stack delete proceeds past a resource that is already gone.
-func (p *Pack) deprovision(ctx context.Context, req *spi.Request, rs ...res) {
-	for i := len(rs) - 1; i >= 0; i-- {
-		r := rs[i]
-		id := r.Physical
-		del := map[string]struct {
-			svc, op string
-			in      map[string]any
-		}{
-			"AWS::S3::Bucket":              {"aws.s3", "DeleteBucket", map[string]any{"Bucket": id}},
-			"AWS::SQS::Queue":              {"aws.sqs", "DeleteQueue", map[string]any{"QueueUrl": id}},
-			"AWS::SNS::Topic":              {"aws.sns", "DeleteTopic", map[string]any{"TopicArn": id}},
-			"AWS::DynamoDB::Table":         {"aws.dynamodb", "DeleteTable", map[string]any{"TableName": id}},
-			"AWS::IAM::Role":               {"aws.iam", "DeleteRole", map[string]any{"RoleName": lastSlash(id)}},
-			"AWS::SSM::Parameter":          {"aws.ssm", "DeleteParameter", map[string]any{"Name": id}},
-			"AWS::SecretsManager::Secret":  {"aws.secretsmanager", "DeleteSecret", map[string]any{"SecretId": id, "ForceDeleteWithoutRecovery": true}},
-			"AWS::KMS::Key":                {"aws.kms", "ScheduleKeyDeletion", map[string]any{"KeyId": id, "PendingWindowInDays": 7}},
-			"AWS::Logs::LogGroup":          {"aws.logs", "DeleteLogGroup", map[string]any{"logGroupName": id}},
-			"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": lastSlash(id), "Force": true}},
-			"AWS::Lambda::Function":        {"aws.lambda", "DeleteFunction", map[string]any{"FunctionName": lastColon(id)}},
-			"AWS::Kinesis::Stream":         {"aws.kinesis", "DeleteStream", map[string]any{"StreamName": id}},
-			"AWS::Kinesis::ResourcePolicy": {"aws.kinesis", "DeleteResourcePolicy", map[string]any{"ResourceARN": id}},
-			"AWS::ApiGateway::RestApi":     {"aws.apigateway", "DeleteRestApi", map[string]any{"restApiId": id}},
-		}[r.Type]
-		if del.svc != "" {
-			_, _ = p.call(ctx, req, del.svc, del.op, del.in)
-		}
+// made answers the id of what a create made: none when it failed.
+func made(id string, err error) (string, error) {
+	if err != nil {
+		return "", err
 	}
+	return id, nil
+}
+
+// deprovision deletes a resource through its owner. One already gone (the
+// owner's not-found error) counts as deleted, as a stack delete proceeds past it.
+func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) error {
+	id := r.Physical
+	del := map[string]struct {
+		svc, op string
+		in      map[string]any
+	}{
+		"AWS::S3::Bucket":              {"aws.s3", "DeleteBucket", map[string]any{"Bucket": id}},
+		"AWS::SQS::Queue":              {"aws.sqs", "DeleteQueue", map[string]any{"QueueUrl": id}},
+		"AWS::SNS::Topic":              {"aws.sns", "DeleteTopic", map[string]any{"TopicArn": id}},
+		"AWS::DynamoDB::Table":         {"aws.dynamodb", "DeleteTable", map[string]any{"TableName": id}},
+		"AWS::IAM::Role":               {"aws.iam", "DeleteRole", map[string]any{"RoleName": lastSlash(id)}},
+		"AWS::SSM::Parameter":          {"aws.ssm", "DeleteParameter", map[string]any{"Name": id}},
+		"AWS::SecretsManager::Secret":  {"aws.secretsmanager", "DeleteSecret", map[string]any{"SecretId": id, "ForceDeleteWithoutRecovery": true}},
+		"AWS::KMS::Key":                {"aws.kms", "ScheduleKeyDeletion", map[string]any{"KeyId": id, "PendingWindowInDays": 7}},
+		"AWS::Logs::LogGroup":          {"aws.logs", "DeleteLogGroup", map[string]any{"logGroupName": id}},
+		"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": lastSlash(id), "Force": true}},
+		"AWS::Lambda::Function":        {"aws.lambda", "DeleteFunction", map[string]any{"FunctionName": lastColon(id)}},
+		"AWS::Kinesis::Stream":         {"aws.kinesis", "DeleteStream", map[string]any{"StreamName": id}},
+		"AWS::Kinesis::ResourcePolicy": {"aws.kinesis", "DeleteResourcePolicy", map[string]any{"ResourceARN": id}},
+		"AWS::ApiGateway::RestApi":     {"aws.apigateway", "DeleteRestApi", map[string]any{"restApiId": id}},
+	}[r.Type]
+	if del.svc == "" {
+		return nil
+	}
+	_, err := p.call(ctx, req, del.svc, del.op, del.in)
+	var f *spi.Fault
+	if errors.As(err, &f) && (strings.Contains(f.Code, "NotFound") || strings.Contains(f.Code, "NoSuch") || strings.Contains(f.Code, "NonExistent")) {
+		return nil
+	}
+	return err
 }
 
 // call invokes another service the way the edge would: through whatever the
@@ -444,23 +586,63 @@ func given(in, props map[string]any, members ...string) map[string]any {
 // generated is the value GenerateSecretString asks for: a password made as
 // GetRandomPassword makes one, seeded by the stack and logical id, and put
 // under GenerateStringKey in SecretStringTemplate when the template gives one.
+// Each way the property can be wrong has its own ValidationError.
 func generated(props map[string]any, seed string) (string, error) {
-	spec, doc := asMap(props["GenerateSecretString"]), map[string]any{}
-	value, err := prim.RandomPassword(spec, seed)
+	spec, isMap := props["GenerateSecretString"].(map[string]any)
 	key, tpl := str(spec["GenerateStringKey"]), str(spec["SecretStringTemplate"])
-	if _, both := props["SecretString"]; both || err != nil || (key == "") != (tpl == "") || tpl != "" && (json.Unmarshal([]byte(tpl), &doc) != nil || doc == nil) {
-		return "", invalid("GenerateSecretString: no SecretString beside it, GenerateStringKey and SecretStringTemplate (a JSON object) together, and a password its parameters allow")
+	_, both := props["SecretString"]
+	var doc any
+	switch {
+	case !isMap:
+		return "", invalid("GenerateSecretString must be an object, not " + jsonText(props["GenerateSecretString"]))
+	case both:
+		return "", invalid("SecretString and GenerateSecretString can't both be given")
+	case tpl == "" && key != "":
+		return "", invalid("GenerateStringKey needs a SecretStringTemplate to put the password in")
+	case tpl != "" && key == "":
+		return "", invalid("SecretStringTemplate needs a GenerateStringKey to name the password")
+	case tpl != "" && json.Unmarshal([]byte(tpl), &doc) != nil:
+		return "", invalid("SecretStringTemplate must be JSON: " + tpl)
+	case tpl != "" && asMap(doc) == nil:
+		return "", invalid("SecretStringTemplate must be a JSON object, not " + tpl)
 	}
-	if key == "" {
+	params := map[string]any{}
+	for member, v := range spec {
+		// A template's number or boolean may be its text ("16", "true"), as a Ref to a parameter always is.
+		want, text := generateTypes[member], str(v)
+		if n, err := strconv.ParseFloat(text, 64); want == "number" && err == nil {
+			v = n
+		} else if want == "boolean" && (text == "true" || text == "false") {
+			v = text == "true"
+		}
+		if want == "" {
+			return "", invalid("GenerateSecretString has no property " + member)
+		}
+		if got := map[string]string{"float64": "number", "int": "number", "bool": "boolean", "string": "string"}[fmt.Sprintf("%T", v)]; got != want {
+			return "", invalid("GenerateSecretString." + member + " must be a " + want + ", not " + jsonText(v))
+		}
+		params[member] = v
+	}
+	value, err := prim.RandomPassword(params, seed)
+	if err != nil {
+		return "", invalid("GenerateSecretString makes no password: " + err.Error())
+	} else if key == "" {
 		return value, nil
 	}
-	doc[key] = value
+	asMap(doc)[key] = value
 	raw, err := json.Marshal(doc)
 	return string(raw), err
 }
 
-func invalid(message string) *spi.Fault {
-	return &spi.Fault{Code: "ValidationError", Message: message, HTTPStatus: 400, Fault: "client"}
+// generateTypes are GenerateSecretString's properties and their types.
+var generateTypes = map[string]string{"PasswordLength": "number", "ExcludeCharacters": "string", "GenerateStringKey": "string",
+	"SecretStringTemplate": "string", "ExcludeLowercase": "boolean", "ExcludeUppercase": "boolean", "ExcludeNumbers": "boolean",
+	"ExcludePunctuation": "boolean", "IncludeSpace": "boolean", "RequireEachIncludedType": "boolean"}
+
+func invalid(message string) *spi.Fault { return fault("ValidationError", message) }
+
+func fault(code, message string) *spi.Fault {
+	return &spi.Fault{Code: code, Message: message, HTTPStatus: 400, Fault: "client"}
 }
 
 func asMap(v any) map[string]any { m, _ := v.(map[string]any); return m }

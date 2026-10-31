@@ -2,8 +2,9 @@ schema: bir/1
 service: aws.cloudformation
 
 # Transcribed from the hand-written pack, not established against the real
-# service. Stacks are records keyed by name; nothing ever fails
-# asynchronously, every create is COMPLETE the moment it is written, and the
+# service. Stacks are records keyed by name; nothing runs asynchronously, so a
+# stack is CREATE_COMPLETE, or ROLLBACK_COMPLETE or ROLLBACK_FAILED when its
+# create failed, the moment CreateStack answers, and the
 # describe family over stack sets, types, templates, scans and refactors
 # answers an empty record instead of faulting on an absent one.
 provenance: authored
@@ -16,10 +17,10 @@ provenance: authored
 missing_input_error: Validation
 
 # The template engine is Go, in internal/services/aws/cloudformation:
-# CreateStack, UpdateStack and ExecuteChangeSet parse a JSON or YAML-subset
+# CreateStack, UpdateStack and ExecuteChangeSet parse a JSON or YAML
 # template, resolve Ref/GetAtt/Join/Sub against pseudo-parameters, and
 # provision each resource through the service that owns it; DeleteStack
-# deprovisions them in reverse; ValidateTemplate and GetTemplateSummary parse
+# deprovisions them in reverse, keeping any it cannot delete; ValidateTemplate and GetTemplateSummary parse
 # without provisioning; ListExports flattens every stack's outputs. The stack
 # record below is the one the engine writes.
 native: [CreateStack, UpdateStack, DeleteStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports]
@@ -137,10 +138,13 @@ operations:
       member: Stacks
       paginate: model
       key: "'StackName' in input ? string(input.StackName) : ''"
+    # StackStatusReason ("Success/failure message associated with the stack
+    # status") is the error a failed rollback or delete kept.
     output:
       Stacks: >-
-        items.map(s, {'StackName': s.Name, 'StackId': s.ID,
-          'StackStatus': s.Status, 'Outputs': s.Outputs})
+        items.map(s, merge({'StackName': s.Name, 'StackId': s.ID,
+          'StackStatus': s.Status, 'Outputs': s.Outputs},
+          'Reason' in s ? {'StackStatusReason': s.Reason} : {}))
 
   ListStacks:
     list:
@@ -170,7 +174,7 @@ operations:
       StackResourceSummaries: >-
         s.Resources.map(r, {'LogicalResourceId': r.Logical,
           'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
-          'ResourceStatus': 'CREATE_COMPLETE'})
+          'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'})
 
   DescribeStackEvents:
     reads:
@@ -199,8 +203,8 @@ operations:
         s.Resources.filter(r, r.Logical ==
           string(input.LogicalResourceId)).map(r, {'LogicalResourceId':
           r.Logical, 'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
-          'ResourceStatus': 'CREATE_COMPLETE', 'StackName': s.Name,
-          'StackId': s.ID})[0]
+          'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE',
+          'StackName': s.Name, 'StackId': s.ID})[0]
 
   UpdateTerminationProtection:
     reads:
@@ -229,7 +233,7 @@ operations:
       StackResources: >-
         s_found && 'Resources' in s && s.Resources != null
           ? s.Resources.map(r, {'LogicalResourceId': r.Logical, 'PhysicalResourceId': r.Physical,
-              'ResourceType': r.Type, 'ResourceStatus': 'CREATE_COMPLETE'})
+              'ResourceType': r.Type, 'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'})
           : []
 
   # The rollback family conjures a fresh record for an absent stack rather
@@ -953,8 +957,8 @@ operations:
 quirks:
   - operation: CreateStack
     note: >
-      Shadowed: parses the template (JSON, or a YAML subset with
-      !Ref/!GetAtt/!Sub), merges Parameters.member.N form fields with
+      Shadowed: parses the template (JSON, or YAML with the short-form
+      intrinsics), merges Parameters.member.N form fields with
       template defaults, resolves Ref/GetAtt/Join/Sub against
       pseudo-parameters, and provisions fourteen resource types into the
       sibling services' collections -- buckets with their versioning, tags
@@ -1108,5 +1112,5 @@ quirks:
     note: >
       Shadowed: parses the template body and answers its declared parameters.
       The engine's model check on absent required members does not apply --
-      none are declared -- and the pack's YAML subset parser is the shadow
+      none are declared -- and the pack's template parsing is the shadow
       reason.

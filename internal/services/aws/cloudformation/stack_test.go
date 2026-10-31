@@ -662,13 +662,18 @@ func TestCloudFormationRefusesYAMLAliases(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			for _, op := range []string{"ValidateTemplate", "CreateStack", "GetTemplateSummary"} {
-				start := time.Now()
-				_, err := h.invoke(op, map[string]any{"StackName": "y", "TemplateBody": c.body})
-				if code(err) != "ValidationError" || !strings.Contains(err.Error(), c.says) {
-					t.Errorf("%s answered %v, want a ValidationError about %s", op, err, c.says)
-				}
-				if took := time.Since(start); took > 2*time.Second {
-					t.Errorf("%s took %v", op, took)
+				answered := make(chan error, 1)
+				go func() {
+					_, err := h.invoke(op, map[string]any{"StackName": "y", "TemplateBody": c.body})
+					answered <- err
+				}()
+				select {
+				case err := <-answered:
+					if code(err) != "ValidationError" || !strings.Contains(err.Error(), c.says) {
+						t.Errorf("%s answered %v, want a ValidationError about %s", op, err, c.says)
+					}
+				case <-time.After(2 * time.Second):
+					t.Errorf("%s did not answer within 2s", op)
 				}
 			}
 		})

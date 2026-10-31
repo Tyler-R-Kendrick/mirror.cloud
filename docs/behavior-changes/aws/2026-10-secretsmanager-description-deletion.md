@@ -164,9 +164,15 @@ The oracle is AWS's documentation as it ships in the vendored model
     stack whatever was left.
   - `GenerateSecretString` makes the value with `GetRandomPassword`'s generator,
     seeded by the stack id and logical id, and puts it under `GenerateStringKey`
-    in `SecretStringTemplate` when the template gives one. `SecretString` beside
-    it, or only one of `GenerateStringKey` and `SecretStringTemplate`, is
-    `ValidationError`. Before, such a secret had no value.
+    in `SecretStringTemplate` when the template gives one. Its properties are
+    read as a template's are: a number or boolean may be given as its text
+    (`"16"`, `"true"`), which is how a `Ref` to a parameter gives one. Each
+    way it can be wrong is `ValidationError` with its own message: not an
+    object; `SecretString` beside it; `GenerateStringKey` without
+    `SecretStringTemplate`, or the reverse; a template that is not JSON, or
+    not a JSON object; a property of the wrong type or one it does not have,
+    named; and parameters no password meets, with the generator's reason.
+    Before, such a secret had no value.
 - **A secret scheduled for deletion refuses writes.** Every operation that
   writes to a secret answers `InvalidRequestException` ("Possible causes: The
   secret is scheduled for deletion."), which each of them lists among its

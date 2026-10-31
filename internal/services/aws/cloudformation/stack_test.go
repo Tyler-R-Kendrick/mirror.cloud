@@ -544,3 +544,90 @@ func TestCloudFormationARollbackThatFailsLeavesItsStack(t *testing.T) {
 		t.Errorf("DescribeStacks after DeleteStack answered %v, want ValidationError (no such stack)", err)
 	}
 }
+
+// GenerateSecretString's properties are read as a template's are: a number
+// or a boolean may be given as its text ("16", "true"), which is how a Ref
+// to a Number parameter, or a YAML scalar quoted, gives one. Any other value
+// of the wrong type is ValidationError naming the property, and each way a
+// GenerateSecretString can be wrong has its own message. Before, "16" and a
+// Ref'd length were refused as no password, "true" read as false, and the
+// refusals shared one message.
+func TestCloudFormationReadsGenerateSecretStringAsATemplateDoes(t *testing.T) {
+	h := newStacks(t)
+	stacks := 0
+	generate := func(props map[string]any, params map[string]any) (string, error) {
+		t.Helper()
+		stacks++
+		stack := "gen" + strings.Repeat("x", stacks)
+		tpl, _ := json.Marshal(map[string]any{"Parameters": params, "Resources": map[string]any{"S": map[string]any{"Type": "AWS::SecretsManager::Secret", "Properties": props}}})
+		if _, err := h.invoke("CreateStack", map[string]any{"StackName": stack, "TemplateBody": string(tpl)}); err != nil {
+			return "", err
+		}
+		out, err := h.service("aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": h.resources(stack)[0].Physical})
+		if err != nil {
+			t.Fatalf("GetSecretValue for %s: %v", stack, err)
+		}
+		return str(out["SecretString"]), nil
+	}
+	spec := func(kv ...any) map[string]any {
+		m := map[string]any{}
+		for i := 0; i < len(kv); i += 2 {
+			m[kv[i].(string)] = kv[i+1]
+		}
+		return map[string]any{"GenerateSecretString": m}
+	}
+	const punctuation = "!\"#$%&'()*+,-./:;?@[\\]^_`{|}~"
+	for _, c := range []struct {
+		name   string
+		props  map[string]any
+		params map[string]any
+		check  func(string) bool
+	}{
+		{"PasswordLength \"16\"", spec("PasswordLength", "16"), nil, func(v string) bool { return len(v) == 16 }},
+		{"PasswordLength from a Number parameter", spec("PasswordLength", map[string]any{"Ref": "Len"}),
+			map[string]any{"Len": map[string]any{"Type": "Number", "Default": "20"}}, func(v string) bool { return len(v) == 20 }},
+		{"ExcludePunctuation \"true\"", spec("PasswordLength", 200, "ExcludePunctuation", "true"), nil, func(v string) bool { return !strings.ContainsAny(v, punctuation) }},
+		{"ExcludePunctuation \"false\"", spec("PasswordLength", 4, "ExcludePunctuation", "false"), nil, func(v string) bool { return strings.ContainsAny(v, punctuation) }},
+	} {
+		if v, err := generate(c.props, c.params); err != nil || !c.check(v) {
+			t.Errorf("%s generated %q (%v)", c.name, v, err)
+		}
+	}
+	yaml := "Resources:\n  S:\n    Type: AWS::SecretsManager::Secret\n    Properties:\n      GenerateSecretString:\n        PasswordLength: 16\n        ExcludePunctuation: 'true'\n"
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "yaml", "TemplateBody": yaml}); err != nil {
+		t.Errorf("a YAML GenerateSecretString: %v", err)
+	} else if out, err := h.service("aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": h.resources("yaml")[0].Physical}); err != nil ||
+		len(str(out["SecretString"])) != 16 || strings.ContainsAny(str(out["SecretString"]), punctuation) {
+		t.Errorf("the YAML GenerateSecretString generated %v (%v)", out["SecretString"], err)
+	}
+
+	seen := map[string]string{}
+	for _, c := range []struct {
+		cause, says string
+		props       map[string]any
+	}{
+		{"not an object", "GenerateSecretString", map[string]any{"GenerateSecretString": "notamap"}},
+		{"SecretString beside it", "SecretString", map[string]any{"SecretString": "x", "GenerateSecretString": map[string]any{}}},
+		{"GenerateStringKey alone", "GenerateStringKey", spec("GenerateStringKey", "password")},
+		{"SecretStringTemplate alone", "SecretStringTemplate", spec("SecretStringTemplate", `{"username":"u"}`)},
+		{"SecretStringTemplate not JSON", "JSON", spec("SecretStringTemplate", `{"username"`, "GenerateStringKey", "password")},
+		{"SecretStringTemplate not a JSON object", "object", spec("SecretStringTemplate", `[1]`, "GenerateStringKey", "password")},
+		{"parameters no password meets", "PasswordLength", spec("PasswordLength", 0)},
+	} {
+		_, err := generate(c.props, nil)
+		var f *spi.Fault
+		if !errors.As(err, &f) || f.Code != "ValidationError" || !strings.Contains(f.Message, c.says) {
+			t.Errorf("%s answered %v, want a ValidationError that says %s", c.cause, err, c.says)
+			continue
+		}
+		if other, dup := seen[f.Message]; dup {
+			t.Errorf("%s and %s share the message %q", c.cause, other, f.Message)
+		}
+		seen[f.Message] = c.cause
+	}
+	for member, value := range map[string]any{"PasswordLength": "sixteen", "ExcludePunctuation": "yes", "IncludeSpace": 1.0, "ExcludeCharacters": true} {
+		if _, err := generate(spec(member, value), nil); code(err) != "ValidationError" || !strings.Contains(err.Error(), member) {
+			t.Errorf("%s %v answered %v, want a ValidationError naming %s", member, value, err, member)
+		}
+	}
+}

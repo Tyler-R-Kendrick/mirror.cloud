@@ -9,11 +9,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
@@ -564,20 +566,58 @@ func given(in, props map[string]any, members ...string) map[string]any {
 // generated is the value GenerateSecretString asks for: a password made as
 // GetRandomPassword makes one, seeded by the stack and logical id, and put
 // under GenerateStringKey in SecretStringTemplate when the template gives one.
+// Each way the property can be wrong has its own ValidationError.
 func generated(props map[string]any, seed string) (string, error) {
-	spec, doc := asMap(props["GenerateSecretString"]), map[string]any{}
-	value, err := prim.RandomPassword(spec, seed)
+	spec, isMap := props["GenerateSecretString"].(map[string]any)
 	key, tpl := str(spec["GenerateStringKey"]), str(spec["SecretStringTemplate"])
-	if _, both := props["SecretString"]; both || err != nil || (key == "") != (tpl == "") || tpl != "" && (json.Unmarshal([]byte(tpl), &doc) != nil || doc == nil) {
-		return "", invalid("GenerateSecretString: no SecretString beside it, GenerateStringKey and SecretStringTemplate (a JSON object) together, and a password its parameters allow")
+	_, both := props["SecretString"]
+	var doc any
+	switch {
+	case !isMap:
+		return "", invalid("GenerateSecretString must be an object, not " + jsonText(props["GenerateSecretString"]))
+	case both:
+		return "", invalid("SecretString and GenerateSecretString can't both be given")
+	case tpl == "" && key != "":
+		return "", invalid("GenerateStringKey needs a SecretStringTemplate to put the password in")
+	case tpl != "" && key == "":
+		return "", invalid("SecretStringTemplate needs a GenerateStringKey to name the password")
+	case tpl != "" && json.Unmarshal([]byte(tpl), &doc) != nil:
+		return "", invalid("SecretStringTemplate must be JSON: " + tpl)
+	case tpl != "" && asMap(doc) == nil:
+		return "", invalid("SecretStringTemplate must be a JSON object, not " + tpl)
 	}
-	if key == "" {
+	params := map[string]any{}
+	for member, v := range spec {
+		// A template's number or boolean may be its text ("16", "true"), as a Ref to a parameter always is.
+		want, text := generateTypes[member], str(v)
+		if n, err := strconv.ParseFloat(text, 64); want == "number" && err == nil {
+			v = n
+		} else if want == "boolean" && (text == "true" || text == "false") {
+			v = text == "true"
+		}
+		if want == "" {
+			return "", invalid("GenerateSecretString has no property " + member)
+		}
+		if got := map[string]string{"float64": "number", "int": "number", "bool": "boolean", "string": "string"}[fmt.Sprintf("%T", v)]; got != want {
+			return "", invalid("GenerateSecretString." + member + " must be a " + want + ", not " + jsonText(v))
+		}
+		params[member] = v
+	}
+	value, err := prim.RandomPassword(params, seed)
+	if err != nil {
+		return "", invalid("GenerateSecretString makes no password: " + err.Error())
+	} else if key == "" {
 		return value, nil
 	}
-	doc[key] = value
+	asMap(doc)[key] = value
 	raw, err := json.Marshal(doc)
 	return string(raw), err
 }
+
+// generateTypes are GenerateSecretString's properties and their types.
+var generateTypes = map[string]string{"PasswordLength": "number", "ExcludeCharacters": "string", "GenerateStringKey": "string",
+	"SecretStringTemplate": "string", "ExcludeLowercase": "boolean", "ExcludeUppercase": "boolean", "ExcludeNumbers": "boolean",
+	"ExcludePunctuation": "boolean", "IncludeSpace": "boolean", "RequireEachIncludedType": "boolean"}
 
 func invalid(message string) *spi.Fault { return fault("ValidationError", message) }
 

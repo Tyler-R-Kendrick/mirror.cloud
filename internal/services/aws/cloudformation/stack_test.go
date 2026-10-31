@@ -863,3 +863,41 @@ func TestCloudFormationTheRollbackFamilyFollowsItsStates(t *testing.T) {
 		t.Errorf("failed lists %v, want its bucket, DELETE_FAILED", left)
 	}
 }
+
+// A stack recorded before resources carried the name they were made under
+// still updates: a resource with no recorded name is known by its physical
+// id, which is its name or ends in it (a queue's URL, a secret's ARN), so
+// the update's check of a name the template gives finds it the stack's own.
+// Before, the check found the stack's own queue taken, and the update failed.
+func TestCloudFormationAnOldRecordStillUpdates(t *testing.T) {
+	h := newStacks(t)
+	q, err := h.service("aws.sqs", "CreateQueue", map[string]any{"QueueName": "legacy-q"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := h.service("aws.secretsmanager", "CreateSecret", map[string]any{"Name": "legacy-s", "SecretString": "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := func(value string) string {
+		return `{"Resources":{"Q":{"Type":"AWS::SQS::Queue","Properties":{"QueueName":"legacy-q"}},` +
+			`"S":{"Type":"AWS::SecretsManager::Secret","Properties":{"Name":"legacy-s","SecretString":"` + value + `"}}}}`
+	}
+	record, _ := json.Marshal(map[string]any{ // the shape a stack was stored in before res.Name
+		"Name": "old", "ID": "arn:aws:cloudformation:us-east-1:000000000000:stack/old/1", "Status": "CREATE_COMPLETE", "Template": tpl("v1"),
+		"Resources": []any{
+			map[string]any{"Logical": "Q", "Physical": str(q["QueueUrl"]), "Type": "AWS::SQS::Queue"},
+			map[string]any{"Logical": "S", "Physical": str(s["ARN"]), "Type": "AWS::SecretsManager::Secret"},
+		},
+		"Refs": map[string]any{"Q": str(q["QueueUrl"]), "S": str(s["ARN"])},
+	})
+	if err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "old", record); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "old", "TemplateBody": tpl("v2")}); err != nil {
+		t.Fatalf("UpdateStack of an old record: %v", err)
+	}
+	if out, err := h.service("aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": "legacy-s"}); err != nil || out["SecretString"] != "v2" {
+		t.Errorf("after the update the secret holds %v (%v), want v2", out["SecretString"], err)
+	}
+}

@@ -310,7 +310,9 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 	out, err := p.call(ctx, req, k.svc, k.op, map[string]any{k.in: id})
 	groups, list := out["logGroups"].([]any) // DescribeLogGroups answers a list by prefix, never a fault
 	if err != nil || list && !slices.ContainsFunc(groups, func(g any) bool { return str(asMap(g)["logGroupName"]) == n }) ||
-		slices.ContainsFunc(old.Resources, func(r res) bool { return r.Logical == logical && r.Name == n }) {
+		slices.ContainsFunc(old.Resources, func(r res) bool { // a record from before res.Name: by the physical id, which ends in the name
+			return r.Logical == logical && (r.Name == n || r.Name == "" && (r.Physical == n || strings.HasSuffix(r.Physical, "/"+n) || strings.HasSuffix(r.Physical, ":"+n)))
+		}) {
 		return n, nil
 	}
 	return "", fault(k.code, "Resource of type '"+typ+"' with identifier '"+n+"' already exists.")

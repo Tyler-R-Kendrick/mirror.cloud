@@ -139,7 +139,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     `AlreadyExistsException`, "The resource with the name requested already
     exists."). The resource is left as it was. It is checked again just
     before each create, since a name can come from a resource made before it.
-    A REST API is not checked: API Gateway holds no name to one API. Before, a
+    A REST API is not checked: API Gateway holds no name to one API. A stack
+    recorded before resources kept the name they were made under is read by
+    each resource's physical id, which is the name or ends in it (a queue's
+    URL, a secret's ARN), so such a stack still updates. Before, a
     create that a service answers with what it already holds (a queue, topic,
     rule, role, stream, log group or bucket here) took the resource over, and
     the stack's rollback or `DeleteStack` deleted it.

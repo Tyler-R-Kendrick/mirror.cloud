@@ -2403,9 +2403,6 @@
             "ReservedCacheNodesOfferingId": "off-1"
           }
         ]
-      },
-      "superseded_members": {
-        "ReservedCacheNodesOfferings[0].Duration": "a recording round-trips through JSON, where the pack's int 31536000 loads back as a float; the member compares 3.1536e+07 against 31536000 on every replay, pack or bundle, so the number is excused rather than misrecorded"
       }
     }
   ]

@@ -1,9 +1,9 @@
 {
   "packs": 0,
-  "case_labels": 488,
+  "case_labels": 483,
   "services_files": 38,
-  "services_loc": 33451,
-  "fault_sites": 615,
+  "services_loc": 33449,
+  "fault_sites": 606,
   "register_sites": 0,
   "pack_dirs": [],
   "routing_mismatches": 0,

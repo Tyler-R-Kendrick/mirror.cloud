@@ -4323,10 +4323,10 @@ var mutants = []mutant{
 		run:  "TestCloudFormationIntrinsicAndYAMLUnits",
 	},
 	{
-		name: "cloudformation-parse-yaml-list-as-map",
+		name: "cloudformation-parse-yaml-list-items-as-null",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "yaml.go"),
-		old:  `if strings.HasPrefix(lines[i].text, "- ") || lines[i].text == "-" {`,
-		new:  `if false {`,
+		old:  `out = append(out, item)`,
+		new:  `_ = item; out = append(out, nil)`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationIntrinsicAndYAMLUnits",
 	},

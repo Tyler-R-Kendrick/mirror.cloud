@@ -13,6 +13,12 @@ provenance: authored
 # the key is a derive.
 missing_input_error: NotFound
 
+# GetRandomPassword's character classes and exclusions, drawn from a seeded
+# generator; CEL has no way to pick characters at random.
+primitives:
+  random_password: { name: secretsmanager.random_password, version: 1 }
+  random_password_error: { name: secretsmanager.random_password_error, version: 1 }
+
 resources:
   secret:
     collection: secrets
@@ -32,18 +38,88 @@ errors:
     code: MalformedPolicyDocumentException
     http: 400
     fault: client
+  InvalidParameter:
+    code: InvalidParameterException
+    http: 400
+    fault: client
+  Exists:
+    code: ResourceExistsException
+    http: 400
+    fault: client
+  # What the awsJson1_1 codec answers a body it cannot decode, and so a
+  # member that is not of its shape's type.
+  Serialization:
+    code: SerializationException
+    http: 400
+    fault: client
+  # The engine's own answer to a member outside its length constraint.
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
+  # "The NextToken value is invalid." (a NextToken no listing answered).
+  InvalidNextToken:
+    code: InvalidNextTokenException
+    http: 400
+    fault: client
 
 operations:
-  # CreateSecret, PutSecretValue and UpdateSecret are one code path in the
-  # pack: merge onto the record if it exists, rotate AWSCURRENT to
-  # AWSPREVIOUS on every older version, append the new version as AWSCURRENT,
-  # and undelete. A put that was never created creates.
+  # The pack served CreateSecret, PutSecretValue and UpdateSecret as one
+  # upsert. CreateSecret "Creates a new secret": a name that exists is
+  # ResourceExistsException, "A resource with the ID you requested already
+  # exists". PutSecretValue and UpdateSecret write to a secret that exists,
+  # moving AWSCURRENT to AWSPREVIOUS on every older version and appending the
+  # new version as AWSCURRENT; a name never created is
+  # ResourceNotFoundException, which both document, as RotateSecret does.
+  #
+  # A secret scheduled for deletion refuses every write, here and in
+  # RotateSecret, TagResource, UntagResource, UpdateSecretVersionStage,
+  # PutResourcePolicy, DeleteResourcePolicy, ReplicateSecretToRegions,
+  # RemoveRegionsFromReplication, StopReplicationToReplica and
+  # CancelRotateSecret: InvalidRequestException, "A parameter value is not
+  # valid for the current state of the resource. Possible causes: The secret
+  # is scheduled for deletion." Each of them lists it among its errors.
+  # RestoreSecret is the way back. The rule is written once, as *scheduled,
+  # and every one of those writes uses it except CreateSecret, whose refusal
+  # names the clash ("a secret with this name is already scheduled for
+  # deletion") and so is its own rule.
+  #
+  # A version is made only "If you include SecretString or SecretBinary"
+  # (CreateSecret); without either the secret has none, and no VersionId.
   CreateSecret:
     reads:
       s: { resource: secret }
     let:
+      hasval: "('SecretString' in input && input.SecretString != null) || ('SecretBinary' in input && input.SecretBinary != null)"
       val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
-      prior: "'Versions' in s ? s.Versions : []"
+    require:
+      # "Either SecretString or SecretBinary must have a value, but not both."
+      # (CreateSecretRequest; PutSecretValueRequest and UpdateSecretRequest
+      # say the same). The model names no error for both at once; this is
+      # InvalidParameterException, "The parameter name or value is invalid",
+      # the documented error about the request rather than the secret's state.
+      # SecretStringType and SecretBinaryType carry "smithy.api#length":
+      # {"min": 1, ...}. The engine refuses a member outside its length
+      # constraint with ValidationException, but the Smithy receiver carries
+      # no length traits into the generated model, so the rule is stated here.
+      - &stringNotEmpty
+        cond: "!('SecretString' in input && input.SecretString != null && size(string(input.SecretString)) == 0)"
+        error: Validation
+        message: "SecretString must be at least 1 characters"
+      - &binaryNotEmpty
+        cond: "!('SecretBinary' in input && input.SecretBinary != null && size(string(input.SecretBinary)) == 0)"
+        error: Validation
+        message: "SecretBinary must be at least 1 characters"
+      - &notBoth
+        cond: "!('SecretString' in input && input.SecretString != null && 'SecretBinary' in input && input.SecretBinary != null)"
+        error: InvalidParameter
+        message: "You can't specify both a binary secret value and a string secret value in the same secret."
+      - cond: "!('Deleted' in s && s.Deleted == true)"
+        error: InvalidRequest
+        message: "You can't create this secret because a secret with this name is already scheduled for deletion."
+      - cond: "!s_found"
+        error: Exists
+        message: "The operation failed because the secret already exists."
     effects:
       - generate: { bind: ver, kind: hex, bytes: 8 }
       - put:
@@ -51,19 +127,21 @@ operations:
           record:
             Name: id
             ARN: "arn('aws', ['secretsmanager', string(identity.region), string(identity.account), 'secret:' + id])"
-            Versions: >-
-              prior.map(v, merge(v, {'VersionStages':
-                ('VersionStages' in v ? v.VersionStages : []).filter(st, st != 'AWSCURRENT' && st != 'AWSPREVIOUS')
-                + (('VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')) ? ['AWSPREVIOUS'] : [])}))
-              + [{'VersionId': fx.ver, 'SecretString': val, 'VersionStages': ['AWSCURRENT']}]
-            VersionId: fx.ver
-            SecretString: val
-            VersionStages: "['AWSCURRENT']"
+            Versions: "hasval ? [{'VersionId': fx.ver, 'SecretString': val, 'VersionStages': ['AWSCURRENT']}] : []"
+            VersionId: "hasval ? fx.ver : dyn(null)"
+            SecretString: "hasval ? val : dyn(null)"
+            VersionStages: "hasval ? ['AWSCURRENT'] : []"
+            # The description is metadata beside the value (DescribeSecretResponse:
+            # "The description of the secret.").
+            Description: "'Description' in input && input.Description != null ? input.Description : dyn(null)"
+            # Tags: "A list of tags to attach to the secret", kept as TagResource keeps them.
+            Tags: "'Tags' in input && input.Tags != null && size(input.Tags) > 0 ? input.Tags : dyn(null)"
             Deleted: "false"
+    omit_null: [VersionId]
     output:
       ARN: rec.ARN
       Name: rec.Name
-      VersionId: fx.ver
+      VersionId: "hasval ? fx.ver : dyn(null)"
 
   PutSecretValue:
     reads:
@@ -71,6 +149,22 @@ operations:
     let:
       val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
       prior: "'Versions' in s ? s.Versions : []"
+    require:
+      # "You must include SecretBinary or SecretString, but not both."
+      # (PutSecretValueRequest). Neither is InvalidParameterException, "The
+      # parameter name or value is invalid", the documented error about the
+      # request rather than the secret's state.
+      - cond: "('SecretString' in input && input.SecretString != null) || ('SecretBinary' in input && input.SecretBinary != null)"
+        error: InvalidParameter
+        message: "You must provide either SecretString or SecretBinary."
+      - *stringNotEmpty
+      - *binaryNotEmpty
+      - *notBoth
+      - { cond: s_found, error: NotFound }
+      - &scheduled
+        cond: "!('Deleted' in s && s.Deleted == true)"
+        error: InvalidRequest
+        message: "You can't perform this operation on the secret because it was marked for deletion."
     effects:
       - generate: { bind: ver, kind: hex, bytes: 8 }
       - put:
@@ -92,12 +186,26 @@ operations:
       Name: rec.Name
       VersionId: fx.ver
 
+  # UpdateSecret changes metadata and, only when it carries one, the value:
+  # "If you include SecretString or SecretBinary to create a new secret
+  # version, Secrets Manager automatically moves the staging label AWSCURRENT
+  # to the new version", and its VersionId is answered only "If Secrets
+  # Manager created a new version of the secret during this operation"
+  # (UpdateSecret and UpdateSecretResponse in the vendored model). A
+  # description-only update neither adds a version nor touches the value.
   UpdateSecret:
     reads:
       s: { resource: secret }
     let:
+      hasval: "('SecretString' in input && input.SecretString != null) || ('SecretBinary' in input && input.SecretBinary != null)"
       val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
       prior: "'Versions' in s ? s.Versions : []"
+    require:
+      - *stringNotEmpty
+      - *binaryNotEmpty
+      - *notBoth
+      - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - generate: { bind: ver, kind: hex, bytes: 8 }
       - put:
@@ -106,22 +214,28 @@ operations:
             Name: id
             ARN: "arn('aws', ['secretsmanager', string(identity.region), string(identity.account), 'secret:' + id])"
             Versions: >-
+              !hasval ? prior :
               prior.map(v, merge(v, {'VersionStages':
                 ('VersionStages' in v ? v.VersionStages : []).filter(st, st != 'AWSCURRENT' && st != 'AWSPREVIOUS')
                 + (('VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')) ? ['AWSPREVIOUS'] : [])}))
               + [{'VersionId': fx.ver, 'SecretString': val, 'VersionStages': ['AWSCURRENT']}]
-            VersionId: fx.ver
-            SecretString: val
+            VersionId: "hasval ? fx.ver : ('VersionId' in s ? s.VersionId : dyn(null))"
+            SecretString: "hasval ? val : ('SecretString' in s ? s.SecretString : '')"
             VersionStages: "['AWSCURRENT']"
+            # The description is metadata beside the value (DescribeSecretResponse:
+            # "The description of the secret."): a write that names none keeps it.
+            Description: "'Description' in input && input.Description != null ? input.Description : ('Description' in s ? s.Description : dyn(null))"
             Deleted: "false"
+    omit_null: [VersionId]
     output:
       ARN: rec.ARN
       Name: rec.Name
-      VersionId: fx.ver
+      VersionId: "hasval ? fx.ver : dyn(null)"
 
   # The pack's RotateSecret is PutSecretValue with the value defaulted to the
-  # current one: it re-seats the same SecretString under a fresh version. On a
-  # secret that does not exist that means it creates one, holding "".
+  # current one: it re-seats the same SecretString under a fresh version. A
+  # secret that does not exist is ResourceNotFoundException; the pack created
+  # one, holding "".
   RotateSecret:
     reads:
       s: { resource: secret }
@@ -134,6 +248,9 @@ operations:
           : s)
         : {}
       val: "coalesce(coalesce('SecretString' in input && input.SecretString != '' ? input.SecretString : null, 'SecretString' in cur ? cur.SecretString : null), '')"
+    require:
+      - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - generate: { bind: ver, kind: hex, bytes: 8 }
       - put:
@@ -160,6 +277,7 @@ operations:
       s: { resource: secret }
     require:
       - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - patch:
           resource: secret
@@ -190,6 +308,10 @@ operations:
       - cond: "!('Deleted' in s && s.Deleted == true)"
         error: InvalidRequest
         message: "secret scheduled for deletion"
+      # A secret created without a value has no version to answer.
+      - cond: "size(vers) > 0"
+        error: NotFound
+        message: "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"
     output:
       ARN: s.ARN
       Name: s.Name
@@ -197,20 +319,30 @@ operations:
       VersionId: "'VersionId' in picked ? picked.VersionId : null"
       VersionStages: "'VersionStages' in picked ? picked.VersionStages : null"
 
+  # A secret scheduled for deletion is described, with its DeletedDate:
+  # "If it is not scheduled for deletion, this field is omitted."
+  # (DescribeSecretResponse.DeletedDate in the vendored model). It is the time
+  # DeleteSecret was requested; see DeleteSecret. It is the value, not the
+  # description, that is out of reach until RestoreSecret.
+  #
+  # DescribeSecret: "Secrets Manager only returns fields that have a value in
+  # the response." A member with none is left out, not answered as null.
   DescribeSecret:
     reads:
       s: { resource: secret }
     require:
       - { cond: s_found, error: NotFound }
-      - cond: "!('Deleted' in s && s.Deleted == true)"
-        error: InvalidRequest
-        message: "secret scheduled for deletion"
+    omit_null: [Description, DeletedDate, Tags, ReplicationStatus, RotationEnabled, RotationLambdaARN, RotationRules]
     output:
       ARN: s.ARN
       Name: s.Name
-      VersionIdsToStages: "rollup('Versions' in s ? s.Versions : [], 'VersionId', 'VersionStages')"
-      Tags: "'Tags' in s ? s.Tags : null"
-      ReplicationStatus: "'ReplicaRegions' in s ? s.ReplicaRegions : null"
+      Description: "'Description' in s ? s.Description : dyn(null)"
+      DeletedDate: "'Deleted' in s && s.Deleted == true && 'DeletedDate' in s ? s.DeletedDate : dyn(null)"
+      # "A list of the versions of the secret that have staging labels
+      # attached": a version with none is deprecated and not listed.
+      VersionIdsToStages: "rollup(('Versions' in s ? s.Versions : []).filter(v, 'VersionStages' in v && v.VersionStages != null && size(v.VersionStages) > 0), 'VersionId', 'VersionStages')"
+      Tags: "'Tags' in s && s.Tags != null && size(s.Tags) > 0 ? s.Tags : dyn(null)"
+      ReplicationStatus: "'ReplicaRegions' in s && s.ReplicaRegions != null && size(s.ReplicaRegions) > 0 ? s.ReplicaRegions : dyn(null)"
       RotationEnabled: "'RotationEnabled' in s ? s.RotationEnabled : null"
       RotationLambdaARN: "'RotationLambdaARN' in s ? s.RotationLambdaARN : null"
       RotationRules: "'RotationRules' in s ? s.RotationRules : null"
@@ -218,28 +350,122 @@ operations:
   # The listing skips secrets marked for deletion unless asked (the pack's
   # truthy accepts the string forms too), and projects each record rather than
   # answering it: no version values leave through here.
+  #
+  # Filters choose secrets as Filter.Key describes: "description: Prefix match,
+  # not case-sensitive. name: Prefix match, case-sensitive. tag-key: Prefix
+  # match, case-sensitive. tag-value: Prefix match, case-sensitive.
+  # primary-region: Prefix match, case-sensitive. owning-service: Prefix
+  # match, case-sensitive. all: Breaks the filter value string into words and
+  # then searches all attributes for matches. Not case-sensitive." A value
+  # that starts with "!" is a negation (Filter.Values). Every filter must
+  # match, and a filter matches when any of its values does; with "all",
+  # every word must start a word of some attribute. The primary region of a
+  # secret is the Region it was created in, and no secret here is owned by a
+  # service. Which values combine how is this bundle's reading; the model
+  # says only what each key matches.
+  # BatchGetSecretValue's Filters reuse this as *filtersMatch, and its check
+  # of Filter.Key as *filterKeys: the key is a FilterNameStringType, an enum,
+  # so any other is ValidationException in the framework's wording.
   ListSecrets:
+    require:
+      # MaxResults is an integer (MaxResultsType; BatchGetSecretValue's is
+      # MaxResultsBatchType): a value the awsJson1_1 codec cannot read as one
+      # is SerializationException, as a fractional RecoveryWindowInDays is.
+      - &maxIsInteger
+        cond: >-
+          !('MaxResults' in input && input.MaxResults != null) || type(input.MaxResults) == int
+          || (type(input.MaxResults) == double && input.MaxResults >= -2147483648.0 && input.MaxResults <= 2147483647.0
+              && double(int(input.MaxResults)) == input.MaxResults)
+        error: Serialization
+        message: "MaxResults must be a whole number."
+      # MaxResultsType's range is 1 to 100.
+      - cond: "!('MaxResults' in input && input.MaxResults != null) || (int(input.MaxResults) >= 1 && int(input.MaxResults) <= 100)"
+        error: Validation
+        message_expr: >-
+          "1 validation error detected: Value '" + string(int(input.MaxResults))
+          + "' at 'maxResults' failed to satisfy constraint: Member must have value "
+          + (int(input.MaxResults) < 1 ? "greater than or equal to 1" : "less than or equal to 100")
+      - &filterKeys
+        cond: >-
+          !('Filters' in input && input.Filters != null) || input.Filters.all(f, !('Key' in f) || f.Key == null
+            || string(f.Key) in ['description', 'name', 'tag-key', 'tag-value', 'primary-region', 'owning-service', 'all'])
+        error: Validation
+        message_expr: >-
+          indices(input.Filters).filter(i, 'Key' in input.Filters[i] && input.Filters[i].Key != null
+            && !(string(input.Filters[i].Key) in ['description', 'name', 'tag-key', 'tag-value', 'primary-region', 'owning-service', 'all']))
+            .map(i, "1 validation error detected: Value '" + string(input.Filters[i].Key) + "' at 'filters."
+              + string(i + 1) + ".member.key' failed to satisfy constraint: Member must satisfy enum value set:"
+              + " [description, name, tag-key, tag-value, primary-region, owning-service, all]")[0]
     list:
       resource: secret
       member: SecretList
       paginate: model
+      let:
+        matched: &filtersMatch >-
+          !('Filters' in input && input.Filters != null) || input.Filters.all(f,
+            [{'name': [string(item.Name)],
+              'description': ['Description' in item && item.Description != null ? string(item.Description) : ''],
+              'tag-key': ('Tags' in item && item.Tags != null ? item.Tags : []).map(x, 'Key' in x && x.Key != null ? string(x.Key) : ''),
+              'tag-value': ('Tags' in item && item.Tags != null ? item.Tags : []).map(x, 'Value' in x && x.Value != null ? string(x.Value) : ''),
+              'primary-region': [string(identity.region)]}].exists(a,
+            ('Values' in f && f.Values != null ? f.Values : []).exists(v,
+              [substr(string(v), string(v).startsWith('!') ? 1 : 0, size(string(v)))].exists(t,
+                string(v).startsWith('!') != (
+                  string(f.Key) == 'all'
+                  ? split(t, ' ').filter(w, w != '').all(w,
+                      (a['name'] + a['description'] + a['tag-key'] + a['tag-value'] + a['primary-region'])
+                        .exists(x, split(lower(x), ' ').exists(y, y.startsWith(lower(w)))))
+                  : string(f.Key) == 'description'
+                    ? a['description'].exists(x, lower(x).startsWith(lower(t)))
+                    : (string(f.Key) in a ? a[string(f.Key)] : []).exists(x, x.startsWith(t)))))))
       filter: >-
-        !('Deleted' in item && item.Deleted == true)
+        matched && (!('Deleted' in item && item.Deleted == true)
         || ('IncludePlannedDeletion' in input
             && (input.IncludePlannedDeletion == true || input.IncludePlannedDeletion == 'true'
-                || input.IncludePlannedDeletion == 'True' || input.IncludePlannedDeletion == '1'))
+                || input.IncludePlannedDeletion == 'True' || input.IncludePlannedDeletion == '1')))
+    #
+    # Each entry carries its Tags, its Description ("The user-provided
+    # description of the secret") and, scheduled for deletion, its DeletedDate
+    # ("The date and time the deletion of the secret occurred. Not present on
+    # active secrets."), each only when it has one. SecretVersionsToStages
+    # leaves out a version with no label: "A version that does not have any
+    # SecretVersionStage is considered deprecated ... Such versions are not
+    # included in this list."
     output:
       SecretList: >-
-        items.map(m, {
+        items.map(m, merge(merge(merge({
           'ARN': m.ARN,
           'Name': m.Name,
-          'Tags': 'Tags' in m ? m.Tags : null,
-          'SecretVersionsToStages': rollup('Versions' in m ? m.Versions : [], 'VersionId', 'VersionStages')
-        })
+          'SecretVersionsToStages': rollup(('Versions' in m ? m.Versions : []).filter(v, 'VersionStages' in v && v.VersionStages != null && size(v.VersionStages) > 0), 'VersionId', 'VersionStages')
+        },
+        'Tags' in m && m.Tags != null && size(m.Tags) > 0 ? {'Tags': m.Tags} : {}),
+        'Description' in m && m.Description != null ? {'Description': m.Description} : {}),
+        'Deleted' in m && m.Deleted == true && 'DeletedDate' in m && m.DeletedDate != null ? {'DeletedDate': m.DeletedDate} : {}))
 
-  # Force delete drops the record; otherwise it is marked Deleted and keeps
-  # answering to RestoreSecret. The output never carries ARN, and DeletionDate
-  # only in the soft case.
+  # Force delete drops the record; otherwise it is marked Deleted, stamped with
+  # the time of the request as its DeletedDate, and keeps answering to
+  # RestoreSecret. From the vendored model's documentation:
+  # - DeleteSecret: "Secrets Manager attaches a DeletionDate stamp to the
+  #   secret that specifies the end of the recovery window."
+  # - RecoveryWindowInDays: "The number of days from 7 to 30 that Secrets
+  #   Manager waits before permanently deleting the secret", "If you don't use
+  #   either, then by default Secrets Manager uses a 30 day recovery window",
+  #   and "You can't use both this parameter and ForceDeleteWithoutRecovery in
+  #   the same call." A window outside 7 to 30 is InvalidParameterException,
+  #   "The parameter name or value is invalid."
+  # - DeleteSecretResponse.DeletionDate: "the date and time of the delete
+  #   request plus the number of days in RecoveryWindowInDays."
+  # - SecretListEntry.DeletedDate: "The date and time the deletion of the
+  #   secret occurred." DescribeSecretResponse.DeletedDate says "The date the
+  #   secret is scheduled for deletion" of the same member. The two readings
+  #   conflict and the model does not settle which holds; this bundle chooses
+  #   the first, the time of the request. The end of the window is
+  #   DeletionDate, answered here only.
+  # - InvalidRequestException, possible causes: "The secret is scheduled for
+  #   deletion." So a second unforced delete is refused, not repeated.
+  # - ForceDeleteWithoutRecovery: "If you forcibly delete an already deleted or
+  #   nonexistent secret, the operation does not return
+  #   ResourceNotFoundException."
   DeleteSecret:
     reads:
       s: { resource: secret }
@@ -248,18 +474,69 @@ operations:
         'ForceDeleteWithoutRecovery' in input
         && (input.ForceDeleteWithoutRecovery == true || input.ForceDeleteWithoutRecovery == 'true'
             || input.ForceDeleteWithoutRecovery == 'True' || input.ForceDeleteWithoutRecovery == '1')
+      windowed: "'RecoveryWindowInDays' in input && input.RecoveryWindowInDays != null"
+      # RecoveryWindowInDaysType is a long: an int, or a JSON number that is a
+      # whole number within a long's range, as a JSON decoder hands one over.
+      long: >-
+        !windowed || type(input.RecoveryWindowInDays) == int
+        || (type(input.RecoveryWindowInDays) == double
+            && input.RecoveryWindowInDays >= -9.2e18 && input.RecoveryWindowInDays <= 9.2e18
+            && double(int(input.RecoveryWindowInDays)) == input.RecoveryWindowInDays)
+      # "The number of days from 7 to 30": compared as a double, so a window
+      # outside it is refused before any arithmetic can overflow on it.
+      inwindow: "!windowed || (long && double(input.RecoveryWindowInDays) >= 7.0 && double(input.RecoveryWindowInDays) <= 30.0)"
+      days: "windowed && inwindow ? int(input.RecoveryWindowInDays) : 30"
+      # awsJson1_1 writes a timestamp as epoch seconds, a JSON number; a string
+      # here fails every Go SDK v2 client, which decodes one only from a number.
+      # It carries milliseconds, as the model's examples do ("CreatedDate":
+      # 1523477145.713 in GetSecretValue's).
+      # One reading of the clock for the request: the engine reads it afresh
+      # for every expression, and DeletionDate must be DeletedDate plus the
+      # window exactly.
+      requested: "double(now_ms) / 1000.0"
+      deletion: "requested + double(days * 86400)"
+      scheduled: "'Deleted' in s && s.Deleted == true"
     require:
-      - { cond: s_found, error: NotFound }
+      - cond: long
+        error: Serialization
+        message: "RecoveryWindowInDays must be a whole number."
+      - cond: "!(force && windowed)"
+        error: InvalidParameter
+        message: "You can't use ForceDeleteWithoutRecovery in conjunction with RecoveryWindowInDays."
+      - cond: inwindow
+        error: InvalidParameter
+        message: "The RecoveryWindowInDays value must be between 7 and 30 days (inclusive)."
+      - { cond: "s_found || force", error: NotFound }
+      # DeleteSecret: "You can't delete a primary secret that is replicated to
+      # other Regions. You must first delete the replicas using
+      # RemoveRegionsFromReplication, and then delete the primary secret."
+      # Forced or not; InvalidRequestException is the error for the secret's
+      # current state.
+      - cond: "!s_found || !('ReplicaRegions' in s && s.ReplicaRegions != null && size(s.ReplicaRegions) > 0)"
+        error: InvalidRequest
+        message: "You can't delete a primary secret that is replicated to other Regions. You must first delete the replicas using RemoveRegionsFromReplication, and then delete the primary secret."
+      - cond: "force || !scheduled"
+        error: InvalidRequest
+        message: "The secret is scheduled for deletion."
     effects:
-      - delete: { resource: secret, when: force }
+      - delete: { resource: secret, when: "force && s_found" }
       - patch:
           resource: secret
           when: "!force"
-          record: { Deleted: "true" }
+          # DeletedDate is when the deletion was requested ("The date and time
+          # the deletion of the secret occurred", SecretListEntry); the end of
+          # the window is the DeletionDate this call answers.
+          record: { Deleted: "true", DeletedDate: requested }
+    omit_null: [ARN]
     output:
+      ARN: "s_found ? s.ARN : dyn(null)"
       Name: id
-      DeletionDate: "force ? dyn(null) : string(now)"
+      # A forced delete has no window: "the date and time of the delete
+      # request plus the number of days in RecoveryWindowInDays" is the request.
+      DeletionDate: "force ? requested : deletion"
 
+  # RestoreSecret: "Cancels the scheduled deletion of a secret by removing the
+  # DeletedDate time stamp." Its response is the secret's ARN and Name.
   RestoreSecret:
     reads:
       s: { resource: secret }
@@ -268,8 +545,9 @@ operations:
     effects:
       - patch:
           resource: secret
-          record: { Deleted: "false" }
+          record: { Deleted: "false", DeletedDate: "dyn(null)" }
     output:
+      ARN: s.ARN
       Name: id
 
   # An unknown secret is not a fault here: the pack answers an empty version
@@ -293,6 +571,7 @@ operations:
       oldkeys: "oldtags.map(t, 'Key' in t && t.Key != null ? string(t.Key) : '')"
     require:
       - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - put:
           resource: secret
@@ -310,6 +589,7 @@ operations:
       s: { resource: secret }
     require:
       - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - put:
           resource: secret
@@ -320,40 +600,121 @@ operations:
                   in ('TagKeys' in input && input.TagKeys != null ? input.TagKeys : [])))
     output: {}
 
+  # GetRandomPassword honours its parameters: PasswordLength ("the default
+  # length is 32 characters"), ExcludeCharacters, the four Exclude* classes,
+  # IncludeSpace and RequireEachIncludedType ("the password contains at least
+  # one of every character type" unless it is false). The default classes are
+  # the documented ones: "uppercase and lowercase letters, numbers, and the
+  # following characters in passwords: !\"#$%&'()*+,-./:;?@[\\]^_`{|}~".
+  # Parameters no password satisfies -- a length outside PasswordLengthType's
+  # 1 to 4096, every class excluded, fewer characters than required types --
+  # are InvalidParameterException. It answered 32 hex digits whatever it was
+  # asked.
   GetRandomPassword:
+    let:
+      pwerr: "prim('secretsmanager.random_password_error', [input])"
+    require:
+      - cond: "pwerr == ''"
+        error: InvalidParameter
+        message_expr: pwerr
     effects:
-      - generate: { bind: pw, kind: hex, bytes: 32 }
+      - generate: { bind: seed, kind: hex, bytes: 32 }
     output:
-      RandomPassword: fx.pw
+      RandomPassword: "prim('secretsmanager.random_password', [input, fx.seed])"
 
   # Every id is looked up in request order; an unknown one is an Errors row,
   # not a fault. The pack reads the id as a raw store key -- an ARN does not
   # resolve here, unlike everywhere else.
+  #
+  # A secret scheduled for deletion is an Errors row too, never a value: "you
+  # cannot retrieve the secret value" (DeleteSecret). The row is an APIErrorType,
+  # SecretId, ErrorCode and Message, with InvalidRequestException, whose
+  # documented causes include "The secret is scheduled for deletion."
+  #
+  # Filters choose the secrets the way ListSecrets' do (*filtersMatch): "You
+  # must include Filters or SecretIdList, but not both", so both, or neither,
+  # is InvalidParameterException. Only the filter form pages, as ListSecrets
+  # does: MaxResults (MaxResultsBatchType, 1 to 20) says "To use this
+  # parameter, you must also use the Filters parameter", so the SecretIdList
+  # form with MaxResults, or with a NextToken only the filter form answers, is
+  # InvalidParameterException, and its list reads one record and keeps none,
+  # so it never answers a NextToken. The filter form leaves out a secret
+  # scheduled for deletion as ListSecrets does, and answers a secret with no
+  # value as a not-found Errors row.
   BatchGetSecretValue:
+    require:
+      - *maxIsInteger
+      - cond: "!('MaxResults' in input && input.MaxResults != null) || (int(input.MaxResults) >= 1 && int(input.MaxResults) <= 20)"
+        error: Validation
+        message_expr: >-
+          "1 validation error detected: Value '" + string(int(input.MaxResults))
+          + "' at 'maxResults' failed to satisfy constraint: Member must have value "
+          + (int(input.MaxResults) < 1 ? "greater than or equal to 1" : "less than or equal to 20")
+      - *filterKeys
+      # SecretIdList: "Minimum number of 1 item. Maximum number of 20 items."
+      - cond: "!('SecretIdList' in input && input.SecretIdList != null) || (size(input.SecretIdList) >= 1 && size(input.SecretIdList) <= 20)"
+        error: Validation
+        message_expr: >-
+          "1 validation error detected: Value at 'secretIdList' failed to satisfy constraint: Member must have length "
+          + (size(input.SecretIdList) < 1 ? "greater than or equal to 1" : "less than or equal to 20")
+      - cond: "!('Filters' in input && input.Filters != null && 'SecretIdList' in input && input.SecretIdList != null)"
+        error: InvalidParameter
+        message: "You must include Filters or SecretIdList, but not both."
+      - cond: "('Filters' in input && input.Filters != null) || size(bids) > 0"
+        error: InvalidParameter
+        message: "You must include Filters or SecretIdList."
+      - cond: "('Filters' in input && input.Filters != null) || !('MaxResults' in input && input.MaxResults != null)"
+        error: InvalidParameter
+        message: "To use MaxResults, you must also use the Filters parameter."
+      # Of a NextToken beside SecretIdList the API reference says nothing
+      # specific: no listing of that form answers one, so it is invalid.
+      - cond: "('Filters' in input && input.Filters != null) || !('NextToken' in input && input.NextToken != null && input.NextToken != '')"
+        error: InvalidNextToken
+        message: "The NextToken value is invalid: only the Filters form answers one."
+    list:
+      resource: secret
+      member: SecretValues
+      paginate: model
+      key: "'Filters' in input && input.Filters != null ? '' : 'SecretIdList'"
+      let:
+        matched: *filtersMatch
+      filter: "'Filters' in input && input.Filters != null && matched && !('Deleted' in item && item.Deleted == true)"
     let:
       bids: >-
         ('SecretIdList' in input && input.SecretIdList != null && size(input.SecretIdList) > 0)
         ? input.SecretIdList
         : (('SecretId' in input && input.SecretId != null && input.SecretId != '') ? [input.SecretId] : [])
+      gone: "bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b) && 'Deleted' in x && x.Deleted == true))"
+      # A secret created without a value has nothing to answer: not found,
+      # as GetSecretValue answers it.
+      valueless: "bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b) && !('Versions' in x && size(x.Versions) > 0)))"
     select:
       binding: bs
       resource: secret
       filter: "'Name' in item && bids.exists(b, string(b) == string(item.Name))"
     output:
       SecretValues: >-
-        bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b)))
-            .map(b, bs.filter(x, 'Name' in x && string(x.Name) == string(b))[0])
+        ('Filters' in input && input.Filters != null
+          ? items.filter(m, 'Versions' in m && size(m.Versions) > 0)
+          : bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b)) && !(b in gone) && !(b in valueless))
+              .map(b, bs.filter(x, 'Name' in x && string(x.Name) == string(b))[0]))
             .map(m, {'m': m, 'p': (('Versions' in m && m.Versions.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))) ? m.Versions.filter(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))[0] : m)})
             .map(pair, {'ARN': pair.m.ARN, 'Name': pair.m.Name, 'SecretString': pair.p.SecretString, 'VersionId': pair.p.VersionId})
       Errors: >-
-        bids.filter(b, !bs.exists(x, 'Name' in x && string(x.Name) == string(b)))
-            .map(b, {'SecretId': string(b), 'ErrorCode': 'ResourceNotFoundException'})
+        'Filters' in input && input.Filters != null
+        ? items.filter(m, !('Versions' in m && size(m.Versions) > 0)).map(m, {'SecretId': string(m.Name), 'ErrorCode': 'ResourceNotFoundException'})
+        : bids.filter(b, !bs.exists(x, 'Name' in x && string(x.Name) == string(b)) || b in gone || b in valueless)
+            .map(b, b in gone
+              ? {'SecretId': string(b), 'ErrorCode': 'InvalidRequestException',
+                 'Message': "You can't perform this operation on the secret because it was marked for deletion."}
+              : {'SecretId': string(b), 'ErrorCode': 'ResourceNotFoundException'})
 
   PutResourcePolicy:
     reads:
       s: { resource: secret }
     require:
       - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - patch:
           resource: secret
@@ -379,6 +740,7 @@ operations:
       s: { resource: secret }
     require:
       - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - patch:
           resource: secret
@@ -411,6 +773,7 @@ operations:
         + extra
     require:
       - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - patch:
           resource: secret
@@ -429,6 +792,7 @@ operations:
             in ('RemoveReplicaRegions' in input && input.RemoveReplicaRegions != null ? input.RemoveReplicaRegions : [])))
     require:
       - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - patch:
           resource: secret
@@ -437,11 +801,13 @@ operations:
       ARN: rec.ARN
       ReplicationStatus: kept
 
-  # Reads nothing, faults on nothing: the answer is the ARN of the name asked
-  # about, whether or not the secret exists.
+  # Faults on nothing but a secret scheduled for deletion: the answer is the
+  # ARN of the name asked about, whether or not the secret exists.
   StopReplicationToReplica:
     reads:
       s: { resource: secret }
+    require:
+      - *scheduled
     output:
       ARN: "arn('aws', ['secretsmanager', string(identity.region), string(identity.account), 'secret:' + id])"
 
@@ -455,6 +821,7 @@ operations:
       uvers: "'Versions' in s ? s.Versions : []"
     require:
       - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - patch:
           resource: secret
@@ -473,21 +840,19 @@ operations:
 quirks:
   - operation: CreateSecret
     note: >
-      CreateSecret, PutSecretValue and UpdateSecret are one code path: a put
-      against a name that was never created creates the secret, where the real
-      service answers ResourceNotFoundException. The value stored is the first
-      of SecretString or SecretBinary, so a binary-only write answers its
-      bytes through the SecretString member everywhere. A write to a secret
-      scheduled for deletion undeletes it (Deleted flips back to false), which
-      the real service refuses. The pack answered an absent Name by storing a
-      record keyed ""; the model requires Name and the engine rejects its
-      absence now, so that row is unreachable.
+      The value stored is the first of SecretString or SecretBinary, so a
+      binary-only write answers its bytes through the SecretString member
+      everywhere. The pack answered an absent Name by storing a record keyed
+      ""; the model requires Name and the engine rejects its absence now, so
+      that row is unreachable.
   - operation: GetSecretValue
     note: >
       A VersionId or VersionStage that matches no stored version is not a
       fault: the pack falls back to the record's top-level members, answering
       the current version as though asked for it. A secret scheduled for
-      deletion reads as InvalidRequestException here and on DescribeSecret.
+      deletion reads as InvalidRequestException here, as the documentation says
+      it does ("When a secret is scheduled for deletion, you cannot retrieve
+      the secret value"). DescribeSecret answers it, with its DeletedDate.
   - operation: ListSecrets
     note: >
       The pack skipped records whose key ends in ':tags' -- a sidecar record
@@ -498,12 +863,9 @@ quirks:
       fails rather than skipping it.
   - operation: DeleteSecret
     note: >
-      Deleting a secret already scheduled for deletion succeeds again, where
-      the real service answers InvalidRequestException. The pack's truthy
-      accepts ForceDeleteWithoutRecovery as the strings 'true', 'True' and '1'
-      as well as the boolean; the transcription keeps all four. The answer
-      never carries ARN, and carries DeletionDate only when the record is
-      kept.
+      The pack's truthy accepts ForceDeleteWithoutRecovery as the strings
+      'true', 'True' and '1' as well as the boolean; the transcription keeps
+      all four. A forced delete answers no ARN when the secret did not exist.
   - operation: TagResource
     note: >
       A request carrying the same tag key twice resolves first-wins here; the
@@ -513,10 +875,10 @@ quirks:
   - operation: BatchGetSecretValue
     note: >
       Ids are raw store keys: an ARN-form id does not resolve (every other
-      operation strips the ARN prefix), so it lands in Errors. A secret
-      scheduled for deletion is answered normally. When SecretIdList is absent
-      or empty the pack falls back to a singular SecretId member the model
-      does not declare on this operation; the transcription keeps that.
+      operation strips the ARN prefix), so it lands in Errors. When
+      SecretIdList is absent or empty the pack falls back to a singular
+      SecretId member the model does not declare on this operation; the
+      transcription keeps that. A not-found row carries no Message.
   - operation: ValidateResourcePolicy
     note: >
       Validation is only 'does it parse as JSON'. A document whose text is a
@@ -534,8 +896,9 @@ quirks:
     note: >
       No rotation ever runs: the current value is re-seated under a fresh
       version id, and RotationLambdaARN, RotationRules and RotateImmediately
-      are accepted and discarded. Rotating a secret that does not exist
-      creates it, holding the empty string. The pack read a SecretString
+      are accepted and discarded. Rotating a secret created without a value
+      re-seats the empty string as its first version, where the real service
+      would need a rotation function to make one. The pack read a SecretString
       member the model does not declare on this operation; kept.
   - operation: UpdateSecretVersionStage
     note: >
@@ -546,5 +909,6 @@ quirks:
       disagree afterwards.
   - operation: StopReplicationToReplica
     note: >
-      Reads nothing and faults on nothing: the answer is the ARN of the name
-      asked about, whether or not the secret exists or was ever replicated.
+      Faults on nothing but a secret scheduled for deletion: the answer is the
+      ARN of the name asked about, whether or not the secret exists or was
+      ever replicated.

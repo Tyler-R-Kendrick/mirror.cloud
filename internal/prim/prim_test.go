@@ -81,3 +81,19 @@ func TestOpensearchMatch(t *testing.T) {
 		t.Error("one argument accepted, want arity error")
 	}
 }
+
+// A password is a function of its parameters and its seed: CloudFormation
+// seeds it with the stack and logical id, so a stack is reproducible.
+func TestRandomPasswordIsSeeded(t *testing.T) {
+	params := map[string]any{"PasswordLength": float64(24)}
+	a, err := RandomPassword(params, "stack/Secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := RandomPassword(params, "stack/Secret"); b != a {
+		t.Fatalf("one seed answered %q and %q", a, b)
+	}
+	if c, _ := RandomPassword(params, "stack/Other"); c == a {
+		t.Fatalf("two seeds answered the same %q", a)
+	}
+}

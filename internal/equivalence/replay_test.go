@@ -316,3 +316,29 @@ func (fixedOutput) Operations() []string {
 func (f *fixedOutput) Invoke(context.Context, *spi.Request) (*spi.Response, error) {
 	return &spi.Response{Output: f.out}, nil
 }
+
+// TestReplayComparesNumbersByValue: a recording's numbers come back from JSON
+// as float64, and a bundle answers an integer as int64. Both are the same JSON
+// number on the wire, so they must match -- including past a million, where
+// fmt.Sprint spells the float64 2592000 as "2.592e+06" -- without the gate going
+// blind to a number that is actually different.
+func TestReplayComparesNumbersByValue(t *testing.T) {
+	trace := &equivalence.Trace{
+		Steps:    []equivalence.Step{{Operation: "DescribeVpcs", Input: map[string]any{}}},
+		Outcomes: []equivalence.Outcome{{Output: map[string]any{"DeletionDate": float64(2592000)}}},
+	}
+	diffs, err := equivalence.Replay(context.Background(), &fixedOutput{out: map[string]any{"DeletionDate": int64(2592000)}}, trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) != 0 {
+		t.Errorf("the same number as float64 and int64 diverged: %v", diffs)
+	}
+	diffs, err = equivalence.Replay(context.Background(), &fixedOutput{out: map[string]any{"DeletionDate": int64(2592001)}}, trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) == 0 {
+		t.Error("a different number was not reported")
+	}
+}

@@ -501,6 +501,33 @@ func TestNotificationAttributesFromEveryPublishForm(t *testing.T) {
 	}
 }
 
+// A batch answered with a fault published nothing. Every entry is checked
+// before any is delivered, so a refused entry after a valid one does not leave
+// the valid one delivered behind a 400 a client will retry.
+func TestPublishBatchPublishesNothingWhenAnEntryIsRefused(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "refused-batch"}}); err != nil {
+		t.Fatal(err)
+	}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "refused-batch"}).Output["TopicArn"])
+	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:refused-batch"})
+	for name, entries := range map[string][]any{
+		"empty message": {map[string]any{"Id": "valid", "Message": "delivered?"}, map[string]any{"Id": "refused", "Message": ""}},
+		"duplicate id":  {map[string]any{"Id": "same", "Message": "delivered?"}, map[string]any{"Id": "same", "Message": "again"}},
+	} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PublishBatch", Input: map[string]any{"TopicArn": topic, "Entries": entries}}); err == nil {
+			t.Fatalf("%s: PublishBatch succeeded", name)
+		}
+		received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "refused-batch", "MaxNumberOfMessages": 10}})
+		if err != nil || len(asSlice(received.Output["Messages"])) != 0 {
+			t.Fatalf("%s: a refused batch delivered %#v (err %v)", name, received.Output["Messages"], err)
+		}
+	}
+}
+
 func TestSNSSQSNotificationSignatureVersionTwo(t *testing.T) {
 	deps := spitest.Deps(t)
 	p, qp := New(deps), bundled.Handler("aws.sqs", deps)

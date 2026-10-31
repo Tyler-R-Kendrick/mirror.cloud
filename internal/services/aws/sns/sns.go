@@ -276,7 +276,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if fault := p.validatePublishTarget(ctx, req, topicARN(req.Input)); fault != nil {
 			return nil, fault
 		}
-		entries, _ := req.Input["Entries"].([]any)
+		entries, _ := req.Input["PublishBatchRequestEntries"].([]any)
+		if entries == nil { // a client sends the model's name; Entries is what in-process callers pass
+			entries, _ = req.Input["Entries"].([]any)
+		}
 		if len(entries) == 0 && str(req.Input["Message"]) != "" {
 			if fault := validatePublishMessage(req); fault != nil {
 				return nil, fault
@@ -289,7 +292,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(entries) > 10 {
 			return nil, clientFault("TooManyEntriesInBatchRequest", "Maximum number of entries per request are 10.", 400)
 		}
-		var ok []any
+		var batch []*spi.Request
+		var ids []any
 		seenIDs := map[string]bool{}
 		totalBytes := 0
 		for _, e := range entries {
@@ -302,21 +306,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			attrs := asMap(m["MessageAttributes"])
 			if len(attrs) == 0 {
 				attrs = messageAttrs(m)
-			}
-			checkInput := map[string]any{"Message": m["Message"], "MessageAttributes": attrs}
-			if _, present := m["Subject"]; present {
-				checkInput["Subject"] = m["Subject"]
-			}
-			if _, present := m["MessageStructure"]; present {
-				checkInput["MessageStructure"] = m["MessageStructure"]
-			}
-			entryCheck := &spi.Request{Input: checkInput}
-			if fault := validatePublishMessage(entryCheck); fault != nil {
-				return nil, fault
-			}
-			totalBytes += publishMessageSize(str(m["Message"]), attrs)
-			if totalBytes > 262144 {
-				return nil, clientFault("BatchRequestTooLong", "Batch requests cannot be longer than 262144 bytes.", 400)
 			}
 			entryInput := make(map[string]any, len(req.Input)+6)
 			for key, value := range req.Input {
@@ -332,16 +321,27 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			entryReq := *req
 			entryReq.Input = entryInput
 			entryReq.Operation = "Publish"
+			if fault := validatePublishMessage(&entryReq); fault != nil {
+				return nil, fault
+			}
+			totalBytes += publishMessageSize(str(m["Message"]), attrs)
+			if totalBytes > 262144 {
+				return nil, clientFault("BatchRequestTooLong", "Batch requests cannot be longer than 262144 bytes.", 400)
+			}
 			if fault := p.validatePublishTarget(ctx, &entryReq, topicARN(entryInput)); fault != nil {
 				return nil, fault
 			}
-			resp, err := p.publishOne(ctx, &entryReq, str(m["Message"]), attrs)
-			if err != nil {
-				continue
-			}
-			ok = append(ok, map[string]any{"Id": m["Id"], "MessageId": resp.Output["MessageId"]})
+			batch, ids = append(batch, &entryReq), append(ids, m["Id"])
 		}
-		return &spi.Response{Output: map[string]any{"Successful": ok}}, nil
+		ok := []any{} // every entry was checked before any is published: a batch answered with a fault delivered nothing
+		for i, entryReq := range batch {
+			resp, err := p.publishOne(ctx, entryReq, str(entryReq.Input["Message"]), asMap(entryReq.Input["MessageAttributes"]))
+			if err != nil {
+				return nil, err
+			}
+			ok = append(ok, map[string]any{"Id": ids[i], "MessageId": resp.Output["MessageId"]})
+		}
+		return &spi.Response{Output: map[string]any{"Successful": ok, "Failed": []any{}}}, nil
 	case "Subscribe":
 		topicArn := str(req.Input["TopicArn"])
 		if !validTopicARN(topicArn) {

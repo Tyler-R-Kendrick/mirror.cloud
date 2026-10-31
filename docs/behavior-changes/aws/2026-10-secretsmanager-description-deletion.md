@@ -24,6 +24,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     succeeds.
   - `ForceDeleteWithoutRecovery` together with `RecoveryWindowInDays` is
     `InvalidParameterException`.
+  - `RecoveryWindowInDays` must be "from 7 to 30"; any other value is
+    `InvalidParameterException`, checked before the date is computed. Before,
+    any window was accepted, and a huge one overflowed into an internal
+    failure.
 - **RestoreSecret** clears `DeletedDate` and answers `ARN` and `Name`.
 - **Timestamps are epoch seconds.** `DeletionDate` and `DeletedDate` are
   timestamps (`DeletionDateType`, `DeletedDateType`) on an `awsJson1_1`

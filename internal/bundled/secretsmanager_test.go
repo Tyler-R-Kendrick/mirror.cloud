@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
@@ -265,4 +266,33 @@ func TestSecretsManagerTimestampsAreEpochSeconds(t *testing.T) {
 		t.Fatal("DescribeSecret of a secret scheduled for deletion answered no DeletedDate")
 	}
 	epochSeconds(t, "ListSecrets", ok(t, "ListSecrets", map[string]any{"IncludePlannedDeletion": true}))
+}
+
+// DeleteSecretRequest.RecoveryWindowInDays: "The number of days from 7 to 30
+// that Secrets Manager waits before permanently deleting the secret."
+// DeleteSecret: "The minimum recovery window is 7 days." InvalidParameterException:
+// "The parameter name or value is invalid." The window is checked before any
+// arithmetic, so a huge one is refused rather than overflowing the date.
+func TestSecretsManagerRecoveryWindowIsSevenToThirtyDays(t *testing.T) {
+	for _, days := range []int64{0, 6, 31, -5, 1 << 60} {
+		t.Run(fmt.Sprint(days), func(t *testing.T) {
+			call, ok, fault := secretsManager(t)
+			ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v"})
+			_, err := call("DeleteSecret", map[string]any{"SecretId": "s", "RecoveryWindowInDays": days})
+			fault(t, err, "InvalidParameterException")
+			if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}); got["DeletedDate"] != nil {
+				t.Fatalf("a refused window scheduled the secret: DeletedDate %#v", got["DeletedDate"])
+			}
+		})
+	}
+	for _, days := range []int64{7, 30} {
+		t.Run(fmt.Sprint(days), func(t *testing.T) {
+			_, ok, _ := secretsManager(t)
+			ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v"})
+			deleted := ok(t, "DeleteSecret", map[string]any{"SecretId": "s", "RecoveryWindowInDays": days})
+			if !at(deleted["DeletionDate"], days*86400) {
+				t.Fatalf("DeletionDate %#v, want the request time plus %d days", deleted["DeletionDate"], days)
+			}
+		})
+	}
 }

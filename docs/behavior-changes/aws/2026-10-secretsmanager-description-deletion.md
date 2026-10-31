@@ -105,12 +105,18 @@ The oracle is AWS's documentation as it ships in the vendored model
     name again.
   - `CreateSecret` gets `SecretString` and `Description` only when the template
     gives them.
+  - A YAML template is read as YAML, with a YAML library: flow collections,
+    block scalars and every short-form intrinsic (`!Ref`, `!GetAtt`, `!Sub`,
+    and `!Name` for any other `Fn::Name`). The hand-written subset it replaced
+    read a flow sequence such as `Tags: [{Key: env, Value: dev}]` as a string
+    and refused a block scalar.
   - A resource the template does not name, of any type, is made under
     `<stack>-<logical id>-<suffix>`, the modelled form: the suffix is twelve
     hex digits of a hash of the stack id and logical id, so no two stacks, and
     no two resources of one stack, share a name. A bucket's name is lower
-    case, and a queue with `FifoQueue` true is made a FIFO queue whose name
-    ends in `.fifo`. Characters other than letters, digits and hyphens are
+    case. A queue with `FifoQueue` true is made a FIFO queue (`FifoQueue` was
+    not passed to `CreateQueue` before), and its name, when the engine makes
+    it, ends in `.fifo`. Characters other than letters, digits and hyphens are
     dropped, and the stack name and logical id are cut, never the suffix, to
     fit the service's longest name: 80 for a queue, 64 for a rule, a role or a
     function, 128 for a stream, 255 for a table, 256 for a topic and 63 for a
@@ -142,8 +148,11 @@ The oracle is AWS's documentation as it ships in the vendored model
     recorded the moment it exists, so one whose create failed partway (a
     bucket whose configuration S3 refused, a rule whose targets EventBridge
     refused) is deleted with the rest, and a create that failed outright
-    records nothing. `OnFailure` is not read, so every failed create rolls
-    back. A failed `UpdateStack` is not rolled back.
+    records nothing. The rollback deletes only what this create made: no two
+    stacks share a name the engine makes, and a given name another resource
+    already holds is refused before anything is made (above). `OnFailure` is
+    not read, so every failed create rolls back. A failed `UpdateStack` is not
+    rolled back.
   - A failed create keeps its stack, `ROLLBACK_COMPLETE` once the rollback
     has deleted everything it made. The name stays taken (`CreateStack` is
     `AlreadyExistsException`; `UpdateStack` is `ValidationError`, "Stack:...

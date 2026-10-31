@@ -159,7 +159,7 @@ func (h *stacks) lookup(r res) (name string, err error) {
 	return "", nil
 }
 
-// nameable is one resource of every type CloudFormation names, each with
+// nameable is one resource of every type the template engine names, each with
 // the least its service needs, none of them named.
 func nameable() map[string]map[string]any {
 	props := func(kv ...any) map[string]any {

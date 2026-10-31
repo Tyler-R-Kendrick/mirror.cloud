@@ -574,9 +574,9 @@ func TestCloudFormationSecretWithoutAValue(t *testing.T) {
 	}
 }
 
-// A secret a template does not name is named for its stack, as CloudFormation
-// names it: <stack>-<logical id>-<suffix>, the suffix taken from the stack id
-// so a stack is reproducible. Two stacks from one template each get their own
+// A secret a template does not name is named for its stack, in the modelled
+// form <stack>-<logical id>-<suffix>, the suffix a hash of the stack id and
+// logical id, so an update finds the same name. Two stacks from one template each get their own
 // secret, which a second CreateSecret of one bare logical id refused.
 func TestCloudFormationNamesAnUnnamedSecretForItsStack(t *testing.T) {
 	deps := spitest.Deps(t)
@@ -672,7 +672,7 @@ func TestCloudFormationAFailedCreateRollsBack(t *testing.T) {
 // classes, IncludeSpace, RequireEachIncludedType -- seeded by the stack and
 // logical id. With SecretStringTemplate and GenerateStringKey, the password
 // goes into the template's JSON under that key. A template that also gives
-// SecretString is refused, as CloudFormation refuses it.
+// SecretString is refused.
 func TestCloudFormationGeneratesASecretString(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := bundled.Handler("aws.cloudformation", deps)

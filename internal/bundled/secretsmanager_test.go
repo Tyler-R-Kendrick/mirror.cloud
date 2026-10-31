@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1030,5 +1031,34 @@ func TestSecretsManagerDeletionDatesComeFromOneRequestTime(t *testing.T) {
 	deleted, _ := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"})["DeletedDate"].(float64)
 	if deletion-deleted != 7*86400 {
 		t.Fatalf("DeletionDate %v - DeletedDate %v = %v, want exactly 7 days (604800)", deletion, deleted, deletion-deleted)
+	}
+}
+
+// ListSecretVersionIdsRequest.IncludeDeprecated: "Specifies whether to include
+// versions of secrets that don't have any staging labels attached to them.
+// Versions without staging labels are considered deprecated and are subject to
+// deletion by Secrets Manager. By default, versions without staging labels
+// aren't included."
+func TestSecretsManagerListSecretVersionIdsIncludesDeprecatedOnlyWhenAsked(t *testing.T) {
+	_, ok, _ := secretsManager(t)
+	first := ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v1"})["VersionId"]
+	ok(t, "PutSecretValue", map[string]any{"SecretId": "s", "SecretString": "v2"})
+	ok(t, "PutSecretValue", map[string]any{"SecretId": "s", "SecretString": "v3"})
+	ids := func(in map[string]any) []any {
+		t.Helper()
+		var out []any
+		versions, _ := ok(t, "ListSecretVersionIds", in)["Versions"].([]any)
+		for _, v := range versions {
+			out = append(out, v.(map[string]any)["VersionId"])
+		}
+		return out
+	}
+	for _, in := range []map[string]any{{"SecretId": "s"}, {"SecretId": "s", "IncludeDeprecated": false}} {
+		if got := ids(in); len(got) != 2 || slices.Contains(got, first) {
+			t.Errorf("%v listed %v, want the two labelled versions and not the deprecated %v", in, got, first)
+		}
+	}
+	if got := ids(map[string]any{"SecretId": "s", "IncludeDeprecated": true}); len(got) != 3 || !slices.Contains(got, first) {
+		t.Errorf("IncludeDeprecated listed %v, want all three versions", got)
 	}
 }

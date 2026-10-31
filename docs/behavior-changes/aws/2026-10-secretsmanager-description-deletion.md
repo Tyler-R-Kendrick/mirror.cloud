@@ -45,7 +45,9 @@ The oracle is AWS's documentation as it ships in the vendored model
   `DescribeSecretResponse.VersionIdsToStages` is "A list of the versions of
   the secret that have staging labels attached"). `ListSecrets` and
   `DescribeSecret` leave such a version out; they answered it with `[]`.
-  `ListSecretVersionIds` is unchanged and still lists it.
+  `ListSecretVersionIds` lists it only with `IncludeDeprecated` ("By
+  default, versions without staging labels aren't included"); it listed
+  every version.
 - **ListSecrets answers both.** Each entry carries `Description` ("The
   user-provided description of the secret") and, for a secret scheduled for
   deletion listed with `IncludePlannedDeletion`, `DeletedDate` ("Not present on
@@ -205,7 +207,7 @@ the replica and step 50 schedules `primary` for deletion. Each of steps 51 to
 `BatchGetSecretValue`, and one each of `UpdateSecretVersionStage`,
 `PutResourcePolicy`, `DeleteResourcePolicy`, `ReplicateSecretToRegions`,
 `RemoveRegionsFromReplication`, `StopReplicationToReplica` and
-`CancelRotateSecret`. Steps 26, 37, 45, 46, 47, 48, 61, 62, 63, 64 and 67 are
+`CancelRotateSecret`. Steps 17, 26, 37, 45, 46, 47, 48, 61, 62, 63, 64 and 67 are
 re-cut, and every step whose reason names another step was re-cut again to
 name it where it now is. Each carries the sentence above that it now follows.
 The first commit's re-cuts at 52, 53 and 56 are now at 63, 64 and 67.

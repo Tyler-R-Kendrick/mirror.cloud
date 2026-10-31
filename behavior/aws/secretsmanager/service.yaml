@@ -514,11 +514,21 @@ operations:
 
   # An unknown secret is not a fault here: the pack answers an empty version
   # list and the name it was asked about.
+  #
+  # A version with no staging label is deprecated and listed only with
+  # IncludeDeprecated: "By default, versions without staging labels aren't
+  # included."
   ListSecretVersionIds:
     reads:
       s: { resource: secret }
+    let:
+      deprecated: "'IncludeDeprecated' in input && (input.IncludeDeprecated == true || input.IncludeDeprecated == 'true')"
     output:
-      Versions: "s_found && 'Versions' in s ? s.Versions.map(v, {'VersionId': v.VersionId, 'VersionStages': ('VersionStages' in v ? v.VersionStages : null)}) : dyn(null)"
+      Versions: >-
+        s_found && 'Versions' in s
+        ? s.Versions.filter(v, deprecated || ('VersionStages' in v && v.VersionStages != null && size(v.VersionStages) > 0))
+            .map(v, {'VersionId': v.VersionId, 'VersionStages': ('VersionStages' in v ? v.VersionStages : null)})
+        : dyn(null)
       Name: id
 
   # Tags upsert by key: an existing key is replaced in place, a new one

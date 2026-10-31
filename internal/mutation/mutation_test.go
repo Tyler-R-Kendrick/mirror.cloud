@@ -4329,6 +4329,40 @@ var mutants = []mutant{
 		run:  "TestCloudFormationIntrinsicAndYAMLUnits",
 	},
 	{
+		name: "cloudformation-cleanup-keeps-what-it-replaced",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `return slices.ContainsFunc(st.Resources, func(n res) bool { return n.Physical == r.Physical })`,
+		new:  `return true`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationAnUpdateDeletesWhatItReplaced",
+	},
+	{
+		name: "cloudformation-retain-deletes-anyway",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `return func(r res) bool { return slices.Contains(keep, str(asMap(asMap(tpl["Resources"])[r.Logical])[attr])) }`,
+		new:  `return func(r res) bool { _, _ = keep, attr; return false }`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationRetainKeepsAResource",
+	},
+	{
+		name: "cloudformation-stack-name-takes-any-pattern",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old: `} else if !ok {
+		constraint = "satisfy regular expression pattern: " + pattern`,
+		new: `} else if false && !ok {
+		constraint = "satisfy regular expression pattern: " + pattern`,
+		pkg: "./internal/services/aws/cloudformation",
+		run: "TestCloudFormationChecksTheStackName",
+	},
+	{
+		name: "cloudformation-ignore-failed-target-entries",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `if failed, _ := put["FailedEntries"].([]any); putErr == nil && len(failed) > 0 {`,
+		new:  `if failed, _ := put["FailedEntries"].([]any); putErr == nil && len(failed) > 0 && false {`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationARuleWhoseTargetsFailFailsTheStack",
+	},
+	{
 		name: "states-ignore-tag-update",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 		old:  `tags[i] = tag`,

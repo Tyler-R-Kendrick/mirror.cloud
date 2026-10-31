@@ -719,3 +719,25 @@ func TestCloudFormationAStackWithNoResourcesReads(t *testing.T) {
 		t.Errorf("a refused template left the stack none: %v", err)
 	}
 }
+
+// A parameter is a string: for a Number, "when you use the parameter
+// elsewhere in your template (for example, by using the Ref intrinsic
+// function), the parameter value becomes a string" (User Guide, Parameters).
+// So a numeric Default is its text, Default: 16 is "16", and a Ref to it
+// feeds PasswordLength like any other. Before, a Default that was not a
+// string became "", in a JSON template and a YAML one alike.
+func TestCloudFormationANumericDefaultIsItsText(t *testing.T) {
+	h := newStacks(t)
+	json1 := `{"Parameters":{"Len":{"Type":"Number","Default":16}},"Resources":{"S":{"Type":"AWS::SecretsManager::Secret","Properties":{"GenerateSecretString":{"PasswordLength":{"Ref":"Len"}}}}}}`
+	yaml1 := "Parameters:\n  Len:\n    Type: Number\n    Default: 16\nResources:\n  S:\n    Type: AWS::SecretsManager::Secret\n    Properties:\n      GenerateSecretString:\n        PasswordLength: !Ref Len\n"
+	for stack, body := range map[string]string{"json-default": json1, "yaml-default": yaml1} {
+		if _, err := h.invoke("CreateStack", map[string]any{"StackName": stack, "TemplateBody": body}); err != nil {
+			t.Errorf("%s: %v", stack, err)
+			continue
+		}
+		out, err := h.service("aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": h.resources(stack)[0].Physical})
+		if err != nil || len(str(out["SecretString"])) != 16 {
+			t.Errorf("%s generated %v (%v), want 16 characters", stack, out["SecretString"], err)
+		}
+	}
+}

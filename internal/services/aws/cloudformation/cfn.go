@@ -761,7 +761,7 @@ func mergeParamDefaults(tpl map[string]any, params map[string]string) {
 	for k, v := range asMap(tpl["Parameters"]) {
 		if _, given := params[k]; !given {
 			if d, ok := asMap(v)["Default"]; ok {
-				params[k] = str(d)
+				params[k] = jsonText(d) // a parameter "becomes a string": Default 16 is "16"
 			}
 		}
 	}

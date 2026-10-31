@@ -187,7 +187,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     seeded by the stack id and logical id, and puts it under `GenerateStringKey`
     in `SecretStringTemplate` when the template gives one. Its properties are
     read as a template's are: a number or boolean may be given as its text
-    (`"16"`, `"true"`), which is how a `Ref` to a parameter gives one. Each
+    (`"16"`, `"true"`), which is how a `Ref` to a parameter gives one. A
+    parameter is a string ("the parameter value becomes a string", User
+    Guide, Parameters), so a numeric `Default`, `Default: 16` in JSON or
+    YAML, is its text `"16"`; before, it became `""`. Each
     way it can be wrong is `ValidationError` with its own message: not an
     object; `SecretString` beside it; `GenerateStringKey` without
     `SecretStringTemplate`, or the reverse; a template that is not JSON, or

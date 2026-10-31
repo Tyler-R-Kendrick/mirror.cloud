@@ -114,6 +114,25 @@ The oracle is AWS's documentation as it ships in the vendored model
   `GetSecretValue` refused it already ("When a secret is scheduled for
   deletion, you cannot retrieve the secret value. You must first cancel the
   deletion with RestoreSecret").
+- **Filters choose secrets.** `BatchGetSecretValue` and `ListSecrets` apply
+  `Filters` as `Filter.Key` describes them: `name`, `tag-key`, `tag-value` and
+  `primary-region` are case-sensitive prefix matches, `description` a prefix
+  match that is not case-sensitive, and `all` "Breaks the filter value string
+  into words and then searches all attributes for matches. Not
+  case-sensitive." A value starting with `!` negates. Every filter must
+  match, a filter matches when any of its values does, and with `all` every
+  word must start a word of some attribute; the model does not say how
+  values combine, so that is this note's reading. Before, both operations
+  ignored `Filters`.
+  - `BatchGetSecretValue` refuses `Filters` with `SecretIdList` ("You must
+    include Filters or SecretIdList, but not both") and a request with
+    neither, with `InvalidParameterException`. The filter form pages with
+    `MaxResults` and `NextToken` as `ListSecrets` does, leaves out a secret
+    scheduled for deletion as `ListSecrets` does, and answers a secret with no
+    value as a not-found `Errors` row. The `SecretIdList` form is unchanged.
+  - A listing page that keeps nothing while more secrets follow now moves
+    `NextToken` past what it read; before, `ListSecrets` with a scheduled
+    secret between two listed ones lost the second (an engine fix).
 - **BatchGetSecretValue leaves out a secret scheduled for deletion.** Its value
   is not answered; it is an `Errors` row, an `APIErrorType` of `SecretId`,
   `ErrorCode` `InvalidRequestException` and `Message`. Before, its value was

@@ -334,16 +334,48 @@ operations:
   # The listing skips secrets marked for deletion unless asked (the pack's
   # truthy accepts the string forms too), and projects each record rather than
   # answering it: no version values leave through here.
+  #
+  # Filters choose secrets as Filter.Key describes: "description: Prefix match,
+  # not case-sensitive. name: Prefix match, case-sensitive. tag-key: Prefix
+  # match, case-sensitive. tag-value: Prefix match, case-sensitive.
+  # primary-region: Prefix match, case-sensitive. owning-service: Prefix
+  # match, case-sensitive. all: Breaks the filter value string into words and
+  # then searches all attributes for matches. Not case-sensitive." A value
+  # that starts with "!" is a negation (Filter.Values). Every filter must
+  # match, and a filter matches when any of its values does; with "all",
+  # every word must start a word of some attribute. The primary region of a
+  # secret is the Region it was created in, and no secret here is owned by a
+  # service. Which values combine how is this bundle's reading; the model
+  # says only what each key matches.
+  # BatchGetSecretValue's Filters reuse this as *filtersMatch.
   ListSecrets:
     list:
       resource: secret
       member: SecretList
       paginate: model
+      let:
+        matched: &filtersMatch >-
+          !('Filters' in input && input.Filters != null) || input.Filters.all(f,
+            [{'name': [string(item.Name)],
+              'description': ['Description' in item && item.Description != null ? string(item.Description) : ''],
+              'tag-key': ('Tags' in item && item.Tags != null ? item.Tags : []).map(x, 'Key' in x && x.Key != null ? string(x.Key) : ''),
+              'tag-value': ('Tags' in item && item.Tags != null ? item.Tags : []).map(x, 'Value' in x && x.Value != null ? string(x.Value) : ''),
+              'primary-region': [string(identity.region)]}].exists(a,
+            ('Values' in f && f.Values != null ? f.Values : []).exists(v,
+              [substr(string(v), string(v).startsWith('!') ? 1 : 0, size(string(v)))].exists(t,
+                string(v).startsWith('!') != (
+                  string(f.Key) == 'all'
+                  ? split(t, ' ').filter(w, w != '').all(w,
+                      (a['name'] + a['description'] + a['tag-key'] + a['tag-value'] + a['primary-region'])
+                        .exists(x, split(lower(x), ' ').exists(y, y.startsWith(lower(w)))))
+                  : string(f.Key) == 'description'
+                    ? a['description'].exists(x, lower(x).startsWith(lower(t)))
+                    : (string(f.Key) in a ? a[string(f.Key)] : []).exists(x, x.startsWith(t)))))))
       filter: >-
-        !('Deleted' in item && item.Deleted == true)
+        matched && (!('Deleted' in item && item.Deleted == true)
         || ('IncludePlannedDeletion' in input
             && (input.IncludePlannedDeletion == true || input.IncludePlannedDeletion == 'true'
-                || input.IncludePlannedDeletion == 'True' || input.IncludePlannedDeletion == '1'))
+                || input.IncludePlannedDeletion == 'True' || input.IncludePlannedDeletion == '1')))
     #
     # Each entry carries its Tags, its Description ("The user-provided
     # description of the secret") and, scheduled for deletion, its DeletedDate
@@ -530,7 +562,28 @@ operations:
   # cannot retrieve the secret value" (DeleteSecret). The row is an APIErrorType,
   # SecretId, ErrorCode and Message, with InvalidRequestException, whose
   # documented causes include "The secret is scheduled for deletion."
+  #
+  # Filters choose the secrets the way ListSecrets' do (*filtersMatch): "You
+  # must include Filters or SecretIdList, but not both", so both, or neither,
+  # is InvalidParameterException. The filter form pages as ListSecrets does
+  # (MaxResults: "To use this parameter, you must also use the Filters
+  # parameter"), leaves out a secret scheduled for deletion as ListSecrets
+  # does, and answers a secret with no value as a not-found Errors row.
   BatchGetSecretValue:
+    require:
+      - cond: "!('Filters' in input && input.Filters != null && 'SecretIdList' in input && input.SecretIdList != null)"
+        error: InvalidParameter
+        message: "You must include Filters or SecretIdList, but not both."
+      - cond: "('Filters' in input && input.Filters != null) || size(bids) > 0"
+        error: InvalidParameter
+        message: "You must include Filters or SecretIdList."
+    list:
+      resource: secret
+      member: SecretValues
+      paginate: model
+      let:
+        matched: *filtersMatch
+      filter: "'Filters' in input && input.Filters != null && matched && !('Deleted' in item && item.Deleted == true)"
     let:
       bids: >-
         ('SecretIdList' in input && input.SecretIdList != null && size(input.SecretIdList) > 0)
@@ -546,12 +599,16 @@ operations:
       filter: "'Name' in item && bids.exists(b, string(b) == string(item.Name))"
     output:
       SecretValues: >-
-        bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b)) && !(b in gone) && !(b in valueless))
-            .map(b, bs.filter(x, 'Name' in x && string(x.Name) == string(b))[0])
+        ('Filters' in input && input.Filters != null
+          ? items.filter(m, 'Versions' in m && size(m.Versions) > 0)
+          : bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b)) && !(b in gone) && !(b in valueless))
+              .map(b, bs.filter(x, 'Name' in x && string(x.Name) == string(b))[0]))
             .map(m, {'m': m, 'p': (('Versions' in m && m.Versions.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))) ? m.Versions.filter(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))[0] : m)})
             .map(pair, {'ARN': pair.m.ARN, 'Name': pair.m.Name, 'SecretString': pair.p.SecretString, 'VersionId': pair.p.VersionId})
       Errors: >-
-        bids.filter(b, !bs.exists(x, 'Name' in x && string(x.Name) == string(b)) || b in gone || b in valueless)
+        'Filters' in input && input.Filters != null
+        ? items.filter(m, !('Versions' in m && size(m.Versions) > 0)).map(m, {'SecretId': string(m.Name), 'ErrorCode': 'ResourceNotFoundException'})
+        : bids.filter(b, !bs.exists(x, 'Name' in x && string(x.Name) == string(b)) || b in gone || b in valueless)
             .map(b, b in gone
               ? {'SecretId': string(b), 'ErrorCode': 'InvalidRequestException',
                  'Message': "You can't perform this operation on the secret because it was marked for deletion."}

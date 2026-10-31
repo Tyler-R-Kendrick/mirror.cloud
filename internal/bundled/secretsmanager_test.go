@@ -836,3 +836,102 @@ func TestSecretsManagerRefusesToDeleteAReplicatedPrimary(t *testing.T) {
 		})
 	}
 }
+
+// BatchGetSecretValueRequest.Filters: "The filters to choose which secrets to
+// retrieve. You must include Filters or SecretIdList, but not both." MaxResults:
+// "To use this parameter, you must also use the Filters parameter." The
+// filters are ListSecrets' (Filter.Key): "description: Prefix match, not
+// case-sensitive. name: Prefix match, case-sensitive. tag-key ... tag-value:
+// Prefix match, case-sensitive ... all: Breaks the filter value string into
+// words and then searches all attributes for matches. Not case-sensitive."
+// Filter.Values: "You can prefix your search value with an exclamation mark
+// (!) in order to perform negation filters."
+func TestSecretsManagerFiltersChooseSecrets(t *testing.T) {
+	call, ok, fault := secretsManager(t)
+	tag := func(k, v string) []any { return []any{map[string]any{"Key": k, "Value": v}} }
+	ok(t, "CreateSecret", map[string]any{"Name": "app/db", "SecretString": "db", "Description": "Primary database"})
+	ok(t, "TagResource", map[string]any{"SecretId": "app/db", "Tags": tag("env", "prod")})
+	ok(t, "CreateSecret", map[string]any{"Name": "app/cache", "SecretString": "cache", "Description": "cache"})
+	ok(t, "TagResource", map[string]any{"SecretId": "app/cache", "Tags": tag("env", "dev")})
+	ok(t, "CreateSecret", map[string]any{"Name": "app/empty"})
+	ok(t, "CreateSecret", map[string]any{"Name": "other", "SecretString": "other"})
+	ok(t, "CreateSecret", map[string]any{"Name": "app/gone", "SecretString": "gone"})
+	ok(t, "DeleteSecret", map[string]any{"SecretId": "app/gone"})
+
+	filter := func(key string, values ...any) []any {
+		return []any{map[string]any{"Key": key, "Values": values}}
+	}
+	names := func(list any, member string) []string {
+		var out []string
+		rows, _ := list.([]any)
+		for _, r := range rows {
+			out = append(out, fmt.Sprint(r.(map[string]any)[member]))
+		}
+		return out
+	}
+	batch := func(filters []any) ([]string, []string) {
+		t.Helper()
+		got := ok(t, "BatchGetSecretValue", map[string]any{"Filters": filters})
+		return names(got["SecretValues"], "Name"), names(got["Errors"], "SecretId")
+	}
+	for _, tc := range []struct {
+		filters      []any
+		values, errs []string
+	}{
+		// A secret with no value is an Errors row, as GetSecretValue would
+		// answer it; one scheduled for deletion is not listed.
+		{filter("name", "app/"), []string{"app/cache", "app/db"}, []string{"app/empty"}},
+		{filter("name", "App/"), nil, nil},
+		{filter("name", "!app/"), []string{"other"}, nil},
+		{filter("description", "PRIMARY"), []string{"app/db"}, nil},
+		{filter("tag-key", "en"), []string{"app/cache", "app/db"}, nil},
+		{filter("tag-value", "prod"), []string{"app/db"}, nil},
+		{filter("tag-value", "prod", "dev"), []string{"app/cache", "app/db"}, nil},
+		{append(filter("name", "app/"), filter("tag-value", "dev")...), []string{"app/cache"}, nil},
+		{filter("all", "PROD database"), []string{"app/db"}, nil},
+		{filter("primary-region", "us-east"), []string{"app/cache", "app/db", "other"}, []string{"app/empty"}},
+	} {
+		values, errs := batch(tc.filters)
+		if !reflect.DeepEqual(values, tc.values) || !reflect.DeepEqual(errs, tc.errs) {
+			t.Errorf("Filters %v: SecretValues %v Errors %v, want %v and %v", tc.filters, values, errs, tc.values, tc.errs)
+		}
+	}
+	if got, _ := ok(t, "BatchGetSecretValue", map[string]any{"Filters": filter("name", "app/db")})["SecretValues"].([]any); len(got) != 1 || got[0].(map[string]any)["SecretString"] != "db" {
+		t.Errorf("the filter form answered %#v, want the value", got)
+	}
+
+	// The filter form pages as ListSecrets does.
+	first := ok(t, "BatchGetSecretValue", map[string]any{"Filters": filter("name", "app/"), "MaxResults": 1})
+	if token, _ := first["NextToken"].(string); token == "" || len(names(first["SecretValues"], "Name"))+len(names(first["Errors"], "SecretId")) != 1 {
+		t.Fatalf("MaxResults 1 answered %#v, want one secret and a NextToken", first)
+	}
+	seen := 1
+	for token, pages := first["NextToken"], 0; token != nil && token != ""; pages++ {
+		if pages > 10 {
+			t.Fatal("still paging after 10 pages")
+		}
+		page := ok(t, "BatchGetSecretValue", map[string]any{"Filters": filter("name", "app/"), "MaxResults": 1, "NextToken": token})
+		seen += len(names(page["SecretValues"], "Name")) + len(names(page["Errors"], "SecretId"))
+		token = page["NextToken"]
+	}
+	if seen != 3 {
+		t.Errorf("paging through name app/ saw %d secrets, want 3", seen)
+	}
+
+	// The same filters choose what ListSecrets lists.
+	if listed := names(ok(t, "ListSecrets", map[string]any{"Filters": filter("name", "app/")})["SecretList"], "Name"); !reflect.DeepEqual(listed, []string{"app/cache", "app/db", "app/empty"}) {
+		t.Errorf("ListSecrets name app/ listed %v", listed)
+	}
+
+	_, err := call("BatchGetSecretValue", map[string]any{"Filters": filter("name", "app/"), "SecretIdList": []any{"other"}})
+	fault(t, err, "InvalidParameterException")
+	_, err = call("BatchGetSecretValue", map[string]any{})
+	fault(t, err, "InvalidParameterException")
+
+	// The SecretIdList form is unchanged.
+	rows := ok(t, "BatchGetSecretValue", map[string]any{"SecretIdList": []any{"app/db", "app/gone", "missing"}})
+	if values, errs := names(rows["SecretValues"], "Name"), names(rows["Errors"], "ErrorCode"); !reflect.DeepEqual(values, []string{"app/db"}) ||
+		!reflect.DeepEqual(errs, []string{"InvalidRequestException", "ResourceNotFoundException"}) {
+		t.Errorf("SecretIdList answered %v and %v", values, errs)
+	}
+}

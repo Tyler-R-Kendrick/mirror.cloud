@@ -1098,3 +1098,28 @@ func TestSecretsManagerBatchGetErrorsMatchGetSecretValue(t *testing.T) {
 		t.Errorf("a missing secret is %q, want the model's ResourceNotFoundException text", err.(*spi.Fault).Message)
 	}
 }
+
+// RotateSecret: "If you don't include the configuration parameters, the
+// operation starts a rotation with the values already stored in the secret."
+// A secret created without a value has none to start from, and no rotation
+// function ever runs here to make one, so the call is refused with the
+// model's error for the secret's state, InvalidRequestException ("A parameter
+// value is not valid for the current state of the resource"). No version, and
+// no empty value, is seated.
+func TestSecretsManagerRotateSecretRefusesASecretWithNoValue(t *testing.T) {
+	call, ok, fault := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "empty"})
+	_, err := call("RotateSecret", map[string]any{"SecretId": "empty"})
+	fault(t, err, "InvalidRequestException")
+	if versions, _ := ok(t, "ListSecretVersionIds", map[string]any{"SecretId": "empty", "IncludeDeprecated": true})["Versions"].([]any); len(versions) != 0 {
+		t.Fatalf("a refused rotation left %d versions: %#v", len(versions), versions)
+	}
+	_, err = call("GetSecretValue", map[string]any{"SecretId": "empty"})
+	fault(t, err, "ResourceNotFoundException")
+
+	// Once it has a value, it rotates.
+	ok(t, "PutSecretValue", map[string]any{"SecretId": "empty", "SecretString": "v"})
+	if rotated := ok(t, "RotateSecret", map[string]any{"SecretId": "empty"}); rotated["VersionId"] == nil {
+		t.Fatalf("RotateSecret of a secret with a value answered %#v", rotated)
+	}
+}

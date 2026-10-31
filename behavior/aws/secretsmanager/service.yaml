@@ -248,6 +248,13 @@ operations:
     require:
       - { cond: s_found, error: NotFound }
       - *scheduled
+      # "the operation starts a rotation with the values already stored in the
+      # secret": a secret created without a value has none, and no rotation
+      # function runs here to make one. Refused with the error for the
+      # secret's current state rather than seating an empty value.
+      - cond: "size(vers) > 0"
+        error: InvalidRequest
+        message: "The secret has no value to rotate: it has no AWSCURRENT version."
     effects:
       - generate: { bind: ver, kind: hex, bytes: 8 }
       - put:
@@ -848,8 +855,9 @@ quirks:
       No rotation ever runs: the current value is re-seated under a fresh
       version id, and RotationLambdaARN, RotationRules and RotateImmediately
       are accepted and discarded. Rotating a secret created without a value
-      re-seats the empty string as its first version, where the real service
-      would need a rotation function to make one. The pack read a SecretString
+      is InvalidRequestException: there is no stored value to start from and
+      no function to make one (the real service would start the rotation
+      function, which fails). The pack read a SecretString
       member the model does not declare on this operation; kept.
   - operation: UpdateSecretVersionStage
     note: >

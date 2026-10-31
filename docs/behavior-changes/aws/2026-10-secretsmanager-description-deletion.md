@@ -36,6 +36,14 @@ The oracle is AWS's documentation as it ships in the vendored model
   constraint. The engine's own check does not fire here because the Smithy
   receiver carries no length traits into any generated AWS model, so the
   bundle states this one. Before, `""` was stored as a version.
+- **A secret with no value is not rotated.** `RotateSecret` "starts a rotation
+  with the values already stored in the secret". A secret created without a
+  value has none, and no rotation function ever runs here to make one, so
+  `RotateSecret` of it is `InvalidRequestException`, the model's error for a
+  request that is "not valid for the current state of the resource". That is
+  this note's reading: the model does not say what happens, and the real
+  service would start the rotation function, which would fail. Before, the
+  empty string was seated as the secret's first version.
 - **Description.** `CreateSecret` and `UpdateSecret` keep `Description`, and
   `DescribeSecret` answers it. Before, it was accepted and dropped. A write
   that names no description keeps the one already stored.

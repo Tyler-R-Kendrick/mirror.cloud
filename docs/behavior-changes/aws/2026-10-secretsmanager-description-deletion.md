@@ -58,11 +58,13 @@ The oracle is AWS's documentation as it ships in the vendored model
   with `DeletedDate`, where it answered `InvalidRequestException` before.
   `GetSecretValue` still refuses it.
 - **`DeletedDate` is when the deletion was requested.** The model documents the
-  member two ways: `SecretListEntry.DeletedDate` is "The date and time the
-  deletion of the secret occurred", and `DescribeSecretResponse.DeletedDate`
-  is "The date the secret is scheduled for deletion". AWS answers the time of
-  the `DeleteSecret` request, which is the first reading, so that is what is
-  stored. The end of the window is `DeleteSecret`'s `DeletionDate`, "the date
+  member two ways, and the two conflict: `SecretListEntry.DeletedDate` is "The
+  date and time the deletion of the secret occurred", and
+  `DescribeSecretResponse.DeletedDate` is "The date the secret is scheduled
+  for deletion". The model does not settle which holds. This bundle chooses
+  the first, the time of the `DeleteSecret` request, and answers it from both
+  operations; that is an implementation choice, not something the model
+  states. The end of the window is `DeleteSecret`'s `DeletionDate`, "the date
   and time of the delete request plus the number of days in
   RecoveryWindowInDays".
 - **DeleteSecret.**
@@ -95,8 +97,27 @@ The oracle is AWS's documentation as it ships in the vendored model
     Regions. You must first delete the replicas using
     RemoveRegionsFromReplication, and then delete the primary secret." It is
     `InvalidRequestException`, the error for the secret's current state.
-    Before, it was deleted with its replicas.
+    Before, the delete went ahead.
 - **RestoreSecret** clears `DeletedDate` and answers `ARN` and `Name`.
+- **CloudFormation, the one in-repo consumer.**
+  - `UpdateStack` updates a secret the stack made with `UpdateSecret`, sending
+    only the members the template gives, where it called `CreateSecret` on the
+    name again.
+  - `CreateSecret` gets `SecretString` and `Description` only when the template
+    gives them.
+  - A secret the template does not name is `<stack>-<logical id>-<suffix>`,
+    the suffix the stack id's own random part, as CloudFormation names one; it
+    was the bare logical id, so a second stack from one template collided.
+  - A `CreateStack` that fails rolls back what it had created, as
+    CloudFormation's default `OnFailure` (`ROLLBACK`) does, deleting a secret
+    without a recovery window so its name is free again. The emulator keeps no
+    stack record for a failed create, so `DO_NOTHING` and `DELETE` are not
+    distinguished. A failed `UpdateStack` is not rolled back.
+  - `GenerateSecretString` makes the value with `GetRandomPassword`'s generator,
+    seeded by the stack id and logical id, and puts it under `GenerateStringKey`
+    in `SecretStringTemplate` when the template gives one. `SecretString` beside
+    it, or only one of `GenerateStringKey` and `SecretStringTemplate`, is
+    `ValidationError`. Before, such a secret had no value.
 - **A secret scheduled for deletion refuses writes.** Every operation that
   writes to a secret answers `InvalidRequestException` ("Possible causes: The
   secret is scheduled for deletion."), which each of them lists among its
@@ -105,8 +126,15 @@ The oracle is AWS's documentation as it ships in the vendored model
   `UpdateSecretVersionStage`, `TagResource`, `UntagResource`,
   `PutResourcePolicy`, `DeleteResourcePolicy`, `ReplicateSecretToRegions`,
   `RemoveRegionsFromReplication` and `StopReplicationToReplica`. Before, the
-  first four wrote the value and undeleted the secret, and the rest changed
-  its stages, tags, policy or replicas. No write operation leaves the error
+  first four wrote the value and undeleted the secret; `TagResource`,
+  `UntagResource`, `UpdateSecretVersionStage`, `PutResourcePolicy`,
+  `DeleteResourcePolicy`, `ReplicateSecretToRegions` and
+  `RemoveRegionsFromReplication` changed its tags, stages, policy or
+  replicas; and `CancelRotateSecret` and `StopReplicationToReplica` succeeded
+  without changing anything a read shows. The bundle writes the rule once and
+  every one of these uses it except `CreateSecret`, whose refusal has its own
+  message ("a secret with this name is already scheduled for deletion"). No
+  write operation leaves the error
   out of its list, so none is left unchanged for that reason. `RestoreSecret`
   is the way back, and `DeleteSecret` has its own rules (below). The reads are
   unchanged: `DescribeSecret` and `ListSecretVersionIds` do not list the
@@ -157,10 +185,12 @@ The oracle is AWS's documentation as it ships in the vendored model
 - **Timestamps are epoch seconds.** `DeletionDate` and `DeletedDate` are
   timestamps (`DeletionDateType`, `DeletedDateType`) on an `awsJson1_1`
   service with no `timestampFormat` trait, so they are written as epoch
-  seconds, a JSON number. They were date strings, which the Go SDK v2 refuses:
-  it decodes a timestamp only from a JSON number, so `DescribeSecret` of a
-  secret scheduled for deletion failed in every Go SDK v2 client, Terraform's
-  included. `main` wrote `DeletionDate` as a string too. They carry
+  seconds, a JSON number. On `main`, `DeleteSecret` answered `DeletionDate` as
+  a date string, which the Go SDK v2 refuses (it decodes a timestamp only
+  from a JSON number), so `DeleteSecret` failed to decode in every Go SDK v2
+  client, Terraform's included; `DescribeSecret` refused a scheduled secret
+  there and answered no `DeletedDate` at all. The first commit on this branch
+  answered `DeletedDate` as a string too, and that is fixed with it. They carry
   milliseconds where the clock has them (`1.5`, `2592001.5`), as the model's
   examples do ("CreatedDate": 1523477145.713); they were whole seconds.
 
@@ -172,7 +202,7 @@ the replica and step 50 schedules `primary` for deletion. Each of steps 51 to
 `BatchGetSecretValue`, and one each of `UpdateSecretVersionStage`,
 `PutResourcePolicy`, `DeleteResourcePolicy`, `ReplicateSecretToRegions`,
 `RemoveRegionsFromReplication`, `StopReplicationToReplica` and
-`CancelRotateSecret`. Steps 37, 45, 46, 47, 48, 61, 62, 63, 64 and 67 are
+`CancelRotateSecret`. Steps 26, 37, 45, 46, 47, 48, 61, 62, 63, 64 and 67 are
 re-cut, and every step whose reason names another step was re-cut again to
 name it where it now is. Each carries the sentence above that it now follows.
 The first commit's re-cuts at 52, 53 and 56 are now at 63, 64 and 67.

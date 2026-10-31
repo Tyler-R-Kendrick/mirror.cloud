@@ -74,7 +74,10 @@ operations:
   # CancelRotateSecret: InvalidRequestException, "A parameter value is not
   # valid for the current state of the resource. Possible causes: The secret
   # is scheduled for deletion." Each of them lists it among its errors.
-  # RestoreSecret is the way back. The rule is written once, as *scheduled.
+  # RestoreSecret is the way back. The rule is written once, as *scheduled,
+  # and every one of those writes uses it except CreateSecret, whose refusal
+  # names the clash ("a secret with this name is already scheduled for
+  # deletion") and so is its own rule.
   #
   # A version is made only "If you include SecretString or SecretBinary"
   # (CreateSecret); without either the secret has none, and no VersionId.
@@ -416,9 +419,10 @@ operations:
   #   request plus the number of days in RecoveryWindowInDays."
   # - SecretListEntry.DeletedDate: "The date and time the deletion of the
   #   secret occurred." DescribeSecretResponse.DeletedDate says "The date the
-  #   secret is scheduled for deletion" of the same member; the two readings
-  #   differ, and AWS answers the time of the request, so that is what is
-  #   stored. The end of the window is DeletionDate, answered here only.
+  #   secret is scheduled for deletion" of the same member. The two readings
+  #   conflict and the model does not settle which holds; this bundle chooses
+  #   the first, the time of the request. The end of the window is
+  #   DeletionDate, answered here only.
   # - InvalidRequestException, possible causes: "The secret is scheduled for
   #   deletion." So a second unforced delete is refused, not repeated.
   # - ForceDeleteWithoutRecovery: "If you forcibly delete an already deleted or

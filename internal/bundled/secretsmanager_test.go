@@ -315,9 +315,9 @@ func TestSecretsManagerRecoveryWindowIsSevenToThirtyDays(t *testing.T) {
 // occurred." DeleteSecretResponse.DeletionDate: "This value is the date and
 // time of the delete request plus the number of days in RecoveryWindowInDays."
 // DescribeSecretResponse.DeletedDate calls the same member "The date the secret
-// is scheduled for deletion"; it is read as the time of the delete request, as
-// the listing's documentation says and as AWS answers, and DeletionDate is the
-// end of the window.
+// is scheduled for deletion". The two readings conflict; the bundle chooses the
+// listing's, the time of the delete request, and DeletionDate is the end of the
+// window. This pins that choice.
 func TestSecretsManagerDeletedDateIsWhenDeletionWasRequested(t *testing.T) {
 	deps := spitest.Deps(t)
 	_, ok, _ := secretsManagerOn(t, deps)
@@ -339,8 +339,8 @@ func TestSecretsManagerDeletedDateIsWhenDeletionWasRequested(t *testing.T) {
 
 // DeleteSecretResponse.DeletionDate: "This value is the date and time of the
 // delete request plus the number of days in RecoveryWindowInDays." A forced
-// delete has no window, so its DeletionDate is the time of the request, as AWS
-// answers it; it was answered as null.
+// delete has no window, so its DeletionDate is the time of the request; it was
+// answered as null.
 func TestSecretsManagerForcedDeleteAnswersTheRequestTime(t *testing.T) {
 	deps := spitest.Deps(t)
 	_, ok, _ := secretsManagerOn(t, deps)
@@ -384,6 +384,16 @@ func TestSecretsManagerRefusesWritesToASecretScheduledForDeletion(t *testing.T) 
 			call, ok, fault := secretsManager(t)
 			ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v1", "Description": "d"})
 			ok(t, "TagResource", map[string]any{"SecretId": "s", "Tags": []any{map[string]any{"Key": "k", "Value": "v"}}})
+			ok(t, "PutResourcePolicy", map[string]any{"SecretId": "s", "ResourcePolicy": `{"Version":"2012-10-17","Statement":[]}`})
+			state := func() []map[string]any {
+				return []map[string]any{
+					ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}),
+					ok(t, "GetResourcePolicy", map[string]any{"SecretId": "s"}),
+					ok(t, "ListSecretVersionIds", map[string]any{"SecretId": "s"}),
+					ok(t, "GetSecretValue", map[string]any{"SecretId": "s"}),
+				}
+			}
+			before := state()
 			ok(t, "DeleteSecret", map[string]any{"SecretId": "s"})
 
 			_, err := call(refused.op, refused.in)
@@ -391,19 +401,11 @@ func TestSecretsManagerRefusesWritesToASecretScheduledForDeletion(t *testing.T) 
 			if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}); got["DeletedDate"] == nil {
 				t.Fatal("the refused call undeleted the secret")
 			}
-			// Nothing the refused call carried landed.
+			// Nothing the refused call carried landed: after RestoreSecret every
+			// read answers what it did before the delete.
 			ok(t, "RestoreSecret", map[string]any{"SecretId": "s"})
-			described := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"})
-			tags, _ := described["Tags"].([]any)
-			if described["Description"] != "d" || len(tags) != 1 || tags[0].(map[string]any)["Value"] != "v" {
-				t.Fatalf("after RestoreSecret, DescribeSecret answered %#v", described)
-			}
-			if value := ok(t, "GetSecretValue", map[string]any{"SecretId": "s"}); value["SecretString"] != "v1" {
-				t.Fatalf("after RestoreSecret, the value is %#v, want v1", value["SecretString"])
-			}
-			versions, _ := ok(t, "ListSecretVersionIds", map[string]any{"SecretId": "s"})["Versions"].([]any)
-			if len(versions) != 1 {
-				t.Fatalf("after RestoreSecret, %d versions, want 1", len(versions))
+			if after := state(); !reflect.DeepEqual(after, before) {
+				t.Fatalf("the refused call changed the secret:\nbefore %#v\nafter  %#v", before, after)
 			}
 		})
 	}

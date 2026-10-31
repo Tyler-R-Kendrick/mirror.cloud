@@ -614,3 +614,35 @@ func TestCloudFormationNamesAnUnnamedSecretForItsStack(t *testing.T) {
 		t.Fatalf("after UpdateStack the secret is %q holding %v, want %q holding dev2", after, value(after), dev)
 	}
 }
+
+// A CreateStack that fails rolls back what it had created, as CloudFormation
+// does by default (OnFailure ROLLBACK). Rolled-back resources are deleted the
+// way DeleteStack deletes them -- a secret without a recovery window -- so a
+// later stack can take their names.
+func TestCloudFormationAFailedCreateRollsBack(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := bundled.Handler("aws.cloudformation", deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	failing := `{"Resources":{
+		"Queue":{"Type":"AWS::SQS::Queue","Properties":{"QueueName":"rq"}},
+		"Secret":{"Type":"AWS::SecretsManager::Secret","Properties":{"Name":"retry","SecretString":"v"}},
+		"Thing":{"Type":"AWS::Nope::Thing"}}}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "r", "TemplateBody": failing}}); err == nil {
+		t.Fatal("a template with an unsupported resource type was created")
+	}
+	owned := func(svc, op string, in map[string]any) error {
+		_, err := New(deps).call(ctx, &spi.Request{Identity: id}, svc, op, in)
+		return err
+	}
+	if err := owned("aws.secretsmanager", "DescribeSecret", map[string]any{"SecretId": "retry"}); err == nil {
+		t.Error("the failed stack's secret is still there")
+	}
+	if err := owned("aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "rq"}); err == nil {
+		t.Error("the failed stack's queue is still there")
+	}
+	retry := `{"Resources":{"Secret":{"Type":"AWS::SecretsManager::Secret","Properties":{"Name":"retry","SecretString":"v"}}}}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "r2", "TemplateBody": retry}}); err != nil {
+		t.Fatalf("re-creating after the rollback: %v", err)
+	}
+}

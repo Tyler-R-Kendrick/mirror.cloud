@@ -61,24 +61,16 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
 	case "GetTemplateSummary":
-		body, bodyErr := p.templateBody(ctx, req)
-		tpl, err := parseTemplate(body)
-		if bodyErr != nil {
-			err = bodyErr
+		body, err := p.templateBody(ctx, req)
+		tpl, parseErr := parseTemplate(body)
+		if err == nil {
+			err = parseErr
+		}
+		if st, loadErr := p.load(ctx, req, name); err != nil && name != "" && loadErr == nil {
+			tpl, err = parseTemplate(st.Template)
 		}
 		if err != nil {
-			if name != "" {
-				st, lerr := p.load(ctx, req, name)
-				if lerr != nil {
-					return nil, err
-				}
-				tpl, err = parseTemplate(st.Template)
-				if err != nil {
-					return nil, err
-				}
-			} else {
-				return nil, err
-			}
+			return nil, err
 		}
 		var types []any
 		if res, ok := tpl["Resources"].(map[string]any); ok {
@@ -169,6 +161,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		}
 		phys, err := p.provision(ctx, req, typ, logical, name, props, old.Refs[logical], id)
 		if err != nil {
+			if !update { // a failed create rolls back what it made: OnFailure ROLLBACK, the default
+				p.deprovision(ctx, req, st.Resources...)
+			}
 			return nil, err
 		}
 		st.Refs[logical] = phys
@@ -226,9 +221,7 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 	if st.Protect {
 		return nil, &spi.Fault{Code: "ValidationError", Message: "stack has termination protection", HTTPStatus: 400, Fault: "client"}
 	}
-	for i := len(st.Resources) - 1; i >= 0; i-- {
-		p.deprovision(ctx, req, st.Resources[i])
-	}
+	p.deprovision(ctx, req, st.Resources...)
 	_ = p.col(req, "cfn").Delete(ctx, name)
 	return &spi.Response{Output: map[string]any{}}, nil
 }
@@ -325,31 +318,34 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 	}
 }
 
-// deprovision deletes a resource through its owner. Failures are ignored, as
-// a stack delete proceeds past a resource that is already gone.
-func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) {
-	id := r.Physical
-	del := map[string]struct {
-		svc, op string
-		in      map[string]any
-	}{
-		"AWS::S3::Bucket":              {"aws.s3", "DeleteBucket", map[string]any{"Bucket": id}},
-		"AWS::SQS::Queue":              {"aws.sqs", "DeleteQueue", map[string]any{"QueueUrl": id}},
-		"AWS::SNS::Topic":              {"aws.sns", "DeleteTopic", map[string]any{"TopicArn": id}},
-		"AWS::DynamoDB::Table":         {"aws.dynamodb", "DeleteTable", map[string]any{"TableName": id}},
-		"AWS::IAM::Role":               {"aws.iam", "DeleteRole", map[string]any{"RoleName": lastSlash(id)}},
-		"AWS::SSM::Parameter":          {"aws.ssm", "DeleteParameter", map[string]any{"Name": id}},
-		"AWS::SecretsManager::Secret":  {"aws.secretsmanager", "DeleteSecret", map[string]any{"SecretId": id, "ForceDeleteWithoutRecovery": true}},
-		"AWS::KMS::Key":                {"aws.kms", "ScheduleKeyDeletion", map[string]any{"KeyId": id, "PendingWindowInDays": 7}},
-		"AWS::Logs::LogGroup":          {"aws.logs", "DeleteLogGroup", map[string]any{"logGroupName": id}},
-		"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": lastSlash(id), "Force": true}},
-		"AWS::Lambda::Function":        {"aws.lambda", "DeleteFunction", map[string]any{"FunctionName": lastColon(id)}},
-		"AWS::Kinesis::Stream":         {"aws.kinesis", "DeleteStream", map[string]any{"StreamName": id}},
-		"AWS::Kinesis::ResourcePolicy": {"aws.kinesis", "DeleteResourcePolicy", map[string]any{"ResourceARN": id}},
-		"AWS::ApiGateway::RestApi":     {"aws.apigateway", "DeleteRestApi", map[string]any{"restApiId": id}},
-	}[r.Type]
-	if del.svc != "" {
-		_, _ = p.call(ctx, req, del.svc, del.op, del.in)
+// deprovision deletes resources through their owners, newest first. Failures
+// are ignored, as a stack delete proceeds past a resource that is already gone.
+func (p *Pack) deprovision(ctx context.Context, req *spi.Request, rs ...res) {
+	for i := len(rs) - 1; i >= 0; i-- {
+		r := rs[i]
+		id := r.Physical
+		del := map[string]struct {
+			svc, op string
+			in      map[string]any
+		}{
+			"AWS::S3::Bucket":              {"aws.s3", "DeleteBucket", map[string]any{"Bucket": id}},
+			"AWS::SQS::Queue":              {"aws.sqs", "DeleteQueue", map[string]any{"QueueUrl": id}},
+			"AWS::SNS::Topic":              {"aws.sns", "DeleteTopic", map[string]any{"TopicArn": id}},
+			"AWS::DynamoDB::Table":         {"aws.dynamodb", "DeleteTable", map[string]any{"TableName": id}},
+			"AWS::IAM::Role":               {"aws.iam", "DeleteRole", map[string]any{"RoleName": lastSlash(id)}},
+			"AWS::SSM::Parameter":          {"aws.ssm", "DeleteParameter", map[string]any{"Name": id}},
+			"AWS::SecretsManager::Secret":  {"aws.secretsmanager", "DeleteSecret", map[string]any{"SecretId": id, "ForceDeleteWithoutRecovery": true}},
+			"AWS::KMS::Key":                {"aws.kms", "ScheduleKeyDeletion", map[string]any{"KeyId": id, "PendingWindowInDays": 7}},
+			"AWS::Logs::LogGroup":          {"aws.logs", "DeleteLogGroup", map[string]any{"logGroupName": id}},
+			"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": lastSlash(id), "Force": true}},
+			"AWS::Lambda::Function":        {"aws.lambda", "DeleteFunction", map[string]any{"FunctionName": lastColon(id)}},
+			"AWS::Kinesis::Stream":         {"aws.kinesis", "DeleteStream", map[string]any{"StreamName": id}},
+			"AWS::Kinesis::ResourcePolicy": {"aws.kinesis", "DeleteResourcePolicy", map[string]any{"ResourceARN": id}},
+			"AWS::ApiGateway::RestApi":     {"aws.apigateway", "DeleteRestApi", map[string]any{"restApiId": id}},
+		}[r.Type]
+		if del.svc != "" {
+			_, _ = p.call(ctx, req, del.svc, del.op, del.in)
+		}
 	}
 }
 

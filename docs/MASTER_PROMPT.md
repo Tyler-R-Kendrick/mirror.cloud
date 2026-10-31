@@ -667,7 +667,7 @@ Parse `Authorization: AWS4-HMAC-SHA256 Credential=<AKID>/<date>/<region>/<servic
 
 - `GET /_mirror/health` → `{"status":"ok","uptime_ms":…,"version":…}`
 - `GET /_mirror/services` → enabled services with ID, protocol, tier, operation count, spec provenance
-- `GET /_mirror/journal?service=&operation=&limit=` → recent entries
+- `GET /_mirror/journal?service=&operation=&limit=` → recent entries, newest first; `limit` is 1 to 10000 (default 100), anything else is a 400
 - `GET /_mirror/model/{serviceID}` → the canonical model for one service, as JSON
 - `POST /_mirror/clock/advance` → advance the controllable clock (only when the controllable clock is configured)
 - `POST /_mirror/snapshot` / `POST /_mirror/restore`

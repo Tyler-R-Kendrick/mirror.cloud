@@ -175,7 +175,15 @@ The oracle is AWS's documentation as it ships in the vendored model
 - **BatchGetSecretValue leaves out a secret scheduled for deletion.** Its value
   is not answered; it is an `Errors` row, an `APIErrorType` of `SecretId`,
   `ErrorCode` `InvalidRequestException` and `Message`. Before, its value was
-  answered in `SecretValues`.
+  answered in `SecretValues`. Every `Errors` row carries the code and message
+  `GetSecretValue` answers for that secret alone: a secret that does not
+  exist is `ResourceNotFoundException`, "Secrets Manager can't find the
+  resource that you asked for." (the model's text for the exception, which
+  every `ResourceNotFoundException` of this service now carries), and a
+  secret with no value "Secrets Manager can't find the specified secret value
+  for staging label: AWSCURRENT". `GetSecretValue` of a scheduled secret
+  answers the same message as the other refused calls. Before, a not-found
+  row had no `Message` and the single call's was empty.
 - **A member with no value is left out.** `DescribeSecret` "only returns
   fields that have a value in the response", so `Description`, `DeletedDate`,
   `Tags`, `ReplicationStatus` and the rotation members are absent when unset,
@@ -207,7 +215,7 @@ the replica and step 50 schedules `primary` for deletion. Each of steps 51 to
 `BatchGetSecretValue`, and one each of `UpdateSecretVersionStage`,
 `PutResourcePolicy`, `DeleteResourcePolicy`, `ReplicateSecretToRegions`,
 `RemoveRegionsFromReplication`, `StopReplicationToReplica` and
-`CancelRotateSecret`. Steps 17, 26, 37, 45, 46, 47, 48, 61, 62, 63, 64 and 67 are
+`CancelRotateSecret`. Steps 17, 24, 26, 37, 45, 46, 47, 48, 61, 62, 63, 64 and 67 are
 re-cut, and every step whose reason names another step was re-cut again to
 name it where it now is. Each carries the sentence above that it now follows.
 The first commit's re-cuts at 52, 53 and 56 are now at 63, 64 and 67.

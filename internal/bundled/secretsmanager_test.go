@@ -1062,3 +1062,39 @@ func TestSecretsManagerListSecretVersionIdsIncludesDeprecatedOnlyWhenAsked(t *te
 		t.Errorf("IncludeDeprecated listed %v, want all three versions", got)
 	}
 }
+
+// APIErrorType is "The error Secrets Manager encountered while retrieving an
+// individual secret as part of BatchGetSecretValue": SecretId, ErrorCode and
+// Message, "A message describing the error". Every row carries the code and
+// message GetSecretValue answers for the same secret alone; a secret that does
+// not exist is ResourceNotFoundException, "Secrets Manager can't find the
+// resource that you asked for."
+func TestSecretsManagerBatchGetErrorsMatchGetSecretValue(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "empty"})
+	ok(t, "CreateSecret", map[string]any{"Name": "gone", "SecretString": "v"})
+	ok(t, "DeleteSecret", map[string]any{"SecretId": "gone"})
+	rows := map[string]map[string]any{}
+	list, _ := ok(t, "BatchGetSecretValue", map[string]any{"SecretIdList": []any{"empty", "gone", "missing"}})["Errors"].([]any)
+	for _, r := range list {
+		rows[r.(map[string]any)["SecretId"].(string)] = r.(map[string]any)
+	}
+	filtered, _ := ok(t, "BatchGetSecretValue", map[string]any{"Filters": []any{map[string]any{"Key": "name", "Values": []any{"empty"}}}})["Errors"].([]any)
+	for _, id := range []string{"empty", "gone", "missing"} {
+		_, err := call("GetSecretValue", map[string]any{"SecretId": id})
+		f, _ := err.(*spi.Fault)
+		if f == nil || f.Message == "" {
+			t.Errorf("GetSecretValue %s answered %v, want a fault with a message", id, err)
+			continue
+		}
+		if row := rows[id]; row["ErrorCode"] != f.Code || row["Message"] != f.Message {
+			t.Errorf("the %s row is %#v, want ErrorCode %q and Message %q as GetSecretValue answers", id, row, f.Code, f.Message)
+		}
+		if id == "empty" && (len(filtered) != 1 || filtered[0].(map[string]any)["Message"] != f.Message) {
+			t.Errorf("the filter form's row for %s is %#v, want Message %q", id, filtered, f.Message)
+		}
+	}
+	if _, err := call("GetSecretValue", map[string]any{"SecretId": "missing"}); err.(*spi.Fault).Message != "Secrets Manager can't find the resource that you asked for." {
+		t.Errorf("a missing secret is %q, want the model's ResourceNotFoundException text", err.(*spi.Fault).Message)
+	}
+}

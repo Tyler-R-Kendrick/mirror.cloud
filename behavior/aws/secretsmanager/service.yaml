@@ -26,10 +26,14 @@ resources:
       derive: "lastSegment(coalesce(coalesce('Name' in input ? input.Name : null, 'SecretId' in input ? input.SecretId : null), ''), ':secret:')"
 
 errors:
+  # The model's text for the exception: "Secrets Manager can't find the
+  # resource that you asked for." A BatchGetSecretValue Errors row for a
+  # missing secret carries the same.
   NotFound:
     code: ResourceNotFoundException
     http: 400
     fault: client
+    message: "Secrets Manager can't find the resource that you asked for."
   InvalidRequest:
     code: InvalidRequestException
     http: 400
@@ -298,9 +302,7 @@ operations:
         : (vers.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == effstage)) ? vers.filter(v, 'VersionStages' in v && v.VersionStages.exists(st, st == effstage))[0] : s)
     require:
       - { cond: s_found, error: NotFound }
-      - cond: "!('Deleted' in s && s.Deleted == true)"
-        error: InvalidRequest
-        message: "secret scheduled for deletion"
+      - *scheduled
       # A secret created without a value has no version to answer.
       - cond: "size(vers) > 0"
         error: NotFound
@@ -647,12 +649,16 @@ operations:
             .map(pair, {'ARN': pair.m.ARN, 'Name': pair.m.Name, 'SecretString': pair.p.SecretString, 'VersionId': pair.p.VersionId})
       Errors: >-
         'Filters' in input && input.Filters != null
-        ? items.filter(m, !('Versions' in m && size(m.Versions) > 0)).map(m, {'SecretId': string(m.Name), 'ErrorCode': 'ResourceNotFoundException'})
+        ? items.filter(m, !('Versions' in m && size(m.Versions) > 0)).map(m, {'SecretId': string(m.Name), 'ErrorCode': 'ResourceNotFoundException',
+            'Message': "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"})
         : bids.filter(b, !bs.exists(x, 'Name' in x && string(x.Name) == string(b)) || b in gone || b in valueless)
             .map(b, b in gone
               ? {'SecretId': string(b), 'ErrorCode': 'InvalidRequestException',
                  'Message': "You can't perform this operation on the secret because it was marked for deletion."}
-              : {'SecretId': string(b), 'ErrorCode': 'ResourceNotFoundException'})
+              : {'SecretId': string(b), 'ErrorCode': 'ResourceNotFoundException',
+                 'Message': b in valueless
+                   ? "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"
+                   : "Secrets Manager can't find the resource that you asked for."})
 
   PutResourcePolicy:
     reads:
@@ -823,7 +829,7 @@ quirks:
       operation strips the ARN prefix), so it lands in Errors. When
       SecretIdList is absent or empty the pack falls back to a singular
       SecretId member the model does not declare on this operation; the
-      transcription keeps that. A not-found row carries no Message.
+      transcription keeps that.
   - operation: ValidateResourcePolicy
     note: >
       Validation is only 'does it parse as JSON'. A document whose text is a

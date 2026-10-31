@@ -257,10 +257,11 @@ operations:
       - { cond: s_found, error: NotFound }
       - *scheduled
       # "the operation starts a rotation with the values already stored in the
-      # secret": a secret created without a value has none, and no rotation
+      # secret", its AWSCURRENT version's: a secret created without a value has
+      # none, nor does one whose AWSCURRENT stage was removed, and no rotation
       # function runs here to make one. Refused with the error for the
       # secret's current state rather than seating an empty value.
-      - cond: "size(vers) > 0"
+      - cond: "vers.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))"
         error: InvalidRequest
         message: "The secret has no value to rotate: it has no AWSCURRENT version."
     effects:

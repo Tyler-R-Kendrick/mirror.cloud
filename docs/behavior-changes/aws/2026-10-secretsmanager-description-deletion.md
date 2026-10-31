@@ -43,7 +43,11 @@ The oracle is AWS's documentation as it ships in the vendored model
   request that is "not valid for the current state of the resource". That is
   this note's reading: the model does not say what happens, and the real
   service would start the rotation function, which would fail. Before, the
-  empty string was seated as the secret's first version.
+  empty string was seated as the secret's first version. The same holds for
+  a secret whose versions hold no `AWSCURRENT` stage (removed with
+  `UpdateSecretVersionStage`), and the refusal says so: "The secret has no
+  value to rotate: it has no AWSCURRENT version." checks for that stage, not
+  for any version.
 - **Description.** `CreateSecret` and `UpdateSecret` keep `Description`, and
   `DescribeSecret` answers it. Before, it was accepted and dropped. A write
   that names no description keeps the one already stored.

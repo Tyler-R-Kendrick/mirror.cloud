@@ -1354,3 +1354,26 @@ func TestSecretsManagerListBoundsAndTokens(t *testing.T) {
 	}
 	ok(t, "ListSecrets", map[string]any{"MaxResults": 100})
 }
+
+// RotateSecret's refusal of a secret with nothing to rotate says "it has no
+// AWSCURRENT version", so that is what it checks: a secret whose versions
+// hold no AWSCURRENT stage (the stage removed from the one version that had
+// it) is refused, with that message, as a secret with no version is. Before,
+// the rule asked only for some version, so such a secret was rotated from
+// nothing in particular.
+func TestSecretsManagerRotateNeedsAnAWSCURRENTVersion(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	out := ok(t, "CreateSecret", map[string]any{"Name": "staged", "SecretString": "v"})
+	if _, err := call("UpdateSecretVersionStage", map[string]any{"SecretId": "staged", "VersionStage": "AWSCURRENT", "RemoveFromVersionId": out["VersionId"]}); err != nil {
+		t.Fatalf("removing AWSCURRENT: %v", err)
+	}
+	for _, name := range []string{"staged", "valueless"} {
+		if name == "valueless" {
+			ok(t, "CreateSecret", map[string]any{"Name": name})
+		}
+		_, err := call("RotateSecret", map[string]any{"SecretId": name})
+		if f, isFault := err.(*spi.Fault); !isFault || f.Code != "InvalidRequestException" || !strings.Contains(f.Message, "no AWSCURRENT version") {
+			t.Errorf("RotateSecret of %s answered %v, want InvalidRequestException: ... no AWSCURRENT version", name, err)
+		}
+	}
+}

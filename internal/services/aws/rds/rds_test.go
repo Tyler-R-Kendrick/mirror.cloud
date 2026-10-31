@@ -126,3 +126,63 @@ func TestRDSHTTPProvenOps(t *testing.T) {
 		t.Fatalf("rds Operations() %d want 46", n)
 	}
 }
+
+// A query-protocol list whose member the model names arrives under that name,
+// not as member: RDS's Parameters (member Parameter), Tags (member Tag) and
+// SubnetIds (member SubnetIdentifier) are Parameters.Parameter.1.ParameterName,
+// Tags.Tag.1.Key and SubnetIds.SubnetIdentifier.1 when botocore or an SDK
+// generated from the model sends them. Read as .member.N they were absent: the
+// required SubnetIds was missing, and the parameter group and tag list were
+// never written.
+func TestRDSQueryListsArriveUnderTheirMemberNames(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.rds"}
+	cfg.Seed = "rds-lists"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	call := func(vals url.Values) string {
+		t.Helper()
+		vals.Set("Version", "2014-10-31")
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(vals.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/rds/aws4_request, SignedHeaders=host, Signature=00")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(res.Body)
+		res.Body.Close()
+		if res.StatusCode >= 300 {
+			t.Fatalf("%s %d %s", vals.Get("Action"), res.StatusCode, b)
+		}
+		return string(b)
+	}
+
+	call(url.Values{"Action": {"CreateDBSubnetGroup"}, "DBSubnetGroupName": {"sg1"}, "DBSubnetGroupDescription": {"d"}, "SubnetIds.SubnetIdentifier.1": {"subnet-1"}, "SubnetIds.SubnetIdentifier.2": {"subnet-2"}})
+
+	call(url.Values{"Action": {"CreateDBParameterGroup"}, "DBParameterGroupName": {"pg1"}, "DBParameterGroupFamily": {"mysql8.0"}, "Description": {"d"}})
+	call(url.Values{
+		"Action": {"ModifyDBParameterGroup"}, "DBParameterGroupName": {"pg1"},
+		"Parameters.Parameter.1.ParameterName": {"max_connections"}, "Parameters.Parameter.1.ParameterValue": {"100"},
+		"Parameters.Parameter.2.ParameterName": {"wait_timeout"}, "Parameters.Parameter.2.ParameterValue": {"30"},
+	})
+	params := call(url.Values{"Action": {"DescribeDBParameters"}, "DBParameterGroupName": {"pg1"}})
+	for _, want := range []string{"<ParameterName>max_connections</ParameterName>", "<ParameterValue>100</ParameterValue>", "<ParameterName>wait_timeout</ParameterName>", "<ParameterValue>30</ParameterValue>"} {
+		if !strings.Contains(params, want) {
+			t.Errorf("DescribeDBParameters has no %s: %s", want, params)
+		}
+	}
+
+	arn := "arn:aws:rds:us-east-1:000000000000:db:db1"
+	call(url.Values{"Action": {"AddTagsToResource"}, "ResourceName": {arn}, "Tags.Tag.1.Key": {"team"}, "Tags.Tag.1.Value": {"data"}, "Tags.Tag.2.Key": {"env"}, "Tags.Tag.2.Value": {"prod"}})
+	tags := call(url.Values{"Action": {"ListTagsForResource"}, "ResourceName": {arn}})
+	for _, want := range []string{"<Key>team</Key><Value>data</Value>", "<Key>env</Key><Value>prod</Value>"} {
+		if !strings.Contains(tags, want) {
+			t.Errorf("ListTagsForResource has no %s: %s", want, tags)
+		}
+	}
+}

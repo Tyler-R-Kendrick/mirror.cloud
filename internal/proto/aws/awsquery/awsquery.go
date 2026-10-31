@@ -164,7 +164,8 @@ func FormEncode(v url.Values) string { return v.Encode() }
 // query parameters the wire carries.
 //
 // The AWS query protocol has no nesting: a list arrives as Name.member.1,
-// Name.member.2, a map as Name.entry.1.key and Name.entry.1.value, a nested
+// Name.member.2 (the member's xmlName in place of member where the model gives
+// one), a map as Name.entry.1.key and Name.entry.1.value (likewise), a nested
 // structure as Name.Field, and any of them may be "flattened", which drops the
 // member/entry segment. Decoding without the shape therefore yields members
 // literally named "Identities.member.1" and no member named "Identities" at
@@ -271,11 +272,32 @@ func valueAt(svc *model.Service, member model.Member, prefix string, form url.Va
 // listAt reads an indexed list. Indices are one-based and contiguous, which is
 // what every AWS SDK emits; a gap ends the list rather than being skipped, so a
 // truncated request does not silently become a shorter valid one.
+//
+// A list that is not flattened puts a segment between its name and the index:
+// the xmlName of the list's member where the model gives one, and `member`
+// otherwise. RDS's VpcSecurityGroupIds is VpcSecurityGroupIds.VpcSecurityGroupId.1
+// on the wire. A flattened list has no segment, so its member's name is never
+// read -- and ec2Query flattens every list, which is why ec2's `item` members
+// are not request names.
 func listAt(svc *model.Service, shape model.Shape, prefix string, flat bool, form url.Values, depth int) (any, bool) {
-	at := prefix
-	if !flat {
-		at = prefix + ".member"
+	if flat {
+		return itemsAt(svc, shape, prefix, form, depth)
 	}
+	name := shape.MemberBinding.Name
+	if name == "" {
+		name = "member"
+	}
+	out, found := itemsAt(svc, shape, prefix+"."+name, form, depth)
+	if !found && name != "member" {
+		// The decoder read every list as member before it read the member's
+		// name, so a named list sent as member still decodes.
+		out, found = itemsAt(svc, shape, prefix+".member", form, depth)
+	}
+	return out, found
+}
+
+// itemsAt reads the elements of a list at at.1, at.2, ...
+func itemsAt(svc *model.Service, shape model.Shape, at string, form url.Values, depth int) (any, bool) {
 	item := model.Member{Shape: shape.Member}
 	var out []any
 	for i := 1; ; i++ {
@@ -291,22 +313,42 @@ func listAt(svc *model.Service, shape model.Shape, prefix string, flat bool, for
 	return out, true
 }
 
-// mapAt reads an indexed map, whose entries carry an explicit key and value.
+// mapAt reads an indexed map, whose entries carry an explicit key and value,
+// each under its xmlName when the model gives one (SQS's Attribute.1.Name and
+// Attribute.1.Value) and as key and value otherwise.
 func mapAt(svc *model.Service, shape model.Shape, prefix string, flat bool, form url.Values, depth int) (any, bool) {
 	at := prefix
 	if !flat {
 		at = prefix + ".entry"
 	}
+	keyName, valueName := "key", "value"
+	if shape.KeyBinding.Name != "" {
+		keyName = shape.KeyBinding.Name
+	}
+	if shape.MemberBinding.Name != "" {
+		valueName = shape.MemberBinding.Name
+	}
+	out, found := entriesAt(svc, shape, at, keyName, valueName, form, depth)
+	if !found && (keyName != "key" || valueName != "value") {
+		// The decoder read every entry as key and value before it read the
+		// entry's own names, so a named map sent that way still decodes.
+		out, found = entriesAt(svc, shape, at, "key", "value", form, depth)
+	}
+	return out, found
+}
+
+// entriesAt reads the entries of a map at at.1.<keyName>/at.1.<valueName>, ...
+func entriesAt(svc *model.Service, shape model.Shape, at, keyName, valueName string, form url.Values, depth int) (any, bool) {
 	key := model.Member{Shape: shape.Key}
 	value := model.Member{Shape: shape.Member}
 	out := map[string]any{}
 	for i := 1; ; i++ {
 		base := fmt.Sprintf("%s.%d", at, i)
-		k, found := valueAt(svc, key, base+".key", form, depth+1)
+		k, found := valueAt(svc, key, base+"."+keyName, form, depth+1)
 		if !found {
 			break
 		}
-		v, _ := valueAt(svc, value, base+".value", form, depth+1)
+		v, _ := valueAt(svc, value, base+"."+valueName, form, depth+1)
 		out[fmt.Sprint(k)] = v
 	}
 	if len(out) == 0 {

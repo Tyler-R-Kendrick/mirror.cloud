@@ -16016,8 +16016,8 @@ var mutants = []mutant{
 	{
 		name: "sns-ignore-signature-version-two",
 		file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-		old:  "signatureVersion := \"1\"\n\t\tif b, found, _ := p.col(req, \"topics\").Get(ctx, topicName(arn)); found {",
-		new:  "signatureVersion := \"1\"\n\t\tif b, found, _ := p.col(req, \"topics\").Get(ctx, topicName(arn)); false && (found) {",
+		old:  `if p.topicAttr(ctx, req, topicARN, "SignatureVersion") == "2" {`,
+		new:  `if false {`,
 		pkg:  "./internal/services/aws/sns",
 		run:  "TestSNSSQSNotificationSignatureVersionTwo",
 	},
@@ -19333,8 +19333,8 @@ var mutants = []mutant{
 	{
 		name: "sns-ignore-fifo-topic-deduplication",
 		file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-		old:  `if until > 0 && p.deps.Clock.Now().UnixNano() < until {`,
-		new:  `if false && (until > 0 && p.deps.Clock.Now().UnixNano() < until) {`,
+		old:  `if until, _ := prior["until"].(float64); float64(p.deps.Clock.Now().UnixNano()) < until {`,
+		new:  `if until, _ := prior["until"].(float64); false && (float64(p.deps.Clock.Now().UnixNano()) < until) {`,
 		pkg:  "./internal/services/aws/sns",
 		run:  "TestSNSFIFOPublishValidationAndTopicDeduplication",
 	},
@@ -19389,8 +19389,8 @@ var mutants = []mutant{
 	{
 		name: "sns-accept-duplicate-publish-batch-entry-id",
 		file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-		old:  `if !validBatchEntryID(entryID) || seenIDs[entryID] {`,
-		new:  `if !validBatchEntryID(entryID) {`,
+		old:  `if seenIDs[entryID] {`,
+		new:  `if false {`,
 		pkg:  "./internal/services/aws/sns",
 		run:  "TestSNSMessageStructureAndSizeValidation",
 	},
@@ -19754,7 +19754,7 @@ var mutants = []mutant{
 	{
 		name: "sns-drop-notification-message-attributes",
 		file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-		old:  `notification["MessageAttributes"] = msgAttrs`,
+		old:  `notification["MessageAttributes"] = notificationAttributes(msgAttrs, false)`,
 		new:  `notification["MessageAttributes"] = nil`,
 		pkg:  "./internal/services/aws/sns",
 		run:  "TestSNSSQSNotificationPreservesMessageAttributes",

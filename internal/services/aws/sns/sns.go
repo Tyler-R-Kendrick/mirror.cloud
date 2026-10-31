@@ -276,7 +276,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if fault := p.validatePublishTarget(ctx, req, topicARN(req.Input)); fault != nil {
 			return nil, fault
 		}
-		entries, _ := req.Input["Entries"].([]any)
+		entries, _ := req.Input["PublishBatchRequestEntries"].([]any)
+		if entries == nil { // a client sends the model's name; Entries is what in-process callers pass
+			entries, _ = req.Input["Entries"].([]any)
+		}
 		if len(entries) == 0 && str(req.Input["Message"]) != "" {
 			if fault := validatePublishMessage(req); fault != nil {
 				return nil, fault
@@ -289,34 +292,23 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(entries) > 10 {
 			return nil, clientFault("TooManyEntriesInBatchRequest", "Maximum number of entries per request are 10.", 400)
 		}
-		var ok []any
+		var batch []*spi.Request
+		var ids []any
 		seenIDs := map[string]bool{}
 		totalBytes := 0
 		for _, e := range entries {
 			m := asMap(e)
 			entryID := str(m["Id"])
-			if !validBatchEntryID(entryID) || seenIDs[entryID] {
-				return nil, clientFault("InvalidParameter", "Id is invalid or duplicated.", 400)
+			if !validBatchEntryID(entryID) {
+				return nil, clientFault("InvalidBatchEntryId", "The Id of a batch entry in a batch request doesn't abide by the specification.", 400)
+			}
+			if seenIDs[entryID] {
+				return nil, clientFault("BatchEntryIdsNotDistinct", "Two or more batch entries in the request have the same Id.", 400)
 			}
 			seenIDs[entryID] = true
 			attrs := asMap(m["MessageAttributes"])
 			if len(attrs) == 0 {
 				attrs = messageAttrs(m)
-			}
-			checkInput := map[string]any{"Message": m["Message"], "MessageAttributes": attrs}
-			if _, present := m["Subject"]; present {
-				checkInput["Subject"] = m["Subject"]
-			}
-			if _, present := m["MessageStructure"]; present {
-				checkInput["MessageStructure"] = m["MessageStructure"]
-			}
-			entryCheck := &spi.Request{Input: checkInput}
-			if fault := validatePublishMessage(entryCheck); fault != nil {
-				return nil, fault
-			}
-			totalBytes += publishMessageSize(str(m["Message"]), attrs)
-			if totalBytes > 262144 {
-				return nil, clientFault("BatchRequestTooLong", "Batch requests cannot be longer than 262144 bytes.", 400)
 			}
 			entryInput := make(map[string]any, len(req.Input)+6)
 			for key, value := range req.Input {
@@ -332,16 +324,28 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			entryReq := *req
 			entryReq.Input = entryInput
 			entryReq.Operation = "Publish"
+			if fault := validatePublishMessage(&entryReq); fault != nil {
+				return nil, fault
+			}
+			totalBytes += publishMessageSize(str(m["Message"]), attrs)
+			if totalBytes > 262144 {
+				return nil, clientFault("BatchRequestTooLong", "Batch requests cannot be longer than 262144 bytes.", 400)
+			}
 			if fault := p.validatePublishTarget(ctx, &entryReq, topicARN(entryInput)); fault != nil {
 				return nil, fault
 			}
-			resp, err := p.publishOne(ctx, &entryReq, str(m["Message"]), attrs)
-			if err != nil {
-				continue
-			}
-			ok = append(ok, map[string]any{"Id": m["Id"], "MessageId": resp.Output["MessageId"]})
+			batch, ids = append(batch, &entryReq), append(ids, m["Id"])
 		}
-		return &spi.Response{Output: map[string]any{"Successful": ok}}, nil
+		ok := []any{} // every entry was checked before any is published: a batch answered with a fault delivered nothing
+		for i, entryReq := range batch {
+			resp, err := p.publishOne(ctx, entryReq, str(entryReq.Input["Message"]), asMap(entryReq.Input["MessageAttributes"]))
+			if err != nil {
+				return nil, err
+			}
+			resp.Output["Id"] = ids[i]
+			ok = append(ok, resp.Output)
+		}
+		return &spi.Response{Output: map[string]any{"Successful": ok, "Failed": []any{}}}, nil
 	case "Subscribe":
 		topicArn := str(req.Input["TopicArn"])
 		if !validTopicARN(topicArn) {
@@ -461,14 +465,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 					"Timestamp":        p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
 					"SignatureVersion": "1", "SigningCertURL": snsCertificateURL(req),
 				}
-				signatureVersion := "1"
-				if b, found, _ := p.col(req, "topics").Get(ctx, topicName(topicARN)); found {
-					var topic map[string]any
-					_ = json.Unmarshal(b, &topic)
-					if str(asMap(topic["attrs"])["SignatureVersion"]) == "2" {
-						signatureVersion = "2"
-					}
-				}
+				signatureVersion := p.topicSignatureVersion(ctx, req, topicARN)
 				confirmation["SignatureVersion"] = signatureVersion
 				confirmation["Signature"] = signNotification(confirmation, signatureVersion)
 				p.httpPost(str(req.Input["Endpoint"]), confirmation, "SubscriptionConfirmation", "text/plain; charset=UTF-8", str(confirmation["MessageId"]), topicARN, "")
@@ -506,14 +503,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 					"Timestamp":        p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
 					"SignatureVersion": "1", "SigningCertURL": snsCertificateURL(req),
 				}
-				signatureVersion := "1"
-				if topicBytes, topicFound, _ := p.col(req, "topics").Get(ctx, topicName(topic)); topicFound {
-					var topicRecord map[string]any
-					_ = json.Unmarshal(topicBytes, &topicRecord)
-					if str(asMap(topicRecord["attrs"])["SignatureVersion"]) == "2" {
-						signatureVersion = "2"
-					}
-				}
+				signatureVersion := p.topicSignatureVersion(ctx, req, topic)
 				confirmation["SignatureVersion"] = signatureVersion
 				unsubscribeSignature := signNotification(confirmation, signatureVersion)
 				confirmation["Signature"] = unsubscribeSignature
@@ -722,12 +712,7 @@ func (p *Pack) validateSQSSubscription(ctx context.Context, req *spi.Request, to
 
 func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, msgAttrs map[string]any) (*spi.Response, error) {
 	arn := topicARN(req.Input)
-	fifo := false
-	if b, found, _ := p.col(req, "topics").Get(ctx, topicName(arn)); found {
-		var topic map[string]any
-		_ = json.Unmarshal(b, &topic)
-		fifo = str(asMap(topic["attrs"])["FifoTopic"]) == "true"
-	}
+	fifo := p.topicAttr(ctx, req, arn, "FifoTopic") == "true"
 	dedupKey := ""
 	if fifo {
 		dedupKey = str(req.Input["MessageDeduplicationId"])
@@ -741,18 +726,22 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		defer dedupMu.Unlock()
 		if b, found, _ := p.col(req, "snsdedup").Get(ctx, arn+"\x1f"+dedupKey); found {
 			var prior map[string]any
-			until, _ := strconv.ParseInt(fmt.Sprint(prior["until"]), 10, 64)
-			if json.Unmarshal(b, &prior) == nil {
-				if value, ok := prior["until"].(float64); ok {
-					until = int64(value)
-				}
-			}
-			if until > 0 && p.deps.Clock.Now().UnixNano() < until {
-				return &spi.Response{Output: map[string]any{"MessageId": prior["id"]}}, nil
+			_ = json.Unmarshal(b, &prior)
+			if until, _ := prior["until"].(float64); float64(p.deps.Clock.Now().UnixNano()) < until {
+				return &spi.Response{Output: map[string]any{"MessageId": prior["id"], "SequenceNumber": prior["seq"]}}, nil
 			}
 		}
 	}
 	mid := p.deps.Rand.Hex(16)
+	out := map[string]any{"MessageId": mid}
+	if fifo { // a SequenceNumber "continues to increase" (API_Publish): one counter per topic, 20 digits wide
+		var n int64
+		if b, found, _ := p.col(req, "snsseq").Get(ctx, arn); found {
+			_ = json.Unmarshal(b, &n)
+		}
+		_ = p.col(req, "snsseq").Put(ctx, arn, mustJSON(n+1))
+		out["SequenceNumber"] = fmt.Sprintf("1%019d", n+1)
+	}
 	_ = p.deps.Bus.Publish(ctx, "sns:"+arn, []byte(body))
 	kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
 	for _, kv := range kvs {
@@ -797,20 +786,13 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			"SigningCertURL": snsCertificateURL(req),
 			"UnsubscribeURL": snsActionURL(req, "Unsubscribe", "SubscriptionArn", str(sub["SubscriptionArn"])),
 		}
-		signatureVersion := "1"
-		if b, found, _ := p.col(req, "topics").Get(ctx, topicName(arn)); found {
-			var topic map[string]any
-			_ = json.Unmarshal(b, &topic)
-			if str(asMap(topic["attrs"])["SignatureVersion"]) == "2" {
-				signatureVersion = "2"
-			}
-		}
+		signatureVersion := p.topicSignatureVersion(ctx, req, arn)
 		notification["SignatureVersion"] = signatureVersion
 		if subject := str(req.Input["Subject"]); subject != "" {
 			notification["Subject"] = subject
 		}
 		if len(msgAttrs) > 0 {
-			notification["MessageAttributes"] = msgAttrs
+			notification["MessageAttributes"] = notificationAttributes(msgAttrs, false)
 		}
 		notification["Signature"] = signNotification(notification, signatureVersion)
 		payload := message
@@ -866,9 +848,9 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		}
 	}
 	if dedupKey != "" {
-		_ = p.col(req, "snsdedup").Put(ctx, arn+"\x1f"+dedupKey, mustJSON(map[string]any{"id": mid, "until": p.deps.Clock.Now().Add(5 * time.Minute).UnixNano()}))
+		_ = p.col(req, "snsdedup").Put(ctx, arn+"\x1f"+dedupKey, mustJSON(map[string]any{"id": mid, "seq": out["SequenceNumber"], "until": p.deps.Clock.Now().Add(5 * time.Minute).UnixNano()}))
 	}
-	return &spi.Response{Output: map[string]any{"MessageId": mid}}, nil
+	return &spi.Response{Output: out}, nil
 }
 
 func (p *Pack) smsOptedOut(ctx context.Context, req *spi.Request, phone string) bool {
@@ -1131,26 +1113,17 @@ func (p *Pack) deliverLambda(ctx context.Context, req *spi.Request, sub map[stri
 
 func (p *Pack) recordLambdaDelivery(ctx context.Context, req *spi.Request, sub map[string]any, messageID string, deliveryErr error) {
 	topicARN := str(req.Input["TopicArn"])
-	b, found, _ := p.col(req, "topics").Get(ctx, topicName(topicARN))
-	if !found {
-		return
-	}
-	var topic map[string]any
-	if json.Unmarshal(b, &topic) != nil {
-		return
-	}
-	attrs := asMap(topic["attrs"])
 	feedback := "LambdaSuccessFeedbackRoleArn"
 	feedbackRate := "LambdaSuccessFeedbackSampleRate"
 	if deliveryErr != nil {
 		feedback = "LambdaFailureFeedbackRoleArn"
 		feedbackRate = "LambdaFailureFeedbackSampleRate"
 	}
-	if str(attrs[feedback]) == "" {
+	if p.topicAttr(ctx, req, topicARN, feedback) == "" {
 		return
 	}
 	sample := 100
-	if value, err := strconv.Atoi(str(attrs[feedbackRate])); err == nil {
+	if value, err := strconv.Atoi(p.topicAttr(ctx, req, topicARN, feedbackRate)); err == nil {
 		sample = value
 	}
 	if sample <= 0 || (sample < 100 && p.deps.Rand.Intn(100) >= sample) {
@@ -1181,18 +1154,9 @@ func (p *Pack) lambdaNotification(req *spi.Request, sub map[string]any, body, me
 		"Message": body, "Timestamp": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
 		"SignatureVersion": "1", "SigningCertUrl": snsCertificateURL(req),
 		"UnsubscribeURL":    snsActionURL(req, "Unsubscribe", "SubscriptionArn", str(sub["SubscriptionArn"])),
-		"MessageAttributes": attrs,
+		"MessageAttributes": notificationAttributes(attrs, true),
 	}
-	signatureVersion := "1"
-	if arn := str(sub["TopicArn"]); arn != "" {
-		if b, found, _ := p.col(req, "topics").Get(context.Background(), topicName(arn)); found {
-			var topic map[string]any
-			_ = json.Unmarshal(b, &topic)
-			if str(asMap(topic["attrs"])["SignatureVersion"]) == "2" {
-				signatureVersion = "2"
-			}
-		}
-	}
+	signatureVersion := p.topicSignatureVersion(context.Background(), req, str(sub["TopicArn"]))
 	sns["Signature"] = signNotification(sns, signatureVersion)
 	return map[string]any{
 		"Records": []any{map[string]any{
@@ -1228,6 +1192,43 @@ func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body 
 	}
 	_, err := bundled.Handler("aws.sqs", p.deps).Invoke(ctx, &spi.Request{Identity: targetReq.Identity, Operation: "SendMessage", Input: in, HTTP: req.HTTP})
 	return err == nil
+}
+
+// notificationAttributes maps each attribute name to the Type and Value a
+// notification body (HTTP/S, SQS without raw delivery) and a Lambda event carry
+// them in, Lambda typing all but Binary as String. AWS documents both; the
+// sources are cited in internal/edge's snsquery_attributes_test.go.
+func notificationAttributes(attrs map[string]any, lambda bool) map[string]any {
+	out := map[string]any{}
+	for name, raw := range sqsMessageAttributes(attrs) {
+		attribute := raw.(map[string]any)
+		dataType, value := str(attribute["DataType"]), attribute["StringValue"]
+		if binary, ok := attribute["BinaryValue"]; ok {
+			value = binary
+		}
+		if lambda && !strings.HasPrefix(dataType, "Binary") {
+			dataType = "String"
+		}
+		out[name] = map[string]any{"Type": dataType, "Value": value}
+	}
+	return out
+}
+
+// topicSignatureVersion is the SignatureVersion a topic's messages are signed with.
+func (p *Pack) topicSignatureVersion(ctx context.Context, req *spi.Request, topicARN string) string {
+	if p.topicAttr(ctx, req, topicARN, "SignatureVersion") == "2" {
+		return "2"
+	}
+	return "1"
+}
+
+// topicAttr is one of a topic's attributes, and "" when the topic or the attribute is absent.
+func (p *Pack) topicAttr(ctx context.Context, req *spi.Request, topicARN, name string) string {
+	var topic map[string]any
+	if b, found, _ := p.col(req, "topics").Get(ctx, topicName(topicARN)); found {
+		_ = json.Unmarshal(b, &topic)
+	}
+	return str(asMap(topic["attrs"])[name])
 }
 
 func sqsMessageAttributes(attrs map[string]any) map[string]any {
@@ -1505,10 +1506,8 @@ func messageAttrs(in map[string]any) map[string]any {
 			slot["Name"] = str(v)
 		case "Value.DataType":
 			slot["DataType"] = str(v)
-			slot["Type"] = str(v)
 		case "Value.StringValue", "Value":
 			slot["StringValue"] = str(v)
-			slot["Value"] = str(v)
 		case "Value.BinaryValue":
 			slot["BinaryValue"] = v
 		}

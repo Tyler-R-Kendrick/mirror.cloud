@@ -446,8 +446,85 @@ func TestSNSSQSNotificationPreservesMessageAttributes(t *testing.T) {
 	}
 	message := asMap(asSlice(received.Output["Messages"])[0])
 	var envelope map[string]any
-	if json.Unmarshal([]byte(str(message["Body"])), &envelope) != nil || envelope["Subject"] != "subject" || str(envelope["Timestamp"]) == "" || !validTestSNSNotificationSignature(envelope) || !strings.Contains(str(envelope["SigningCertURL"]), "SimpleNotificationService.pem") || !strings.Contains(str(envelope["UnsubscribeURL"]), "Action=Unsubscribe") || str(asMap(envelope["MessageAttributes"])["kind"].(map[string]any)["StringValue"]) != "event" {
+	if json.Unmarshal([]byte(str(message["Body"])), &envelope) != nil || envelope["Subject"] != "subject" || str(envelope["Timestamp"]) == "" || !validTestSNSNotificationSignature(envelope) || !strings.Contains(str(envelope["SigningCertURL"]), "SimpleNotificationService.pem") || !strings.Contains(str(envelope["UnsubscribeURL"]), "Action=Unsubscribe") {
 		t.Fatalf("notification envelope=%#v", envelope)
+	}
+	// The notification maps each attribute name to a Type and a Value, not to
+	// the MessageAttributeValue Publish took:
+	// https://docs.aws.amazon.com/sns/latest/dg/http-notification-json.html
+	if got, want := envelope["MessageAttributes"], map[string]any{"kind": map[string]any{"Type": "String", "Value": "event"}}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("notification MessageAttributes=%#v, want %#v", got, want)
+	}
+}
+
+// A notification and a Lambda event carry each attribute as a Type and a Value
+// whatever form Publish took it in: the structured MessageAttributeValue the
+// query and JSON decoders produce, the flat query keys an in-process caller may
+// still pass, or Type and Value already.
+func TestNotificationAttributesFromEveryPublishForm(t *testing.T) {
+	binary := base64.StdEncoding.EncodeToString([]byte{7, 8, 9})
+	forms := map[string]map[string]any{
+		"structured": {"MessageAttributes": map[string]any{
+			"kind":  map[string]any{"DataType": "String", "StringValue": "order"},
+			"price": map[string]any{"DataType": "Number", "StringValue": "12.5"},
+			"blob":  map[string]any{"DataType": "Binary", "BinaryValue": binary},
+		}},
+		"flat": {
+			"MessageAttributes.entry.1.Name": "kind", "MessageAttributes.entry.1.Value.DataType": "String", "MessageAttributes.entry.1.Value.StringValue": "order",
+			"MessageAttributes.entry.2.Name": "price", "MessageAttributes.entry.2.Value.DataType": "Number", "MessageAttributes.entry.2.Value.StringValue": "12.5",
+			"MessageAttributes.entry.3.Name": "blob", "MessageAttributes.entry.3.Value.DataType": "Binary", "MessageAttributes.entry.3.Value.BinaryValue": binary,
+		},
+		"typed": {"MessageAttributes": map[string]any{
+			"kind":  map[string]any{"Type": "String", "Value": "order"},
+			"price": map[string]any{"Type": "Number", "Value": "12.5"},
+			"blob":  map[string]any{"Type": "Binary", "Value": binary},
+		}},
+	}
+	notification := map[string]any{
+		"kind":  map[string]any{"Type": "String", "Value": "order"},
+		"price": map[string]any{"Type": "Number", "Value": "12.5"},
+		"blob":  map[string]any{"Type": "Binary", "Value": binary},
+	}
+	lambda := map[string]any{
+		"kind":  map[string]any{"Type": "String", "Value": "order"},
+		"price": map[string]any{"Type": "String", "Value": "12.5"},
+		"blob":  map[string]any{"Type": "Binary", "Value": binary},
+	}
+	for name, input := range forms {
+		attrs := messageAttrs(input)
+		if got := notificationAttributes(attrs, false); !reflect.DeepEqual(got, notification) {
+			t.Errorf("%s: notification attributes %#v, want %#v", name, got, notification)
+		}
+		if got := notificationAttributes(attrs, true); !reflect.DeepEqual(got, lambda) {
+			t.Errorf("%s: Lambda attributes %#v, want %#v", name, got, lambda)
+		}
+	}
+}
+
+// A batch answered with a fault published nothing. Every entry is checked
+// before any is delivered, so a refused entry after a valid one does not leave
+// the valid one delivered behind a 400 a client will retry.
+func TestPublishBatchPublishesNothingWhenAnEntryIsRefused(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, qp := New(deps), bundled.Handler("aws.sqs", deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "1", Region: "us-east-1"}
+	if _, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateQueue", Input: map[string]any{"QueueName": "refused-batch"}}); err != nil {
+		t.Fatal(err)
+	}
+	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "refused-batch"}).Output["TopicArn"])
+	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:refused-batch"})
+	for name, entries := range map[string][]any{
+		"empty message": {map[string]any{"Id": "valid", "Message": "delivered?"}, map[string]any{"Id": "refused", "Message": ""}},
+		"duplicate id":  {map[string]any{"Id": "same", "Message": "delivered?"}, map[string]any{"Id": "same", "Message": "again"}},
+	} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PublishBatch", Input: map[string]any{"TopicArn": topic, "Entries": entries}}); err == nil {
+			t.Fatalf("%s: PublishBatch succeeded", name)
+		}
+		received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "refused-batch", "MaxNumberOfMessages": 10}})
+		if err != nil || len(asSlice(received.Output["Messages"])) != 0 {
+			t.Fatalf("%s: a refused batch delivered %#v (err %v)", name, received.Output["Messages"], err)
+		}
 	}
 }
 

@@ -26,14 +26,15 @@ resources:
       derive: "lastSegment(coalesce(coalesce('Name' in input ? input.Name : null, 'SecretId' in input ? input.SecretId : null), ''), ':secret:')"
 
 errors:
-  # The model's text for the exception: "Secrets Manager can't find the
-  # resource that you asked for." A BatchGetSecretValue Errors row for a
-  # missing secret carries the same.
+  # The service's wire text for a secret it cannot find, "Secrets Manager
+  # can't find the specified secret.", not the model's documentation of the
+  # exception ("can't find the resource that you asked for"). A
+  # BatchGetSecretValue Errors row for a missing secret carries the same.
   NotFound:
     code: ResourceNotFoundException
     http: 400
     fault: client
-    message: "Secrets Manager can't find the resource that you asked for."
+    message: "Secrets Manager can't find the specified secret."
   InvalidRequest:
     code: InvalidRequestException
     http: 400
@@ -733,7 +734,7 @@ operations:
               : {'SecretId': string(b), 'ErrorCode': 'ResourceNotFoundException',
                  'Message': b in valueless
                    ? "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"
-                   : "Secrets Manager can't find the resource that you asked for."})
+                   : "Secrets Manager can't find the specified secret."})
 
   PutResourcePolicy:
     reads:

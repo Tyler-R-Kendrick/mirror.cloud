@@ -509,7 +509,7 @@ func TestSecretsManagerListSecretsAnswersDescriptionAndDeletedDate(t *testing.T)
 
 // CreateSecret: "Creates a new secret." ResourceExistsException: "A resource
 // with the ID you requested already exists." ResourceNotFoundException:
-// "Secrets Manager can't find the resource that you asked for." PutSecretValue,
+// "Secrets Manager can't find the specified secret." PutSecretValue,
 // UpdateSecret and RotateSecret each document ResourceNotFoundException. A
 // second CreateSecret of one name used to write a new version, and a put,
 // update or rotation of a name never created used to create it.
@@ -552,7 +552,7 @@ func TestSecretsManagerCreatesOnceAndWritesOnlyWhatExists(t *testing.T) {
 // staging label AWSCURRENT to it." Without either it creates the secret and
 // no version, so it answers no VersionId, and there is no value to get:
 // GetSecretValue is ResourceNotFoundException ("Secrets Manager can't find the
-// resource that you asked for"), and BatchGetSecretValue answers an Errors row.
+// specified secret."), and BatchGetSecretValue answers an Errors row.
 // PutSecretValueRequest.SecretString: "You must include SecretBinary or
 // SecretString, but not both." Neither is InvalidParameterException ("The
 // parameter name or value is invalid"), the documented error that is about
@@ -1066,7 +1066,7 @@ func TestSecretsManagerListSecretVersionIdsIncludesDeprecatedOnlyWhenAsked(t *te
 // Message, "A message describing the error". Every row carries the code and
 // message GetSecretValue answers for the same secret alone; a secret that does
 // not exist is ResourceNotFoundException, "Secrets Manager can't find the
-// resource that you asked for."
+// specified secret."
 func TestSecretsManagerBatchGetErrorsMatchGetSecretValue(t *testing.T) {
 	call, ok, _ := secretsManager(t)
 	ok(t, "CreateSecret", map[string]any{"Name": "empty"})
@@ -1092,8 +1092,11 @@ func TestSecretsManagerBatchGetErrorsMatchGetSecretValue(t *testing.T) {
 			t.Errorf("the filter form's row for %s is %#v, want Message %q", id, filtered, f.Message)
 		}
 	}
-	if _, err := call("GetSecretValue", map[string]any{"SecretId": "missing"}); err.(*spi.Fault).Message != "Secrets Manager can't find the resource that you asked for." {
-		t.Errorf("a missing secret is %q, want the model's ResourceNotFoundException text", err.(*spi.Fault).Message)
+	// The wire text, which the service answers for a secret it cannot find:
+	// the model's documentation of the exception ("can't find the resource
+	// that you asked for") is not what a client reads.
+	if _, err := call("GetSecretValue", map[string]any{"SecretId": "missing"}); err.(*spi.Fault).Message != "Secrets Manager can't find the specified secret." {
+		t.Errorf("a missing secret is %q, want Secrets Manager's wire text", err.(*spi.Fault).Message)
 	}
 }
 

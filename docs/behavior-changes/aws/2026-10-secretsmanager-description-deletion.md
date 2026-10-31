@@ -8,7 +8,7 @@ The oracle is AWS's documentation as it ships in the vendored model
   that exists is `ResourceExistsException` ("A resource with the ID you
   requested already exists"). `PutSecretValue`, `UpdateSecret` and
   `RotateSecret` of a name never created are `ResourceNotFoundException`
-  ("Secrets Manager can't find the resource that you asked for"), which each
+  ("Secrets Manager can't find the specified secret."), which each
   documents. Before, the four were one upsert: a second `CreateSecret` wrote a
   new version, and the others created the secret. CloudFormation's
   `UpdateStack` relied on that and now updates its secret through
@@ -519,8 +519,10 @@ The oracle is AWS's documentation as it ships in the vendored model
   answered in `SecretValues`. Every `Errors` row carries the code and message
   `GetSecretValue` answers for that secret alone: a secret that does not
   exist is `ResourceNotFoundException`, "Secrets Manager can't find the
-  resource that you asked for." (the model's text for the exception, which
-  every `ResourceNotFoundException` of this service now carries), and a
+  specified secret." (the service's wire text, which every
+  `ResourceNotFoundException` of this service now carries; the model's
+  documentation of the exception, "can't find the resource that you asked
+  for", is not what a client reads), and a
   secret with no value "Secrets Manager can't find the specified secret value
   for staging label: AWSCURRENT". `GetSecretValue` of a scheduled secret
   answers the same message as the other refused calls. Before, a not-found

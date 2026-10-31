@@ -322,7 +322,9 @@ operations:
       Name: s.Name
       Description: "'Description' in s ? s.Description : dyn(null)"
       DeletedDate: "'Deleted' in s && s.Deleted == true && 'DeletedDate' in s ? s.DeletedDate : dyn(null)"
-      VersionIdsToStages: "rollup('Versions' in s ? s.Versions : [], 'VersionId', 'VersionStages')"
+      # "A list of the versions of the secret that have staging labels
+      # attached": a version with none is deprecated and not listed.
+      VersionIdsToStages: "rollup(('Versions' in s ? s.Versions : []).filter(v, 'VersionStages' in v && v.VersionStages != null && size(v.VersionStages) > 0), 'VersionId', 'VersionStages')"
       Tags: "'Tags' in s && s.Tags != null && size(s.Tags) > 0 ? s.Tags : dyn(null)"
       ReplicationStatus: "'ReplicaRegions' in s ? s.ReplicaRegions : null"
       RotationEnabled: "'RotationEnabled' in s ? s.RotationEnabled : null"
@@ -346,13 +348,16 @@ operations:
     # Each entry carries its Tags, its Description ("The user-provided
     # description of the secret") and, scheduled for deletion, its DeletedDate
     # ("The date and time the deletion of the secret occurred. Not present on
-    # active secrets."), each only when it has one.
+    # active secrets."), each only when it has one. SecretVersionsToStages
+    # leaves out a version with no label: "A version that does not have any
+    # SecretVersionStage is considered deprecated ... Such versions are not
+    # included in this list."
     output:
       SecretList: >-
         items.map(m, merge(merge(merge({
           'ARN': m.ARN,
           'Name': m.Name,
-          'SecretVersionsToStages': rollup('Versions' in m ? m.Versions : [], 'VersionId', 'VersionStages')
+          'SecretVersionsToStages': rollup(('Versions' in m ? m.Versions : []).filter(v, 'VersionStages' in v && v.VersionStages != null && size(v.VersionStages) > 0), 'VersionId', 'VersionStages')
         },
         'Tags' in m && m.Tags != null && size(m.Tags) > 0 ? {'Tags': m.Tags} : {}),
         'Description' in m && m.Description != null ? {'Description': m.Description} : {}),

@@ -786,3 +786,24 @@ func TestSecretsManagerOmitsTagsWhenThereAreNone(t *testing.T) {
 		t.Errorf("after its last tag was removed, DescribeSecret answered Tags %#v", got["Tags"])
 	}
 }
+
+// SecretListEntry.SecretVersionsToStages: "A version that does not have any
+// SecretVersionStage is considered deprecated and subject to deletion. Such
+// versions are not included in this list." DescribeSecretResponse.
+// VersionIdsToStages: "A list of the versions of the secret that have staging
+// labels attached."
+func TestSecretsManagerStageMapsLeaveOutDeprecatedVersions(t *testing.T) {
+	_, ok, _ := secretsManager(t)
+	first := ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v1"})["VersionId"].(string)
+	ok(t, "PutSecretValue", map[string]any{"SecretId": "s", "SecretString": "v2"})
+	ok(t, "PutSecretValue", map[string]any{"SecretId": "s", "SecretString": "v3"})
+	// v1 lost AWSPREVIOUS to v2 and has no label left.
+	described := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"})["VersionIdsToStages"].(map[string]any)
+	if _, has := described[first]; has || len(described) != 2 {
+		t.Errorf("DescribeSecret VersionIdsToStages = %#v, want the two labelled versions only", described)
+	}
+	listed := ok(t, "ListSecrets", map[string]any{})["SecretList"].([]any)[0].(map[string]any)["SecretVersionsToStages"].(map[string]any)
+	if _, has := listed[first]; has || len(listed) != 2 {
+		t.Errorf("ListSecrets SecretVersionsToStages = %#v, want the two labelled versions only", listed)
+	}
+}

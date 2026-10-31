@@ -39,6 +39,13 @@ The oracle is AWS's documentation as it ships in the vendored model
 - **Description.** `CreateSecret` and `UpdateSecret` keep `Description`, and
   `DescribeSecret` answers it. Before, it was accepted and dropped. A write
   that names no description keeps the one already stored.
+- **Deprecated versions are not in the stage maps.** A version with no staging
+  label "is considered deprecated and subject to deletion. Such versions are
+  not included in this list" (`SecretListEntry.SecretVersionsToStages`;
+  `DescribeSecretResponse.VersionIdsToStages` is "A list of the versions of
+  the secret that have staging labels attached"). `ListSecrets` and
+  `DescribeSecret` leave such a version out; they answered it with `[]`.
+  `ListSecretVersionIds` is unchanged and still lists it.
 - **ListSecrets answers both.** Each entry carries `Description` ("The
   user-provided description of the secret") and, for a secret scheduled for
   deletion listed with `IncludePlannedDeletion`, `DeletedDate` ("Not present on

@@ -146,7 +146,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		st.Status = "UPDATE_COMPLETE"
 	}
 	fail := func(err error) (*spi.Response, error) {
-		if !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack
+		if st.Reason = err.Error(); !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
 		}
 		return nil, err
@@ -240,7 +240,7 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 
 // unwind deletes a stack's resources, newest first, as a rollback or a
 // DeleteStack does, and records the outcome. With nothing left the stack is
-// done (a DELETE_COMPLETE stack is removed); otherwise it is failed, the
+// done, keeping st's reason (a DELETE_COMPLETE stack is removed); else failed, the
 // resources left listed as DELETE_FAILED for the next DeleteStack to try
 // again and the first error, which unwind answers, its StackStatusReason.
 func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, done, failed string) error {
@@ -252,7 +252,7 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, done, fai
 			left = append([]res{r}, left...)
 		}
 	}
-	st.Resources, st.Status, st.Reason = left, done, ""
+	st.Resources, st.Status = left, done
 	if first != nil {
 		st.Status, st.Reason = failed, first.Error()
 	}

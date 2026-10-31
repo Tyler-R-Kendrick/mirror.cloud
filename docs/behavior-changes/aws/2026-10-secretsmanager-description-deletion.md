@@ -165,7 +165,9 @@ The oracle is AWS's documentation as it ships in the vendored model
     must be defined.", on `CreateStack`, `UpdateStack`, `ValidateTemplate`
     and `GetTemplateSummary`. Before, such a stack was created.
   - A failed create keeps its stack, `ROLLBACK_COMPLETE` once the rollback
-    has deleted everything it made, and every read of it answers it with no
+    has deleted everything it made, with the create's error as its
+    `StackStatusReason` (which `ListStacks` answers too, as the model's
+    `StackSummary` has it), and every read of it answers it with no
     resources (the record never holds a null list). The name stays taken (`CreateStack` is
     `AlreadyExistsException`; `UpdateStack` is `ValidationError`, "Stack:...
     is in ROLLBACK_COMPLETE state and can not be updated.") until

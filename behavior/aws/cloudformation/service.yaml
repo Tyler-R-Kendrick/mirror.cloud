@@ -153,8 +153,8 @@ operations:
       paginate: model
     output:
       StackSummaries: >-
-        items.map(s, {'StackName': s.Name, 'StackId': s.ID,
-          'StackStatus': s.Status})
+        items.map(s, merge({'StackName': s.Name, 'StackId': s.ID,
+          'StackStatus': s.Status}, 'Reason' in s ? {'StackStatusReason': s.Reason} : {}))
 
   GetTemplate:
     reads:

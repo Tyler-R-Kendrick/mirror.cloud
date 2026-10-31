@@ -795,3 +795,27 @@ func TestCloudFormationStackEventsAgreeWithTheResources(t *testing.T) {
 		}
 	}
 }
+
+// A ROLLBACK_COMPLETE stack keeps why its create failed as its
+// StackStatusReason, and ListStacks answers the reason as DescribeStacks
+// does: the model's StackSummary has it ("Success/Failure message associated
+// with the stack status"). Before, the reason was cleared once the rollback
+// completed, and ListStacks never answered one.
+func TestCloudFormationAStackKeepsWhyItFailed(t *testing.T) {
+	h := newStacks(t)
+	if err := h.create("why", map[string]map[string]any{"Q": nameable()["Queue"], "ZZZ": {"Type": "AWS::Nope::Thing"}}); err == nil {
+		t.Fatal("a template with an unsupported resource type was created")
+	}
+	if status, reason, err := h.status("why"); status != "ROLLBACK_COMPLETE" || !strings.Contains(reason, "unsupported resource type") || err != nil {
+		t.Errorf("why is %q, reason %q (%v), want ROLLBACK_COMPLETE with the create's error", status, reason, err)
+	}
+	listed, err := h.invoke("ListStacks", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range listed["StackSummaries"].([]any) {
+		if s := raw.(map[string]any); s["StackName"] == "why" && !strings.Contains(str(s["StackStatusReason"]), "unsupported resource type") {
+			t.Errorf("ListStacks answered why with %v, want its reason", s)
+		}
+	}
+}

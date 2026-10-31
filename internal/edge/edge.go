@@ -660,7 +660,18 @@ func (s *Server) diag(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(list)
 	case r.URL.Path == "/_mirror/journal" && r.Method == http.MethodGet:
 		q := r.URL.Query()
-		ents := s.deps.Journal.Query(spi.Filter{ServiceID: q.Get("service"), Operation: q.Get("operation"), Limit: 100})
+		limit := 100
+		// An empty limit= is a value, and not one from 1 to 10000; only an absent limit is the default.
+		if q.Has("limit") {
+			// ponytail: the journal is kept whole in memory; 10000 bounds one answer, not what is kept.
+			n, err := strconv.Atoi(q.Get("limit"))
+			if err != nil || n < 1 || n > 10000 {
+				http.Error(w, "limit must be an integer from 1 to 10000", http.StatusBadRequest)
+				return
+			}
+			limit = n
+		}
+		ents := s.deps.Journal.Query(spi.Filter{ServiceID: q.Get("service"), Operation: q.Get("operation"), Limit: limit})
 		_ = json.NewEncoder(w).Encode(ents)
 	case strings.HasPrefix(r.URL.Path, "/_mirror/model/") && r.Method == http.MethodGet:
 		id := strings.TrimPrefix(r.URL.Path, "/_mirror/model/")

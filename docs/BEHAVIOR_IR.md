@@ -273,7 +273,7 @@ This transcribes the v1 pack's semantics faithfully (`internal/services/aws/sqs/
 
 What in SQS genuinely cannot be data, and where it goes instead:
 
-1. **`aws.sqs/attr-md5`** — AWS's undocumented binary encoding for message-attribute MD5s. A ~40-LOC pure-function primitive.
+1. **`aws.sqs/attr-md5`** — AWS's binary encoding for message-attribute MD5s, which the SQS Developer Guide documents ("Calculating the MD5 message digest for message attributes"). A ~40-LOC pure-function primitive; it shipped as the engine's CEL function `md5MessageAttributes` rather than a registered primitive.
 2. **Long-poll `wait`** — a *generic engine capability*: park on `spi.Clock.After` plus a Bus wakeup topic that create/move effects publish to. This gives `spi.Bus.Subscribe` its first caller in the codebase and works under the controllable clock.
 3. **FIFO exclusive-group selection** — the spec is data; the selector executor is generic engine code.
 4. Real receipt-handle *content* encodes metadata; ours stays opaque-random — recorded as a quirk annotation, not code.

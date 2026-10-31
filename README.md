@@ -46,6 +46,8 @@ aws --endpoint-url http://127.0.0.1:4566 s3 mb s3://demo
 aws --endpoint-url http://127.0.0.1:4566 s3 cp README.md s3://demo/README.md
 ```
 
+`mirror up` writes `mirror <version> listening on http://127.0.0.1:4566` to stderr once the port is bound, so a script or test runner that waits for that line can connect as soon as it appears. The line names the `--bind` address as given, so `--bind 127.0.0.1:0` prints port 0. A port that cannot be bound prints only the error, and `mirror up` exits 1.
+
 Dummy credentials `test`/`test` work. By default, so does anything else: signatures are parsed but not verified. Set `MIRROR_S3_VALIDATE_PRESIGNED_SIGNATURES=true` to verify S3 SigV2 and SigV4 requests plus single-chunk SigV4A/ECDSA presigned queries and Authorization headers against `test`/`test` and deterministic IAM/STS credentials, including issued temporary session tokens and LocalStack gateway-port Host aliases. Signed hexadecimal payload hashes, SigV4 and SigV4A streaming chunk and trailer signature chains, and unsigned aws-chunked trailing checksums under either authorization algorithm are checked. Malformed object aws-chunked framing and decoded-length mismatches are rejected before service invocation; cancelled multipart part streams return InternalError without storing a part and may be retried. Accepted uploads strip the transport-only `aws-chunked` content encoding while preserving other encodings. Default listen: `http://127.0.0.1:4566`.
 
 S3 rejects unknown bucket regions by default. Set `MIRROR_S3_ALLOW_NONSTANDARD_REGIONS=true` (or `s3_allow_nonstandard_regions` in `.mirror/config.json`) to match LocalStack's opt-in nonstandard-region mode.

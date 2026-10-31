@@ -815,7 +815,7 @@ operations:
       carry: [QueueUrl, QueueName]
       successful: Successful
       failed: Failed
-      result: [MessageId, MD5OfMessageBody, SequenceNumber]
+      result: [MessageId, MD5OfMessageBody, MD5OfMessageAttributes, MD5OfMessageSystemAttributes, SequenceNumber]
       max_entries: 10
       empty_error: EmptyBatchRequest
       too_many_error: TooManyEntriesInBatchRequest
@@ -1409,8 +1409,16 @@ quirks:
     provenance: authored
 
   - note: >
-      MD5OfMessageAttributes is not returned. AWS computes it with an
-      undocumented binary encoding of the attribute map; that is the
-      `aws.sqs/attr-md5` primitive in the design, and no primitive registry
-      exists yet. Omitting it is honest; guessing it would not be.
+      MD5OfMessageAttributes and MD5OfMessageSystemAttributes are answered by
+      SendMessage (a deduplicated send included), each SendMessageBatch entry
+      and ReceiveMessage, and left out when there are no attributes. The
+      engine's md5MessageAttributes computes them as AWS documents: attributes
+      sorted by name; each one's name, data type, a transport byte (1 for String
+      and Number, 2 for Binary) and value, every field but the byte prefixed
+      with its 4-byte length; MD5 over the whole
+      (https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-message-metadata.html#sqs-attributes-md5-message-digest-calculation).
+      A query-protocol client names the attributes MessageAttribute.N.Name and
+      MessageAttribute.N.Value.*, the map's own entry names, which is how the
+      decoder reads them; read as key and value they were dropped, and with
+      them the digest.
     provenance: authored

@@ -154,11 +154,12 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		return nil, err
 	}
 	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: params}
+	changed := map[string]bool{} // what the update changed in place, which a rollback changes back
 	fail := func(err error) (*spi.Response, error) {
 		if st.Reason, old.Reason = err.Error(), err.Error(); !update || old.ID == "" { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, nil, st.Resources, nil, "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
 		} else {
-			_ = p.rollback(ctx, req, old, st.Resources)
+			_ = p.rollback(ctx, req, old, st.Resources, changed)
 		}
 		return nil, err
 	}
@@ -183,6 +184,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		if how != "" && err == nil {
 			phys, err = p.provision(ctx, req, typ, logical, n, props, map[string]string{"update": prev.Physical}[how], id)
 		}
+		changed[logical] = how == "update"
 		if phys != "" { // recorded once it exists, so a rollback finds a half-made one too
 			st.Refs[logical] = phys
 			st.Resources = append(st.Resources, res{Logical: logical, Physical: phys, Type: typ, Name: n})
@@ -343,7 +345,7 @@ var kinds = map[string]kind{
 	"AWS::DynamoDB::Table":         {"TableName", 255, "aws.dynamodb DescribeTable TableName={n}", "ResourceInUseException", "{n}", "TableName ImportSourceSpecification", "aws.dynamodb CreateTable * TableName={n}", "TableName", "aws.dynamodb UpdateTable TableName={id} BillingMode ProvisionedThroughput StreamSpecification TableClass DeletionProtectionEnabled", "aws.dynamodb DeleteTable TableName={id}"},
 	"AWS::IAM::Role":               {"RoleName", 64, "aws.iam GetRole RoleName={n}", "EntityAlreadyExists", "arn:aws:iam::{a}:role/{n}", "RoleName Path", "aws.iam CreateRole RoleName={n} AssumeRolePolicyDocument=%AssumeRolePolicyDocument", "Role.Arn", "aws.iam UpdateAssumeRolePolicy RoleName={id/} PolicyDocument=%AssumeRolePolicyDocument", "aws.iam DeleteRole RoleName={id/}"},
 	"AWS::SSM::Parameter":          {"Name", 2048, "aws.ssm GetParameter Name={n}", "ParameterAlreadyExists", "{n}", "Name", "aws.ssm PutParameter Name={n} Value= Value=$Value Type=String Type=$Type", "Name", "aws.ssm PutParameter Name={id} Value= Value=$Value Type=String Type=$Type Overwrite=true", "aws.ssm DeleteParameter Name={id}"},
-	"AWS::SecretsManager::Secret":  {"Name", 512, "aws.secretsmanager DescribeSecret SecretId={n}", "ResourceExistsException", "arn:aws:secretsmanager:{r}:{a}:secret:{n}", "Name", "aws.secretsmanager CreateSecret Name={n} SecretString=$SecretString Description=$Description", "ARN", "aws.secretsmanager UpdateSecret SecretId={id} SecretString=$SecretString Description=$Description", "aws.secretsmanager DeleteSecret SecretId={id} ForceDeleteWithoutRecovery=true"},
+	"AWS::SecretsManager::Secret":  {"Name", 512, "aws.secretsmanager DescribeSecret SecretId={n}", "ResourceExistsException", "arn:aws:secretsmanager:{r}:{a}:secret:{n}", "Name", "aws.secretsmanager CreateSecret Name={n} SecretString=$SecretString Description=$Description", "ARN", "aws.secretsmanager UpdateSecret SecretId={id} SecretString=$SecretString Description= Description=$Description", "aws.secretsmanager DeleteSecret SecretId={id} ForceDeleteWithoutRecovery=true"},
 	"AWS::KMS::Key":                {"", 0, "", "", "", "KeySpec KeyUsage MultiRegion", "aws.kms CreateKey Description= Description=$Description", "KeyMetadata.KeyId", "aws.kms UpdateKeyDescription KeyId={id} Description= Description=$Description", "aws.kms ScheduleKeyDeletion KeyId={id} PendingWindowInDays=7"},
 	"AWS::Logs::LogGroup":          {"LogGroupName", 512, "aws.logs DescribeLogGroups logGroupNamePrefix={n}", "ResourceAlreadyExistsException", "{n}", "LogGroupName", "aws.logs CreateLogGroup logGroupName={n}", "logGroupName", "", "aws.logs DeleteLogGroup logGroupName={id}"},
 	"AWS::Events::Rule":            {"Name", 64, "aws.events DescribeRule Name={n} EventBusName=$EventBusName", "ResourceAlreadyExistsException", "arn:aws:events:{r}:{a}:rule/{n}", "Name EventBusName", "aws.events PutRule Name={n} ScheduleExpression=$ScheduleExpression State=$State Description=$Description EventBusName=$EventBusName EventPattern=%EventPattern", "RuleArn", "aws.events PutRule Name={n} ScheduleExpression=$ScheduleExpression State=$State Description=$Description EventBusName=$EventBusName EventPattern=%EventPattern", "aws.events DeleteRule Name={id/} EventBusName={bus}"},
@@ -553,18 +555,19 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	return phys, err
 }
 
-// rollback undoes a failed update as UPDATE_ROLLBACK does. What the update changed in place is
-// provisioned again from the previous template; what it made, half-made ones included, is deleted; the
-// stack keeps the previous template and resources, UPDATE_ROLLBACK_COMPLETE, or UPDATE_ROLLBACK_FAILED with
-// what it could not delete still listed for DeleteStack. Only a finished update deletes what it replaced.
-func (p *Pack) rollback(ctx context.Context, req *spi.Request, old stack, made []res) error {
+// rollback undoes a failed update as UPDATE_ROLLBACK does. What the update changed in place is updated
+// back, through the same update, to exactly the previous template's properties; what it made, half-made
+// ones included, is deleted; what it kept is not called. The stack keeps the previous template and
+// resources, UPDATE_ROLLBACK_COMPLETE, or UPDATE_ROLLBACK_FAILED with what it could not delete still listed
+// for DeleteStack. Only a finished update deletes what it replaced.
+func (p *Pack) rollback(ctx context.Context, req *spi.Request, old stack, made []res, changed map[string]bool) error {
 	tpl, _ := parseTemplate(old.Template)
 	var doomed []res
 	var first error
 	for _, r := range made {
 		if old.Refs[r.Logical] != r.Physical {
 			doomed = append(doomed, r)
-		} else if props := asMap(p.resolve(asMap(asMap(tpl["Resources"])[r.Logical])["Properties"], old.Refs, req, old.Name)); props != nil {
+		} else if props := maps.Collect(maps.All(asMap(p.resolve(asMap(asMap(tpl["Resources"])[r.Logical])["Properties"], old.Refs, req, old.Name)))); changed[r.Logical] {
 			_, err := p.provision(ctx, req, r.Type, r.Logical, r.Name, props, r.Physical, old.ID)
 			first = cmp.Or(first, err)
 		}

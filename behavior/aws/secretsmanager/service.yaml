@@ -345,7 +345,10 @@ operations:
     output:
       ARN: s.ARN
       Name: s.Name
-      Description: "'Description' in s ? s.Description : dyn(null)"
+      # An empty description has no value ("Secrets Manager only returns
+      # fields that have a value in the response"), as UpdateSecret leaves one
+      # that clears it.
+      Description: "'Description' in s && s.Description != null && string(s.Description) != '' ? s.Description : dyn(null)"
       DeletedDate: "'Deleted' in s && s.Deleted == true && 'DeletedDate' in s ? s.DeletedDate : dyn(null)"
       # "A list of the versions of the secret that have staging labels
       # attached": a version with none is deprecated and not listed.
@@ -448,7 +451,7 @@ operations:
           'SecretVersionsToStages': rollup(('Versions' in m ? m.Versions : []).filter(v, 'VersionStages' in v && v.VersionStages != null && size(v.VersionStages) > 0), 'VersionId', 'VersionStages')
         },
         'Tags' in m && m.Tags != null && size(m.Tags) > 0 ? {'Tags': m.Tags} : {}),
-        'Description' in m && m.Description != null ? {'Description': m.Description} : {}),
+        'Description' in m && m.Description != null && string(m.Description) != '' ? {'Description': m.Description} : {}),
         'Deleted' in m && m.Deleted == true && 'DeletedDate' in m && m.DeletedDate != null ? {'DeletedDate': m.DeletedDate} : {}))
 
   # Force delete drops the record; otherwise it is marked Deleted, stamped with

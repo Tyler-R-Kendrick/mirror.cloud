@@ -1621,3 +1621,44 @@ func TestCloudFormationAnUpdateTouchesOnlyWhatChanged(t *testing.T) {
 		t.Errorf("the custom-named role is gone: %v", err)
 	}
 }
+
+// A failed update's rollback puts back exactly the properties the stack had,
+// through the same in-place update an update uses, given the previous
+// properties: a property the failed update added is taken away again, a
+// rule's targets are its previous template's and no others, and a secret
+// the failed update gave a description has none again. A resource the update
+// did not change is not called. Before, the rollback only provisioned the
+// previous properties on top: the rule kept the target the failed update
+// added, and the secret its description.
+func TestCloudFormationARollbackRestoresExactly(t *testing.T) {
+	h := newStacks(t)
+	target := func(id string) map[string]any {
+		return map[string]any{"Id": id, "Arn": "arn:aws:sqs:us-east-1:000000000000:" + id}
+	}
+	resources := map[string]map[string]any{
+		"R": {"Type": "AWS::Events::Rule", "Properties": map[string]any{"ScheduleExpression": "rate(1 hour)", "Targets": []any{target("t1")}}},
+		"S": {"Type": "AWS::SecretsManager::Secret", "Properties": map[string]any{"SecretString": "v"}},
+	}
+	h.mustCreate("exact", resources)
+	ids := map[string]string{}
+	for _, r := range h.resources("exact") {
+		ids[r.Logical] = r.Physical
+	}
+	resources["R"] = map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"ScheduleExpression": "rate(1 hour)", "Targets": []any{target("t1"), target("t2")}}}
+	resources["S"] = map[string]any{"Type": "AWS::SecretsManager::Secret", "Properties": map[string]any{"SecretString": "v", "Description": "added"}}
+	resources["Z"] = map[string]any{"Type": "AWS::Nothing::Here"}
+	tpl, _ := json.Marshal(map[string]any{"Resources": resources})
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "exact", "TemplateBody": string(tpl)}); err == nil {
+		t.Fatal("an update with an unsupported type succeeded")
+	}
+	if status, reason, _ := h.status("exact"); status != "UPDATE_ROLLBACK_COMPLETE" {
+		t.Errorf("exact is %s (%s), want UPDATE_ROLLBACK_COMPLETE", status, reason)
+	}
+	out, err := h.service("aws.events", "ListTargetsByRule", map[string]any{"Rule": lastSlash(ids["R"])})
+	if targets, _ := out["Targets"].([]any); err != nil || len(targets) != 1 || asMap(targets[0])["Id"] != "t1" {
+		t.Errorf("after the rollback the rule's targets are %v (%v), want t1 alone", out["Targets"], err)
+	}
+	if out, err := h.service("aws.secretsmanager", "DescribeSecret", map[string]any{"SecretId": ids["S"]}); err != nil || out["Description"] != nil {
+		t.Errorf("after the rollback the secret's description is %v (%v), want none", out["Description"], err)
+	}
+}

@@ -325,6 +325,15 @@ The oracle is AWS's documentation as it ships in the vendored model
     ones the cleanup then deleted, and a failure on any parameter, table, log
     group, function, role or stream, which could only be created. A stream
     is made with the template's `ShardCount`.
+  - A failed update's rollback puts back exactly the properties the stack
+    had: what the update changed in place is updated back through the same
+    update, given the previous template's properties, so a property the
+    failed update added is taken away (a rule's targets are its previous
+    template's and no others; a secret given a description has an empty one,
+    which Secrets Manager no longer answers, as it "only returns fields that
+    have a value"); what the update kept is not called. Before, the rollback
+    provisioned the previous properties on top of the new ones, and every
+    kept resource again.
   - A finished `UpdateStack` cleans up. "CloudFormation will replace the
     resource by creating a new one and deleting the old one"
     (`ResourceChange.Replacement`), and for an update "it begins disposing of

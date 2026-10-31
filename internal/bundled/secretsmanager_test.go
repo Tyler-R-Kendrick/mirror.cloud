@@ -462,3 +462,42 @@ func hasKey(m map[string]any, k string) bool {
 	_, present := m[k]
 	return present
 }
+
+// SecretListEntry.Description: "The user-provided description of the secret."
+// SecretListEntry.DeletedDate: "The date and time the deletion of the secret
+// occurred. Not present on active secrets." ListSecretsRequest.
+// IncludePlannedDeletion: "Specifies whether to include secrets scheduled for
+// deletion."
+func TestSecretsManagerListSecretsAnswersDescriptionAndDeletedDate(t *testing.T) {
+	deps := spitest.Deps(t)
+	_, ok, _ := secretsManagerOn(t, deps)
+	ok(t, "CreateSecret", map[string]any{"Name": "active", "SecretString": "v", "Description": "kept"})
+	ok(t, "CreateSecret", map[string]any{"Name": "scheduled", "SecretString": "v"})
+	if err := deps.Clock.Advance(time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	ok(t, "DeleteSecret", map[string]any{"SecretId": "scheduled"})
+
+	entries := func(in map[string]any) map[string]map[string]any {
+		out := ok(t, "ListSecrets", in)
+		epochSeconds(t, "ListSecrets", out)
+		byName := map[string]map[string]any{}
+		list, _ := out["SecretList"].([]any)
+		for _, e := range list {
+			m := e.(map[string]any)
+			byName[m["Name"].(string)] = m
+		}
+		return byName
+	}
+	listed := entries(map[string]any{})
+	if len(listed) != 1 || listed["active"]["Description"] != "kept" || hasKey(listed["active"], "DeletedDate") {
+		t.Fatalf("ListSecrets answered %#v, want active alone, with its Description and no DeletedDate", listed)
+	}
+	planned := entries(map[string]any{"IncludePlannedDeletion": true})
+	if len(planned) != 2 || !at(planned["scheduled"]["DeletedDate"], 3600) || hasKey(planned["scheduled"], "Description") {
+		t.Fatalf("with IncludePlannedDeletion, scheduled answered %#v, want DeletedDate 3600 and no Description", planned["scheduled"])
+	}
+	if hasKey(planned["active"], "DeletedDate") || planned["active"]["Description"] != "kept" {
+		t.Fatalf("with IncludePlannedDeletion, active answered %#v", planned["active"])
+	}
+}

@@ -7,6 +7,10 @@ The oracle is AWS's documentation as it ships in the vendored model
 - **Description.** `CreateSecret` and `UpdateSecret` keep `Description`, and
   `DescribeSecret` answers it. Before, it was accepted and dropped. A write
   that names no description keeps the one already stored.
+- **ListSecrets answers both.** Each entry carries `Description` ("The
+  user-provided description of the secret") and, for a secret scheduled for
+  deletion listed with `IncludePlannedDeletion`, `DeletedDate` ("Not present on
+  active secrets"), each only when it has one. Before, neither was projected.
 - **UpdateSecret without a value.** A description-only `UpdateSecret` adds no
   version and answers no `VersionId`. Only an update that carries
   `SecretString` or `SecretBinary` creates a version. Before, every update

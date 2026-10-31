@@ -278,14 +278,21 @@ operations:
         || ('IncludePlannedDeletion' in input
             && (input.IncludePlannedDeletion == true || input.IncludePlannedDeletion == 'true'
                 || input.IncludePlannedDeletion == 'True' || input.IncludePlannedDeletion == '1'))
+    #
+    # Each entry carries its Description ("The user-provided description of
+    # the secret") and, scheduled for deletion, its DeletedDate ("The date and
+    # time the deletion of the secret occurred. Not present on active
+    # secrets."), each only when it has one.
     output:
       SecretList: >-
-        items.map(m, {
+        items.map(m, merge(merge({
           'ARN': m.ARN,
           'Name': m.Name,
           'Tags': 'Tags' in m ? m.Tags : null,
           'SecretVersionsToStages': rollup('Versions' in m ? m.Versions : [], 'VersionId', 'VersionStages')
-        })
+        },
+        'Description' in m && m.Description != null ? {'Description': m.Description} : {}),
+        'Deleted' in m && m.Deleted == true && 'DeletedDate' in m && m.DeletedDate != null ? {'DeletedDate': m.DeletedDate} : {}))
 
   # Force delete drops the record; otherwise it is marked Deleted, stamped with
   # the time of the request as its DeletedDate, and keeps answering to

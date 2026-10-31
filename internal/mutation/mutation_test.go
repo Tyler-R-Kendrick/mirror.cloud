@@ -4326,7 +4326,7 @@ var mutants = []mutant{
 		name: "cloudformation-parse-yaml-list-items-as-null",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "yaml.go"),
 		old:  `out = append(out, item)`,
-		new:  `out = append(out, nil)`,
+		new:  `_ = item; out = append(out, nil)`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationIntrinsicAndYAMLUnits",
 	},

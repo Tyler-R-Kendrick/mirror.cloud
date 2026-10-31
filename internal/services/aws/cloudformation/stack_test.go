@@ -1,6 +1,7 @@
 package cloudformation
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -1059,5 +1060,88 @@ func TestCloudFormationReadsEveryPropertyAsItsType(t *testing.T) {
 		t.Errorf("an SSM Parameter of Value 123: %v", err)
 	} else if out, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": r.Physical}); err != nil || asMap(out["Parameter"])["Value"] != "123" {
 		t.Errorf("an SSM Parameter of Value 123 holds %v (%v), want \"123\"", out["Parameter"], err)
+	}
+}
+
+// A Ref answers what its resource's Ref really answers, never its logical id.
+// Before anything is made, each resource's id is planned (planID) in the
+// order resources are made, each after those its properties name ("if the
+// properties of resource A use a !Ref to resource B ... Resource B is created
+// before resource A", Template Reference, DependsOn attribute), so the check
+// of a name built on another resource's id checks that id; one built on an id
+// known only once made (a KMS key's) is checked as it is made. A cycle is
+// ValidationError and makes no stack. Before, a Ref to a resource not yet made
+// answered its logical id: a parameter named for a bucket was checked, and
+// made, as "ABucket", and a parameter sorted before the key it names held
+// "ZKey".
+func TestCloudFormationPlansEveryIdBeforeMakingIt(t *testing.T) {
+	h := newStacks(t)
+	if _, err := h.service("aws.ssm", "PutParameter", map[string]any{"Name": "ABucket", "Value": "x", "Type": "String"}); err != nil {
+		t.Fatal(err)
+	}
+	ref := func(logical string) map[string]any { return map[string]any{"Ref": logical} }
+	if err := h.create("named-for", map[string]map[string]any{
+		"ABucket": {"Type": "AWS::S3::Bucket"},
+		"ZParam":  {"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": ref("ABucket"), "Value": "v"}},
+	}); err != nil {
+		t.Errorf("a parameter named for an unnamed bucket, beside a parameter named ABucket: %v", err)
+	} else {
+		rs := map[string]string{}
+		for _, r := range h.resources("named-for") {
+			rs[r.Logical] = r.Physical
+		}
+		if rs["ZParam"] != rs["ABucket"] || rs["ZParam"] == "ABucket" {
+			t.Errorf("ZParam is %q, want the bucket's name %q", rs["ZParam"], rs["ABucket"])
+		}
+	}
+
+	if err := h.create("before", map[string]map[string]any{
+		"AParam":  {"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": ref("ZBucket"), "Value": ref("ZKey")}},
+		"BParam":  {"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": map[string]any{"Fn::Sub": "p-${ZKey}"}, "Value": "v"}},
+		"ZBucket": {"Type": "AWS::S3::Bucket"},
+		"ZKey":    {"Type": "AWS::KMS::Key", "Properties": map[string]any{"Description": "d"}},
+	}); err != nil {
+		t.Errorf("parameters named for a bucket and a key made after them: %v", err)
+	} else {
+		rs := map[string]string{}
+		for _, r := range h.resources("before") {
+			rs[r.Logical] = r.Physical
+		}
+		out, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": rs["AParam"]})
+		if rs["AParam"] != rs["ZBucket"] || err != nil || asMap(out["Parameter"])["Value"] != rs["ZKey"] || rs["BParam"] != "p-"+rs["ZKey"] {
+			t.Errorf("AParam %q holds %v (%v) and BParam is %q, want the bucket's name %q holding the key's id %q, and p-%s", rs["AParam"], out["Parameter"], err, rs["BParam"], rs["ZBucket"], rs["ZKey"], rs["ZKey"])
+		}
+	}
+
+	cycle := `{"Resources":{"A":{"Type":"AWS::SSM::Parameter","Properties":{"Name":{"Ref":"B"},"Value":"v"}},"B":{"Type":"AWS::SSM::Parameter","Properties":{"Name":{"Fn::Sub":"${A}-b"},"Value":"v"}}}}`
+	for _, op := range []string{"CreateStack", "ValidateTemplate"} {
+		if _, err := h.invoke(op, map[string]any{"StackName": "cycle", "TemplateBody": cycle}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Circular dependency between resources: [A, B]") {
+			t.Errorf("%s of a cycle answered %v, want ValidationError naming A and B", op, err)
+		}
+	}
+	if _, _, err := h.status("cycle"); err == nil {
+		t.Error("a cycle made a stack")
+	}
+
+	if _, err := h.service("aws.events", "CreateEventBus", map[string]any{"Name": "b"}); err != nil {
+		t.Fatal(err)
+	}
+	all := nameable()
+	all["BusRule"] = map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"EventBusName": "b", "EventPattern": map[string]any{"source": []any{"app"}}}}
+	all["Key"] = map[string]any{"Type": "AWS::KMS::Key", "Properties": map[string]any{}}
+	all["Named"] = map[string]any{"Type": "AWS::SNS::Topic", "Properties": map[string]any{"TopicName": "named-topic"}}
+	h.mustCreate("every", all)
+	out, err := h.invoke("DescribeStacks", map[string]any{"StackName": "every"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := str(asMap(out["Stacks"].([]any)[0])["StackId"])
+	for _, r := range h.resources("every") {
+		props := asMap(all[r.Logical]["Properties"])
+		n := cmp.Or(str(props[kinds[r.Type].member]), physicalName("every", r.Logical, id, r.Type, props))
+		got, unknowable := planID(&spi.Request{Identity: h.id}, r.Type, n, props), r.Type == "AWS::SQS::Queue" || r.Type == "AWS::KMS::Key" || r.Type == "AWS::ApiGateway::RestApi"
+		if unknowable && got != unknown || !unknowable && got != r.Physical {
+			t.Errorf("%s (%s) was planned as %q and made as %q", r.Logical, r.Type, got, r.Physical)
+		}
 	}
 }

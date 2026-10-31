@@ -137,8 +137,24 @@ The oracle is AWS's documentation as it ships in the vendored model
     `EntityAlreadyExists`, `ResourceInUseException` and so on; for a topic,
     whose `CreateTopic` "is idempotent" and has none, CloudFormation's own
     `AlreadyExistsException`, "The resource with the name requested already
-    exists."). The resource is left as it was. It is checked again just
-    before each create, since a name can come from a resource made before it.
+    exists."). The resource is left as it was. A name built on another
+    resource's id is checked by the id that resource will be made with: before
+    anything is made, each resource's id is planned in the order resources are
+    made, so a `Ref` answers what the type's `Ref` will answer (a bucket's
+    name, a topic's, role's, rule's, function's or secret's ARN), never the
+    logical id. A queue's URL (its endpoint's business), a KMS key's id and a
+    REST API's id are known only once made, so a name built on one is checked
+    just before its create instead. Resources are made in dependency order,
+    each after those its properties name by `Ref`, `Fn::GetAtt` or `Fn::Sub`
+    ("Resource B is created before resource A", Template Reference, DependsOn
+    attribute), and otherwise by logical id; `DependsOn` itself is not read.
+    A cycle is `ValidationError` ("Circular dependency between resources:
+    [A, B]") on `CreateStack`, `UpdateStack`, `ValidateTemplate` and
+    `GetTemplateSummary`, and makes no stack. Before, a `Ref` to a resource
+    not yet made answered its logical id: beside an SSM parameter named
+    `ABucket`, a parameter named for an unnamed bucket `ABucket` was refused
+    as taken, and a resource that sorted before the one it named was made
+    with the logical id, and a cycle was made in alphabetical order.
     A REST API is not checked: API Gateway holds no name to one API. A stack
     recorded before resources kept the name they were made under is read by
     each resource's physical id, which is the name or ends in it (a queue's

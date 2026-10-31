@@ -1,5 +1,4 @@
-// Package cloudformation is CloudFormation's template engine: the operations
-// behavior/aws/cloudformation lists as native.
+// Package cloudformation is CloudFormation's template engine: the operations behavior/aws/cloudformation lists as native.
 package cloudformation
 
 import (
@@ -23,10 +22,9 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
-// natives are the operations behavior/aws/cloudformation lists as native:
-// the template engine. Parsing a template, resolving its intrinsics and
-// provisioning resources through their owning services is Go; the stack,
-// change set, stack set and type bookkeeping is the bundle's.
+// natives are the operations behavior/aws/cloudformation lists as native: the template engine. Parsing a
+// template, resolving its intrinsics and provisioning resources through their owning services is Go; the
+// stack, change set, stack set and type bookkeeping is the bundle's.
 var natives = []string{"CreateStack", "UpdateStack", "DeleteStack", "ExecuteChangeSet", "ValidateTemplate", "GetTemplateSummary", "ListExports"}
 
 func init() {
@@ -147,29 +145,26 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}); err != nil {
 		return nil, err
 	}
-	st := stack{Name: name, ID: id, Status: "CREATE_COMPLETE", Template: body, Refs: params}
-	if update {
-		st.Status = "UPDATE_COMPLETE"
-	}
+	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: params}
 	fail := func(err error) (*spi.Response, error) {
 		if st.Reason = err.Error(); !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
 		}
 		return nil, err
 	}
-	resources, _ := tpl["Resources"].(map[string]any)
-	order := slices.Sorted(maps.Keys(resources))
-	for _, logical := range order { // a name taken fails the stack before anything is made
+	resources, planned := asMap(tpl["Resources"]), maps.Clone(st.Refs)
+	order, _ := p.order(req, tpl)
+	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
-		if _, err := p.claim(ctx, req, st, old, logical, str(rm["Type"]), asMap(p.resolve(rm["Properties"], st.Refs, req, name))); err != nil {
+		typ, props := str(rm["Type"]), asMap(p.resolve(rm["Properties"], planned, req, name))
+		n, err := p.claim(ctx, req, st, old, logical, typ, props)
+		if planned[logical] = planID(req, typ, n, props); err != nil {
 			return fail(err)
 		}
 	}
 	for _, logical := range order {
-		rm, _ := resources[logical].(map[string]any)
-		typ := str(rm["Type"])
-		props := map[string]any{}
-		maps.Copy(props, asMap(p.resolve(rm["Properties"], st.Refs, req, name)))
+		rm := asMap(resources[logical]) // props is never nil: provision adds to it
+		typ, props := str(rm["Type"]), maps.Collect(maps.All(asMap(p.resolve(rm["Properties"], st.Refs, req, name))))
 		phys, n, err := "", "", error(nil)
 		if n, err = p.claim(ctx, req, st, old, logical, typ, props); err == nil { // again: a name may come from a resource made before it
 			phys, err = p.provision(ctx, req, typ, logical, n, props, old.Refs[logical], id)
@@ -198,6 +193,9 @@ func (p *Pack) template(ctx context.Context, req *spi.Request) (string, map[stri
 		return "", nil, err
 	}
 	tpl, err := parseTemplate(body)
+	if err == nil {
+		_, err = p.order(req, tpl)
+	}
 	return body, tpl, err
 }
 
@@ -232,26 +230,23 @@ func (p *Pack) templateBody(ctx context.Context, req *spi.Request) (string, erro
 
 func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Response, error) {
 	st, err := p.load(ctx, req, name)
+	if err == nil && st.Protect {
+		err = invalid("stack has termination protection")
+	} else if err == nil {
+		err = p.unwind(ctx, req, st, "DELETE_COMPLETE", "DELETE_FAILED")
+	}
 	if err != nil {
-		return nil, err
-	}
-	if st.Protect {
-		return nil, invalid("stack has termination protection")
-	}
-	if err := p.unwind(ctx, req, st, "DELETE_COMPLETE", "DELETE_FAILED"); err != nil {
 		return nil, err
 	}
 	return &spi.Response{Output: map[string]any{}}, nil
 }
 
-// unwind deletes a stack's resources, newest first, as a rollback or a
-// DeleteStack does, and records the outcome. With nothing left the stack is
-// done, keeping st's reason (a DELETE_COMPLETE stack is removed); else failed, the
-// resources left listed as DELETE_FAILED for the next DeleteStack to try
-// again and the first error, which unwind answers, its StackStatusReason.
+// unwind deletes a stack's resources, newest first, as a rollback or a DeleteStack does, and records the
+// outcome. With nothing left the stack is done, keeping st's reason (a DELETE_COMPLETE stack is removed);
+// else failed, the resources left listed as DELETE_FAILED for the next DeleteStack to try again and the
+// first error, which unwind answers, its StackStatusReason.
 func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, done, failed string) error {
-	left := []res{} // never null: every read of the stack lists its resources
-	var first error
+	left, first := []res{}, error(nil) // left is never null: every read of the stack lists its resources
 	for _, r := range slices.Backward(st.Resources) {
 		if err := p.deprovision(ctx, req, r); err != nil {
 			r.Status, r.Reason, first = "DELETE_FAILED", err.Error(), cmp.Or(first, err)
@@ -279,26 +274,63 @@ func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, 
 	return st, nil
 }
 
-// kinds are the types provision names: the property that names one, the longest name its service takes
-// (API Gateway sets none for a REST API, nor holds a name to one; 1024 only bounds it), a read that finds
-// one by name, and the service's error for a name taken (SNS's CreateTopic "is idempotent": CloudFormation's).
+// kinds are the types provision names: the property that names one, the longest name its service takes (API
+// Gateway sets none for a REST API, nor holds a name to one; 1024 only bounds it), a read that finds one by
+// name, the service's error for a name taken (SNS's CreateTopic "is idempotent": CloudFormation's), its id.
 var kinds = map[string]struct {
-	member            string
-	max               int
-	svc, op, in, code string
+	member                 string
+	max                    int
+	svc, op, in, code, ref string
 }{
-	"AWS::S3::Bucket":             {"BucketName", 63, "aws.s3", "HeadBucket", "Bucket", "BucketAlreadyOwnedByYou"},
-	"AWS::SQS::Queue":             {"QueueName", 80, "aws.sqs", "GetQueueUrl", "QueueName", "QueueAlreadyExists"},
-	"AWS::SNS::Topic":             {"TopicName", 256, "aws.sns", "GetTopicAttributes", "TopicArn", "AlreadyExistsException"},
-	"AWS::DynamoDB::Table":        {"TableName", 255, "aws.dynamodb", "DescribeTable", "TableName", "ResourceInUseException"},
-	"AWS::IAM::Role":              {"RoleName", 64, "aws.iam", "GetRole", "RoleName", "EntityAlreadyExists"},
-	"AWS::SSM::Parameter":         {"Name", 2048, "aws.ssm", "GetParameter", "Name", "ParameterAlreadyExists"},
-	"AWS::SecretsManager::Secret": {"Name", 512, "aws.secretsmanager", "DescribeSecret", "SecretId", "ResourceExistsException"},
-	"AWS::Logs::LogGroup":         {"LogGroupName", 512, "aws.logs", "DescribeLogGroups", "logGroupNamePrefix", "ResourceAlreadyExistsException"},
-	"AWS::Events::Rule":           {"Name", 64, "aws.events", "DescribeRule", "Name", "ResourceAlreadyExistsException"},
-	"AWS::Lambda::Function":       {"FunctionName", 64, "aws.lambda", "GetFunction", "FunctionName", "ResourceConflictException"},
-	"AWS::Kinesis::Stream":        {"Name", 128, "aws.kinesis", "DescribeStreamSummary", "StreamName", "ResourceInUseException"},
-	"AWS::ApiGateway::RestApi":    {"Name", 1024, "", "", "", ""},
+	"AWS::S3::Bucket":             {"BucketName", 63, "aws.s3", "HeadBucket", "Bucket", "BucketAlreadyOwnedByYou", "{n}"},
+	"AWS::SQS::Queue":             {"QueueName", 80, "aws.sqs", "GetQueueUrl", "QueueName", "QueueAlreadyExists", ""},
+	"AWS::SNS::Topic":             {"TopicName", 256, "aws.sns", "GetTopicAttributes", "TopicArn", "AlreadyExistsException", "arn:aws:sns:{r}:{a}:{n}"},
+	"AWS::DynamoDB::Table":        {"TableName", 255, "aws.dynamodb", "DescribeTable", "TableName", "ResourceInUseException", "{n}"},
+	"AWS::IAM::Role":              {"RoleName", 64, "aws.iam", "GetRole", "RoleName", "EntityAlreadyExists", "arn:aws:iam::{a}:role/{n}"},
+	"AWS::SSM::Parameter":         {"Name", 2048, "aws.ssm", "GetParameter", "Name", "ParameterAlreadyExists", "{n}"},
+	"AWS::SecretsManager::Secret": {"Name", 512, "aws.secretsmanager", "DescribeSecret", "SecretId", "ResourceExistsException", "arn:aws:secretsmanager:{r}:{a}:secret:{n}"},
+	"AWS::Logs::LogGroup":         {"LogGroupName", 512, "aws.logs", "DescribeLogGroups", "logGroupNamePrefix", "ResourceAlreadyExistsException", "{n}"},
+	"AWS::Events::Rule":           {"Name", 64, "aws.events", "DescribeRule", "Name", "ResourceAlreadyExistsException", "arn:aws:events:{r}:{a}:rule/{n}"},
+	"AWS::Lambda::Function":       {"FunctionName", 64, "aws.lambda", "GetFunction", "FunctionName", "ResourceConflictException", "arn:aws:lambda:{r}:{a}:function:{n}"},
+	"AWS::Kinesis::Stream":        {"Name", 128, "aws.kinesis", "DescribeStreamSummary", "StreamName", "ResourceInUseException", "{n}"},
+	"AWS::ApiGateway::RestApi":    {"Name", 1024, "", "", "", "", ""},
+}
+
+// unknown stands for an id known only once its resource is made, and in order for one not yet ordered.
+const unknown = "\uffff"
+
+// planID is the id a resource named n is made with, which a Ref to it answers: n in the form its
+// service gives it back. A queue's URL (its endpoint's business), a KMS key's id and a REST API's are
+// known only once made, as is an id built on one: unknown. A Kinesis resource policy's is its ARN.
+func planID(req *spi.Request, typ, n string, props map[string]any) string {
+	if bus := lastSlash(str(props["EventBusName"])); typ == "AWS::Events::Rule" && bus != "" && bus != "default" {
+		n = bus + "/" + n
+	}
+	if f := kinds[typ].ref; f != "" && !strings.Contains(n, unknown) {
+		return strings.NewReplacer("{r}", req.Identity.Region, "{a}", req.Identity.Account, "{n}", n).Replace(f)
+	}
+	return cmp.Or(str(props["ResourceArn"]), str(props["ResourceARN"]), unknown)
+}
+
+// order is the order a template's resources are made in: each after those its properties name, by Ref,
+// Fn::GetAtt or Fn::Sub ("Resource B is created before resource A", Template Reference, DependsOn
+// attribute), else by logical id. A cycle orders none, and is CloudFormation's error.
+func (p *Pack) order(req *spi.Request, tpl map[string]any) ([]string, error) {
+	resources, marks, order := asMap(tpl["Resources"]), map[string]string{}, []string(nil)
+	todo := slices.Sorted(maps.Keys(resources))
+	for _, logical := range todo {
+		marks[logical] = unknown
+	}
+	for len(todo) > 0 {
+		i := slices.IndexFunc(todo, func(l string) bool {
+			return !strings.Contains(jsonText(p.resolve(asMap(resources[l])["Properties"], marks, req, "")), unknown)
+		})
+		if i < 0 {
+			return nil, invalid("Circular dependency between resources: [" + strings.Join(todo, ", ") + "]")
+		}
+		marks[todo[i]], order, todo = "", append(order, todo[i]), slices.Delete(slices.Clone(todo), i, i+1)
+	}
+	return order, nil
 }
 
 // claim answers the name a resource is made under: the template's, or else physicalName's. A given name
@@ -306,12 +338,12 @@ var kinds = map[string]struct {
 // services answer such a create with what they hold, which a rollback or DeleteStack would then delete.
 func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logical, typ string, props map[string]any) (string, error) {
 	k, n := kinds[typ], str(props[kinds[typ].member])
-	if n == "" {
-		return physicalName(st.Name, logical, st.ID, typ, props), nil
+	if n == "" || strings.Contains(n, unknown) { // one built on an id known only once made is checked as it is made
+		return cmp.Or(n, physicalName(st.Name, logical, st.ID, typ, props)), nil
 	}
 	id := n
-	if k.in == "TopicArn" {
-		id = "arn:aws:sns:" + req.Identity.Region + ":" + req.Identity.Account + ":" + n
+	if k.in == "TopicArn" { // GetTopicAttributes finds a topic by its ARN
+		id = planID(req, typ, n, props)
 	}
 	out, err := p.call(ctx, req, k.svc, k.op, given(map[string]any{k.in: id}, props, "EventBusName"))
 	groups, list := out["logGroups"].([]any) // DescribeLogGroups answers a list by prefix, never a fault
@@ -352,9 +384,8 @@ func physicalName(stack, logical, stackID, typ string, props map[string]any) str
 	return n
 }
 
-// provision creates a resource through the service that owns it, and answers
-// the resource's physical id. Going through the owner's API keeps its store
-// layout, validation and cascades that service's business.
+// provision creates a resource through the service that owns it, and answers the resource's physical id.
+// Going through the owner's API keeps its store layout, validation and cascades that service's business.
 func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n string, props map[string]any, existing, stackID string) (string, error) {
 	switch typ {
 	case "AWS::S3::Bucket":
@@ -486,9 +517,8 @@ func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) error {
 	return err
 }
 
-// call invokes another service the way the edge would: through whatever the
-// registry serves it with, pack or bundle. A pack that runs a worker is
-// closed again, since this construction is per call.
+// call invokes another service the way the edge would: through whatever the registry serves it with, pack
+// or bundle. A pack that runs a worker is closed again, since this construction is per call.
 func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map[string]any) (map[string]any, error) {
 	for _, f := range registry.Factories() {
 		if f.ServiceID != id {
@@ -510,38 +540,26 @@ func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map
 	return nil, spi.NotImplemented(id, op, "emulate")
 }
 
-// configureBucket applies the bucket properties that map one to one onto an
-// S3 operation, and refuses the rest by name rather than storing a shape S3
-// does not read.
+// configureBucket applies the bucket properties that map one to one onto an S3 operation, and stores the
+// rest as they are given.
 func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket string, props map[string]any) error {
-	// The S3 pack reads Status and TagSet lifted to the top of the input, as
-	// the restXml decoder hands them over (its liftedMembers debt).
-	for property, apply := range map[string]func(v any) (string, map[string]any){
-		"VersioningConfiguration": func(v any) (string, map[string]any) {
-			return "PutBucketVersioning", map[string]any{"VersioningConfiguration": v, "Status": asMap(v)["Status"]}
-		},
-		"Tags": func(v any) (string, map[string]any) {
-			return "PutBucketTagging", map[string]any{"Tagging": map[string]any{"TagSet": v}, "TagSet": v}
-		},
-		"PublicAccessBlockConfiguration": func(v any) (string, map[string]any) {
-			return "PutPublicAccessBlock", map[string]any{"PublicAccessBlockConfiguration": v}
-		},
-		"OwnershipControls": func(v any) (string, map[string]any) {
-			return "PutBucketOwnershipControls", map[string]any{"OwnershipControls": v}
-		},
-	} {
+	for property, op := range map[string]string{"VersioningConfiguration": "PutBucketVersioning", "Tags": "PutBucketTagging",
+		"PublicAccessBlockConfiguration": "PutPublicAccessBlock", "OwnershipControls": "PutBucketOwnershipControls"} {
 		if v, ok := props[property]; ok {
-			op, in := apply(v)
-			in["Bucket"] = bucket
+			in := map[string]any{"Bucket": bucket, property: v}
+			if property == "VersioningConfiguration" { // S3 reads Status and TagSet lifted to the top, as restXml hands them over (its liftedMembers debt)
+				in["Status"] = asMap(v)["Status"]
+			} else if property == "Tags" {
+				in = map[string]any{"Bucket": bucket, "Tagging": map[string]any{"TagSet": v}, "TagSet": v}
+			}
 			if _, err := p.call(ctx, req, "aws.s3", op, in); err != nil {
 				return err
 			}
 		}
 	}
-	// ponytail: the configurations with no one-to-one S3 operation are stored
-	// in CloudFormation's own shape, which S3 does not read and Cloud Control
-	// reads back. Mapping each onto its S3 operation (CorsRules to CORSRules,
-	// and so on) is the upgrade, in both directions.
+	// ponytail: the configurations with no one-to-one S3 operation are stored in CloudFormation's own
+	// shape, which S3 does not read and Cloud Control reads back. Mapping each onto its S3 operation
+	// (CorsRules to CORSRules, and so on) is the upgrade, in both directions.
 	for property, kind := range map[string]string{
 		"CorsConfiguration": "cors", "BucketEncryption": "encryption", "LifecycleConfiguration": "lifecycle",
 		"ReplicationConfiguration": "replication", "NotificationConfiguration": "notification", "WebsiteConfiguration": "website",
@@ -641,8 +659,7 @@ func fault(code, message string) *spi.Fault {
 
 func asMap(v any) map[string]any { m, _ := v.(map[string]any); return m }
 
-// jsonText answers a policy-like property as the JSON text an API takes; a
-// template may give it as an object or as a string already.
+// jsonText is a policy-like property as the JSON text an API takes: an object's, or a string as given.
 func jsonText(v any) string {
 	if text, ok := v.(string); ok {
 		return text
@@ -695,11 +712,8 @@ func (p *Pack) ref(name string, refs map[string]string, req *spi.Request, stack 
 }
 
 func (p *Pack) getAtt(g any, refs map[string]string, req *spi.Request) string {
-	var logical, attr string
-	switch t := g.(type) {
-	case string:
-		logical, attr, _ = strings.Cut(t, ".")
-	case []any:
+	logical, attr, _ := strings.Cut(str(g), ".") // "A.B", or [A, B]
+	if t, ok := g.([]any); ok {
 		t = append(slices.Clip(t), nil, nil)
 		logical, attr = str(t[0]), str(t[1])
 	}
@@ -735,10 +749,8 @@ func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack str
 }
 
 func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack string) string {
-	out := str(s)
-	if arr, ok := s.([]any); ok && len(arr) > 0 {
-		out = str(arr[0])
-	}
+	arr, _ := s.([]any) // "text", or ["text", {variables}]
+	out := str(append(slices.Clip(arr), s)[0])
 	for k, v := range refs {
 		out = strings.ReplaceAll(out, "${"+k+"}", v)
 	}
@@ -770,27 +782,19 @@ func parseTemplate(body string) (map[string]any, error) {
 }
 
 func formParams(in map[string]any) map[string]string {
-	keys, vals := map[string]string{}, map[string]string{}
+	out := map[string]string{}
 	for k, v := range in {
 		if pfx, ok := strings.CutSuffix(k, ".ParameterKey"); ok && strings.HasPrefix(k, "Parameters.member.") {
-			keys[pfx] = str(v)
-		} else if pfx, ok := strings.CutSuffix(k, ".ParameterValue"); ok && strings.HasPrefix(k, "Parameters.member.") {
-			vals[pfx] = str(v)
+			out[str(v)] = str(in[pfx+".ParameterValue"])
 		}
-	}
-	out := map[string]string{}
-	for pfx, k := range keys {
-		out[k] = vals[pfx]
 	}
 	return out
 }
 
 func mergeParamDefaults(tpl map[string]any, params map[string]string) {
 	for k, v := range asMap(tpl["Parameters"]) {
-		if _, given := params[k]; !given {
-			if d, ok := asMap(v)["Default"]; ok {
-				params[k] = jsonText(d) // a parameter "becomes a string": Default 16 is "16"
-			}
+		if _, given := params[k]; !given && asMap(v)["Default"] != nil {
+			params[k] = jsonText(asMap(v)["Default"]) // a parameter "becomes a string": Default 16 is "16"
 		}
 	}
 }

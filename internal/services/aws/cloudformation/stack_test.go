@@ -775,3 +775,84 @@ func TestCloudFormationChecksTheStackName(t *testing.T) {
 		t.Errorf("DescribeStacks refused the stack id %s as a name: %v", id, err)
 	}
 }
+
+// "CloudFormation will replace the resource by creating a new one and
+// deleting the old one" (ResourceChange.Replacement), and for an update "it
+// begins disposing of old resources immediately once the operation
+// completes" (RollbackConfiguration.MonitoringTimeInMinutes). So once every
+// resource of an update is in place, the cleanup deletes each old resource
+// the stack no longer holds: one replaced by a new physical id (a new name
+// here) and one the template dropped. A delete that fails there leaves the
+// stack UPDATE_COMPLETE, as CloudFormation does, and is not lost: the old
+// resource stays listed as DELETE_FAILED, the error its ResourceStatusReason
+// ("Success/failure message associated with the resource"), and DeleteStack
+// deletes it with the rest. A failed update deletes nothing old. Before, an
+// update never deleted the resources it replaced or dropped.
+func TestCloudFormationAnUpdateDeletesWhatItReplaced(t *testing.T) {
+	h := newStacks(t)
+	named := func(typ, member, name string) map[string]any {
+		return map[string]any{"Type": typ, "Properties": map[string]any{member: name}}
+	}
+	queue := func(name string) map[string]any { return named("AWS::SQS::Queue", "QueueName", name) }
+	bucket := func(name string) map[string]any { return named("AWS::S3::Bucket", "BucketName", name) }
+	update := func(resources map[string]map[string]any) error {
+		tpl, _ := json.Marshal(map[string]any{"Resources": resources})
+		_, err := h.invoke("UpdateStack", map[string]any{"StackName": "rp", "TemplateBody": string(tpl)})
+		return err
+	}
+	alive := func(svc, op, member, name string) bool {
+		_, err := h.service(svc, op, map[string]any{member: name})
+		return err == nil
+	}
+	h.mustCreate("rp", map[string]map[string]any{"Q": queue("old-q"), "B": bucket("old-b"), "Gone": queue("gone-q")})
+	if err := update(map[string]map[string]any{"Q": queue("new-q"), "B": bucket("old-b"), "Gone": queue("gone-q"), "ZZZ": {"Type": "AWS::Nope::Thing"}}); err == nil {
+		t.Fatal("an update with an unsupported resource type succeeded")
+	}
+	if !alive("aws.sqs", "GetQueueUrl", "QueueName", "old-q") || alive("aws.sqs", "GetQueueUrl", "QueueName", "new-q") {
+		t.Error("the failed update deleted the queue it would have replaced, or kept its replacement")
+	}
+	h.fill("old-b", true) // S3 refuses to delete a bucket that holds an object
+	if err := update(map[string]map[string]any{"Q": queue("new-q2"), "B": bucket("new-b")}); err != nil {
+		t.Fatalf("the replacing update: %v", err)
+	}
+	if status, _, err := h.status("rp"); status != "UPDATE_COMPLETE" {
+		t.Errorf("rp is %q (%v), want UPDATE_COMPLETE", status, err)
+	}
+	for _, c := range []struct {
+		name            string
+		want            bool
+		svc, op, member string
+	}{
+		{"old-q", false, "aws.sqs", "GetQueueUrl", "QueueName"}, {"gone-q", false, "aws.sqs", "GetQueueUrl", "QueueName"},
+		{"new-q2", true, "aws.sqs", "GetQueueUrl", "QueueName"}, {"new-b", true, "aws.s3", "HeadBucket", "Bucket"},
+		{"old-b", true, "aws.s3", "HeadBucket", "Bucket"},
+	} {
+		if got := alive(c.svc, c.op, c.member, c.name); got != c.want {
+			t.Errorf("after the update %s exists: %v, want %v", c.name, got, c.want)
+		}
+	}
+	listed, err := h.invoke("DescribeStackResources", map[string]any{"StackName": "rp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []string
+	for _, raw := range listed["StackResources"].([]any) {
+		r := raw.(map[string]any)
+		row := str(r["LogicalResourceId"]) + " " + lastSlash(str(r["PhysicalResourceId"])) + " " + str(r["ResourceStatus"])
+		if reason := str(r["ResourceStatusReason"]); strings.Contains(reason, "BucketNotEmpty") {
+			row += " BucketNotEmpty"
+		}
+		rows = append(rows, row)
+	}
+	want := []string{"B new-b CREATE_COMPLETE", "Q new-q2 CREATE_COMPLETE", "B old-b DELETE_FAILED BucketNotEmpty"}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("rp lists %q, want %q", rows, want)
+	}
+	h.fill("old-b", false)
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "rp"}); err != nil {
+		t.Fatalf("DeleteStack rp: %v", err)
+	}
+	if alive("aws.s3", "HeadBucket", "Bucket", "old-b") {
+		t.Error("DeleteStack left the bucket the cleanup could not delete")
+	}
+}

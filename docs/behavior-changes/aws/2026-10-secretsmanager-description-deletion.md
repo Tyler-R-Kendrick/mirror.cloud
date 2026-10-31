@@ -202,9 +202,9 @@ The oracle is AWS's documentation as it ships in the vendored model
     created is deleted, what it changed is provisioned again from the
     previous template (a secret gets its previous value and description back
     through `UpdateSecret`, as a new version), and the stack keeps its
-    previous template and resources as `UPDATE_ROLLBACK_COMPLETE`. An update
-    here never deletes a replaced resource, so none needs recreating. What the
-    update made is recorded the moment it exists, so a half-made one is
+    previous template and resources as `UPDATE_ROLLBACK_COMPLETE`. A failed
+    update has deleted nothing old (its cleanup runs only after a success,
+    below), so none needs recreating. What the update made is recorded the moment it exists, so a half-made one is
     deleted too. A resource the rollback cannot delete stays listed by
     `DescribeStackResources` as `DELETE_FAILED`, the stack is
     `UPDATE_ROLLBACK_FAILED` with the error as its `StackStatusReason` (an
@@ -212,6 +212,21 @@ The oracle is AWS's documentation as it ships in the vendored model
     `ROLLBACK_` or `_FAILED` state), and `DeleteStack` removes the resource
     with the rest. Before, the changes stayed and the new resources were left
     behind.
+  - A finished `UpdateStack` cleans up. "CloudFormation will replace the
+    resource by creating a new one and deleting the old one"
+    (`ResourceChange.Replacement`), and for an update "it begins disposing of
+    old resources immediately once the operation completes"
+    (`RollbackConfiguration`). Once every resource of the update is in place,
+    each old resource the stack no longer holds is deleted: one the update
+    replaced with a new physical id (a new name, say) and one the template
+    dropped. A delete that fails there leaves the stack `UPDATE_COMPLETE`, as
+    in CloudFormation, but is not lost: the old resource stays listed by
+    `DescribeStackResources` as `DELETE_FAILED`, its `ResourceStatusReason`
+    ("Success/failure message associated with the resource") the error, which
+    is also the stack's `StackStatusReason`, and `DeleteStack` deletes it with
+    the rest. Stack statuses here have no `_IN_PROGRESS` grain, so
+    `UPDATE_COMPLETE_CLEANUP_IN_PROGRESS` is never seen. Before, an update
+    never deleted what it replaced or dropped.
   - `GenerateSecretString` makes the value with `GetRandomPassword`'s generator,
     seeded by the stack id and logical id, and puts it under `GenerateStringKey`
     in `SecretStringTemplate` when the template gives one. Its properties are

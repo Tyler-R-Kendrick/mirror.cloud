@@ -270,10 +270,9 @@ func TestBootedServerCloudFormationRemainder(t *testing.T) {
 	call(url.Values{"Action": {"SetStackPolicy"}, "Version": {"2010-05-15"}, "StackName": {"rem"}, "StackPolicyBody": {"{}"}})
 	call(url.Values{"Action": {"GetStackPolicy"}, "Version": {"2010-05-15"}, "StackName": {"rem"}})
 	call(url.Values{"Action": {"DetectStackDrift"}, "Version": {"2010-05-15"}, "StackName": {"rem"}})
-	// The change set put cfn-rem-b2 in cfn-rem-b's place without deleting
-	// cfn-rem-b, which still holds its name, so rem2's bucket is unnamed.
-	unnamed := `{"Resources":{"B":{"Type":"AWS::S3::Bucket"}}}`
-	call(url.Values{"Action": {"CreateStack"}, "Version": {"2010-05-15"}, "StackName": {"rem2"}, "TemplateBody": {unnamed}})
+	// The change set replaced cfn-rem-b with cfn-rem-b2 and its cleanup deleted
+	// cfn-rem-b, so rem2 can take the name again.
+	call(url.Values{"Action": {"CreateStack"}, "Version": {"2010-05-15"}, "StackName": {"rem2"}, "TemplateBody": {tpl}})
 	call(url.Values{"Action": {"RollbackStack"}, "Version": {"2010-05-15"}, "StackName": {"rem2"}})
 }
 

@@ -116,10 +116,10 @@ type stack struct {
 }
 
 // res is a resource a stack made, the name it was made under and, once a
-// delete of it failed, DELETE_FAILED.
+// delete of it failed, DELETE_FAILED with the error as its reason.
 type res struct {
 	Logical, Physical, Type string
-	Name, Status            string `json:",omitempty"`
+	Name, Status, Reason    string `json:",omitempty"`
 }
 
 func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool) (*spi.Response, error) {
@@ -182,8 +182,12 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	for _, k := range slices.Sorted(maps.Keys(outs)) {
 		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)})
 	}
-	raw, _ := json.Marshal(st)
-	_ = p.col(req, "cfn").Put(ctx, name, raw)
+	// The update is done, so its cleanup deletes the old resources the stack no longer holds, replaced
+	// ("creating a new one and deleting the old one") or dropped; one it cannot delete stays listed.
+	stale := slices.DeleteFunc(slices.Clone(old.Resources), func(r res) bool {
+		return slices.ContainsFunc(st.Resources, func(n res) bool { return n.Physical == r.Physical })
+	})
+	_ = p.unwind(ctx, req, st, st.Resources, stale, nil, st.Status, st.Status)
 	return &spi.Response{Output: map[string]any{"StackId": id}}, nil
 }
 
@@ -248,7 +252,7 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, kept, doo
 	st.Resources = slices.Clip(kept)
 	for _, r := range slices.Backward(doomed) {
 		if err := p.deprovision(ctx, req, r); err != nil {
-			r.Status, first = "DELETE_FAILED", cmp.Or(first, err)
+			r.Status, r.Reason, first = "DELETE_FAILED", err.Error(), cmp.Or(first, err)
 			st.Resources = slices.Insert(st.Resources, len(kept), r)
 		}
 	}
@@ -453,13 +457,10 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	}
 }
 
-// rollback undoes a failed update as UPDATE_ROLLBACK does. What the update
-// changed in place is provisioned again from the previous template; what it
-// made, half-made ones included, is deleted; and the stack keeps the
-// previous template and resources, UPDATE_ROLLBACK_COMPLETE, or
-// UPDATE_ROLLBACK_FAILED with whatever it could not delete still listed, so
-// DeleteStack removes it. An update never deletes a replaced resource, so
-// none is recreated.
+// rollback undoes a failed update as UPDATE_ROLLBACK does. What the update changed in place is
+// provisioned again from the previous template; what it made, half-made ones included, is deleted; the
+// stack keeps the previous template and resources, UPDATE_ROLLBACK_COMPLETE, or UPDATE_ROLLBACK_FAILED with
+// what it could not delete still listed for DeleteStack. Only a finished update deletes what it replaced.
 func (p *Pack) rollback(ctx context.Context, req *spi.Request, old stack, made []res) error {
 	tpl, _ := parseTemplate(old.Template)
 	var doomed []res
@@ -542,8 +543,7 @@ func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map
 }
 
 // configureBucket applies the bucket properties that map one to one onto an
-// S3 operation, and refuses the rest by name rather than storing a shape S3
-// does not read.
+// S3 operation, and stores the rest (below).
 func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket string, props map[string]any) error {
 	// The S3 pack reads Status and TagSet lifted to the top of the input, as
 	// the restXml decoder hands them over (its liftedMembers debt).

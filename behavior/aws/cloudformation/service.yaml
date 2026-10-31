@@ -182,9 +182,10 @@ operations:
       - { cond: s_found, error: Validation }
     output:
       StackResourceSummaries: >-
-        s.Resources.map(r, {'LogicalResourceId': r.Logical,
+        s.Resources.map(r, merge({'LogicalResourceId': r.Logical,
           'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
-          'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'})
+          'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'},
+          'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))
 
   DescribeStackEvents:
     reads:
@@ -214,7 +215,9 @@ operations:
           string(input.LogicalResourceId)).map(r, {'LogicalResourceId':
           r.Logical, 'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
           'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE',
-          'StackName': s.Name, 'StackId': s.ID})[0]
+          'StackName': s.Name, 'StackId': s.ID}).map(d, merge(d,
+          'Reason' in s.Resources.filter(r, r.Logical == string(input.LogicalResourceId))[0]
+            ? {'ResourceStatusReason': s.Resources.filter(r, r.Logical == string(input.LogicalResourceId))[0].Reason} : {}))[0]
 
   UpdateTerminationProtection:
     reads:
@@ -242,8 +245,9 @@ operations:
     output:
       StackResources: >-
         s_found && 'Resources' in s && s.Resources != null
-          ? s.Resources.map(r, {'LogicalResourceId': r.Logical, 'PhysicalResourceId': r.Physical,
-              'ResourceType': r.Type, 'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'})
+          ? s.Resources.map(r, merge({'LogicalResourceId': r.Logical, 'PhysicalResourceId': r.Physical,
+              'ResourceType': r.Type, 'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'},
+              'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))
           : []
 
   # The rollback family conjures a fresh record for an absent stack rather

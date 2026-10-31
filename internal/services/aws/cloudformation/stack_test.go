@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"regexp"
@@ -685,5 +686,47 @@ func TestCloudFormationAFailedUpdateKeepsWhatItCouldNotRollBack(t *testing.T) {
 	}
 	if _, err := h.service("aws.secretsmanager", "DescribeSecret", map[string]any{"SecretId": "a"}); err == nil {
 		t.Error("DeleteStack left the stack's secret")
+	}
+}
+
+// PutTargets "can partially fail ... FailedEntryCount is non-zero in the
+// response and each entry in FailedEntries provides the ID of the failed
+// target and the error code", each entry representing "a target that failed
+// to be added to a rule". A rule whose targets were not all added is not the
+// rule the template declares, so the resource fails with an error naming
+// each failed entry, and the stack rolls back: on create, and on update.
+// Before, the stack finished CREATE_COMPLETE or UPDATE_COMPLETE without the
+// targets.
+func TestCloudFormationARuleWhoseTargetsFailFailsTheStack(t *testing.T) {
+	h := newStacks(t)
+	rule := func(name string, targets ...map[string]any) map[string]map[string]any {
+		list := []any{}
+		for _, target := range targets {
+			list = append(list, target)
+		}
+		return map[string]map[string]any{"R": {"Type": "AWS::Events::Rule", "Properties": map[string]any{
+			"Name": name, "ScheduleExpression": "rate(5 minutes)", "Targets": list}}}
+	}
+	queue := "arn:aws:sqs:us-east-1:000000000000:q"
+	for i, target := range []map[string]any{{"Id": "no-arn"}, {"Arn": queue}, {}} {
+		name := fmt.Sprintf("tr%d", i)
+		err := h.create(name, rule(name, target))
+		if err == nil || !strings.Contains(err.Error(), "Id or Arn is invalid") || !strings.Contains(err.Error(), fmt.Sprint(target["Id"])) && target["Id"] != nil {
+			t.Errorf("a rule with the target %v answered %v, want an error naming the failed entry", target, err)
+		}
+		if status, _, err := h.status(name); status != "ROLLBACK_COMPLETE" {
+			t.Errorf("%s is %q (%v), want ROLLBACK_COMPLETE", name, status, err)
+		}
+		if _, err := h.service("aws.events", "DescribeRule", map[string]any{"Name": name}); err == nil {
+			t.Errorf("%s's rule outlived the rollback", name)
+		}
+	}
+	h.mustCreate("tu", rule("tu", map[string]any{"Id": "kept", "Arn": queue}))
+	update, _ := json.Marshal(map[string]any{"Resources": rule("tu", map[string]any{"Id": "kept", "Arn": queue}, map[string]any{"Id": "bad"})})
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "tu", "TemplateBody": string(update)}); err == nil || !strings.Contains(err.Error(), "bad") {
+		t.Errorf("an update adding a target EventBridge refused answered %v, want an error naming it", err)
+	}
+	if status, _, err := h.status("tu"); status != "UPDATE_ROLLBACK_COMPLETE" {
+		t.Errorf("tu is %q (%v), want UPDATE_ROLLBACK_COMPLETE", status, err)
 	}
 }

@@ -414,7 +414,13 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		}
 		out, err := p.call(ctx, req, "aws.events", "PutRule", in)
 		if targets, ok := props["Targets"]; ok && err == nil {
-			_, err = p.call(ctx, req, "aws.events", "PutTargets", map[string]any{"Rule": in["Name"], "Targets": targets})
+			// "each entry in FailedEntries provides the ID of the failed target and the error code":
+			// a target not added fails the rule, as its error does.
+			put, putErr := p.call(ctx, req, "aws.events", "PutTargets", map[string]any{"Rule": in["Name"], "Targets": targets})
+			if failed, _ := put["FailedEntries"].([]any); putErr == nil && len(failed) > 0 {
+				putErr = fault(cmp.Or(str(asMap(failed[0])["ErrorCode"]), "ValidationError"), "PutTargets failed to add targets: "+jsonText(failed))
+			}
+			err = putErr
 		}
 		return str(out["RuleArn"]), err
 	case "AWS::Lambda::Function":

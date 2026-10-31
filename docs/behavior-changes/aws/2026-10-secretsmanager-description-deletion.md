@@ -162,6 +162,13 @@ The oracle is AWS's documentation as it ships in the vendored model
     stacks share a name the engine makes, and a given name another resource
     already holds is refused before anything is made (above). `OnFailure` is
     not read, so every failed create rolls back.
+  - A rule whose targets EventBridge did not all add fails. `PutTargets` "can
+    partially fail ... FailedEntryCount is non-zero in the response and each
+    entry in FailedEntries provides the ID of the failed target and the error
+    code", so the rule is not the one the template declares. The resource's
+    error is the first entry's code, with a message naming every failed entry,
+    and the stack rolls back, on create and on update. Before, the stack
+    finished `CREATE_COMPLETE` or `UPDATE_COMPLETE` without those targets.
   - A failed create keeps its stack, `ROLLBACK_COMPLETE` once the rollback
     has deleted everything it made. The name stays taken (`CreateStack` is
     `AlreadyExistsException`; `UpdateStack` is `ValidationError`, "Stack:...

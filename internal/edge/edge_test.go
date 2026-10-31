@@ -1066,6 +1066,57 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+// The journal answers 100 entries unless asked for another number with
+// ?limit=, which docs/MASTER_PROMPT.md §4.7 documents. A caller that made more
+// than 100 requests could not see the older ones before limit was read.
+func TestJournalLimit(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.s3"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 150; i++ {
+		deps.Journal.Record(spi.Entry{ServiceID: "aws.s3", Operation: fmt.Sprintf("Op%03d", i), Status: 200})
+	}
+	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
+	defer ts.Close()
+	count := func(query string) (int, int, []spi.Entry) {
+		t.Helper()
+		response, err := http.Get(ts.URL + "/_mirror/journal" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			return response.StatusCode, 0, nil
+		}
+		var entries []spi.Entry
+		if err := json.NewDecoder(response.Body).Decode(&entries); err != nil {
+			t.Fatal(err)
+		}
+		return response.StatusCode, len(entries), entries
+	}
+	if _, n, _ := count(""); n != 100 {
+		t.Fatalf("default: %d entries, want 100", n)
+	}
+	if _, n, entries := count("?limit=150"); n != 150 || entries[0].Operation != "Op149" || entries[149].Operation != "Op000" {
+		t.Fatalf("limit=150: %d entries, want all 150 newest first", n)
+	}
+	if _, n, entries := count("?service=aws.s3&limit=3"); n != 3 || entries[2].Operation != "Op147" {
+		t.Fatalf("limit=3: %d entries, want the 3 newest", n)
+	}
+	if _, n, _ := count("?limit=10000"); n != 150 {
+		t.Fatalf("limit=10000: %d entries, want the 150 there are", n)
+	}
+	for _, bad := range []string{"0", "-1", "abc", "1.5", "10001"} {
+		if status, _, _ := count("?limit=" + bad); status != http.StatusBadRequest {
+			t.Fatalf("limit=%s: status %d, want 400", bad, status)
+		}
+	}
+}
+
 func TestDiagnostics(t *testing.T) {
 	deps := spitest.Deps(t)
 	cfg := config.Default()

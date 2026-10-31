@@ -5,10 +5,13 @@ package cloudformation
 import (
 	"cmp"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"maps"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -155,7 +158,8 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		if props == nil {
 			props = map[string]any{}
 		}
-		phys, err := p.provision(ctx, req, typ, logical, name, props, old.Refs[logical], id)
+		n := cmp.Or(str(props[kinds[typ].member]), physicalName(name, logical, id, typ, props))
+		phys, err := p.provision(ctx, req, typ, logical, n, props, old.Refs[logical], id)
 		if err != nil {
 			if !update { // a failed create rolls back what it made: OnFailure ROLLBACK, the default
 				p.deprovision(ctx, req, st.Resources...)
@@ -232,40 +236,82 @@ func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, 
 	return st, nil
 }
 
+// kinds are the types provision names: the property that names one, and the
+// longest name its service takes (API Gateway sets none for a REST API; 1024
+// only bounds it).
+var kinds = map[string]struct {
+	member string
+	max    int
+}{
+	"AWS::S3::Bucket": {"BucketName", 63}, "AWS::SQS::Queue": {"QueueName", 80}, "AWS::SNS::Topic": {"TopicName", 256},
+	"AWS::DynamoDB::Table": {"TableName", 255}, "AWS::IAM::Role": {"RoleName", 64}, "AWS::SSM::Parameter": {"Name", 2048},
+	"AWS::SecretsManager::Secret": {"Name", 512}, "AWS::Logs::LogGroup": {"LogGroupName", 512}, "AWS::Events::Rule": {"Name", 64},
+	"AWS::Lambda::Function": {"FunctionName", 64}, "AWS::Kinesis::Stream": {"Name", 128}, "AWS::ApiGateway::RestApi": {"Name", 1024},
+}
+
+var unnameable = regexp.MustCompile(`[^A-Za-z0-9-]+`)
+
+func fifo(p map[string]any) bool { return p["FifoQueue"] == true || str(p["FifoQueue"]) == "true" }
+
+// physicalName is the name of a resource the template leaves unnamed, in
+// the modelled form <stack>-<logical id>-<suffix>. The suffix is twelve hex
+// digits of a hash of the stack id and logical id, so no two stacks, and no
+// two resources of one stack, share a name, and an update finds the name
+// its create made. Only letters, digits and hyphens are kept; a bucket's
+// name is lower case and a FIFO queue's ends in .fifo; and the stack name
+// and logical id, never the suffix, are cut to fit the service's longest.
+func physicalName(stack, logical, stackID, typ string, props map[string]any) string {
+	k, named := kinds[typ]
+	if !named {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(stackID + "/" + logical))
+	end := "-" + hex.EncodeToString(sum[:6])
+	if typ == "AWS::SQS::Queue" && fifo(props) {
+		end += ".fifo"
+	}
+	s, l, room := unnameable.ReplaceAllString(stack, ""), unnameable.ReplaceAllString(logical, ""), k.max-len(end)-1
+	l = l[:min(len(l), max(room/2, room-len(s)))]
+	n := s[:min(len(s), room-len(l))] + "-" + l + end
+	if typ == "AWS::S3::Bucket" {
+		return strings.ToLower(n)
+	}
+	return n
+}
+
 // provision creates a resource through the service that owns it, and answers
 // the resource's physical id. Going through the owner's API keeps its store
 // layout, validation and cascades that service's business.
-func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, stack string, props map[string]any, existing, stackID string) (string, error) {
-	name := func(member, fallback string) string { return cmp.Or(str(props[member]), fallback) }
+func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n string, props map[string]any, existing, stackID string) (string, error) {
 	switch typ {
 	case "AWS::S3::Bucket":
-		n := name("BucketName", strings.ToLower(stack+"-"+logical))
 		if _, err := p.call(ctx, req, "aws.s3", "CreateBucket", map[string]any{"Bucket": n}); err != nil {
 			return "", err
 		}
 		return n, p.configureBucket(ctx, req, n, props)
 	case "AWS::SQS::Queue":
-		out, err := p.call(ctx, req, "aws.sqs", "CreateQueue", map[string]any{"QueueName": name("QueueName", logical)})
+		in := map[string]any{"QueueName": n}
+		if fifo(props) {
+			in["Attributes"] = map[string]any{"FifoQueue": "true"}
+		}
+		out, err := p.call(ctx, req, "aws.sqs", "CreateQueue", in)
 		return str(out["QueueUrl"]), err
 	case "AWS::SNS::Topic":
-		out, err := p.call(ctx, req, "aws.sns", "CreateTopic", map[string]any{"Name": name("TopicName", logical)})
+		out, err := p.call(ctx, req, "aws.sns", "CreateTopic", map[string]any{"Name": n})
 		return str(out["TopicArn"]), err
 	case "AWS::DynamoDB::Table":
 		in := maps.Clone(props)
-		in["TableName"] = name("TableName", logical)
+		in["TableName"] = n
 		_, err := p.call(ctx, req, "aws.dynamodb", "CreateTable", in)
-		return str(in["TableName"]), err
+		return n, err
 	case "AWS::IAM::Role":
-		out, err := p.call(ctx, req, "aws.iam", "CreateRole", map[string]any{"RoleName": name("RoleName", logical), "AssumeRolePolicyDocument": jsonText(props["AssumeRolePolicyDocument"])})
+		out, err := p.call(ctx, req, "aws.iam", "CreateRole", map[string]any{"RoleName": n, "AssumeRolePolicyDocument": jsonText(props["AssumeRolePolicyDocument"])})
 		return str(asMap(out["Role"])["Arn"]), err
 	case "AWS::SSM::Parameter":
-		n := name("Name", "/"+stack+"/"+logical)
-		_, err := p.call(ctx, req, "aws.ssm", "PutParameter", map[string]any{"Name": n, "Value": str(props["Value"]), "Type": name("Type", "String")})
+		_, err := p.call(ctx, req, "aws.ssm", "PutParameter", map[string]any{"Name": n, "Value": str(props["Value"]), "Type": cmp.Or(str(props["Type"]), "String")})
 		return n, err
 	case "AWS::SecretsManager::Secret":
 		// existing is what an update finds; a second CreateSecret of its name is ResourceExistsException.
-		// Unnamed, it is <stack>-<logical id>-<suffix> as CloudFormation names it, the suffix the stack id's.
-		n := name("Name", stack+"-"+logical+"-"+lastSlash(stackID))
 		op, in := "CreateSecret", map[string]any{"Name": n}
 		if strings.HasSuffix(existing, ":secret:"+n) {
 			op, in = "UpdateSecret", map[string]any{"SecretId": existing}
@@ -283,11 +329,10 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 		out, err := p.call(ctx, req, "aws.kms", "CreateKey", map[string]any{"Description": str(props["Description"])})
 		return str(asMap(out["KeyMetadata"])["KeyId"]), err
 	case "AWS::Logs::LogGroup":
-		n := name("LogGroupName", "/aws/"+stack+"/"+logical)
 		_, err := p.call(ctx, req, "aws.logs", "CreateLogGroup", map[string]any{"logGroupName": n})
 		return n, err
 	case "AWS::Events::Rule":
-		in := given(map[string]any{"Name": name("Name", logical)}, props, "ScheduleExpression", "State", "Description", "EventBusName")
+		in := given(map[string]any{"Name": n}, props, "ScheduleExpression", "State", "Description", "EventBusName")
 		if pattern, ok := props["EventPattern"]; ok {
 			in["EventPattern"] = jsonText(pattern)
 		}
@@ -298,15 +343,14 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 		return str(out["RuleArn"]), err
 	case "AWS::Lambda::Function":
 		in := maps.Clone(props)
-		in["FunctionName"] = name("FunctionName", logical)
+		in["FunctionName"] = n
 		out, err := p.call(ctx, req, "aws.lambda", "CreateFunction", in)
 		return str(out["FunctionArn"]), err
 	case "AWS::Kinesis::Stream":
-		n := name("Name", logical)
 		_, err := p.call(ctx, req, "aws.kinesis", "CreateStream", map[string]any{"StreamName": n})
 		return n, err
 	case "AWS::Kinesis::ResourcePolicy":
-		arn := name("ResourceArn", str(props["ResourceARN"]))
+		arn := cmp.Or(str(props["ResourceArn"]), str(props["ResourceARN"]))
 		policy := props["ResourcePolicy"]
 		if policy == nil {
 			policy = props["Policy"]
@@ -314,7 +358,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 		_, err := p.call(ctx, req, "aws.kinesis", "PutResourcePolicy", map[string]any{"ResourceARN": arn, "Policy": jsonText(policy)})
 		return arn, err
 	case "AWS::ApiGateway::RestApi":
-		out, err := p.call(ctx, req, "aws.apigateway", "CreateRestApi", map[string]any{"name": name("Name", logical)})
+		out, err := p.call(ctx, req, "aws.apigateway", "CreateRestApi", map[string]any{"name": n})
 		return str(out["id"]), err
 	default:
 		return "", invalid("unsupported resource type " + typ)

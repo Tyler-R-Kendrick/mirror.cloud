@@ -105,9 +105,20 @@ The oracle is AWS's documentation as it ships in the vendored model
     name again.
   - `CreateSecret` gets `SecretString` and `Description` only when the template
     gives them.
-  - A secret the template does not name is `<stack>-<logical id>-<suffix>`,
-    the suffix the stack id's own random part, as CloudFormation names one; it
-    was the bare logical id, so a second stack from one template collided.
+  - A resource the template does not name, of any type, is made under
+    `<stack>-<logical id>-<suffix>`, the modelled form: the suffix is twelve
+    hex digits of a hash of the stack id and logical id, so no two stacks, and
+    no two resources of one stack, share a name. A bucket's name is lower
+    case, and a queue with `FifoQueue` true is made a FIFO queue whose name
+    ends in `.fifo`. Characters other than letters, digits and hyphens are
+    dropped, and the stack name and logical id are cut, never the suffix, to
+    fit the service's longest name: 80 for a queue, 64 for a rule, a role or a
+    function, 128 for a stream, 255 for a table, 256 for a topic and 63 for a
+    bucket. Before, a secret's suffix was the stack id's, and most other types
+    were named for the bare logical id (a bucket `<stack>-<logical id>`, a
+    parameter and a log group under a path with the stack name), so a second
+    stack from one template failed on its table, or took over the first
+    stack's queue, topic and rule and deleted them when it rolled back.
   - A `CreateStack` that fails rolls back what it had created, as
     CloudFormation's default `OnFailure` (`ROLLBACK`) does, deleting a secret
     without a recovery window so its name is free again. The emulator keeps no

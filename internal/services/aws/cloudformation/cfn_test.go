@@ -386,10 +386,12 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 	if err != nil || len(stackResources.Output["StackResources"].([]any)) != len(resources) {
 		t.Fatalf("DescribeStackResources %#v %v", stackResources, err)
 	}
+	physical := map[string]string{} // unnamed, each is <stack>-<logical id>-<suffix>
 	for _, raw := range stackResources.Output["StackResources"].([]any) {
 		if r := raw.(map[string]any); r["PhysicalResourceId"] == "" || r["ResourceType"] == "" {
 			t.Fatalf("stack resource %#v", r)
 		}
+		physical[str(raw.(map[string]any)["LogicalResourceId"])] = str(raw.(map[string]any)["PhysicalResourceId"])
 	}
 	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListStackResources", Input: map[string]any{"StackName": "all"}})
 	if err != nil || len(listed.Output["StackResourceSummaries"].([]any)) != len(resources) {
@@ -400,7 +402,7 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 		_, err := New(deps).call(ctx, &spi.Request{Identity: id}, svc, op, in)
 		return err
 	}
-	versioning, err := New(deps).call(ctx, &spi.Request{Identity: id}, "aws.s3", "GetBucketVersioning", map[string]any{"Bucket": "all-bucket"})
+	versioning, err := New(deps).call(ctx, &spi.Request{Identity: id}, "aws.s3", "GetBucketVersioning", map[string]any{"Bucket": physical["Bucket"]})
 	if err != nil || versioning["Status"] != "Enabled" {
 		t.Fatalf("bucket versioning %#v %v", versioning, err)
 	}
@@ -408,10 +410,10 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 		svc, op string
 		in      map[string]any
 	}{
-		{"aws.iam", "GetRole", map[string]any{"RoleName": "Role"}},
-		{"aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "Queue"}},
-		{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": "Table"}},
-		{"aws.logs", "DescribeLogGroups", map[string]any{"logGroupNamePrefix": "/aws/all/Log"}},
+		{"aws.iam", "GetRole", map[string]any{"RoleName": lastSlash(physical["Role"])}},
+		{"aws.sqs", "GetQueueUrl", map[string]any{"QueueName": lastSlash(physical["Queue"])}},
+		{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": physical["Table"]}},
+		{"aws.logs", "DescribeLogGroups", map[string]any{"logGroupNamePrefix": physical["Log"]}},
 	} {
 		if err := owned(check.svc, check.op, check.in); err != nil {
 			t.Errorf("%s %s after CreateStack: %v", check.svc, check.op, err)
@@ -424,9 +426,9 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 		svc, op string
 		in      map[string]any
 	}{
-		{"aws.iam", "GetRole", map[string]any{"RoleName": "Role"}},
-		{"aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "Queue"}},
-		{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": "Table"}},
+		{"aws.iam", "GetRole", map[string]any{"RoleName": lastSlash(physical["Role"])}},
+		{"aws.sqs", "GetQueueUrl", map[string]any{"QueueName": lastSlash(physical["Queue"])}},
+		{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": physical["Table"]}},
 	} {
 		if err := owned(check.svc, check.op, check.in); err == nil {
 			t.Errorf("%s %s still answers after DeleteStack", check.svc, check.op)

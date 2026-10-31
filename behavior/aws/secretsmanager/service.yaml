@@ -335,7 +335,7 @@ operations:
       # attached": a version with none is deprecated and not listed.
       VersionIdsToStages: "rollup(('Versions' in s ? s.Versions : []).filter(v, 'VersionStages' in v && v.VersionStages != null && size(v.VersionStages) > 0), 'VersionId', 'VersionStages')"
       Tags: "'Tags' in s && s.Tags != null && size(s.Tags) > 0 ? s.Tags : dyn(null)"
-      ReplicationStatus: "'ReplicaRegions' in s ? s.ReplicaRegions : null"
+      ReplicationStatus: "'ReplicaRegions' in s && s.ReplicaRegions != null && size(s.ReplicaRegions) > 0 ? s.ReplicaRegions : dyn(null)"
       RotationEnabled: "'RotationEnabled' in s ? s.RotationEnabled : null"
       RotationLambdaARN: "'RotationLambdaARN' in s ? s.RotationLambdaARN : null"
       RotationRules: "'RotationRules' in s ? s.RotationRules : null"

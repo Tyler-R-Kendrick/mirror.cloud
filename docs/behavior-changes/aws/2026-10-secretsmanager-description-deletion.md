@@ -253,7 +253,8 @@ The oracle is AWS's documentation as it ships in the vendored model
   `DeleteSecret`'s `ARN` for a secret that never existed. `Tags` is left out of
   a `ListSecrets` entry and of `DescribeSecret` when the secret has none,
   including after its last tag is removed; the listing wrote `"Tags": null`
-  and both wrote `[]`.
+  and both wrote `[]`. `ReplicationStatus` is likewise left out once the last
+  replica is removed; `DescribeSecret` wrote `[]`.
 - **Timestamps are epoch seconds.** `DeletionDate` and `DeletedDate` are
   timestamps (`DeletionDateType`, `DeletedDateType`) on an `awsJson1_1`
   service with no `timestampFormat` trait, so they are written as epoch

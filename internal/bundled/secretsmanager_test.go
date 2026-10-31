@@ -1136,3 +1136,19 @@ func TestSecretsManagerRefusesAnUnknownFilterKey(t *testing.T) {
 		}
 	}
 }
+
+// DescribeSecret "only returns fields that have a value in the response", so
+// a secret whose last replica was removed has no ReplicationStatus. Before,
+// it answered "ReplicationStatus": [].
+func TestSecretsManagerLeavesOutAnEmptyReplicationStatus(t *testing.T) {
+	_, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "r", "SecretString": "1"})
+	ok(t, "ReplicateSecretToRegions", map[string]any{"SecretId": "r", "AddReplicaRegions": []any{map[string]any{"Region": "us-west-2"}}})
+	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "r"}); got["ReplicationStatus"] == nil {
+		t.Fatalf("a replicated secret has no ReplicationStatus: %v", got)
+	}
+	ok(t, "RemoveRegionsFromReplication", map[string]any{"SecretId": "r", "RemoveReplicaRegions": []any{"us-west-2"}})
+	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "r"}); hasKey(got, "ReplicationStatus") {
+		t.Errorf("with its last replica removed, DescribeSecret answered ReplicationStatus %#v, want none", got["ReplicationStatus"])
+	}
+}

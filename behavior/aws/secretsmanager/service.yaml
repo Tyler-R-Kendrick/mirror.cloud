@@ -285,7 +285,9 @@ operations:
             || input.ForceDeleteWithoutRecovery == 'True' || input.ForceDeleteWithoutRecovery == '1')
       windowed: "'RecoveryWindowInDays' in input && input.RecoveryWindowInDays != null"
       days: "windowed ? int(input.RecoveryWindowInDays) : 30"
-      deletion: "string(now + duration(string(days * 24) + 'h'))"
+      # awsJson1_1 writes a timestamp as epoch seconds, a JSON number; a string
+      # here fails every Go SDK v2 client, which decodes one only from a number.
+      deletion: "int(now + duration(string(days * 24) + 'h'))"
       scheduled: "'Deleted' in s && s.Deleted == true"
     require:
       - cond: "!(force && windowed)"

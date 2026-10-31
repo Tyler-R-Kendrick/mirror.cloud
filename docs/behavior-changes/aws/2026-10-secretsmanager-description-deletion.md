@@ -25,6 +25,13 @@ The oracle is AWS's documentation as it ships in the vendored model
   - `ForceDeleteWithoutRecovery` together with `RecoveryWindowInDays` is
     `InvalidParameterException`.
 - **RestoreSecret** clears `DeletedDate` and answers `ARN` and `Name`.
+- **Timestamps are epoch seconds.** `DeletionDate` and `DeletedDate` are
+  timestamps (`DeletionDateType`, `DeletedDateType`) on an `awsJson1_1`
+  service with no `timestampFormat` trait, so they are written as epoch
+  seconds, a JSON number. They were date strings, which the Go SDK v2 refuses:
+  it decodes a timestamp only from a JSON number, so `DescribeSecret` of a
+  secret scheduled for deletion failed in every Go SDK v2 client, Terraform's
+  included. `main` wrote `DeletionDate` as a string too.
 
 Equivalence trace `aws.secretsmanager` re-cut at steps 48, 52, 53 and 56, each
 citing the sentence above that it now follows.

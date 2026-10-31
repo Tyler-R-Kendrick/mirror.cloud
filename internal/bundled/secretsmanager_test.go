@@ -1,10 +1,14 @@
 package bundled_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -46,6 +50,19 @@ func secretsManager(t *testing.T) (secretsCall, func(t *testing.T, op string, in
 		return out
 	}
 	return call, ok, fault
+}
+
+// at reports whether a timestamp member is the instant given in epoch seconds.
+// A value the bundle computes answers as an int64 and one read back from the
+// store as a float64; both write the same JSON number.
+func at(v any, seconds int64) bool {
+	switch n := v.(type) {
+	case int64:
+		return n == seconds
+	case float64:
+		return n == float64(seconds)
+	}
+	return false
 }
 
 // DescribeSecretResponse.Description: "The description of the secret."
@@ -111,7 +128,7 @@ func TestSecretsManagerDescribesASecretScheduledForDeletion(t *testing.T) {
 
 	deleted := ok(t, "DeleteSecret", map[string]any{"SecretId": "s"})
 	// spitest's clock stands at the Unix epoch.
-	if deleted["DeletionDate"] != "1970-01-31T00:00:00Z" || deleted["Name"] != "s" ||
+	if !at(deleted["DeletionDate"], 30*86400) || deleted["Name"] != "s" ||
 		deleted["ARN"] != "arn:aws:secretsmanager:us-east-1:000000000000:secret:s" {
 		t.Fatalf("DeleteSecret answered %#v, want Name, ARN and the request time plus 30 days", deleted)
 	}
@@ -119,7 +136,7 @@ func TestSecretsManagerDescribesASecretScheduledForDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DescribeSecret of a secret scheduled for deletion faulted: %v", err)
 	}
-	if described["DeletedDate"] != "1970-01-31T00:00:00Z" || described["Name"] != "s" {
+	if !at(described["DeletedDate"], 30*86400) || described["Name"] != "s" {
 		t.Fatalf("DescribeSecret of a secret scheduled for deletion answered %#v", described)
 	}
 	// DeleteSecret: "When a secret is scheduled for deletion, you cannot
@@ -137,7 +154,7 @@ func TestSecretsManagerDescribesASecretScheduledForDeletion(t *testing.T) {
 
 	ok(t, "CreateSecret", map[string]any{"Name": "week", "SecretString": "v"})
 	week := ok(t, "DeleteSecret", map[string]any{"SecretId": "week", "RecoveryWindowInDays": 7})
-	if week["DeletionDate"] != "1970-01-08T00:00:00Z" {
+	if !at(week["DeletionDate"], 7*86400) {
 		t.Fatalf("a 7-day window answered DeletionDate %#v", week["DeletionDate"])
 	}
 }
@@ -155,7 +172,7 @@ func TestSecretsManagerDeletesASecretOnce(t *testing.T) {
 
 	_, err := call("DeleteSecret", map[string]any{"SecretId": "s"})
 	fault(t, err, "InvalidRequestException")
-	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}); got["DeletedDate"] != "1970-01-31T00:00:00Z" {
+	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}); !at(got["DeletedDate"], 30*86400) {
 		t.Fatalf("a refused second DeleteSecret moved DeletedDate to %#v", got["DeletedDate"])
 	}
 
@@ -178,4 +195,74 @@ func TestSecretsManagerDeletesASecretOnce(t *testing.T) {
 	ok(t, "CreateSecret", map[string]any{"Name": "both", "SecretString": "v"})
 	_, err = call("DeleteSecret", map[string]any{"SecretId": "both", "ForceDeleteWithoutRecovery": true, "RecoveryWindowInDays": 7})
 	fault(t, err, "InvalidParameterException")
+}
+
+// epochSeconds answers every timestamp member an answer carries, as the JSON
+// the awsJson1_1 codec writes for it, and fails on one that is not a number.
+// awsJson1_1 writes a timestamp as epoch seconds, a JSON number; the Go SDK v2
+// decodes one only from a json.Number, so a string there fails the whole
+// response. The walk follows the model's output shape, so a timestamp member
+// added later is held to this without naming it here.
+func epochSeconds(t *testing.T, op string, out map[string]any) map[string]json.Number {
+	t.Helper()
+	svc := specboot.Bundle().ServiceByID("aws.secretsmanager")
+	raw, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var wire any
+	if err := dec.Decode(&wire); err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]json.Number{}
+	var walk func(path, shapeID string, v any)
+	walk = func(path, shapeID string, v any) {
+		shape, known := svc.Shapes[shapeID]
+		if !known || v == nil {
+			return
+		}
+		switch shape.Kind {
+		case model.KindTimestamp:
+			n, isNumber := v.(json.Number)
+			if !isNumber {
+				t.Fatalf("%s %s is %#v on the wire; awsJson1_1 writes a timestamp as epoch seconds, a JSON number", op, path, v)
+			}
+			found[path] = n
+		case model.KindStructure:
+			m, _ := v.(map[string]any)
+			for name, member := range shape.Members {
+				walk(path+"."+name, member.Shape, m[name])
+			}
+		case model.KindList:
+			list, _ := v.([]any)
+			for _, item := range list {
+				walk(path+"[]", shape.Member, item)
+			}
+		}
+	}
+	walk(op, svc.OperationByName(op).Output, wire)
+	return found
+}
+
+// DeleteSecretResponse.DeletionDate and DescribeSecretResponse.DeletedDate are
+// timestamps (DeletionDateType and DeletedDateType, "type": "timestamp"), and
+// awsJson1_1 writes a timestamp as epoch seconds. The Go SDK v2 module for
+// Secrets Manager is not in this module cache, so the test holds the JSON
+// form to what its deserializer accepts, a json.Number.
+func TestSecretsManagerTimestampsAreEpochSeconds(t *testing.T) {
+	_, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v"})
+
+	deleted := epochSeconds(t, "DeleteSecret", ok(t, "DeleteSecret", map[string]any{"SecretId": "s"}))
+	// spitest's clock stands at the Unix epoch; the window is 30 days.
+	if got := deleted["DeleteSecret.DeletionDate"]; got != "2592000" {
+		t.Fatalf("DeletionDate = %q, want 2592000 (the request time plus 30 days, in epoch seconds)", got)
+	}
+	described := epochSeconds(t, "DescribeSecret", ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}))
+	if _, has := described["DescribeSecret.DeletedDate"]; !has {
+		t.Fatal("DescribeSecret of a secret scheduled for deletion answered no DeletedDate")
+	}
+	epochSeconds(t, "ListSecrets", ok(t, "ListSecrets", map[string]any{"IncludePlannedDeletion": true}))
 }

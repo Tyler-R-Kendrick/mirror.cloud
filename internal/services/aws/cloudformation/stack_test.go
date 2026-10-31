@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -358,5 +359,30 @@ func TestCloudFormationARollbackDeletesAHalfMadeResource(t *testing.T) {
 	}
 	if _, err := h.service("aws.events", "DescribeRule", map[string]any{"Name": "half-rule"}); err == nil {
 		t.Error("the half-made rule outlived the rollback")
+	}
+}
+
+// A stack name "must be unique in the Region in which you are creating the
+// stack", so a CreateStack that names a stack already there is
+// AlreadyExistsException ("The resource with the name requested already
+// exists.") and makes nothing; the stack keeps its resources. Before, the
+// second CreateStack made a second set of resources and wrote its record
+// over the first, so the first set belonged to no stack.
+func TestCloudFormationCreateStackRefusesAStackThatExists(t *testing.T) {
+	h := newStacks(t)
+	all := nameable()
+	h.mustCreate("dup", map[string]map[string]any{"Secret": all["Secret"]})
+	before := h.resources("dup")
+	err := h.create("dup", map[string]map[string]any{"Secret": all["Secret"], "Queue": all["Queue"]})
+	if code(err) != "AlreadyExistsException" {
+		t.Errorf("a second CreateStack of dup answered %v, want AlreadyExistsException", err)
+	}
+	if after := h.resources("dup"); !reflect.DeepEqual(after, before) {
+		t.Errorf("dup's resources went from %v to %v", before, after)
+	}
+	secrets, _ := h.service("aws.secretsmanager", "ListSecrets", map[string]any{})
+	queues, _ := h.service("aws.sqs", "ListQueues", map[string]any{})
+	if n, q := len(secrets["SecretList"].([]any)), queues["QueueUrls"]; n != 1 || q != nil && len(q.([]any)) != 0 {
+		t.Errorf("after the refused CreateStack there are %d secrets and queues %v, want dup's one secret and no queue", n, q)
 	}
 }

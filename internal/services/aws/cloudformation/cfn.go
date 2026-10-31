@@ -142,10 +142,10 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	mergeParamDefaults(tpl, params)
 	id := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name + "/" + p.deps.Rand.Hex(8)
 	var old stack // what an update finds already provisioned
-	if update {
-		if found, err := p.load(ctx, req, name); err == nil {
-			old, id = found, found.ID
-		}
+	if found, err := p.load(ctx, req, name); err == nil && !update {
+		return nil, fault("AlreadyExistsException", "Stack ["+name+"] already exists")
+	} else if err == nil {
+		old, id = found, found.ID
 	}
 	st := stack{Name: name, ID: id, Status: "CREATE_COMPLETE", Template: body, Refs: map[string]string{}}
 	maps.Copy(st.Refs, params)

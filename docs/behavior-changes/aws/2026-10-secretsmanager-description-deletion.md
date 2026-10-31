@@ -131,6 +131,11 @@ The oracle is AWS's documentation as it ships in the vendored model
     create that a service answers with what it already holds (a queue, topic,
     rule, role, stream, log group or bucket here) took the resource over, and
     the stack's rollback or `DeleteStack` deleted it.
+  - A stack name "must be unique in the Region in which you are creating the
+    stack", so `CreateStack` of a name a stack already has is
+    `AlreadyExistsException` ("Stack [name] already exists") and makes
+    nothing. Before, it made a second set of resources and wrote its record
+    over the first, which then belonged to no stack.
   - A `CreateStack` that fails rolls back what it had created, as
     CloudFormation's default `OnFailure` (`ROLLBACK`) does, deleting a secret
     without a recovery window so its name is free again. A resource is

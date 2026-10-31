@@ -3,6 +3,7 @@ package cloudformation
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -644,5 +645,81 @@ func TestCloudFormationAFailedCreateRollsBack(t *testing.T) {
 	retry := `{"Resources":{"Secret":{"Type":"AWS::SecretsManager::Secret","Properties":{"Name":"retry","SecretString":"v"}}}}`
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "r2", "TemplateBody": retry}}); err != nil {
 		t.Fatalf("re-creating after the rollback: %v", err)
+	}
+}
+
+// GenerateSecretString makes the secret's value as GetRandomPassword makes a
+// password -- PasswordLength (32 by default), ExcludeCharacters, the Exclude*
+// classes, IncludeSpace, RequireEachIncludedType -- seeded by the stack and
+// logical id. With SecretStringTemplate and GenerateStringKey, the password
+// goes into the template's JSON under that key. A template that also gives
+// SecretString is refused, as CloudFormation refuses it.
+func TestCloudFormationGeneratesASecretString(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := bundled.Handler("aws.cloudformation", deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	stacks := 0
+	generate := func(spec map[string]any) (string, error) {
+		t.Helper()
+		stacks++
+		name := fmt.Sprintf("gen%d", stacks)
+		tpl, _ := json.Marshal(map[string]any{"Resources": map[string]any{"Db": map[string]any{
+			"Type": "AWS::SecretsManager::Secret", "Properties": map[string]any{"Name": name, "GenerateSecretString": spec},
+		}}})
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": name, "TemplateBody": string(tpl)}}); err != nil {
+			return "", err
+		}
+		out, err := New(deps).call(ctx, &spi.Request{Identity: id}, "aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": name})
+		if err != nil {
+			t.Fatalf("GetSecretValue %s: %v", name, err)
+		}
+		return str(out["SecretString"]), nil
+	}
+	must := func(spec map[string]any) string {
+		t.Helper()
+		v, err := generate(spec)
+		if err != nil {
+			t.Fatalf("CreateStack with %v: %v", spec, err)
+		}
+		return v
+	}
+	const lower, upper, digits, punctuation = "abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "0123456789", "!\"#$%&'()*+,-./:;?@[\\]^_`{|}~"
+
+	if v := must(map[string]any{}); len(v) != 32 {
+		t.Errorf("the default generated value %q has %d characters, want 32", v, len(v))
+	}
+	if v := must(map[string]any{"PasswordLength": 16}); len(v) != 16 {
+		t.Errorf("PasswordLength 16 generated %q", v)
+	}
+	if v := must(map[string]any{"PasswordLength": 4}); !strings.ContainsAny(v, lower) || !strings.ContainsAny(v, upper) ||
+		!strings.ContainsAny(v, digits) || !strings.ContainsAny(v, punctuation) {
+		t.Errorf("RequireEachIncludedType, the default, generated %q without one of each type", v)
+	}
+	if v := must(map[string]any{"PasswordLength": 200, "ExcludeCharacters": "abcXYZ019!@"}); strings.ContainsAny(v, "abcXYZ019!@") {
+		t.Errorf("ExcludeCharacters left one in %q", v)
+	}
+	for member, set := range map[string]string{"ExcludeLowercase": lower, "ExcludeUppercase": upper, "ExcludeNumbers": digits, "ExcludePunctuation": punctuation} {
+		if v := must(map[string]any{"PasswordLength": 200, member: true}); strings.ContainsAny(v, set) {
+			t.Errorf("%s generated %q", member, v)
+		}
+	}
+	if v := must(map[string]any{"PasswordLength": 200, "IncludeSpace": true}); !strings.Contains(v, " ") {
+		t.Errorf("IncludeSpace generated no space in %q", v)
+	}
+	var doc map[string]any
+	v := must(map[string]any{"SecretStringTemplate": `{"username":"admin"}`, "GenerateStringKey": "password", "PasswordLength": 20})
+	if err := json.Unmarshal([]byte(v), &doc); err != nil || doc["username"] != "admin" || len(str(doc["password"])) != 20 {
+		t.Errorf("the template form generated %q, want the template with a 20-character password under password", v)
+	}
+
+	both, _ := json.Marshal(map[string]any{"Resources": map[string]any{"Db": map[string]any{
+		"Type": "AWS::SecretsManager::Secret", "Properties": map[string]any{"Name": "both", "SecretString": "v", "GenerateSecretString": map[string]any{}},
+	}}})
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "both", "TemplateBody": string(both)}}); err == nil {
+		t.Error("a secret with both SecretString and GenerateSecretString was created")
+	}
+	if _, err := generate(map[string]any{"GenerateStringKey": "password"}); err == nil {
+		t.Error("GenerateStringKey without SecretStringTemplate was accepted")
 	}
 }

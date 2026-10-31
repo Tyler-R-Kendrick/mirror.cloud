@@ -10,10 +10,10 @@ import (
 	"maps"
 	"net/url"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/prim"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -44,7 +44,7 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 
 // Invoke serves one native operation.
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := first(req.Input, "StackName")
+	name := str(req.Input["StackName"])
 	switch req.Operation {
 	case "ValidateTemplate":
 		body, err := p.templateBody(ctx, req)
@@ -73,12 +73,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, err
 		}
 		var types []any
-		if res, ok := tpl["Resources"].(map[string]any); ok {
-			for _, v := range res {
-				m, _ := v.(map[string]any)
-				if t := str(m["Type"]); t != "" {
-					types = append(types, t)
-				}
+		for _, v := range asMap(tpl["Resources"]) {
+			if t := str(asMap(v)["Type"]); t != "" {
+				types = append(types, t)
 			}
 		}
 		return &spi.Response{Output: map[string]any{"Parameters": paramDecls(tpl), "ResourceTypes": types}}, nil
@@ -89,13 +86,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			var st stack
 			_ = json.Unmarshal(kv.Value, &st)
 			for _, o := range st.Outputs {
-				m, _ := o.(map[string]any)
+				m := asMap(o)
 				ex = append(ex, map[string]any{"Name": m["OutputKey"], "Value": m["OutputValue"], "ExportingStackId": st.ID})
 			}
 		}
 		return &spi.Response{Output: map[string]any{"Exports": ex}}, nil
 	case "ExecuteChangeSet":
-		csn := first(req.Input, "ChangeSetName")
+		csn := str(req.Input["ChangeSetName"])
 		b, ok, _ := p.col(req, "cfn-cs").Get(ctx, name+":"+csn)
 		if !ok {
 			return nil, &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
@@ -103,8 +100,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
 		req.Input["TemplateBody"] = rec["TemplateBody"]
-		_, err := p.upsert(ctx, req, name, true)
-		if err != nil {
+		if _, err := p.upsert(ctx, req, name, true); err != nil {
 			return nil, err
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -127,7 +123,7 @@ type res struct {
 
 func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool) (*spi.Response, error) {
 	if name == "" {
-		return nil, &spi.Fault{Code: "ValidationError", Message: "StackName required", HTTPStatus: 400, Fault: "client"}
+		return nil, invalid("StackName required")
 	}
 	body, err := p.templateBody(ctx, req)
 	if err != nil {
@@ -188,7 +184,7 @@ func (p *Pack) templateBody(ctx context.Context, req *spi.Request) (string, erro
 	location := str(req.Input["TemplateURL"])
 	parsed, err := url.Parse(location)
 	if err != nil || location == "" {
-		return "", &spi.Fault{Code: "ValidationError", Message: "TemplateBody or TemplateURL required", HTTPStatus: 400, Fault: "client"}
+		return "", invalid("TemplateBody or TemplateURL required")
 	}
 	bucket, key := "", strings.TrimPrefix(parsed.Path, "/")
 	if parsed.Scheme == "s3" {
@@ -199,11 +195,11 @@ func (p *Pack) templateBody(ctx context.Context, req *spi.Request) (string, erro
 		bucket, key = key[:slash], key[slash+1:]
 	}
 	if bucket == "" || key == "" {
-		return "", &spi.Fault{Code: "ValidationError", Message: "TemplateURL must identify an S3 object", HTTPStatus: 400, Fault: "client"}
+		return "", invalid("TemplateURL must identify an S3 object")
 	}
 	reader, _, err := p.deps.Blobs.Get(ctx, req.Identity.Account+"/"+req.Identity.Region+"/"+bucket+"/"+key)
 	if err != nil {
-		return "", &spi.Fault{Code: "ValidationError", Message: "TemplateURL object not found", HTTPStatus: 400, Fault: "client"}
+		return "", invalid("TemplateURL object not found")
 	}
 	defer reader.Close()
 	body, err := io.ReadAll(reader)
@@ -219,7 +215,7 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 		return nil, err
 	}
 	if st.Protect {
-		return nil, &spi.Fault{Code: "ValidationError", Message: "stack has termination protection", HTTPStatus: 400, Fault: "client"}
+		return nil, invalid("stack has termination protection")
 	}
 	p.deprovision(ctx, req, st.Resources...)
 	_ = p.col(req, "cfn").Delete(ctx, name)
@@ -230,7 +226,7 @@ func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, 
 	var st stack
 	b, ok, _ := p.col(req, "cfn").Get(ctx, name)
 	if !ok {
-		return st, &spi.Fault{Code: "ValidationError", Message: "Stack [" + name + "] does not exist", HTTPStatus: 400, Fault: "client"}
+		return st, invalid("Stack [" + name + "] does not exist")
 	}
 	_ = json.Unmarshal(b, &st)
 	return st, nil
@@ -274,6 +270,13 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 		if strings.HasSuffix(existing, ":secret:"+n) {
 			op, in = "UpdateSecret", map[string]any{"SecretId": existing}
 		}
+		if _, ok := props["GenerateSecretString"]; ok {
+			value, err := generated(props, stackID+"/"+logical)
+			if err != nil {
+				return "", err
+			}
+			in["SecretString"] = value
+		}
 		out, err := p.call(ctx, req, "aws.secretsmanager", op, given(in, props, "SecretString", "Description"))
 		return str(out["ARN"]), err
 	case "AWS::KMS::Key":
@@ -314,7 +317,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 		out, err := p.call(ctx, req, "aws.apigateway", "CreateRestApi", map[string]any{"name": name("Name", logical)})
 		return str(out["id"]), err
 	default:
-		return "", &spi.Fault{Code: "ValidationError", Message: "unsupported resource type " + typ, HTTPStatus: 400, Fault: "client"}
+		return "", invalid("unsupported resource type " + typ)
 	}
 }
 
@@ -425,6 +428,28 @@ func given(in, props map[string]any, members ...string) map[string]any {
 		}
 	}
 	return in
+}
+
+// generated is the value GenerateSecretString asks for: a password made as
+// GetRandomPassword makes one, seeded by the stack and logical id, and put
+// under GenerateStringKey in SecretStringTemplate when the template gives one.
+func generated(props map[string]any, seed string) (string, error) {
+	spec, doc := asMap(props["GenerateSecretString"]), map[string]any{}
+	value, err := prim.RandomPassword(spec, seed)
+	key, tpl := str(spec["GenerateStringKey"]), str(spec["SecretStringTemplate"])
+	if _, both := props["SecretString"]; both || err != nil || (key == "") != (tpl == "") || tpl != "" && (json.Unmarshal([]byte(tpl), &doc) != nil || doc == nil) {
+		return "", invalid("GenerateSecretString: no SecretString beside it, GenerateStringKey and SecretStringTemplate (a JSON object) together, and a password its parameters allow")
+	}
+	if key == "" {
+		return value, nil
+	}
+	doc[key] = value
+	raw, err := json.Marshal(doc)
+	return string(raw), err
+}
+
+func invalid(message string) *spi.Fault {
+	return &spi.Fault{Code: "ValidationError", Message: message, HTTPStatus: 400, Fault: "client"}
 }
 
 func asMap(v any) map[string]any {
@@ -560,18 +585,18 @@ func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack stri
 func parseTemplate(body string) (map[string]any, error) {
 	body = strings.TrimSpace(body)
 	if body == "" {
-		return nil, &spi.Fault{Code: "ValidationError", Message: "empty TemplateBody", HTTPStatus: 400, Fault: "client"}
+		return nil, invalid("empty TemplateBody")
 	}
 	if body[0] == '{' {
 		var m map[string]any
 		if err := json.Unmarshal([]byte(body), &m); err != nil {
-			return nil, &spi.Fault{Code: "ValidationError", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
+			return nil, invalid(err.Error())
 		}
 		return m, nil
 	}
 	m, err := parseYAML(body)
 	if err != nil {
-		return nil, &spi.Fault{Code: "ValidationError", Message: "TemplateBody YAML: " + err.Error(), HTTPStatus: 400, Fault: "client"}
+		return nil, invalid("TemplateBody YAML: " + err.Error())
 	}
 	return m, nil
 }
@@ -607,23 +632,12 @@ func mergeParamDefaults(tpl map[string]any, params map[string]string) {
 			params[k] = str(d)
 		}
 	}
-	for k, v := range params {
-		if tpl["_params"] == nil {
-			tpl["_params"] = map[string]any{}
-		}
-		tpl["_params"].(map[string]any)[k] = v
-	}
 }
 
 func paramDecls(tpl map[string]any) []any {
 	pm, _ := tpl["Parameters"].(map[string]any)
 	var out []any
-	keys := make([]string, 0, len(pm))
-	for k := range pm {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
+	for _, k := range slices.Sorted(maps.Keys(pm)) {
 		out = append(out, map[string]any{"ParameterKey": k})
 	}
 	return out
@@ -636,30 +650,11 @@ func advertise(req *spi.Request) string {
 	return "http://127.0.0.1:4566"
 }
 
-func first(in map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if s := str(in[k]); s != "" {
-			return s
-		}
-	}
-	return ""
-}
-
 func str(v any) string {
 	s, _ := v.(string)
 	return s
 }
 
-func lastSlash(s string) string {
-	if i := strings.LastIndex(s, "/"); i >= 0 {
-		return s[i+1:]
-	}
-	return s
-}
+func lastSlash(s string) string { return s[strings.LastIndex(s, "/")+1:] }
 
-func lastColon(s string) string {
-	if i := strings.LastIndex(s, ":"); i >= 0 {
-		return s[i+1:]
-	}
-	return s
-}
+func lastColon(s string) string { return s[strings.LastIndex(s, ":")+1:] }

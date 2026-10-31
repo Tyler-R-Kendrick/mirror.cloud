@@ -208,8 +208,34 @@ The oracle is AWS's documentation as it ships in the vendored model
     [a-zA-Z][-a-zA-Z0-9]*", or "Member must have length less than or equal to
     128"), and nothing is made. `UpdateStack`, `DeleteStack` and
     `DescribeStacks` take "The name or unique stack ID", so they check the
-    same pattern with a stack id (`arn:...`) admitted. Before, any name was
-    taken.
+    same pattern with a stack id admitted. Before, any name was taken.
+  - Every operation that takes "The name or unique stack ID" finds a stack by
+    its `StackId` (`arn:...:stack/<name>/<id>`) as well as by its name, and
+    only while the stack of that name has that id: `DescribeStacks`,
+    `DescribeStackResources`, `ListStackResources`, `DescribeStackEvents`,
+    `DescribeStackResource`, `GetTemplate`, `GetTemplateSummary`,
+    `UpdateTerminationProtection`, the rollback family, `UpdateStack`,
+    `DeleteStack` and the change sets. Stacks stay keyed by name; no record is
+    keyed by an id. `UpdateStack`, and `ExecuteChangeSet` of an `UPDATE`
+    change set (the default `ChangeSetType`, which `CreateChangeSet` now
+    records), of a stack that does not exist is `ValidationError`, "Stack [x]
+    does not exist", and makes nothing. Before, the reads did not find a stack
+    by its id, an update of a missing stack created it, and an `UpdateStack`
+    by id made a second stack keyed by the id.
+  - Where the model's input uses `StackNameOrId` (`ContinueUpdateRollback`,
+    `CreateChangeSet`, `DeleteChangeSet`, `DescribeChangeSet`,
+    `DescribeChangeSetHooks`, `DescribeEvents`,
+    `DescribeStackResourceDrifts`, `DetectStackDrift`,
+    `DetectStackResourceDrift`, `ExecuteChangeSet`, `GetTemplateSummary`,
+    `ListChangeSets`, `RollbackStack`, `SignalResource`,
+    `UpdateTerminationProtection`), the name is held to its length (1 or
+    more) and the model's pattern,
+    `^([a-zA-Z][-a-zA-Z0-9]*)|(arn:\b(aws|aws-us-gov|aws-cn)\b:[-a-zA-Z0-9:/._+]*)$`,
+    each alternative matched whole, so a bare `arn:`, or an id in another
+    partition, is `ValidationError` in the framework's wording. The reads
+    that take a name or id (`DescribeStacks` and the rest above) and
+    `UpdateStack` and `DeleteStack` check the same pattern. Before, those
+    operations took any name, and the reads admitted any `arn:` text.
   - A rule whose targets EventBridge did not all add fails. `PutTargets` "can
     partially fail ... FailedEntryCount is non-zero in the response and each
     entry in FailedEntries provides the ID of the failed target and the error

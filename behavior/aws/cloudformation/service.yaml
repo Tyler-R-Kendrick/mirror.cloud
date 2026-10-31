@@ -30,8 +30,15 @@ resources:
   # the rollback family and UpdateTerminationProtection.
   stack:
     collection: cfn
+    # StackName is "The name or unique stack ID". A stack id,
+    # arn:...:stack/<name>/<id>, finds the record by its name, and a read takes
+    # it only while the record's id is the one given (stackExists); no record
+    # is keyed by an id.
     id:
-      input_members: [StackName]
+      derive: >-
+        'StackName' in input && string(input.StackName).contains(':stack/')
+          ? string(split(string(split(string(input.StackName), ':stack/')[1]), '/')[0])
+          : ('StackName' in input ? string(input.StackName) : '')
 
   # Change sets are keyed stack:changeset over one collection; ListChangeSets
   # narrows by the recorded StackName. The composite key is derive-only:
@@ -39,7 +46,10 @@ resources:
   changeset:
     collection: cfn-cs
     id:
-      derive: "('StackName' in input ? string(input.StackName) : '') + ':' + string(input.ChangeSetName)"
+      derive: >-
+        ('StackName' in input && string(input.StackName).contains(':stack/')
+          ? string(split(string(split(string(input.StackName), ':stack/')[1]), '/')[0])
+          : ('StackName' in input ? string(input.StackName) : '')) + ':' + string(input.ChangeSetName)
 
   stackset:
     collection: cfnss
@@ -130,24 +140,34 @@ operations:
     reads:
       s: { resource: stack }
     require:
-      # StackName is "The name or unique stack ID": a name by CreateStack's
-      # rule (letters, digits and hyphens, starting with a letter) or a stack
-      # id, as the native operations check it (checkStackName).
-      - cond: >-
+      # StackName is "The name or unique stack ID": a name, or a stack id by
+      # the model's StackNameOrId pattern,
+      # ^([a-zA-Z][-a-zA-Z0-9]*)|(arn:\b(aws|aws-us-gov|aws-cn)\b:[-a-zA-Z0-9:/._+]*)$,
+      # each alternative matched whole, as the native operations check it
+      # (checkStackName). StackNameOrId also has a minimum length of 1, which
+      # the operations that take it check (stackNameOrId); DescribeStacks'
+      # StackName, which has none, reads '' as no name.
+      - &stackPattern
+        cond: >-
           !('StackName' in input) || string(input.StackName) == ''
-          || string(input.StackName).matches('^([a-zA-Z][-a-zA-Z0-9]*|arn:[-a-zA-Z0-9:/._+]*)$')
+          || string(input.StackName).matches('^(([a-zA-Z][-a-zA-Z0-9]*)|(arn:\\b(aws|aws-us-gov|aws-cn)\\b:[-a-zA-Z0-9:/._+]*))$')
         error: Validation
         message_expr: >-
           "1 validation error detected: Value '" + string(input.StackName)
-          + "' at 'stackName' failed to satisfy constraint: Member must satisfy regular expression pattern: [a-zA-Z][-a-zA-Z0-9]*|arn:[-a-zA-Z0-9:/._+]*"
+          + "' at 'stackName' failed to satisfy constraint: Member must satisfy regular expression pattern: ^([a-zA-Z][-a-zA-Z0-9]*)|(arn:\\b(aws|aws-us-gov|aws-cn)\\b:[-a-zA-Z0-9:/._+]*)$"
       - cond: >-
-          !('StackName' in input) || string(input.StackName) == '' || s_found
+          !('StackName' in input) || string(input.StackName) == ''
+          || s_found && (!string(input.StackName).startsWith('arn:') || s.ID == string(input.StackName))
         error: Validation
+        message_expr: "'Stack [' + string(input.StackName) + '] does not exist'"
     list:
       resource: stack
       member: Stacks
       paginate: model
-      key: "'StackName' in input ? string(input.StackName) : ''"
+      key: >-
+        'StackName' in input && string(input.StackName).contains(':stack/')
+          ? string(split(string(split(string(input.StackName), ':stack/')[1]), '/')[0])
+          : ('StackName' in input ? string(input.StackName) : '')
     # StackStatusReason ("Success/failure message associated with the stack
     # status") is the error a failed rollback or delete kept.
     output:
@@ -170,7 +190,11 @@ operations:
     reads:
       s: { resource: stack }
     require:
-      - { cond: s_found, error: Validation }
+      - *stackPattern
+      - &stackExists
+        cond: "s_found && (!string(input.StackName).startsWith('arn:') || s.ID == string(input.StackName))"
+        error: Validation
+        message_expr: "'Stack [' + string(input.StackName) + '] does not exist'"
     output:
       TemplateBody: s.Template
       StagesAvailable: "['Original']"
@@ -179,7 +203,8 @@ operations:
     reads:
       s: { resource: stack }
     require:
-      - { cond: s_found, error: Validation }
+      - *stackPattern
+      - *stackExists
     output:
       StackResourceSummaries: >-
         ('Resources' in s && s.Resources != null ? s.Resources : []).map(r, merge({'LogicalResourceId': r.Logical,
@@ -191,7 +216,8 @@ operations:
     reads:
       s: { resource: stack }
     require:
-      - { cond: s_found, error: Validation }
+      - *stackPattern
+      - *stackExists
     output:
       StackEvents: >-
         ('Resources' in s && s.Resources != null ? s.Resources : []).map(r, merge({'LogicalResourceId': r.Logical,
@@ -208,7 +234,8 @@ operations:
     let:
       rs: "s_found && 'Resources' in s && s.Resources != null ? s.Resources : []"
     require:
-      - { cond: s_found, error: Validation }
+      - *stackPattern
+      - *stackExists
       - cond: "rs.exists(r, r.Logical == string(input.LogicalResourceId))"
         error: Validation
     output:
@@ -223,7 +250,14 @@ operations:
     reads:
       s: { resource: stack }
     require:
-      - { cond: s_found, error: Validation }
+      - &stackNameOrId
+        cond: "!('StackName' in input) || string(input.StackName) != ''"
+        error: Validation
+        message_expr: >-
+          "1 validation error detected: Value '" + ('StackName' in input ? string(input.StackName) : '')
+          + "' at 'stackName' failed to satisfy constraint: Member must have length greater than or equal to 1"
+      - *stackPattern
+      - *stackExists
     effects:
       - put:
           resource: stack
@@ -238,13 +272,18 @@ operations:
   # The pack also deprovisions every stack resource into the sibling
   # services' collections before deleting the record; that loop is the shadow
   # reason and is not transcribed.
-  # A missing stack answers no resources rather than faulting.
+  # A missing stack answers no resources rather than faulting, and so does a
+  # stack id the stack of that name no longer has.
   DescribeStackResources:
     reads:
       s: { resource: stack }
+    require:
+      - *stackPattern
+    let:
+      ok: "s_found && (!string(input.StackName).startsWith('arn:') || s.ID == string(input.StackName))"
     output:
       StackResources: >-
-        s_found && 'Resources' in s && s.Resources != null
+        ok && 'Resources' in s && s.Resources != null
           ? s.Resources.map(r, merge({'LogicalResourceId': r.Logical, 'PhysicalResourceId': r.Physical,
               'ResourceType': r.Type, 'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'},
               'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))
@@ -267,10 +306,9 @@ operations:
     reads:
       s: { resource: stack }
     require:
-      - &stackExists
-        cond: s_found
-        error: Validation
-        message_expr: "'Stack [' + string(input.StackName) + '] does not exist'"
+      - *stackNameOrId
+      - *stackPattern
+      - *stackExists
       - cond: "s.Status in ['CREATE_FAILED', 'UPDATE_FAILED']"
         error: Validation
         message: "RollbackStack cannot be called from current stack status"
@@ -281,6 +319,7 @@ operations:
     reads:
       s: { resource: stack }
     require:
+      - *stackPattern
       - *stackExists
       - cond: "s.Status == 'UPDATE_IN_PROGRESS'"
         error: Validation
@@ -291,6 +330,8 @@ operations:
     reads:
       s: { resource: stack }
     require:
+      - *stackNameOrId
+      - *stackPattern
       - *stackExists
       - cond: "s.Status == 'UPDATE_ROLLBACK_FAILED'"
         error: Validation
@@ -312,6 +353,8 @@ operations:
 
   CreateChangeSet:
     require:
+      - *stackNameOrId
+      - *stackPattern
       - cond: "'TemplateBody' in input && string(input.TemplateBody) != ''"
         error: Validation
     effects:
@@ -325,6 +368,7 @@ operations:
               + identity.account + ':changeSet/' + string(input.ChangeSetName)
               + '/' + fx.csid
             StackName: string(input.StackName)
+            ChangeSetType: "'ChangeSetType' in input ? string(input.ChangeSetType) : 'UPDATE'"
             Status: "'CREATE_COMPLETE'"
             TemplateBody: string(input.TemplateBody)
     output:
@@ -340,6 +384,8 @@ operations:
     reads:
       cs: { resource: changeset }
     require:
+      - *stackNameOrId
+      - *stackPattern
       - { cond: cs_found, error: ChangeSetNotFound }
     output:
       ChangeSetId: cs.ChangeSetId
@@ -348,16 +394,23 @@ operations:
       Status: cs.Status
 
   ListChangeSets:
+    require: [*stackNameOrId, *stackPattern]
     list:
       resource: changeset
       member: Summaries
       paginate: model
       filter: "item.StackName == string(input.StackName)"
     output:
-      Summaries: items
+      Summaries: "items.map(c, without(c, ['ChangeSetType']))"
 
-  DeleteChangeSet: {delete: {resource: changeset, missing: ignore}}
+  DeleteChangeSet:
+    require: [*stackNameOrId, *stackPattern]
+    effects:
+      - delete: { resource: changeset, missing: ignore }
+    output: {}
+
   SignalResource:
+    require: [*stackNameOrId, *stackPattern]
 
   # --- stack sets ------------------------------------------------------------
 
@@ -551,6 +604,7 @@ operations:
   # stored so DescribeStackDriftDetectionStatus can read them back.
 
   DetectStackDrift:
+    require: [*stackNameOrId, *stackPattern]
     effects:
       - create:
           resource: drift
@@ -575,6 +629,7 @@ operations:
       OperationId: id
 
   DetectStackResourceDrift:
+    require: [*stackNameOrId, *stackPattern]
     effects:
       - create:
           resource: drift
@@ -599,6 +654,7 @@ operations:
   # answers both under StackResourceDrifts; ListStackInstanceResourceDrifts
   # declares Summaries instead, and both empty answers compare blank.
   DescribeStackResourceDrifts:
+    require: [*stackNameOrId, *stackPattern]
     output:
       StackResourceDrifts: "[]"
 
@@ -941,6 +997,7 @@ operations:
       AccountLimits: "[{'Name': 'StackLimit', 'Value': 200}]"
 
   DescribeChangeSetHooks:
+    require: [*stackNameOrId, *stackPattern]
     output:
       Hooks: "[]"
 
@@ -956,6 +1013,7 @@ operations:
     output: {}
 
   DescribeEvents:
+    require: [*stackNameOrId, *stackPattern]
     output:
       OperationEvents: "[]"
 

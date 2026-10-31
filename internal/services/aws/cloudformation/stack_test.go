@@ -1374,3 +1374,90 @@ func TestCloudFormationPlansEveryIdBeforeMakingIt(t *testing.T) {
 		}
 	}
 }
+
+// Every operation that takes "The name or unique stack ID" finds a stack by
+// its StackId too, and only while that stack has that id; no record is ever
+// keyed by an id. UpdateStack, and ExecuteChangeSet of an UPDATE change set,
+// of a stack that does not exist is ValidationError, "Stack [x] does not
+// exist", and makes nothing. Before,
+// DescribeStacks and the other reads did not find a stack by its id, an
+// UpdateStack of a missing stack created it, and an UpdateStack by StackId
+// made a second stack keyed by the id.
+func TestCloudFormationFindsAStackByItsId(t *testing.T) {
+	h := newStacks(t)
+	q := map[string]map[string]any{"Q": nameable()["Queue"]}
+	tpl, _ := json.Marshal(map[string]any{"Resources": q})
+	h.mustCreate("byid", q)
+	out, err := h.invoke("DescribeStacks", map[string]any{"StackName": "byid"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := str(asMap(out["Stacks"].([]any)[0])["StackId"])
+	stale := id[:strings.LastIndex(id, "/")] + "/0000000000000000"
+	for _, op := range []string{"DescribeStacks", "DescribeStackResources", "ListStackResources", "DescribeStackEvents", "GetTemplate", "GetTemplateSummary"} {
+		if _, err := h.invoke(op, map[string]any{"StackName": id}); err != nil {
+			t.Errorf("%s by StackId: %v", op, err)
+		}
+		if out, err := h.invoke(op, map[string]any{"StackName": stale}); op == "DescribeStackResources" && (err != nil || len(out["StackResources"].([]any)) != 0) {
+			t.Errorf("%s by another id of the name answered %v (%v), want none, as for a missing stack", op, out, err)
+		} else if op != "DescribeStackResources" && code(err) != "ValidationError" {
+			t.Errorf("%s by another id of the name answered %v, want ValidationError", op, err)
+		}
+	}
+	if _, err := h.invoke("DescribeStackResource", map[string]any{"StackName": id, "LogicalResourceId": "Q"}); err != nil {
+		t.Errorf("DescribeStackResource by StackId: %v", err)
+	}
+	if _, err := h.invoke("UpdateTerminationProtection", map[string]any{"StackName": id, "EnableTerminationProtection": false}); err != nil {
+		t.Errorf("UpdateTerminationProtection by StackId: %v", err)
+	}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": id, "TemplateBody": string(tpl)}); err != nil {
+		t.Errorf("UpdateStack by StackId: %v", err)
+	}
+	for _, missing := range []map[string]any{
+		{"op": "UpdateStack", "StackName": "missing", "TemplateBody": string(tpl)},
+		{"op": "CreateChangeSet", "StackName": "missing", "ChangeSetName": "cs", "TemplateBody": string(tpl)},
+		{"op": "ExecuteChangeSet", "StackName": "missing", "ChangeSetName": "cs"},
+	} {
+		op := str(missing["op"])
+		delete(missing, "op")
+		if _, err := h.invoke(op, missing); op != "CreateChangeSet" && (code(err) != "ValidationError" || !strings.Contains(err.Error(), "Stack [missing] does not exist")) {
+			t.Errorf("%s of a missing stack answered %v, want ValidationError: Stack [missing] does not exist", op, err)
+		}
+	}
+	if _, _, err := h.status("missing"); err == nil {
+		t.Error("an update of a missing stack made it")
+	}
+	stacks, _ := h.invoke("ListStacks", map[string]any{})
+	for _, s := range stacks["StackSummaries"].([]any) {
+		if name := str(asMap(s)["StackName"]); name != "byid" {
+			t.Errorf("ListStacks lists %q beside byid", name)
+		}
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": id}); err != nil {
+		t.Errorf("DeleteStack by StackId: %v", err)
+	} else if _, _, err := h.status("byid"); err == nil {
+		t.Error("DeleteStack by StackId left the stack")
+	}
+}
+
+// Where the model's input uses StackNameOrId, the name is held to its length
+// (1 or more) and pattern,
+// ^([a-zA-Z][-a-zA-Z0-9]*)|(arn:\b(aws|aws-us-gov|aws-cn)\b:[-a-zA-Z0-9:/._+]*)$,
+// each alternative matched whole, so a bare "arn:" or another partition is
+// refused, in the framework's wording. Before, every such operation took any
+// name, and DescribeStacks admitted any "arn:..." text.
+func TestCloudFormationHoldsAStackNameOrIdToItsPattern(t *testing.T) {
+	h := newStacks(t)
+	tpl, _ := json.Marshal(map[string]any{"Resources": map[string]map[string]any{"Q": nameable()["Queue"]}})
+	const pattern = `Member must satisfy regular expression pattern: ^([a-zA-Z][-a-zA-Z0-9]*)|(arn:\b(aws|aws-us-gov|aws-cn)\b:[-a-zA-Z0-9:/._+]*)$`
+	for _, op := range []string{"ContinueUpdateRollback", "RollbackStack", "UpdateTerminationProtection", "CreateChangeSet", "DescribeChangeSet",
+		"DeleteChangeSet", "ListChangeSets", "ExecuteChangeSet", "GetTemplateSummary", "SignalResource", "DetectStackDrift",
+		"DetectStackResourceDrift", "DescribeStackResourceDrifts", "DescribeChangeSetHooks", "DescribeEvents"} {
+		for name, want := range map[string]string{"arn:": pattern, "under_score": pattern, "arn:aws-mars:cloudformation:x": pattern, "": "Member must have length greater than or equal to 1"} {
+			in := map[string]any{"StackName": name, "ChangeSetName": "cs", "TemplateBody": string(tpl), "LogicalResourceId": "Q", "UniqueId": "u", "Status": "SUCCESS", "EnableTerminationProtection": true}
+			if _, err := h.invoke(op, in); code(err) != "ValidationError" || !strings.Contains(err.Error(), "at 'stackName' failed to satisfy constraint: "+want) {
+				t.Errorf("%s of %q answered %v, want ValidationError: ... %s", op, name, err, want)
+			}
+		}
+	}
+}

@@ -48,6 +48,11 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 // Invoke serves one native operation.
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	name := str(req.Input["StackName"])
+	if _, given := req.Input["StackName"]; given && (req.Operation == "ExecuteChangeSet" || req.Operation == "GetTemplateSummary") {
+		if err := checkStackName(name, true); err != nil { // the model's StackNameOrId
+			return nil, err
+		}
+	}
 	switch req.Operation {
 	case "ValidateTemplate":
 		_, tpl, err := p.template(ctx, req)
@@ -87,14 +92,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"Exports": ex}}, nil
 	case "ExecuteChangeSet":
 		csn := str(req.Input["ChangeSetName"])
-		b, ok, _ := p.col(req, "cfn-cs").Get(ctx, name+":"+csn)
+		b, ok, _ := p.col(req, "cfn-cs").Get(ctx, named(name)+":"+csn)
 		if !ok {
 			return nil, &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
 		}
 		var rec map[string]any
 		_ = json.Unmarshal(b, &rec)
 		req.Input["TemplateBody"] = rec["TemplateBody"]
-		if _, err := p.upsert(ctx, req, name, true); err != nil {
+		if _, err := p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE"); err != nil { // an UPDATE change set's stack must exist
 			return nil, err
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -131,13 +136,16 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	mergeParamDefaults(tpl, params)
 	id := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name + "/" + p.deps.Rand.Hex(8)
 	var old stack // what an update finds; a create reserves the name, CREATE_IN_PROGRESS, in the same transaction
+	given, name := name, named(name)
 	if err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
 		raw, found, _ := tx.Get(name)
 		if _ = json.Unmarshal(raw, &old); found && !update {
 			return fault("AlreadyExistsException", "Stack ["+name+"] already exists")
+		} else if update && (!found || given != name && old.ID != given) { // an update of a stack that does not exist makes none
+			return invalid("Stack [" + given + "] does not exist")
 		} else if found && (strings.HasPrefix(old.Status, "ROLLBACK_") || strings.HasSuffix(old.Status, "_FAILED")) {
 			return invalid("Stack:" + old.ID + " is in " + old.Status + " state and can not be updated.")
-		} else if id = cmp.Or(old.ID, id); found || update { // an update reserves nothing
+		} else if id = cmp.Or(old.ID, id); found {
 			return nil
 		}
 		raw, _ = json.Marshal(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS"})
@@ -274,29 +282,42 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, kept, doo
 
 // checkStackName is the framework's ValidationError for a StackName outside CreateStack's rule,
 // "alphanumeric characters (case sensitive) and hyphens. It must start with an alphabetical character
-// and can't be longer than 128 characters"; byID also admits a stack id ("The name or unique stack ID").
+// and can't be longer than 128 characters"; or, byID, where "The name or unique stack ID" is taken, the
+// model's StackNameOrId: a length of 1 or more and its pattern, each alternative matched whole.
 func checkStackName(name string, byID bool) error {
-	pattern := `[a-zA-Z][-a-zA-Z0-9]*`
+	pattern, constraint := `[a-zA-Z][-a-zA-Z0-9]*`, ""
 	if byID {
-		pattern += `|arn:[-a-zA-Z0-9:/._+]*`
+		pattern = `^([a-zA-Z][-a-zA-Z0-9]*)|(arn:\b(aws|aws-us-gov|aws-cn)\b:[-a-zA-Z0-9:/._+]*)$`
 	}
-	constraint := "satisfy regular expression pattern: " + pattern
-	if ok, _ := regexp.MatchString("^("+pattern+")$", name); ok && (len(name) <= 128 || byID) {
-		return nil
-	} else if ok {
+	if ok, _ := regexp.MatchString("^(?:"+strings.Trim(pattern, "^$")+")$", name); name == "" {
+		constraint = "have length greater than or equal to 1"
+	} else if !ok {
+		constraint = "satisfy regular expression pattern: " + pattern
+	} else if len(name) > 128 && !byID {
 		constraint = "have length less than or equal to 128"
+	} else {
+		return nil
 	}
 	return invalid("1 validation error detected: Value '" + name + "' at 'stackName' failed to satisfy constraint: Member must " + constraint)
 }
 
+// load reads the stack a StackName names: by its name, or by its stack id while the stack has that id.
 func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, error) {
 	var st stack
-	b, ok, _ := p.col(req, "cfn").Get(ctx, name)
-	if !ok {
-		return st, invalid("Stack [" + name + "] does not exist")
+	b, ok, _ := p.col(req, "cfn").Get(ctx, named(name))
+	if _ = json.Unmarshal(b, &st); !ok || named(name) != name && st.ID != name {
+		return stack{}, invalid("Stack [" + name + "] does not exist")
 	}
-	_ = json.Unmarshal(b, &st)
 	return st, nil
+}
+
+// named is the name of the stack a StackName names: "The name or unique stack ID", a stack id being
+// arn:...:stack/<name>/<id>. Stacks are keyed by name, never by an id.
+func named(s string) string {
+	if _, path, isID := strings.Cut(s, ":stack/"); isID {
+		s, _, _ = strings.Cut(path, "/")
+	}
+	return s
 }
 
 // kinds are the types provision names: the property that names one, the longest name its service takes (API

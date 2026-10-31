@@ -29,6 +29,13 @@ The oracle is AWS's documentation as it ships in the vendored model
   operations list, it is the one about the request ("The parameter name or
   value is invalid") rather than the secret's state. Before, the string was
   stored and the binary dropped.
+- **An empty value is refused.** `SecretStringType` and `SecretBinaryType`
+  have a minimum length of 1. `CreateSecret`, `PutSecretValue` and
+  `UpdateSecret` refuse an empty `SecretString` or `SecretBinary` with
+  `ValidationException`, the engine's answer to a member outside its length
+  constraint. The engine's own check does not fire here because the Smithy
+  receiver carries no length traits into any generated AWS model, so the
+  bundle states this one. Before, `""` was stored as a version.
 - **Description.** `CreateSecret` and `UpdateSecret` keep `Description`, and
   `DescribeSecret` answers it. Before, it was accepted and dropped. A write
   that names no description keeps the one already stored.

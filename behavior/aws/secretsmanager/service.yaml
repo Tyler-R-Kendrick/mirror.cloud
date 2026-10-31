@@ -40,6 +40,11 @@ errors:
     code: ResourceExistsException
     http: 400
     fault: client
+  # The engine's own answer to a member outside its length constraint.
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
 
 operations:
   # The pack served CreateSecret, PutSecretValue and UpdateSecret as one
@@ -73,6 +78,18 @@ operations:
       # say the same). The model names no error for both at once; this is
       # InvalidParameterException, "The parameter name or value is invalid",
       # the documented error about the request rather than the secret's state.
+      # SecretStringType and SecretBinaryType carry "smithy.api#length":
+      # {"min": 1, ...}. The engine refuses a member outside its length
+      # constraint with ValidationException, but the Smithy receiver carries
+      # no length traits into the generated model, so the rule is stated here.
+      - &stringNotEmpty
+        cond: "!('SecretString' in input && input.SecretString != null && size(string(input.SecretString)) == 0)"
+        error: Validation
+        message: "SecretString must be at least 1 characters"
+      - &binaryNotEmpty
+        cond: "!('SecretBinary' in input && input.SecretBinary != null && size(string(input.SecretBinary)) == 0)"
+        error: Validation
+        message: "SecretBinary must be at least 1 characters"
       - &notBoth
         cond: "!('SecretString' in input && input.SecretString != null && 'SecretBinary' in input && input.SecretBinary != null)"
         error: InvalidParameter
@@ -118,6 +135,8 @@ operations:
       - cond: "('SecretString' in input && input.SecretString != null) || ('SecretBinary' in input && input.SecretBinary != null)"
         error: InvalidParameter
         message: "You must provide either SecretString or SecretBinary."
+      - *stringNotEmpty
+      - *binaryNotEmpty
       - *notBoth
       - { cond: s_found, error: NotFound }
       - &scheduled
@@ -160,6 +179,8 @@ operations:
       val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
       prior: "'Versions' in s ? s.Versions : []"
     require:
+      - *stringNotEmpty
+      - *binaryNotEmpty
       - *notBoth
       - { cond: s_found, error: NotFound }
       - *scheduled

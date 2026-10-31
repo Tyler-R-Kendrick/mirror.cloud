@@ -673,3 +673,30 @@ func TestSecretsManagerRefusesAStringAndABinaryTogether(t *testing.T) {
 		})
 	}
 }
+
+// SecretStringType and SecretBinaryType carry "smithy.api#length": {"min": 1}.
+// An empty value is refused the way the engine refuses a member outside its
+// length constraint, ValidationException, "must be at least 1 characters".
+// The Smithy receiver carries no length traits into the generated model, so
+// the engine's own check never sees this one.
+func TestSecretsManagerRefusesAnEmptyValue(t *testing.T) {
+	for _, tc := range []struct{ op, member string }{
+		{"CreateSecret", "SecretString"}, {"CreateSecret", "SecretBinary"},
+		{"PutSecretValue", "SecretString"}, {"PutSecretValue", "SecretBinary"},
+		{"UpdateSecret", "SecretString"}, {"UpdateSecret", "SecretBinary"},
+	} {
+		t.Run(tc.op+"/"+tc.member, func(t *testing.T) {
+			call, ok, fault := secretsManager(t)
+			ok(t, "CreateSecret", map[string]any{"Name": "existing", "SecretString": "v1"})
+			in := map[string]any{"SecretId": "existing", tc.member: ""}
+			if tc.op == "CreateSecret" {
+				in = map[string]any{"Name": "fresh", tc.member: ""}
+			}
+			_, err := call(tc.op, in)
+			fault(t, err, "ValidationException")
+			if got := ok(t, "GetSecretValue", map[string]any{"SecretId": "existing"}); got["SecretString"] != "v1" {
+				t.Fatalf("a refused %s changed the value to %#v", tc.op, got["SecretString"])
+			}
+		})
+	}
+}

@@ -541,3 +541,47 @@ func TestSecretsManagerCreatesOnceAndWritesOnlyWhatExists(t *testing.T) {
 		}
 	}
 }
+
+// CreateSecret: "If you include SecretString or SecretBinary then Secrets
+// Manager creates an initial secret version and automatically attaches the
+// staging label AWSCURRENT to it." Without either it creates the secret and
+// no version, so it answers no VersionId, and there is no value to get:
+// GetSecretValue is ResourceNotFoundException ("Secrets Manager can't find the
+// resource that you asked for"), and BatchGetSecretValue answers an Errors row.
+// PutSecretValueRequest.SecretString: "You must include SecretBinary or
+// SecretString, but not both." Neither is InvalidParameterException ("The
+// parameter name or value is invalid"), the documented error that is about
+// the request rather than the secret's state.
+func TestSecretsManagerASecretWithoutAValueHasNoVersion(t *testing.T) {
+	call, ok, fault := secretsManager(t)
+	created := ok(t, "CreateSecret", map[string]any{"Name": "empty", "Description": "filled later"})
+	if hasKey(created, "VersionId") {
+		t.Fatalf("CreateSecret without a value answered VersionId %#v", created["VersionId"])
+	}
+	if versions, _ := ok(t, "ListSecretVersionIds", map[string]any{"SecretId": "empty"})["Versions"].([]any); len(versions) != 0 {
+		t.Fatalf("CreateSecret without a value made %d versions", len(versions))
+	}
+	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "empty"}); got["Description"] != "filled later" {
+		t.Fatalf("DescribeSecret answered %#v", got)
+	}
+	_, err := call("GetSecretValue", map[string]any{"SecretId": "empty"})
+	fault(t, err, "ResourceNotFoundException")
+	batch := ok(t, "BatchGetSecretValue", map[string]any{"SecretIdList": []any{"empty"}})
+	errs, _ := batch["Errors"].([]any)
+	if values, _ := batch["SecretValues"].([]any); len(values) != 0 || len(errs) != 1 ||
+		errs[0].(map[string]any)["ErrorCode"] != "ResourceNotFoundException" {
+		t.Fatalf("BatchGetSecretValue of a secret with no value answered %#v", batch)
+	}
+
+	_, err = call("PutSecretValue", map[string]any{"SecretId": "empty"})
+	fault(t, err, "InvalidParameterException")
+
+	put := ok(t, "PutSecretValue", map[string]any{"SecretId": "empty", "SecretString": "first"})
+	value := ok(t, "GetSecretValue", map[string]any{"SecretId": "empty"})
+	if value["SecretString"] != "first" || value["VersionId"] != put["VersionId"] {
+		t.Fatalf("after the first PutSecretValue, GetSecretValue answered %#v", value)
+	}
+	if stages, _ := value["VersionStages"].([]any); len(stages) != 1 || stages[0] != "AWSCURRENT" {
+		t.Fatalf("the first version is staged %#v, want AWSCURRENT alone", value["VersionStages"])
+	}
+}

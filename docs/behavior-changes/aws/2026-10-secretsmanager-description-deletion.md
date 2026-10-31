@@ -13,6 +13,13 @@ The oracle is AWS's documentation as it ships in the vendored model
   new version, and the others created the secret. CloudFormation's
   `UpdateStack` relied on that and now updates its secret through
   `UpdateSecret`.
+- **A secret without a value has no version.** `CreateSecret` makes a version
+  only "If you include SecretString or SecretBinary"; without either it
+  answers no `VersionId`, `GetSecretValue` is `ResourceNotFoundException`, and
+  `BatchGetSecretValue` answers a not-found `Errors` row. Before, it stored an
+  empty version holding `""`. `PutSecretValue` with neither value ("You must
+  include SecretBinary or SecretString") is `InvalidParameterException`;
+  before, it stored `""`.
 - **Description.** `CreateSecret` and `UpdateSecret` keep `Description`, and
   `DescribeSecret` answers it. Before, it was accepted and dropped. A write
   that names no description keeps the one already stored.

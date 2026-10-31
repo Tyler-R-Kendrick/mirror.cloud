@@ -55,10 +55,14 @@ operations:
   # parameter value is not valid for the current state of the resource.
   # Possible causes: The secret is scheduled for deletion." Each of them
   # documents it. RestoreSecret is the way back.
+  #
+  # A version is made only "If you include SecretString or SecretBinary"
+  # (CreateSecret); without either the secret has none, and no VersionId.
   CreateSecret:
     reads:
       s: { resource: secret }
     let:
+      hasval: "('SecretString' in input && input.SecretString != null) || ('SecretBinary' in input && input.SecretBinary != null)"
       val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
     require:
       - cond: "!('Deleted' in s && s.Deleted == true)"
@@ -74,18 +78,19 @@ operations:
           record:
             Name: id
             ARN: "arn('aws', ['secretsmanager', string(identity.region), string(identity.account), 'secret:' + id])"
-            Versions: "[{'VersionId': fx.ver, 'SecretString': val, 'VersionStages': ['AWSCURRENT']}]"
-            VersionId: fx.ver
-            SecretString: val
-            VersionStages: "['AWSCURRENT']"
+            Versions: "hasval ? [{'VersionId': fx.ver, 'SecretString': val, 'VersionStages': ['AWSCURRENT']}] : []"
+            VersionId: "hasval ? fx.ver : dyn(null)"
+            SecretString: "hasval ? val : dyn(null)"
+            VersionStages: "hasval ? ['AWSCURRENT'] : []"
             # The description is metadata beside the value (DescribeSecretResponse:
             # "The description of the secret.").
             Description: "'Description' in input && input.Description != null ? input.Description : dyn(null)"
             Deleted: "false"
+    omit_null: [VersionId]
     output:
       ARN: rec.ARN
       Name: rec.Name
-      VersionId: fx.ver
+      VersionId: "hasval ? fx.ver : dyn(null)"
 
   PutSecretValue:
     reads:
@@ -94,6 +99,13 @@ operations:
       val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
       prior: "'Versions' in s ? s.Versions : []"
     require:
+      # "You must include SecretBinary or SecretString, but not both."
+      # (PutSecretValueRequest). Neither is InvalidParameterException, "The
+      # parameter name or value is invalid", the documented error about the
+      # request rather than the secret's state.
+      - cond: "('SecretString' in input && input.SecretString != null) || ('SecretBinary' in input && input.SecretBinary != null)"
+        error: InvalidParameter
+        message: "You must provide either SecretString or SecretBinary."
       - { cond: s_found, error: NotFound }
       - cond: "!('Deleted' in s && s.Deleted == true)"
         error: InvalidRequest
@@ -241,6 +253,10 @@ operations:
       - cond: "!('Deleted' in s && s.Deleted == true)"
         error: InvalidRequest
         message: "secret scheduled for deletion"
+      # A secret created without a value has no version to answer.
+      - cond: "size(vers) > 0"
+        error: NotFound
+        message: "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"
     output:
       ARN: s.ARN
       Name: s.Name
@@ -461,18 +477,21 @@ operations:
         ? input.SecretIdList
         : (('SecretId' in input && input.SecretId != null && input.SecretId != '') ? [input.SecretId] : [])
       gone: "bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b) && 'Deleted' in x && x.Deleted == true))"
+      # A secret created without a value has nothing to answer: not found,
+      # as GetSecretValue answers it.
+      valueless: "bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b) && !('Versions' in x && size(x.Versions) > 0)))"
     select:
       binding: bs
       resource: secret
       filter: "'Name' in item && bids.exists(b, string(b) == string(item.Name))"
     output:
       SecretValues: >-
-        bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b)) && !(b in gone))
+        bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b)) && !(b in gone) && !(b in valueless))
             .map(b, bs.filter(x, 'Name' in x && string(x.Name) == string(b))[0])
             .map(m, {'m': m, 'p': (('Versions' in m && m.Versions.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))) ? m.Versions.filter(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))[0] : m)})
             .map(pair, {'ARN': pair.m.ARN, 'Name': pair.m.Name, 'SecretString': pair.p.SecretString, 'VersionId': pair.p.VersionId})
       Errors: >-
-        bids.filter(b, !bs.exists(x, 'Name' in x && string(x.Name) == string(b)) || b in gone)
+        bids.filter(b, !bs.exists(x, 'Name' in x && string(x.Name) == string(b)) || b in gone || b in valueless)
             .map(b, b in gone
               ? {'SecretId': string(b), 'ErrorCode': 'InvalidRequestException',
                  'Message': "You can't perform this operation on the secret because it was marked for deletion."}
@@ -658,8 +677,10 @@ quirks:
     note: >
       No rotation ever runs: the current value is re-seated under a fresh
       version id, and RotationLambdaARN, RotationRules and RotateImmediately
-      are accepted and discarded. The pack read a SecretString member the
-      model does not declare on this operation; kept.
+      are accepted and discarded. Rotating a secret created without a value
+      re-seats the empty string as its first version, where the real service
+      would need a rotation function to make one. The pack read a SecretString
+      member the model does not declare on this operation; kept.
   - operation: UpdateSecretVersionStage
     note: >
       With neither MoveToVersionId nor RemoveFromVersionId the call is a

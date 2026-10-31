@@ -146,6 +146,14 @@ The oracle is AWS's documentation as it ships in the vendored model
     create that a service answers with what it already holds (a queue, topic,
     rule, role, stream, log group or bucket here) took the resource over, and
     the stack's rollback or `DeleteStack` deleted it.
+  - EventBridge keys a rule by its event bus and its name, and the rule's
+    ARN carries the bus (`rule/<bus>/<name>`), so the check of a rule's name,
+    its `PutTargets` and its delete all carry the bus: the `EventBusName`
+    property, or the bus in the ARN. A named rule already on bus `b` fails
+    the stack and is left as it was, a rule of that name on the default bus
+    does not block it, and `DeleteStack` deletes the stack's own rule on its
+    bus, never a same-named rule on the default bus. Before, all three
+    looked at the default bus.
   - A stack name "must be unique in the Region in which you are creating the
     stack", so `CreateStack` of a name a stack already has is
     `AlreadyExistsException` ("Stack [name] already exists") and makes

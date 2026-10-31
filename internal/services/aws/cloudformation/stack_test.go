@@ -901,3 +901,63 @@ func TestCloudFormationAnOldRecordStillUpdates(t *testing.T) {
 		t.Errorf("after the update the secret holds %v (%v), want v2", out["SecretString"], err)
 	}
 }
+
+// EventBridge keys a rule by its event bus and its name, and the rule's ARN
+// carries the bus (rule/<bus>/<name>), so every check, write and delete of a
+// rule carries its bus: the EventBusName property, or the bus in the ARN. A
+// named rule already on bus b fails the stack, a rule of that name on the
+// default bus does not, a rule's targets go to the rule on its own bus, and
+// DeleteStack deletes the stack's rule on bus b, never a same-named rule on
+// the default bus. Before, the check, PutTargets and the delete looked at the
+// default bus whatever the rule's bus was.
+func TestCloudFormationARuleLivesOnItsBus(t *testing.T) {
+	h := newStacks(t)
+	events := func(op string, in map[string]any) (map[string]any, error) { return h.service("aws.events", op, in) }
+	if _, err := events("CreateEventBus", map[string]any{"Name": "b"}); err != nil {
+		t.Fatal(err)
+	}
+	queue := "arn:aws:sqs:us-east-1:000000000000:q"
+	rule := func(name string, targets bool) map[string]map[string]any {
+		props := map[string]any{"EventBusName": "b", "EventPattern": map[string]any{"source": []any{"app"}}} // a schedule is the default bus's
+		if name != "" {
+			props["Name"] = name
+		}
+		if targets {
+			props["Targets"] = []any{map[string]any{"Id": "t", "Arn": queue}}
+		}
+		return map[string]map[string]any{"R": {"Type": "AWS::Events::Rule", "Properties": props}}
+	}
+	onBus := func(name, bus string) bool {
+		_, err := events("DescribeRule", map[string]any{"Name": name, "EventBusName": bus})
+		return err == nil
+	}
+	for _, in := range []map[string]any{{"Name": "x", "EventBusName": "b", "EventPattern": `{"source":["app"]}`}, {"Name": "y", "ScheduleExpression": "rate(1 hour)"}} {
+		if _, err := events("PutRule", in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := h.create("taken", rule("x", false)); code(err) != "ResourceAlreadyExistsException" {
+		t.Errorf("a rule named for one already on bus b answered %v, want ResourceAlreadyExistsException", err)
+	}
+	if !onBus("x", "b") {
+		t.Error("the refused stack touched the rule already on bus b")
+	}
+	h.mustCreate("ony", rule("y", true))
+	targets, err := events("ListTargetsByRule", map[string]any{"Rule": "y", "EventBusName": "b"})
+	if err != nil || len(targets["Targets"].([]any)) != 1 {
+		t.Errorf("the bus-b rule y has targets %v (%v), want the template's one", targets["Targets"], err)
+	}
+	h.mustCreate("unnamed", rule("", false))
+	unnamed := lastSlash(h.resources("unnamed")[0].Physical)
+	for _, stack := range []string{"ony", "unnamed"} {
+		if _, err := h.invoke("DeleteStack", map[string]any{"StackName": stack}); err != nil {
+			t.Fatalf("DeleteStack %s: %v", stack, err)
+		}
+	}
+	if onBus("y", "b") || onBus(unnamed, "b") {
+		t.Error("DeleteStack left a stack's rule on bus b")
+	}
+	if !onBus("y", "default") {
+		t.Error("DeleteStack deleted the default bus's rule y, which no stack made")
+	}
+}

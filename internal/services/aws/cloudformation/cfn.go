@@ -307,7 +307,7 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 	if k.in == "TopicArn" {
 		id = "arn:aws:sns:" + req.Identity.Region + ":" + req.Identity.Account + ":" + n
 	}
-	out, err := p.call(ctx, req, k.svc, k.op, map[string]any{k.in: id})
+	out, err := p.call(ctx, req, k.svc, k.op, given(map[string]any{k.in: id}, props, "EventBusName"))
 	groups, list := out["logGroups"].([]any) // DescribeLogGroups answers a list by prefix, never a fault
 	if err != nil || list && !slices.ContainsFunc(groups, func(g any) bool { return str(asMap(g)["logGroupName"]) == n }) ||
 		slices.ContainsFunc(old.Resources, func(r res) bool { // a record from before res.Name: by the physical id, which ends in the name
@@ -405,7 +405,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		}
 		out, err := p.call(ctx, req, "aws.events", "PutRule", in)
 		if targets, ok := props["Targets"]; ok && err == nil {
-			_, err = p.call(ctx, req, "aws.events", "PutTargets", map[string]any{"Rule": in["Name"], "Targets": targets})
+			_, err = p.call(ctx, req, "aws.events", "PutTargets", given(map[string]any{"Rule": in["Name"], "Targets": targets}, props, "EventBusName"))
 		}
 		return str(out["RuleArn"]), err
 	case "AWS::Lambda::Function":
@@ -430,6 +430,12 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	default:
 		return "", invalid("unsupported resource type " + typ)
 	}
+}
+
+// ruleBus is the event bus in a rule's ARN, rule/<bus>/<name>: none for the default bus.
+func ruleBus(arn string) string {
+	_, path, _ := strings.Cut(arn, ":rule/")
+	return path[:max(strings.LastIndex(path, "/"), 0)]
 }
 
 // made answers the id of what a create made: none when it failed.
@@ -457,7 +463,7 @@ func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) error {
 		"AWS::SecretsManager::Secret":  {"aws.secretsmanager", "DeleteSecret", map[string]any{"SecretId": id, "ForceDeleteWithoutRecovery": true}},
 		"AWS::KMS::Key":                {"aws.kms", "ScheduleKeyDeletion", map[string]any{"KeyId": id, "PendingWindowInDays": 7}},
 		"AWS::Logs::LogGroup":          {"aws.logs", "DeleteLogGroup", map[string]any{"logGroupName": id}},
-		"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": lastSlash(id), "Force": true}},
+		"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": lastSlash(id), "Force": true, "EventBusName": ruleBus(id)}},
 		"AWS::Lambda::Function":        {"aws.lambda", "DeleteFunction", map[string]any{"FunctionName": lastColon(id)}},
 		"AWS::Kinesis::Stream":         {"aws.kinesis", "DeleteStream", map[string]any{"StreamName": id}},
 		"AWS::Kinesis::ResourcePolicy": {"aws.kinesis", "DeleteResourcePolicy", map[string]any{"ResourceARN": id}},

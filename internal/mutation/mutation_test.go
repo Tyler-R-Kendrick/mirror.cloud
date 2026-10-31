@@ -16016,8 +16016,8 @@ var mutants = []mutant{
 	{
 		name: "sns-ignore-signature-version-two",
 		file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-		old:  "signatureVersion := \"1\"\n\t\tif b, found, _ := p.col(req, \"topics\").Get(ctx, topicName(arn)); found {",
-		new:  "signatureVersion := \"1\"\n\t\tif b, found, _ := p.col(req, \"topics\").Get(ctx, topicName(arn)); false && (found) {",
+		old:  "if b, found, _ := p.col(req, \"topics\").Get(ctx, topicName(topicARN)); found {\n\t\tvar topic map[string]any",
+		new:  "if b, found, _ := p.col(req, \"topics\").Get(ctx, topicName(topicARN)); false && (found) {\n\t\tvar topic map[string]any",
 		pkg:  "./internal/services/aws/sns",
 		run:  "TestSNSSQSNotificationSignatureVersionTwo",
 	},
@@ -19754,7 +19754,7 @@ var mutants = []mutant{
 	{
 		name: "sns-drop-notification-message-attributes",
 		file: filepath.Join("internal", "services", "aws", "sns", "sns.go"),
-		old:  `notification["MessageAttributes"] = msgAttrs`,
+		old:  `notification["MessageAttributes"] = notificationAttributes(msgAttrs, false)`,
 		new:  `notification["MessageAttributes"] = nil`,
 		pkg:  "./internal/services/aws/sns",
 		run:  "TestSNSSQSNotificationPreservesMessageAttributes",

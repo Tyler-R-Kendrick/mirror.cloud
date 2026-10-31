@@ -461,14 +461,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 					"Timestamp":        p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
 					"SignatureVersion": "1", "SigningCertURL": snsCertificateURL(req),
 				}
-				signatureVersion := "1"
-				if b, found, _ := p.col(req, "topics").Get(ctx, topicName(topicARN)); found {
-					var topic map[string]any
-					_ = json.Unmarshal(b, &topic)
-					if str(asMap(topic["attrs"])["SignatureVersion"]) == "2" {
-						signatureVersion = "2"
-					}
-				}
+				signatureVersion := p.topicSignatureVersion(ctx, req, topicARN)
 				confirmation["SignatureVersion"] = signatureVersion
 				confirmation["Signature"] = signNotification(confirmation, signatureVersion)
 				p.httpPost(str(req.Input["Endpoint"]), confirmation, "SubscriptionConfirmation", "text/plain; charset=UTF-8", str(confirmation["MessageId"]), topicARN, "")
@@ -506,14 +499,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 					"Timestamp":        p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
 					"SignatureVersion": "1", "SigningCertURL": snsCertificateURL(req),
 				}
-				signatureVersion := "1"
-				if topicBytes, topicFound, _ := p.col(req, "topics").Get(ctx, topicName(topic)); topicFound {
-					var topicRecord map[string]any
-					_ = json.Unmarshal(topicBytes, &topicRecord)
-					if str(asMap(topicRecord["attrs"])["SignatureVersion"]) == "2" {
-						signatureVersion = "2"
-					}
-				}
+				signatureVersion := p.topicSignatureVersion(ctx, req, topic)
 				confirmation["SignatureVersion"] = signatureVersion
 				unsubscribeSignature := signNotification(confirmation, signatureVersion)
 				confirmation["Signature"] = unsubscribeSignature
@@ -797,20 +783,13 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			"SigningCertURL": snsCertificateURL(req),
 			"UnsubscribeURL": snsActionURL(req, "Unsubscribe", "SubscriptionArn", str(sub["SubscriptionArn"])),
 		}
-		signatureVersion := "1"
-		if b, found, _ := p.col(req, "topics").Get(ctx, topicName(arn)); found {
-			var topic map[string]any
-			_ = json.Unmarshal(b, &topic)
-			if str(asMap(topic["attrs"])["SignatureVersion"]) == "2" {
-				signatureVersion = "2"
-			}
-		}
+		signatureVersion := p.topicSignatureVersion(ctx, req, arn)
 		notification["SignatureVersion"] = signatureVersion
 		if subject := str(req.Input["Subject"]); subject != "" {
 			notification["Subject"] = subject
 		}
 		if len(msgAttrs) > 0 {
-			notification["MessageAttributes"] = msgAttrs
+			notification["MessageAttributes"] = notificationAttributes(msgAttrs, false)
 		}
 		notification["Signature"] = signNotification(notification, signatureVersion)
 		payload := message
@@ -1181,18 +1160,9 @@ func (p *Pack) lambdaNotification(req *spi.Request, sub map[string]any, body, me
 		"Message": body, "Timestamp": p.deps.Clock.Now().UTC().Format(time.RFC3339Nano),
 		"SignatureVersion": "1", "SigningCertUrl": snsCertificateURL(req),
 		"UnsubscribeURL":    snsActionURL(req, "Unsubscribe", "SubscriptionArn", str(sub["SubscriptionArn"])),
-		"MessageAttributes": attrs,
+		"MessageAttributes": notificationAttributes(attrs, true),
 	}
-	signatureVersion := "1"
-	if arn := str(sub["TopicArn"]); arn != "" {
-		if b, found, _ := p.col(req, "topics").Get(context.Background(), topicName(arn)); found {
-			var topic map[string]any
-			_ = json.Unmarshal(b, &topic)
-			if str(asMap(topic["attrs"])["SignatureVersion"]) == "2" {
-				signatureVersion = "2"
-			}
-		}
-	}
+	signatureVersion := p.topicSignatureVersion(context.Background(), req, str(sub["TopicArn"]))
 	sns["Signature"] = signNotification(sns, signatureVersion)
 	return map[string]any{
 		"Records": []any{map[string]any{
@@ -1228,6 +1198,38 @@ func (p *Pack) deliverSQS(ctx context.Context, req *spi.Request, endpoint, body 
 	}
 	_, err := bundled.Handler("aws.sqs", p.deps).Invoke(ctx, &spi.Request{Identity: targetReq.Identity, Operation: "SendMessage", Input: in, HTTP: req.HTTP})
 	return err == nil
+}
+
+// notificationAttributes maps each attribute name to the Type and Value a
+// notification body (HTTP/S, SQS without raw delivery) and a Lambda event carry
+// them in, Lambda typing all but Binary as String. AWS documents both; the
+// sources are cited in internal/edge's snsquery_attributes_test.go.
+func notificationAttributes(attrs map[string]any, lambda bool) map[string]any {
+	out := map[string]any{}
+	for name, raw := range sqsMessageAttributes(attrs) {
+		attribute := raw.(map[string]any)
+		dataType, value := str(attribute["DataType"]), attribute["StringValue"]
+		if binary, ok := attribute["BinaryValue"]; ok {
+			value = binary
+		}
+		if lambda && !strings.HasPrefix(dataType, "Binary") {
+			dataType = "String"
+		}
+		out[name] = map[string]any{"Type": dataType, "Value": value}
+	}
+	return out
+}
+
+// topicSignatureVersion is the SignatureVersion a topic's messages are signed with.
+func (p *Pack) topicSignatureVersion(ctx context.Context, req *spi.Request, topicARN string) string {
+	if b, found, _ := p.col(req, "topics").Get(ctx, topicName(topicARN)); found {
+		var topic map[string]any
+		_ = json.Unmarshal(b, &topic)
+		if str(asMap(topic["attrs"])["SignatureVersion"]) == "2" {
+			return "2"
+		}
+	}
+	return "1"
 }
 
 func sqsMessageAttributes(attrs map[string]any) map[string]any {
@@ -1505,10 +1507,8 @@ func messageAttrs(in map[string]any) map[string]any {
 			slot["Name"] = str(v)
 		case "Value.DataType":
 			slot["DataType"] = str(v)
-			slot["Type"] = str(v)
 		case "Value.StringValue", "Value":
 			slot["StringValue"] = str(v)
-			slot["Value"] = str(v)
 		case "Value.BinaryValue":
 			slot["BinaryValue"] = v
 		}

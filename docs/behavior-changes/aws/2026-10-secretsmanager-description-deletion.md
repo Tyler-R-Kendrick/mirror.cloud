@@ -364,11 +364,16 @@ The oracle is AWS's documentation as it ships in the vendored model
     each old resource the stack no longer holds is deleted: one the update
     replaced with a new physical id (a new name, say) and one the template
     dropped. A delete that fails there leaves the stack `UPDATE_COMPLETE`, as
-    in CloudFormation, but is not lost: the old resource stays listed by
-    `DescribeStackResources` as `DELETE_FAILED`, its `ResourceStatusReason`
-    ("Success/failure message associated with the resource") the error, which
-    is also the stack's `StackStatusReason`, and `DeleteStack` deletes it with
-    the rest. Stack statuses here have no `_IN_PROGRESS` grain, so
+    in CloudFormation, and abandons the resource, as CloudFormation does: it
+    leaves the stack's resources, and is recorded once, as a `DELETE_FAILED`
+    event with the error as its `ResourceStatusReason` ("Success/failure
+    message associated with the resource"), and as the stack's
+    `StackStatusReason`. No later update or `DeleteStack` touches it, and no
+    CloudFormation delete touches a physical resource another stack's record
+    holds: such a one leaves the stack `DELETE_SKIPPED`, its reason naming
+    the holder. Before, the abandoned resource stayed listed and every later
+    update retried its delete, which, once it was gone and another stack had
+    made one of its name, deleted the other stack's. Stack statuses here have no `_IN_PROGRESS` grain, so
     `UPDATE_COMPLETE_CLEANUP_IN_PROGRESS` is never seen. Before, an update
     never deleted what it replaced or dropped.
   - The rollback family accepts only the states the API reference gives

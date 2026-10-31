@@ -788,10 +788,10 @@ func TestCloudFormationChecksTheStackName(t *testing.T) {
 // resource of an update is in place, the cleanup deletes each old resource
 // the stack no longer holds: one replaced by a new physical id (a new name
 // here) and one the template dropped. A delete that fails there leaves the
-// stack UPDATE_COMPLETE, as CloudFormation does, and is not lost: the old
-// resource stays listed as DELETE_FAILED, the error its ResourceStatusReason
-// ("Success/failure message associated with the resource"), and DeleteStack
-// deletes it with the rest. A failed update deletes nothing old. Before, an
+// stack UPDATE_COMPLETE, as CloudFormation does, and abandons the resource: it
+// leaves the stack, recorded once as a DELETE_FAILED event with the error as
+// its ResourceStatusReason ("Success/failure message associated with the
+// resource") and as StackStatusReason. A failed update deletes nothing old. Before, an
 // update never deleted the resources it replaced or dropped.
 func TestCloudFormationAnUpdateDeletesWhatItReplaced(t *testing.T) {
 	h := newStacks(t)
@@ -849,16 +849,31 @@ func TestCloudFormationAnUpdateDeletesWhatItReplaced(t *testing.T) {
 		}
 		rows = append(rows, row)
 	}
-	want := []string{"B new-b CREATE_COMPLETE", "Q new-q2 CREATE_COMPLETE", "B old-b DELETE_FAILED BucketNotEmpty"}
+	// The bucket the cleanup could not delete is abandoned: once, as a
+	// DELETE_FAILED event with S3's error, and in StackStatusReason, never as
+	// one of the stack's resources, and no later DeleteStack touches it.
+	want := []string{"B new-b CREATE_COMPLETE", "Q new-q2 CREATE_COMPLETE"}
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("rp lists %q, want %q", rows, want)
 	}
-	h.fill("old-b", false)
+	if status, reason, err := h.status("rp"); status != "UPDATE_COMPLETE" || !strings.Contains(reason, "BucketNotEmpty") {
+		t.Errorf("rp is %s with reason %q (%v), want UPDATE_COMPLETE with S3's BucketNotEmpty", status, reason, err)
+	}
+	events, _ := h.invoke("DescribeStackEvents", map[string]any{"StackName": "rp"})
+	failed := 0
+	for _, e := range events["StackEvents"].([]any) {
+		if r := asMap(e); lastSlash(str(r["PhysicalResourceId"])) == "old-b" && r["ResourceStatus"] == "DELETE_FAILED" && strings.Contains(str(r["ResourceStatusReason"]), "BucketNotEmpty") {
+			failed++
+		}
+	}
+	if failed != 1 {
+		t.Errorf("rp's events list old-b's failed delete %d times, want once", failed)
+	}
 	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "rp"}); err != nil {
 		t.Fatalf("DeleteStack rp: %v", err)
 	}
-	if alive("aws.s3", "HeadBucket", "Bucket", "old-b") {
-		t.Error("DeleteStack left the bucket the cleanup could not delete")
+	if !alive("aws.s3", "HeadBucket", "Bucket", "old-b") {
+		t.Error("DeleteStack deleted the bucket the cleanup had abandoned")
 	}
 }
 
@@ -1757,5 +1772,58 @@ func TestCloudFormationRetainKeepsAResource(t *testing.T) {
 				t.Errorf("%s with %s %s answered %v, want ValidationError naming %s", op, policy, value, err, policy)
 			}
 		}
+	}
+}
+
+// A resource the cleanup could not delete is abandoned, so no later update or
+// DeleteStack of its stack touches it; and no CloudFormation delete touches a
+// physical resource another stack's record holds: it leaves this stack,
+// DELETE_SKIPPED, with the holder named. Before, every later update retried
+// the abandoned delete: once the bucket was deleted out of band and another
+// stack made one of its name, updating the first stack deleted the second's
+// bucket.
+func TestCloudFormationNoStackDeletesAnothersResource(t *testing.T) {
+	h := newStacks(t)
+	bucket := func(name string) map[string]any {
+		return map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": name}}
+	}
+	update := func(stack string, resources map[string]map[string]any) error {
+		tpl, _ := json.Marshal(map[string]any{"Resources": resources})
+		_, err := h.invoke("UpdateStack", map[string]any{"StackName": stack, "TemplateBody": string(tpl)})
+		return err
+	}
+	alive := func(name string) bool {
+		_, err := h.service("aws.s3", "HeadBucket", map[string]any{"Bucket": name})
+		return err == nil
+	}
+	h.mustCreate("cf", map[string]map[string]any{"B": bucket("rv-cf-old")})
+	h.fill("rv-cf-old", true)
+	if err := update("cf", map[string]map[string]any{"B": bucket("rv-cf-new")}); err != nil {
+		t.Fatalf("renaming cf's bucket: %v", err)
+	}
+	h.fill("rv-cf-old", false)
+	if _, err := h.service("aws.s3", "DeleteBucket", map[string]any{"Bucket": "rv-cf-old"}); err != nil {
+		t.Fatal(err)
+	}
+	h.mustCreate("other", map[string]map[string]any{"B": bucket("rv-cf-old")})
+	if err := update("cf", map[string]map[string]any{"B": bucket("rv-cf-new"), "Q": {"Type": "AWS::SQS::Queue"}}); err != nil {
+		t.Fatalf("a later update of cf: %v", err)
+	}
+	if !alive("rv-cf-old") {
+		t.Fatal("updating cf deleted other's bucket")
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "cf"}); err != nil || !alive("rv-cf-old") {
+		t.Errorf("DeleteStack cf (%v) left other's bucket alive: %v", err, alive("rv-cf-old"))
+	}
+
+	// A record that claims other's bucket, as only a fault could write one.
+	record, _ := json.Marshal(map[string]any{"Name": "claims", "ID": "arn:aws:cloudformation:us-east-1:000000000000:stack/claims/1", "Status": "CREATE_COMPLETE",
+		"Template":  `{"Resources":{"B":{"Type":"AWS::S3::Bucket","Properties":{"BucketName":"rv-cf-old"}}}}`,
+		"Resources": []any{map[string]any{"Logical": "B", "Physical": "rv-cf-old", "Type": "AWS::S3::Bucket", "Name": "rv-cf-old"}}, "Refs": map[string]any{"B": "rv-cf-old"}})
+	if err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "claims", record); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "claims"}); err != nil || !alive("rv-cf-old") {
+		t.Errorf("DeleteStack of a stack claiming other's bucket (%v) left it alive: %v", err, alive("rv-cf-old"))
 	}
 }

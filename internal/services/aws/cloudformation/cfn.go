@@ -275,20 +275,25 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 	return &spi.Response{Output: map[string]any{}}, nil
 }
 
-// unwind deletes the doomed resources, newest first, for a rollback or DeleteStack, and records the outcome on
-// st, which keeps kept: done, keeping st's reason, with nothing left and no earlier error (first); else failed,
-// what it could not delete listed as DELETE_FAILED for the next DeleteStack to try again, and the first error,
-// which it answers, as StackStatusReason. One its policy keeps (skip) is not deleted: it leaves the stack,
-// DELETE_SKIPPED. A DELETE_COMPLETE stack is answered by its stack id alone, and exports nothing.
+// unwind deletes the doomed resources, newest first, for a rollback, DeleteStack or an update's cleanup, and
+// records the outcome on st, which keeps kept: done, keeping st's reason, with nothing left and no earlier
+// error (first); else failed, what it could not delete listed as DELETE_FAILED for the next DeleteStack to try
+// again (a cleanup, done and failed alike, abandons it: an event, no longer the stack's), and the first error,
+// which it answers, as StackStatusReason. One its policy keeps (skip), or another stack holds, is not deleted:
+// it leaves the stack, DELETE_SKIPPED. A DELETE_COMPLETE stack answers its stack id alone, and exports nothing.
 func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, kept, doomed []res, first error, done, failed string, skip func(res) bool) error {
 	st.Resources = append([]res{}, kept...) // never null: every read of the stack lists its resources
 	for _, r := range slices.Backward(doomed) {
-		if skip(r) { // "Retain ... keeps the resource without deleting the resource or its contents"
-			r.Status = "DELETE_SKIPPED"
+		if other := p.holder(ctx, req, st.Name, r); other != "" || skip(r) { // "Retain ... keeps the resource"
+			r.Status, r.Reason = "DELETE_SKIPPED", map[bool]string{true: "held by stack " + other}[other != ""]
 			st.Events = append(st.Events, r)
 		} else if err := p.deprovision(ctx, req, r); err != nil {
 			r.Status, r.Reason, first = "DELETE_FAILED", err.Error(), cmp.Or(first, err)
-			st.Resources = slices.Insert(st.Resources, len(kept), r)
+			if done == failed { // a cleanup abandons what it cannot delete: an event, no longer the stack's
+				st.Events = append(st.Events, r)
+			} else {
+				st.Resources = slices.Insert(st.Resources, len(kept), r)
+			}
 		}
 	}
 	st.Status = done
@@ -321,6 +326,18 @@ func checkStackName(name string, byID bool) error {
 		return nil
 	}
 	return invalid("1 validation error detected: Value '" + name + "' at 'stackName' failed to satisfy constraint: Member must " + constraint)
+}
+
+// holder is another stack whose record holds r: no stack's delete touches what another holds.
+func (p *Pack) holder(ctx context.Context, req *spi.Request, name string, r res) string {
+	kvs, _, _ := p.col(req, "cfn").List(ctx, "", "", 0)
+	for _, kv := range kvs {
+		var other stack
+		if _ = json.Unmarshal(kv.Value, &other); other.Name != name && slices.ContainsFunc(other.Resources, func(o res) bool { return o.Type == r.Type && o.Physical == r.Physical }) {
+			return other.Name
+		}
+	}
+	return ""
 }
 
 // retains answers whether tpl's policy attr keeps a resource rather than deleting it: it is one of keep.

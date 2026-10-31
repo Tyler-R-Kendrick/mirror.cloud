@@ -323,7 +323,7 @@ operations:
       Description: "'Description' in s ? s.Description : dyn(null)"
       DeletedDate: "'Deleted' in s && s.Deleted == true && 'DeletedDate' in s ? s.DeletedDate : dyn(null)"
       VersionIdsToStages: "rollup('Versions' in s ? s.Versions : [], 'VersionId', 'VersionStages')"
-      Tags: "'Tags' in s ? s.Tags : null"
+      Tags: "'Tags' in s && s.Tags != null && size(s.Tags) > 0 ? s.Tags : dyn(null)"
       ReplicationStatus: "'ReplicaRegions' in s ? s.ReplicaRegions : null"
       RotationEnabled: "'RotationEnabled' in s ? s.RotationEnabled : null"
       RotationLambdaARN: "'RotationLambdaARN' in s ? s.RotationLambdaARN : null"
@@ -343,18 +343,18 @@ operations:
             && (input.IncludePlannedDeletion == true || input.IncludePlannedDeletion == 'true'
                 || input.IncludePlannedDeletion == 'True' || input.IncludePlannedDeletion == '1'))
     #
-    # Each entry carries its Description ("The user-provided description of
-    # the secret") and, scheduled for deletion, its DeletedDate ("The date and
-    # time the deletion of the secret occurred. Not present on active
-    # secrets."), each only when it has one.
+    # Each entry carries its Tags, its Description ("The user-provided
+    # description of the secret") and, scheduled for deletion, its DeletedDate
+    # ("The date and time the deletion of the secret occurred. Not present on
+    # active secrets."), each only when it has one.
     output:
       SecretList: >-
-        items.map(m, merge(merge({
+        items.map(m, merge(merge(merge({
           'ARN': m.ARN,
           'Name': m.Name,
-          'Tags': 'Tags' in m ? m.Tags : null,
           'SecretVersionsToStages': rollup('Versions' in m ? m.Versions : [], 'VersionId', 'VersionStages')
         },
+        'Tags' in m && m.Tags != null && size(m.Tags) > 0 ? {'Tags': m.Tags} : {}),
         'Description' in m && m.Description != null ? {'Description': m.Description} : {}),
         'Deleted' in m && m.Deleted == true && 'DeletedDate' in m && m.DeletedDate != null ? {'DeletedDate': m.DeletedDate} : {}))
 

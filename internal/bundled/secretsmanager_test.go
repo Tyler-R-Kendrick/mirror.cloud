@@ -754,3 +754,35 @@ func TestSecretsManagerTimestampsCarryMilliseconds(t *testing.T) {
 		t.Fatalf("a forced delete's DeletionDate %q, want 1.5", got)
 	}
 }
+
+// A ListSecrets entry carries Tags only when the secret has some, as the rest
+// of the answers on this service leave out a member with no value; so does
+// DescribeSecret once the last tag is removed.
+func TestSecretsManagerOmitsTagsWhenThereAreNone(t *testing.T) {
+	_, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "bare", "SecretString": "v"})
+	ok(t, "CreateSecret", map[string]any{"Name": "tagged", "SecretString": "v"})
+	ok(t, "TagResource", map[string]any{"SecretId": "tagged", "Tags": []any{map[string]any{"Key": "k", "Value": "v"}}})
+	entries := func() map[string]map[string]any {
+		byName := map[string]map[string]any{}
+		list, _ := ok(t, "ListSecrets", map[string]any{})["SecretList"].([]any)
+		for _, e := range list {
+			byName[e.(map[string]any)["Name"].(string)] = e.(map[string]any)
+		}
+		return byName
+	}
+	listed := entries()
+	if hasKey(listed["bare"], "Tags") {
+		t.Errorf("ListSecrets answered Tags %#v for a secret with none", listed["bare"]["Tags"])
+	}
+	if tags, _ := listed["tagged"]["Tags"].([]any); len(tags) != 1 {
+		t.Errorf("ListSecrets answered Tags %#v for a secret with one", listed["tagged"]["Tags"])
+	}
+	ok(t, "UntagResource", map[string]any{"SecretId": "tagged", "TagKeys": []any{"k"}})
+	if listed := entries(); hasKey(listed["tagged"], "Tags") {
+		t.Errorf("after its last tag was removed, ListSecrets answered Tags %#v", listed["tagged"]["Tags"])
+	}
+	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "tagged"}); hasKey(got, "Tags") {
+		t.Errorf("after its last tag was removed, DescribeSecret answered Tags %#v", got["Tags"])
+	}
+}

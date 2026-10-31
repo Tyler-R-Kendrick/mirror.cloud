@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/xml"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -197,6 +198,80 @@ func TestSQSQuerySendMessageAttributesArriveUnderTheirEntryNames(t *testing.T) {
 	})
 	if status != http.StatusBadRequest || !strings.Contains(body, "<Code>InvalidParameterValue</Code>") {
 		t.Fatalf("SendMessage with an attribute that has no DataType: %d %s, want 400 InvalidParameterValue", status, body)
+	}
+}
+
+// SendMessageBatch answers each entry with what SendMessage answers for it:
+// SendMessageBatchResultEntry carries MD5OfMessageAttributes beside
+// MD5OfMessageBody
+// (https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_SendMessageBatchResultEntry.html),
+// and an SDK checks it against the attributes it sent. The bundle's batch
+// copied only MessageId, MD5OfMessageBody and SequenceNumber, so an entry's
+// attributes were stored and delivered and its digest was never answered.
+func TestSQSQuerySendMessageBatchAnswersEachEntrysAttributeDigest(t *testing.T) {
+	deps := spitest.Deps(t)
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	reg, err := registry.New(deps, cfg.Services, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(edge.New(cfg, deps, reg, "test").Handler())
+	defer ts.Close()
+	call := func(form url.Values) string {
+		t.Helper()
+		form.Set("Version", "2012-11-05")
+		req, err := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(form.Encode()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = "sqs.us-east-1.amazonaws.com"
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		body, _ := io.ReadAll(res.Body)
+		if res.StatusCode != http.StatusOK {
+			t.Fatalf("%s: %d %s", form.Get("Action"), res.StatusCode, body)
+		}
+		return string(body)
+	}
+	queueURL := between(call(url.Values{"Action": {"CreateQueue"}, "QueueName": {"batched-attributes"}}), "<QueueUrl>", "</QueueUrl>")
+
+	blob := []byte{0, 1, 0xfe, 0xff}
+	body := call(url.Values{
+		"Action": {"SendMessageBatch"}, "QueueUrl": {queueURL},
+		"SendMessageBatchRequestEntry.1.Id":                                   {"typed"},
+		"SendMessageBatchRequestEntry.1.MessageBody":                          {"one"},
+		"SendMessageBatchRequestEntry.1.MessageAttribute.1.Name":              {"kind"},
+		"SendMessageBatchRequestEntry.1.MessageAttribute.1.Value.DataType":    {"String"},
+		"SendMessageBatchRequestEntry.1.MessageAttribute.1.Value.StringValue": {"order"},
+		"SendMessageBatchRequestEntry.1.MessageAttribute.2.Name":              {"blob"},
+		"SendMessageBatchRequestEntry.1.MessageAttribute.2.Value.DataType":    {"Binary"},
+		"SendMessageBatchRequestEntry.1.MessageAttribute.2.Value.BinaryValue": {base64.StdEncoding.EncodeToString(blob)},
+		"SendMessageBatchRequestEntry.2.Id":                                   {"plain"},
+		"SendMessageBatchRequestEntry.2.MessageBody":                          {"two"},
+	})
+	var answer struct {
+		Entries []struct{ Id, MD5OfMessageBody, MD5OfMessageAttributes string } `xml:"SendMessageBatchResult>SendMessageBatchResultEntry"`
+	}
+	if err := xml.Unmarshal([]byte(body), &answer); err != nil || len(answer.Entries) != 2 {
+		t.Fatalf("SendMessageBatch answer %v: %s", err, body)
+	}
+	want := map[string]string{
+		"typed": documentedAttributesMD5([]queueAttribute{{"kind", "String", []byte("order")}, {"blob", "Binary", blob}}),
+		"plain": "",
+	}
+	for _, entry := range answer.Entries {
+		if entry.MD5OfMessageBody == "" {
+			t.Errorf("%s: no MD5OfMessageBody: %s", entry.Id, body)
+		}
+		if entry.MD5OfMessageAttributes != want[entry.Id] {
+			t.Errorf("%s: MD5OfMessageAttributes = %q, want %q: %s", entry.Id, entry.MD5OfMessageAttributes, want[entry.Id], body)
+		}
 	}
 }
 

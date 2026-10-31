@@ -82,10 +82,13 @@ func shapedService() *model.Service {
 				"Renamed":    {Shape: "String", Binding: model.MemberBinding{Name: "OnTheWire"}},
 				"Nested":     {Shape: "Inner"},
 				"People":     {Shape: "InnerList"},
+				"Attributes": {Shape: "NamedValueMap", Binding: model.MemberBinding{Name: "Attribute", XMLFlattened: true}},
+				"Labels":     {Shape: "LabelledMap"},
 			}},
-			"StringList": {Kind: model.KindList, Member: "String"},
-			"StringMap":  {Kind: model.KindMap, Key: "String", Member: "String"},
-			"InnerList":  {Kind: model.KindList, Member: "Inner"},
+			"NamedValueMap": {Kind: model.KindMap, Key: "String", Member: "String", KeyBinding: model.MemberBinding{Name: "Name"}, MemberBinding: model.MemberBinding{Name: "Value"}},
+			"StringList":    {Kind: model.KindList, Member: "String"},
+			"StringMap":     {Kind: model.KindMap, Key: "String", Member: "String"},
+			"InnerList":     {Kind: model.KindList, Member: "Inner"},
 			"Inner": {Kind: model.KindStructure, Members: map[string]model.Member{
 				"First": {Shape: "String"},
 				"Last":  {Shape: "String"},
@@ -154,6 +157,30 @@ func TestDecodeRebuildsShapedInput(t *testing.T) {
 	// their presence is asserted rather than merely tolerated.
 	if in["Identities.member.1"] != "a" || in["Tags.entry.1.key"] != "k" {
 		t.Errorf("flat keys were removed: %#v", in)
+	}
+}
+
+// A map whose key and value carry xmlNames arrives under those names, not as
+// key and value: SQS's Attributes (xmlName Attribute, flattened, key Name,
+// value Value) is Attribute.1.Name and Attribute.1.Value on the wire, which is
+// how CreateQueue is told FifoQueue=true.
+func TestDecodeReadsMapEntryNames(t *testing.T) {
+	in := decodeForm(t, shapedService(), url.Values{
+		"Attribute.1.Name":     {"FifoQueue"},
+		"Attribute.1.Value":    {"true"},
+		"Attribute.2.Name":     {"VisibilityTimeout"},
+		"Attribute.2.Value":    {"45"},
+		"Labels.entry.1.k":     {"a"},
+		"Labels.entry.1.v":     {"b"},
+		"Labels.entry.2.key":   {"ignored"},
+		"Labels.entry.2.value": {"ignored"},
+	})
+
+	if got := in["Attributes"]; !reflect.DeepEqual(got, map[string]any{"FifoQueue": "true", "VisibilityTimeout": "45"}) {
+		t.Errorf("Attributes = %#v, want {FifoQueue:true VisibilityTimeout:45}", got)
+	}
+	if got := in["Labels"]; !reflect.DeepEqual(got, map[string]any{"a": "b"}) {
+		t.Errorf("Labels = %#v, want {a:b}: the entry's own names, and nothing under key/value", got)
 	}
 }
 

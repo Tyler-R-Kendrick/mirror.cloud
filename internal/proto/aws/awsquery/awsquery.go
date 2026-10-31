@@ -291,7 +291,9 @@ func listAt(svc *model.Service, shape model.Shape, prefix string, flat bool, for
 	return out, true
 }
 
-// mapAt reads an indexed map, whose entries carry an explicit key and value.
+// mapAt reads an indexed map, whose entries carry an explicit key and value,
+// each under its xmlName when the model gives one (SQS's Attribute.1.Name and
+// Attribute.1.Value) and as key and value otherwise.
 func mapAt(svc *model.Service, shape model.Shape, prefix string, flat bool, form url.Values, depth int) (any, bool) {
 	at := prefix
 	if !flat {
@@ -299,14 +301,21 @@ func mapAt(svc *model.Service, shape model.Shape, prefix string, flat bool, form
 	}
 	key := model.Member{Shape: shape.Key}
 	value := model.Member{Shape: shape.Member}
+	keyName, valueName := "key", "value"
+	if shape.KeyBinding.Name != "" {
+		keyName = shape.KeyBinding.Name
+	}
+	if shape.MemberBinding.Name != "" {
+		valueName = shape.MemberBinding.Name
+	}
 	out := map[string]any{}
 	for i := 1; ; i++ {
 		base := fmt.Sprintf("%s.%d", at, i)
-		k, found := valueAt(svc, key, base+".key", form, depth+1)
+		k, found := valueAt(svc, key, base+"."+keyName, form, depth+1)
 		if !found {
 			break
 		}
-		v, _ := valueAt(svc, value, base+".value", form, depth+1)
+		v, _ := valueAt(svc, value, base+"."+valueName, form, depth+1)
 		out[fmt.Sprint(k)] = v
 	}
 	if len(out) == 0 {

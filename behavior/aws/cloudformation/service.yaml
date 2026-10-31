@@ -137,10 +137,13 @@ operations:
       member: Stacks
       paginate: model
       key: "'StackName' in input ? string(input.StackName) : ''"
+    # StackStatusReason ("Success/failure message associated with the stack
+    # status") is the error a failed rollback or delete kept.
     output:
       Stacks: >-
-        items.map(s, {'StackName': s.Name, 'StackId': s.ID,
-          'StackStatus': s.Status, 'Outputs': s.Outputs})
+        items.map(s, merge({'StackName': s.Name, 'StackId': s.ID,
+          'StackStatus': s.Status, 'Outputs': s.Outputs},
+          'Reason' in s ? {'StackStatusReason': s.Reason} : {}))
 
   ListStacks:
     list:
@@ -170,7 +173,7 @@ operations:
       StackResourceSummaries: >-
         s.Resources.map(r, {'LogicalResourceId': r.Logical,
           'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
-          'ResourceStatus': 'CREATE_COMPLETE'})
+          'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'})
 
   DescribeStackEvents:
     reads:
@@ -199,8 +202,8 @@ operations:
         s.Resources.filter(r, r.Logical ==
           string(input.LogicalResourceId)).map(r, {'LogicalResourceId':
           r.Logical, 'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
-          'ResourceStatus': 'CREATE_COMPLETE', 'StackName': s.Name,
-          'StackId': s.ID})[0]
+          'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE',
+          'StackName': s.Name, 'StackId': s.ID})[0]
 
   UpdateTerminationProtection:
     reads:
@@ -229,7 +232,7 @@ operations:
       StackResources: >-
         s_found && 'Resources' in s && s.Resources != null
           ? s.Resources.map(r, {'LogicalResourceId': r.Logical, 'PhysicalResourceId': r.Physical,
-              'ResourceType': r.Type, 'ResourceStatus': 'CREATE_COMPLETE'})
+              'ResourceType': r.Type, 'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'})
           : []
 
   # The rollback family conjures a fresh record for an absent stack rather

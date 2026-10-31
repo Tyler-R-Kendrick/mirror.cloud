@@ -142,9 +142,26 @@ The oracle is AWS's documentation as it ships in the vendored model
     recorded the moment it exists, so one whose create failed partway (a
     bucket whose configuration S3 refused, a rule whose targets EventBridge
     refused) is deleted with the rest, and a create that failed outright
-    records nothing. The emulator keeps no
-    stack record for a failed create, so `DO_NOTHING` and `DELETE` are not
-    distinguished. A failed `UpdateStack` is not rolled back.
+    records nothing. `OnFailure` is not read, so every failed create rolls
+    back. A failed `UpdateStack` is not rolled back.
+  - A failed create keeps its stack, `ROLLBACK_COMPLETE` once the rollback
+    has deleted everything it made. The name stays taken (`CreateStack` is
+    `AlreadyExistsException`; `UpdateStack` is `ValidationError`, "Stack:...
+    is in ROLLBACK_COMPLETE state and can not be updated.") until
+    `DeleteStack` removes the stack ("Deleted stacks don't show up in the
+    DescribeStacks operation if the deletion has been completed
+    successfully"). A resource the rollback cannot delete stays listed by
+    `DescribeStackResources` as `DELETE_FAILED`, the stack is
+    `ROLLBACK_FAILED`, and the service's error is its `StackStatusReason`
+    ("Success/failure message associated with the stack status");
+    `DeleteStack` tries the resource again. A `DeleteStack` that cannot delete
+    a resource likewise leaves the stack `DELETE_FAILED`, listing what is
+    left, and answers the service's error at once, as this emulator's
+    `CreateStack` answers a provisioning error, where CloudFormation would
+    report it only in the stack's status. A resource already gone (its
+    service's not-found error) counts as deleted. Before, a failed create left
+    no stack, and `DeleteStack` dropped every delete error and removed the
+    stack whatever was left.
   - `GenerateSecretString` makes the value with `GetRandomPassword`'s generator,
     seeded by the stack id and logical id, and puts it under `GenerateStringKey`
     in `SecretStringTemplate` when the template gives one. `SecretString` beside

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"maps"
 	"net/url"
@@ -114,16 +115,18 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 
 type stack struct {
 	Name, ID, Status, Template string
+	Reason                     string `json:",omitempty"` // StackStatusReason
 	Resources                  []res
 	Outputs                    []any
 	Refs                       map[string]string
 	Protect                    bool
 }
 
-// res is a resource a stack made, and the name it was made under.
+// res is a resource a stack made, the name it was made under and, once a
+// delete of it failed, DELETE_FAILED.
 type res struct {
 	Logical, Physical, Type string
-	Name                    string `json:",omitempty"`
+	Name, Status            string `json:",omitempty"`
 }
 
 func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool) (*spi.Response, error) {
@@ -144,6 +147,8 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	var old stack // what an update finds already provisioned
 	if found, err := p.load(ctx, req, name); err == nil && !update {
 		return nil, fault("AlreadyExistsException", "Stack ["+name+"] already exists")
+	} else if err == nil && (strings.HasPrefix(found.Status, "ROLLBACK_") || found.Status == "DELETE_FAILED") {
+		return nil, invalid("Stack:" + found.ID + " is in " + found.Status + " state and can not be updated.")
 	} else if err == nil {
 		old, id = found, found.ID
 	}
@@ -152,21 +157,25 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	if update {
 		st.Status = "UPDATE_COMPLETE"
 	}
+	fail := func(err error) (*spi.Response, error) {
+		if !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack
+			_ = p.unwind(ctx, req, st, "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
+		}
+		return nil, err
+	}
 	resources, _ := tpl["Resources"].(map[string]any)
 	order := slices.Sorted(maps.Keys(resources))
 	for _, logical := range order { // a name taken fails the stack before anything is made
 		rm := asMap(resources[logical])
 		if _, err := p.claim(ctx, req, st, old, logical, str(rm["Type"]), asMap(p.resolve(rm["Properties"], st.Refs, req, name))); err != nil {
-			return nil, err
+			return fail(err)
 		}
 	}
 	for _, logical := range order {
 		rm, _ := resources[logical].(map[string]any)
 		typ := str(rm["Type"])
-		props, _ := p.resolve(rm["Properties"], st.Refs, req, name).(map[string]any)
-		if props == nil {
-			props = map[string]any{}
-		}
+		props := map[string]any{}
+		maps.Copy(props, asMap(p.resolve(rm["Properties"], st.Refs, req, name)))
 		phys, n, err := "", "", error(nil)
 		if n, err = p.claim(ctx, req, st, old, logical, typ, props); err == nil { // again: a name may come from a resource made before it
 			phys, err = p.provision(ctx, req, typ, logical, n, props, old.Refs[logical], id)
@@ -176,18 +185,12 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			st.Resources = append(st.Resources, res{Logical: logical, Physical: phys, Type: typ, Name: n})
 		}
 		if err != nil {
-			if !update { // a failed create rolls back what it made: OnFailure ROLLBACK, the default
-				p.deprovision(ctx, req, st.Resources...)
-			}
-			return nil, err
+			return fail(err)
 		}
 	}
-	if outs, ok := tpl["Outputs"].(map[string]any); ok {
-		for _, k := range slices.Sorted(maps.Keys(outs)) {
-			om, _ := outs[k].(map[string]any)
-			val := p.resolve(om["Value"], st.Refs, req, name)
-			st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": val})
-		}
+	outs := asMap(tpl["Outputs"])
+	for _, k := range slices.Sorted(maps.Keys(outs)) {
+		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)})
 	}
 	raw, _ := json.Marshal(st)
 	_ = p.col(req, "cfn").Put(ctx, name, raw)
@@ -234,9 +237,35 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 	if st.Protect {
 		return nil, invalid("stack has termination protection")
 	}
-	p.deprovision(ctx, req, st.Resources...)
-	_ = p.col(req, "cfn").Delete(ctx, name)
+	if err := p.unwind(ctx, req, st, "DELETE_COMPLETE", "DELETE_FAILED"); err != nil {
+		return nil, err
+	}
 	return &spi.Response{Output: map[string]any{}}, nil
+}
+
+// unwind deletes a stack's resources, newest first, as a rollback or a
+// DeleteStack does, and records the outcome. With nothing left the stack is
+// done (a DELETE_COMPLETE stack is removed); otherwise it is failed, the
+// resources left listed as DELETE_FAILED for the next DeleteStack to try
+// again and the first error, which unwind answers, its StackStatusReason.
+func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, done, failed string) error {
+	var left []res
+	var first error
+	for _, r := range slices.Backward(st.Resources) {
+		if err := p.deprovision(ctx, req, r); err != nil {
+			r.Status, first = "DELETE_FAILED", cmp.Or(first, err)
+			left = append([]res{r}, left...)
+		}
+	}
+	st.Resources, st.Status, st.Reason = left, done, ""
+	if first != nil {
+		st.Status, st.Reason = failed, first.Error()
+	}
+	if st.Status == "DELETE_COMPLETE" {
+		return p.col(req, "cfn").Delete(ctx, st.Name)
+	}
+	raw, _ := json.Marshal(st)
+	return cmp.Or(first, p.col(req, "cfn").Put(ctx, st.Name, raw))
 }
 
 func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, error) {
@@ -420,35 +449,38 @@ func made(id string, err error) (string, error) {
 	return id, nil
 }
 
-// deprovision deletes resources through their owners, newest first. Failures
-// are ignored, as a stack delete proceeds past a resource that is already gone.
-func (p *Pack) deprovision(ctx context.Context, req *spi.Request, rs ...res) {
-	for i := len(rs) - 1; i >= 0; i-- {
-		r := rs[i]
-		id := r.Physical
-		del := map[string]struct {
-			svc, op string
-			in      map[string]any
-		}{
-			"AWS::S3::Bucket":              {"aws.s3", "DeleteBucket", map[string]any{"Bucket": id}},
-			"AWS::SQS::Queue":              {"aws.sqs", "DeleteQueue", map[string]any{"QueueUrl": id}},
-			"AWS::SNS::Topic":              {"aws.sns", "DeleteTopic", map[string]any{"TopicArn": id}},
-			"AWS::DynamoDB::Table":         {"aws.dynamodb", "DeleteTable", map[string]any{"TableName": id}},
-			"AWS::IAM::Role":               {"aws.iam", "DeleteRole", map[string]any{"RoleName": lastSlash(id)}},
-			"AWS::SSM::Parameter":          {"aws.ssm", "DeleteParameter", map[string]any{"Name": id}},
-			"AWS::SecretsManager::Secret":  {"aws.secretsmanager", "DeleteSecret", map[string]any{"SecretId": id, "ForceDeleteWithoutRecovery": true}},
-			"AWS::KMS::Key":                {"aws.kms", "ScheduleKeyDeletion", map[string]any{"KeyId": id, "PendingWindowInDays": 7}},
-			"AWS::Logs::LogGroup":          {"aws.logs", "DeleteLogGroup", map[string]any{"logGroupName": id}},
-			"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": lastSlash(id), "Force": true}},
-			"AWS::Lambda::Function":        {"aws.lambda", "DeleteFunction", map[string]any{"FunctionName": lastColon(id)}},
-			"AWS::Kinesis::Stream":         {"aws.kinesis", "DeleteStream", map[string]any{"StreamName": id}},
-			"AWS::Kinesis::ResourcePolicy": {"aws.kinesis", "DeleteResourcePolicy", map[string]any{"ResourceARN": id}},
-			"AWS::ApiGateway::RestApi":     {"aws.apigateway", "DeleteRestApi", map[string]any{"restApiId": id}},
-		}[r.Type]
-		if del.svc != "" {
-			_, _ = p.call(ctx, req, del.svc, del.op, del.in)
-		}
+// deprovision deletes a resource through its owner. One already gone (the
+// owner's not-found error) counts as deleted, as a stack delete proceeds past it.
+func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) error {
+	id := r.Physical
+	del := map[string]struct {
+		svc, op string
+		in      map[string]any
+	}{
+		"AWS::S3::Bucket":              {"aws.s3", "DeleteBucket", map[string]any{"Bucket": id}},
+		"AWS::SQS::Queue":              {"aws.sqs", "DeleteQueue", map[string]any{"QueueUrl": id}},
+		"AWS::SNS::Topic":              {"aws.sns", "DeleteTopic", map[string]any{"TopicArn": id}},
+		"AWS::DynamoDB::Table":         {"aws.dynamodb", "DeleteTable", map[string]any{"TableName": id}},
+		"AWS::IAM::Role":               {"aws.iam", "DeleteRole", map[string]any{"RoleName": lastSlash(id)}},
+		"AWS::SSM::Parameter":          {"aws.ssm", "DeleteParameter", map[string]any{"Name": id}},
+		"AWS::SecretsManager::Secret":  {"aws.secretsmanager", "DeleteSecret", map[string]any{"SecretId": id, "ForceDeleteWithoutRecovery": true}},
+		"AWS::KMS::Key":                {"aws.kms", "ScheduleKeyDeletion", map[string]any{"KeyId": id, "PendingWindowInDays": 7}},
+		"AWS::Logs::LogGroup":          {"aws.logs", "DeleteLogGroup", map[string]any{"logGroupName": id}},
+		"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": lastSlash(id), "Force": true}},
+		"AWS::Lambda::Function":        {"aws.lambda", "DeleteFunction", map[string]any{"FunctionName": lastColon(id)}},
+		"AWS::Kinesis::Stream":         {"aws.kinesis", "DeleteStream", map[string]any{"StreamName": id}},
+		"AWS::Kinesis::ResourcePolicy": {"aws.kinesis", "DeleteResourcePolicy", map[string]any{"ResourceARN": id}},
+		"AWS::ApiGateway::RestApi":     {"aws.apigateway", "DeleteRestApi", map[string]any{"restApiId": id}},
+	}[r.Type]
+	if del.svc == "" {
+		return nil
 	}
+	_, err := p.call(ctx, req, del.svc, del.op, del.in)
+	var f *spi.Fault
+	if errors.As(err, &f) && (strings.Contains(f.Code, "NotFound") || strings.Contains(f.Code, "NoSuch") || strings.Contains(f.Code, "NonExistent")) {
+		return nil
+	}
+	return err
 }
 
 // call invokes another service the way the edge would: through whatever the
@@ -553,10 +585,7 @@ func fault(code, message string) *spi.Fault {
 	return &spi.Fault{Code: code, Message: message, HTTPStatus: 400, Fault: "client"}
 }
 
-func asMap(v any) map[string]any {
-	m, _ := v.(map[string]any)
-	return m
-}
+func asMap(v any) map[string]any { m, _ := v.(map[string]any); return m }
 
 // jsonText answers a policy-like property as the JSON text an API takes; a
 // template may give it as an object or as a string already.
@@ -622,11 +651,7 @@ func (p *Pack) getAtt(g any, refs map[string]string, req *spi.Request) string {
 	var logical, attr string
 	switch t := g.(type) {
 	case string:
-		parts := strings.SplitN(t, ".", 2)
-		logical = parts[0]
-		if len(parts) > 1 {
-			attr = parts[1]
-		}
+		logical, attr, _ = strings.Cut(t, ".")
 	case []any:
 		if len(t) > 0 {
 			logical = str(t[0])
@@ -705,14 +730,10 @@ func parseTemplate(body string) (map[string]any, error) {
 func formParams(in map[string]any) map[string]string {
 	keys, vals := map[string]string{}, map[string]string{}
 	for k, v := range in {
-		if !strings.HasPrefix(k, "Parameters.member.") {
-			continue
-		}
-		if strings.HasSuffix(k, ".ParameterKey") {
-			keys[strings.TrimSuffix(k, ".ParameterKey")] = str(v)
-		}
-		if strings.HasSuffix(k, ".ParameterValue") {
-			vals[strings.TrimSuffix(k, ".ParameterValue")] = str(v)
+		if pfx, ok := strings.CutSuffix(k, ".ParameterKey"); ok && strings.HasPrefix(k, "Parameters.member.") {
+			keys[pfx] = str(v)
+		} else if pfx, ok := strings.CutSuffix(k, ".ParameterValue"); ok && strings.HasPrefix(k, "Parameters.member.") {
+			vals[pfx] = str(v)
 		}
 	}
 	out := map[string]string{}
@@ -723,14 +744,11 @@ func formParams(in map[string]any) map[string]string {
 }
 
 func mergeParamDefaults(tpl map[string]any, params map[string]string) {
-	pm, _ := tpl["Parameters"].(map[string]any)
-	for k, v := range pm {
-		if _, ok := params[k]; ok {
-			continue
-		}
-		m, _ := v.(map[string]any)
-		if d, ok := m["Default"]; ok {
-			params[k] = str(d)
+	for k, v := range asMap(tpl["Parameters"]) {
+		if _, given := params[k]; !given {
+			if d, ok := asMap(v)["Default"]; ok {
+				params[k] = str(d)
+			}
 		}
 	}
 }
@@ -751,10 +769,7 @@ func advertise(req *spi.Request) string {
 	return "http://127.0.0.1:4566"
 }
 
-func str(v any) string {
-	s, _ := v.(string)
-	return s
-}
+func str(v any) string { s, _ := v.(string); return s }
 
 func lastSlash(s string) string { return s[strings.LastIndex(s, "/")+1:] }
 

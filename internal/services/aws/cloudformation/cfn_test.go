@@ -625,7 +625,8 @@ func TestCloudFormationNamesAnUnnamedSecretForItsStack(t *testing.T) {
 // A CreateStack that fails rolls back what it had created, as CloudFormation
 // does by default (OnFailure ROLLBACK). Rolled-back resources are deleted the
 // way DeleteStack deletes them -- a secret without a recovery window -- so a
-// later stack can take their names.
+// later stack can take their names; the stack itself stays, ROLLBACK_COMPLETE,
+// until DeleteStack removes it.
 func TestCloudFormationAFailedCreateRollsBack(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := bundled.Handler("aws.cloudformation", deps)
@@ -648,9 +649,21 @@ func TestCloudFormationAFailedCreateRollsBack(t *testing.T) {
 	if err := owned("aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "rq"}); err == nil {
 		t.Error("the failed stack's queue is still there")
 	}
+	// The rolled-back stack keeps its name until DeleteStack removes it; a
+	// stack of another name can take the names its resources had.
 	retry := `{"Resources":{"Secret":{"Type":"AWS::SecretsManager::Secret","Properties":{"Name":"retry","SecretString":"v"}}}}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "r", "TemplateBody": retry}}); err == nil {
+		t.Fatal("re-creating r before DeleteStack removed the rolled-back stack succeeded")
+	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "r2", "TemplateBody": retry}}); err != nil {
-		t.Fatalf("re-creating after the rollback: %v", err)
+		t.Fatalf("creating r2 after the rollback: %v", err)
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteStack", Input: map[string]any{"StackName": "r"}}); err != nil {
+		t.Fatalf("DeleteStack of the rolled-back r: %v", err)
+	}
+	unnamed := `{"Resources":{"Secret":{"Type":"AWS::SecretsManager::Secret","Properties":{"SecretString":"v"}}}}`
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "r", "TemplateBody": unnamed}}); err != nil {
+		t.Fatalf("re-creating r after DeleteStack: %v", err)
 	}
 }
 

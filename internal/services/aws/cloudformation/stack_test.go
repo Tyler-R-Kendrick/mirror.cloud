@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"reflect"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -18,6 +20,7 @@ import (
 // through, in one account and region.
 type stacks struct {
 	t    *testing.T
+	deps spi.Deps
 	cfn  spi.Handler
 	pack *Pack
 	ctx  context.Context
@@ -26,8 +29,45 @@ type stacks struct {
 
 func newStacks(t *testing.T) *stacks {
 	deps := spitest.Deps(t)
-	return &stacks{t: t, cfn: bundled.Handler("aws.cloudformation", deps), pack: New(deps), ctx: context.Background(),
+	return &stacks{t: t, deps: deps, cfn: bundled.Handler("aws.cloudformation", deps), pack: New(deps), ctx: context.Background(),
 		id: spi.Identity{Account: "000000000000", Region: "us-east-1"}}
+}
+
+// status answers DescribeStacks' StackStatus and StackStatusReason for the stack.
+func (h *stacks) status(stack string) (status, reason string, err error) {
+	out, err := h.invoke("DescribeStacks", map[string]any{"StackName": stack})
+	if err != nil {
+		return "", "", err
+	}
+	st := out["Stacks"].([]any)[0].(map[string]any)
+	return str(st["StackStatus"]), str(st["StackStatusReason"]), nil
+}
+
+// statuses answers each listed resource's ResourceStatus, by logical id.
+func (h *stacks) statuses(stack string) map[string]string {
+	h.t.Helper()
+	out, err := h.invoke("DescribeStackResources", map[string]any{"StackName": stack})
+	if err != nil {
+		h.t.Fatalf("DescribeStackResources %s: %v", stack, err)
+	}
+	m := map[string]string{}
+	for _, raw := range out["StackResources"].([]any) {
+		m[str(raw.(map[string]any)["LogicalResourceId"])] = str(raw.(map[string]any)["ResourceStatus"])
+	}
+	return m
+}
+
+// fill puts an object in the bucket, which S3 then refuses to delete.
+func (h *stacks) fill(bucket string, put bool) {
+	h.t.Helper()
+	in := map[string]any{"Bucket": bucket, "Key": "k"}
+	op, body := "DeleteObject", io.ReadCloser(nil)
+	if put {
+		op, body = "PutObject", io.NopCloser(strings.NewReader("x"))
+	}
+	if _, err := s3.New(h.deps).Invoke(h.ctx, &spi.Request{Identity: h.id, Operation: op, Input: in, Body: body}); err != nil {
+		h.t.Fatalf("%s %s: %v", op, bucket, err)
+	}
 }
 
 func (h *stacks) invoke(op string, in map[string]any) (map[string]any, error) {
@@ -384,5 +424,123 @@ func TestCloudFormationCreateStackRefusesAStackThatExists(t *testing.T) {
 	queues, _ := h.service("aws.sqs", "ListQueues", map[string]any{})
 	if n, q := len(secrets["SecretList"].([]any)), queues["QueueUrls"]; n != 1 || q != nil && len(q.([]any)) != 0 {
 		t.Errorf("after the refused CreateStack there are %d secrets and queues %v, want dup's one secret and no queue", n, q)
+	}
+}
+
+// A failed CreateStack keeps its stack: ROLLBACK_COMPLETE once the rollback
+// has deleted what it made, holding its name -- a CreateStack of it is
+// AlreadyExistsException and an UpdateStack ValidationError ("can not be
+// updated") -- until DeleteStack removes it, after which the name is free.
+// Before, a failed create left no stack at all.
+func TestCloudFormationAFailedCreateLeavesARolledBackStack(t *testing.T) {
+	h := newStacks(t)
+	all := nameable()
+	failing := map[string]map[string]any{"Queue": all["Queue"], "ZZZ": {"Type": "AWS::Nope::Thing"}}
+	if err := h.create("rb", failing); err == nil {
+		t.Fatal("a template with an unsupported resource type was created")
+	}
+	if status, _, err := h.status("rb"); status != "ROLLBACK_COMPLETE" || err != nil {
+		t.Fatalf("after the failed create rb is %q (%v), want ROLLBACK_COMPLETE", status, err)
+	}
+	if left := h.statuses("rb"); len(left) != 0 {
+		t.Errorf("the rolled-back stack still lists %v", left)
+	}
+	valid := map[string]map[string]any{"Secret": all["Secret"]}
+	if err := h.create("rb", valid); code(err) != "AlreadyExistsException" {
+		t.Errorf("CreateStack of the rolled-back rb answered %v, want AlreadyExistsException", err)
+	}
+	tpl, _ := json.Marshal(map[string]any{"Resources": valid})
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "rb", "TemplateBody": string(tpl)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "ROLLBACK_COMPLETE state and can not be updated") {
+		t.Errorf("UpdateStack of the rolled-back rb answered %v, want ValidationError", err)
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "rb"}); err != nil {
+		t.Fatalf("DeleteStack rb: %v", err)
+	}
+	if _, _, err := h.status("rb"); code(err) != "ValidationError" {
+		t.Errorf("DescribeStacks after DeleteStack answered %v, want ValidationError (no such stack)", err)
+	}
+	h.mustCreate("rb", valid)
+}
+
+// A DeleteStack that cannot delete a resource -- a bucket S3 refuses to
+// delete while it holds an object -- keeps the stack, DELETE_FAILED, with the
+// resource listed as DELETE_FAILED and S3's error as StackStatusReason
+// ("Success/failure message associated with the stack status"), and answers
+// that error. The next DeleteStack tries it again. Before, the error was
+// dropped, the stack record deleted and the bucket left behind with no stack.
+func TestCloudFormationADeleteThatFailsKeepsItsStack(t *testing.T) {
+	h := newStacks(t)
+	all := nameable()
+	h.mustCreate("keep", map[string]map[string]any{"Bucket": all["Bucket"], "Queue": all["Queue"]})
+	var bucket string
+	for _, r := range h.resources("keep") {
+		if r.Logical == "Bucket" {
+			bucket = r.Physical
+		}
+	}
+	h.fill(bucket, true)
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "keep"}); code(err) != "BucketNotEmpty" {
+		t.Errorf("DeleteStack of a stack whose bucket holds an object answered %v, want S3's BucketNotEmpty", err)
+	}
+	if status, reason, err := h.status("keep"); status != "DELETE_FAILED" || !strings.Contains(reason, "BucketNotEmpty") || err != nil {
+		t.Errorf("after the failed delete keep is %q, reason %q (%v), want DELETE_FAILED with S3's error", status, reason, err)
+	}
+	if left := h.statuses("keep"); !reflect.DeepEqual(left, map[string]string{"Bucket": "DELETE_FAILED"}) {
+		t.Errorf("after the failed delete keep lists %v, want only its bucket, DELETE_FAILED", left)
+	}
+	h.fill(bucket, false)
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "keep"}); err != nil {
+		t.Fatalf("DeleteStack again: %v", err)
+	}
+	if _, _, err := h.status("keep"); code(err) != "ValidationError" {
+		t.Errorf("DescribeStacks after the second DeleteStack answered %v, want ValidationError (no such stack)", err)
+	}
+	if _, err := h.service("aws.s3", "HeadBucket", map[string]any{"Bucket": bucket}); err == nil {
+		t.Error("the second DeleteStack left the bucket")
+	}
+}
+
+// A rollback that cannot delete a resource leaves the stack ROLLBACK_FAILED,
+// with the resource listed as DELETE_FAILED and the error as
+// StackStatusReason, and DeleteStack tries the resource again. Here an
+// object lands in the stack's bucket before its rollback runs, so S3 refuses
+// to delete the bucket; it is written into S3's store ahead of the create,
+// since nothing runs between a create and its rollback here.
+func TestCloudFormationARollbackThatFailsLeavesItsStack(t *testing.T) {
+	h := newStacks(t)
+	objects := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("objects")
+	if err := objects.Put(h.ctx, "landed/k", []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	bucket := map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "landed"}}
+	if err := h.create("rf", map[string]map[string]any{"Bucket": bucket, "ZZZ": {"Type": "AWS::Nope::Thing"}}); code(err) != "ValidationError" {
+		t.Fatalf("the create answered %v, want its own ValidationError for the unsupported type", err)
+	}
+	if status, reason, err := h.status("rf"); status != "ROLLBACK_FAILED" || !strings.Contains(reason, "BucketNotEmpty") || err != nil {
+		t.Errorf("rf is %q, reason %q (%v), want ROLLBACK_FAILED with S3's error", status, reason, err)
+	}
+	if left := h.statuses("rf"); !reflect.DeepEqual(left, map[string]string{"Bucket": "DELETE_FAILED"}) {
+		t.Errorf("rf lists %v, want its bucket, DELETE_FAILED", left)
+	}
+	if err := h.create("rf", map[string]map[string]any{"Q": nameable()["Queue"]}); code(err) != "AlreadyExistsException" {
+		t.Errorf("CreateStack of the ROLLBACK_FAILED rf answered %v, want AlreadyExistsException", err)
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "rf"}); code(err) != "BucketNotEmpty" {
+		t.Errorf("DeleteStack of rf while its bucket holds an object answered %v, want BucketNotEmpty", err)
+	}
+	if status, _, _ := h.status("rf"); status != "DELETE_FAILED" {
+		t.Errorf("rf is %q after the refused delete, want DELETE_FAILED", status)
+	}
+	if err := objects.Delete(h.ctx, "landed/k"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "rf"}); err != nil {
+		t.Fatalf("DeleteStack rf: %v", err)
+	}
+	if _, err := h.service("aws.s3", "HeadBucket", map[string]any{"Bucket": "landed"}); err == nil {
+		t.Error("DeleteStack left the bucket the rollback could not delete")
+	}
+	if _, _, err := h.status("rf"); code(err) != "ValidationError" {
+		t.Errorf("DescribeStacks after DeleteStack answered %v, want ValidationError (no such stack)", err)
 	}
 }

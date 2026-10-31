@@ -1066,6 +1066,27 @@
       }
     },
     {
+      "operation": "RemoveTargets",
+      "input": {
+        "Ids": [
+          "t1"
+        ],
+        "Rule": "r1"
+      },
+      "identity": {
+        "Account": "000000000000",
+        "Region": "us-east-1",
+        "AccessKeyID": "",
+        "ARN": "",
+        "Project": ""
+      },
+      "output": {
+        "FailedEntries": [],
+        "FailedEntryCount": 0
+      },
+      "recut": "Added: DeleteRule's reference says \"Before you can delete the rule, you must remove all targets, using RemoveTargets\", and r1 still holds t1 (step 13), so its last target is removed before the delete at step 51."
+    },
+    {
       "operation": "DeleteRule",
       "input": {
         "Name": "r1"

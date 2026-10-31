@@ -236,6 +236,17 @@ The oracle is AWS's documentation as it ships in the vendored model
     that take a name or id (`DescribeStacks` and the rest above) and
     `UpdateStack` and `DeleteStack` check the same pattern. Before, those
     operations took any name, and the reads admitted any `arn:` text.
+  - "Before you can delete the rule, you must remove all targets, using
+    RemoveTargets" (EventBridge, `DeleteRule`), and `Force` "is ignored for
+    rules that are not managed rules". So EventBridge's `DeleteRule` of a rule
+    that still has targets is `ValidationException` ("Rule can't be deleted
+    since it has targets.") and deletes nothing, and CloudFormation removes a
+    rule's targets with `RemoveTargets` before it deletes the rule, on
+    `DeleteStack`, on a rollback and on an update's cleanup, and no longer
+    passes `Force`. A later rule of that name starts with no targets. The
+    EventBridge trace gains a `RemoveTargets` of `r1`'s last target before its
+    delete (step 50). Before, `DeleteRule` deleted a rule and kept its
+    targets, which a new rule of the name inherited.
   - A rule whose targets EventBridge did not all add fails. `PutTargets` "can
     partially fail ... FailedEntryCount is non-zero in the response and each
     entry in FailedEntries provides the ID of the failed target and the error

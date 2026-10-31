@@ -1461,3 +1461,48 @@ func TestCloudFormationHoldsAStackNameOrIdToItsPattern(t *testing.T) {
 		}
 	}
 }
+
+// "Before you can delete the rule, you must remove all targets, using
+// RemoveTargets" (EventBridge, DeleteRule), and Force "is ignored for rules
+// that are not managed rules". So EventBridge refuses to delete a rule that
+// still has targets, with ValidationException, and CloudFormation removes a
+// rule's targets before it deletes the rule, on DeleteStack and on a create's
+// rollback alike. A later rule of that name starts with no targets. Before,
+// DeleteRule deleted a rule and kept its targets, and a new rule of the name
+// inherited them.
+func TestCloudFormationARuleLeavesNoTargets(t *testing.T) {
+	h := newStacks(t)
+	events := func(op string, in map[string]any) (map[string]any, error) { return h.service("aws.events", op, in) }
+	target := []any{map[string]any{"Id": "t", "Arn": "arn:aws:sqs:us-east-1:000000000000:q"}}
+	if _, err := events("PutRule", map[string]any{"Name": "direct", "ScheduleExpression": "rate(1 hour)"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := events("PutTargets", map[string]any{"Rule": "direct", "Targets": target}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := events("DeleteRule", map[string]any{"Name": "direct", "Force": true}); code(err) != "ValidationException" {
+		t.Errorf("DeleteRule of a rule with targets answered %v, want ValidationException", err)
+	}
+	none := func(rule string) bool {
+		t.Helper()
+		out, err := events("ListTargetsByRule", map[string]any{"Rule": rule})
+		return err != nil || len(asMap(out)["Targets"].([]any)) == 0
+	}
+	rule := map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"Name": "cfn-rule", "ScheduleExpression": "rate(1 hour)", "Targets": target}}
+	h.mustCreate("rules", map[string]map[string]any{"R": rule})
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "rules"}); err != nil {
+		t.Fatalf("DeleteStack: %v", err)
+	}
+	if !none("cfn-rule") {
+		t.Error("DeleteStack left the rule's targets")
+	}
+	if err := h.create("rolled", map[string]map[string]any{"R": rule, "Z": {"Type": "AWS::Nothing::Here"}}); err == nil {
+		t.Fatal("a stack with an unsupported type was created")
+	}
+	if !none("cfn-rule") {
+		t.Error("the rollback left the rule's targets")
+	}
+	if _, err := events("PutRule", map[string]any{"Name": "cfn-rule", "ScheduleExpression": "rate(2 hours)"}); err != nil || !none("cfn-rule") {
+		t.Errorf("a new rule of the name holds targets (%v)", err)
+	}
+}

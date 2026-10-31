@@ -341,7 +341,7 @@ var kinds = map[string]kind{
 	"AWS::SecretsManager::Secret":  {"Name", 512, "aws.secretsmanager DescribeSecret SecretId={n}", "ResourceExistsException", "arn:aws:secretsmanager:{r}:{a}:secret:{n}", "aws.secretsmanager CreateSecret Name={n} SecretString=$SecretString Description=$Description", "ARN", "aws.secretsmanager UpdateSecret SecretId={id} SecretString=$SecretString Description=$Description", "aws.secretsmanager DeleteSecret SecretId={id} ForceDeleteWithoutRecovery=true"},
 	"AWS::KMS::Key":                {"", 0, "", "", "", "aws.kms CreateKey Description= Description=$Description", "KeyMetadata.KeyId", "", "aws.kms ScheduleKeyDeletion KeyId={id} PendingWindowInDays=7"},
 	"AWS::Logs::LogGroup":          {"LogGroupName", 512, "aws.logs DescribeLogGroups logGroupNamePrefix={n}", "ResourceAlreadyExistsException", "{n}", "aws.logs CreateLogGroup logGroupName={n}", "logGroupName", "", "aws.logs DeleteLogGroup logGroupName={id}"},
-	"AWS::Events::Rule":            {"Name", 64, "aws.events DescribeRule Name={n} EventBusName=$EventBusName", "ResourceAlreadyExistsException", "arn:aws:events:{r}:{a}:rule/{n}", "aws.events PutRule Name={n} ScheduleExpression=$ScheduleExpression State=$State Description=$Description EventBusName=$EventBusName EventPattern=%EventPattern", "RuleArn", "", "aws.events DeleteRule Name={id/} Force=true EventBusName={bus}"},
+	"AWS::Events::Rule":            {"Name", 64, "aws.events DescribeRule Name={n} EventBusName=$EventBusName", "ResourceAlreadyExistsException", "arn:aws:events:{r}:{a}:rule/{n}", "aws.events PutRule Name={n} ScheduleExpression=$ScheduleExpression State=$State Description=$Description EventBusName=$EventBusName EventPattern=%EventPattern", "RuleArn", "", "aws.events DeleteRule Name={id/} EventBusName={bus}"},
 	"AWS::Lambda::Function":        {"FunctionName", 64, "aws.lambda GetFunction FunctionName={n}", "ResourceConflictException", "arn:aws:lambda:{r}:{a}:function:{n}", "aws.lambda CreateFunction * FunctionName={n}", "FunctionArn", "", "aws.lambda DeleteFunction FunctionName={id:}"},
 	"AWS::Kinesis::Stream":         {"Name", 128, "aws.kinesis DescribeStreamSummary StreamName={n}", "ResourceInUseException", "{n}", "aws.kinesis CreateStream StreamName={n}", "StreamName", "", "aws.kinesis DeleteStream StreamName={id}"},
 	"AWS::Kinesis::ResourcePolicy": {"", 0, "", "", "", "aws.kinesis PutResourcePolicy ResourceARN=$ResourceARN ResourceARN=$ResourceArn Policy=%Policy Policy=%ResourcePolicy", "ResourceARN", "", "aws.kinesis DeleteResourcePolicy ResourceARN={id}"},
@@ -534,11 +534,33 @@ func ruleBus(arn string) string {
 
 // deprovision deletes a resource through its owner. One already gone (the
 // owner's not-found error) counts as deleted, as a stack delete proceeds past it.
-func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) error {
-	_, err := p.do(ctx, req, kinds[r.Type].del, "", r.Physical, nil)
+func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) (err error) {
+	if r.Type == "AWS::Events::Rule" {
+		err = p.dropTargets(ctx, req, r.Physical, nil)
+	}
+	if err == nil {
+		_, err = p.do(ctx, req, kinds[r.Type].del, "", r.Physical, nil)
+	}
 	var f *spi.Fault
 	if errors.As(err, &f) && (strings.Contains(f.Code, "NotFound") || strings.Contains(f.Code, "NoSuch") || strings.Contains(f.Code, "NonExistent")) {
 		return nil
+	}
+	return err
+}
+
+// dropTargets removes the rule's targets but those keep names: all of them before the rule is deleted
+// ("Before you can delete the rule, you must remove all targets, using RemoveTargets", EventBridge).
+func (p *Pack) dropTargets(ctx context.Context, req *spi.Request, rule string, keep []any) error {
+	listed, err := p.do(ctx, req, "aws.events ListTargetsByRule Rule={id/} EventBusName={bus}", "", rule, nil)
+	targets, _ := listed["Targets"].([]any)
+	var ids []any
+	for _, t := range targets {
+		if !slices.ContainsFunc(keep, func(k any) bool { return str(asMap(k)["Id"]) == str(asMap(t)["Id"]) }) {
+			ids = append(ids, asMap(t)["Id"])
+		}
+	}
+	if len(ids) > 0 && err == nil {
+		_, err = p.do(ctx, req, "aws.events RemoveTargets Rule={id/} EventBusName={bus} Ids", "", rule, map[string]any{"Ids": ids})
 	}
 	return err
 }

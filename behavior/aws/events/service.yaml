@@ -85,6 +85,7 @@ errors:
   RuleNotFound: { code: ResourceNotFoundException, http: 400, fault: client, message: Rule does not exist. }
   NotFound: { code: ResourceNotFoundException, http: 400, fault: client }
   Exists: { code: ResourceAlreadyExistsException, http: 400, fault: client }
+  HasTargets: { code: ValidationException, http: 400, fault: client, message: "Rule can't be deleted since it has targets." }
 
 operations:
   # --- rules and targets -----------------------------------------------------
@@ -128,7 +129,19 @@ operations:
         'State': r.State, 'Description': 'Description' in r ? r.Description : null,
         'EventBusName': 'EventBusName' in r ? r.EventBusName : null})
 
+  # "Before you can delete the rule, you must remove all targets, using
+  # RemoveTargets." Force is for managed rules ("This parameter is ignored for
+  # rules that are not managed rules"), so it deletes no targets.
   DeleteRule:
+    reads:
+      t:
+        resource: targets
+        key: >-
+          ('EventBusName' in input && string(input.EventBusName) != ''
+          ? (string(input.EventBusName).contains(':event-bus/') ? split(string(input.EventBusName), ':event-bus/')[1] : string(input.EventBusName))
+          : 'default') + '\x00' + ('Name' in input ? string(input.Name) : '')
+    require:
+      - { cond: "!t_found || size(t.Targets) == 0", error: HasTargets }
     effects:
       - delete: { resource: rule, missing: ignore }
     output: {}

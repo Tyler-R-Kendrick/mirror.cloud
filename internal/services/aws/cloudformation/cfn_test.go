@@ -566,3 +566,51 @@ func TestCloudFormationSecretWithoutAValue(t *testing.T) {
 		t.Fatalf("GetSecretValue of a secret the template gave no value: want ResourceNotFoundException, got %v", err)
 	}
 }
+
+// A secret a template does not name is named for its stack, as CloudFormation
+// names it: <stack>-<logical id>-<suffix>, the suffix taken from the stack id
+// so a stack is reproducible. Two stacks from one template each get their own
+// secret, which a second CreateSecret of one bare logical id refused.
+func TestCloudFormationNamesAnUnnamedSecretForItsStack(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := bundled.Handler("aws.cloudformation", deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	template := func(value string) string {
+		return `{"Resources":{"Secret":{"Type":"AWS::SecretsManager::Secret","Properties":{"SecretString":"` + value + `"}}}}`
+	}
+	physical := func(stack string) string {
+		t.Helper()
+		out, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeStackResources", Input: map[string]any{"StackName": stack}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return str(out.Output["StackResources"].([]any)[0].(map[string]any)["PhysicalResourceId"])
+	}
+	value := func(secretID string) any {
+		t.Helper()
+		out, err := New(deps).call(ctx, &spi.Request{Identity: id}, "aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": secretID})
+		if err != nil {
+			t.Fatalf("GetSecretValue %s: %v", secretID, err)
+		}
+		return out["SecretString"]
+	}
+	for _, stack := range []string{"dev", "staging"} {
+		if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": stack, "TemplateBody": template(stack)}}); err != nil {
+			t.Fatalf("CreateStack %s: %v", stack, err)
+		}
+	}
+	dev, staging := physical("dev"), physical("staging")
+	if dev == staging || !strings.Contains(dev, ":secret:dev-Secret-") || !strings.Contains(staging, ":secret:staging-Secret-") {
+		t.Fatalf("the two stacks' secrets are %q and %q, want one each named <stack>-Secret-<suffix>", dev, staging)
+	}
+	if value(dev) != "dev" || value(staging) != "staging" {
+		t.Fatalf("the two secrets hold %v and %v", value(dev), value(staging))
+	}
+	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "UpdateStack", Input: map[string]any{"StackName": "dev", "TemplateBody": template("dev2")}}); err != nil {
+		t.Fatalf("UpdateStack: %v", err)
+	}
+	if after := physical("dev"); after != dev || value(dev) != "dev2" {
+		t.Fatalf("after UpdateStack the secret is %q holding %v, want %q holding dev2", after, value(after), dev)
+	}
+}

@@ -3,6 +3,7 @@
 package cloudformation
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"io"
@@ -166,7 +167,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		if props == nil {
 			props = map[string]any{}
 		}
-		phys, err := p.provision(ctx, req, typ, logical, name, props, old.Refs[logical])
+		phys, err := p.provision(ctx, req, typ, logical, name, props, old.Refs[logical], id)
 		if err != nil {
 			return nil, err
 		}
@@ -245,13 +246,8 @@ func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, 
 // provision creates a resource through the service that owns it, and answers
 // the resource's physical id. Going through the owner's API keeps its store
 // layout, validation and cascades that service's business.
-func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, stack string, props map[string]any, existing string) (string, error) {
-	name := func(member, fallback string) string {
-		if n := str(props[member]); n != "" {
-			return n
-		}
-		return fallback
-	}
+func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, stack string, props map[string]any, existing, stackID string) (string, error) {
+	name := func(member, fallback string) string { return cmp.Or(str(props[member]), fallback) }
 	switch typ {
 	case "AWS::S3::Bucket":
 		n := name("BucketName", strings.ToLower(stack+"-"+logical))
@@ -279,8 +275,10 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 		return n, err
 	case "AWS::SecretsManager::Secret":
 		// existing is what an update finds; a second CreateSecret of its name is ResourceExistsException.
-		op, in := "CreateSecret", map[string]any{"Name": name("Name", logical)}
-		if strings.HasSuffix(existing, ":secret:"+name("Name", logical)) {
+		// Unnamed, it is <stack>-<logical id>-<suffix> as CloudFormation names it, the suffix the stack id's.
+		n := name("Name", stack+"-"+logical+"-"+lastSlash(stackID))
+		op, in := "CreateSecret", map[string]any{"Name": n}
+		if strings.HasSuffix(existing, ":secret:"+n) {
 			op, in = "UpdateSecret", map[string]any{"SecretId": existing}
 		}
 		out, err := p.call(ctx, req, "aws.secretsmanager", op, given(in, props, "SecretString", "Description"))

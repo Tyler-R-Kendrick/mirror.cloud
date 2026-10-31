@@ -60,12 +60,20 @@ The oracle is AWS's documentation as it ships in the vendored model
     any window was accepted, and a huge one overflowed into an internal
     failure.
 - **RestoreSecret** clears `DeletedDate` and answers `ARN` and `Name`.
-- **A secret scheduled for deletion refuses writes.** `CreateSecret` on its
-  name, `PutSecretValue`, `UpdateSecret`, `RotateSecret`, `TagResource` and
-  `UntagResource` answer `InvalidRequestException` ("Possible causes: The
-  secret is scheduled for deletion."), which each of them documents, and leave
-  the secret as it was. Before, each of the first four wrote the value and
-  undeleted the secret, and the tag operations changed its tags.
+- **A secret scheduled for deletion refuses writes.** Every operation that
+  writes to a secret answers `InvalidRequestException` ("Possible causes: The
+  secret is scheduled for deletion."), which each of them lists among its
+  errors, and leaves the secret as it was: `CreateSecret` on its name,
+  `PutSecretValue`, `UpdateSecret`, `RotateSecret`, `CancelRotateSecret`,
+  `UpdateSecretVersionStage`, `TagResource`, `UntagResource`,
+  `PutResourcePolicy`, `DeleteResourcePolicy`, `ReplicateSecretToRegions`,
+  `RemoveRegionsFromReplication` and `StopReplicationToReplica`. Before, the
+  first four wrote the value and undeleted the secret, and the rest changed
+  its stages, tags, policy or replicas. No write operation leaves the error
+  out of its list, so none is left unchanged for that reason. `RestoreSecret`
+  is the way back, and `DeleteSecret` has its own rules (below). The reads are
+  unchanged: `DescribeSecret` and `ListSecretVersionIds` do not list the
+  error, and `GetResourcePolicy`, which does, writes nothing.
   `GetSecretValue` refused it already ("When a secret is scheduled for
   deletion, you cannot retrieve the secret value. You must first cancel the
   deletion with RestoreSecret").
@@ -86,8 +94,11 @@ The oracle is AWS's documentation as it ships in the vendored model
   secret scheduled for deletion failed in every Go SDK v2 client, Terraform's
   included. `main` wrote `DeletionDate` as a string too.
 
-Equivalence trace `aws.secretsmanager`, steps counted from 0: steps 49 and 50
-are added (a `PutSecretValue` to, and a `BatchGetSecretValue` of, the secret
-scheduled at step 48), and steps 45, 46, 47, 48, 52, 53, 54, 55 and 58 are
-re-cut. Each carries the sentence above that it now follows. The two added
-steps moved the earlier re-cuts at 52, 53 and 56 to 54, 55 and 58.
+Equivalence trace `aws.secretsmanager`, steps counted from 0: steps 49 to 57
+are added, each against the secret scheduled at step 48 (a `PutSecretValue`, a
+`BatchGetSecretValue`, then one each of `UpdateSecretVersionStage`,
+`PutResourcePolicy`, `DeleteResourcePolicy`, `ReplicateSecretToRegions`,
+`RemoveRegionsFromReplication`, `StopReplicationToReplica` and
+`CancelRotateSecret`), and steps 45, 46, 47, 48, 59, 60, 61, 62 and 65 are
+re-cut. Each carries the sentence above that it now follows. The added steps
+moved the first commit's re-cuts at 52, 53 and 56 to 61, 62 and 65.

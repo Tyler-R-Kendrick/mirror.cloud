@@ -51,10 +51,13 @@ operations:
   # ResourceNotFoundException, which both document, as RotateSecret does.
   #
   # A secret scheduled for deletion refuses every write, here and in
-  # RotateSecret, TagResource and UntagResource: InvalidRequestException, "A
-  # parameter value is not valid for the current state of the resource.
-  # Possible causes: The secret is scheduled for deletion." Each of them
-  # documents it. RestoreSecret is the way back.
+  # RotateSecret, TagResource, UntagResource, UpdateSecretVersionStage,
+  # PutResourcePolicy, DeleteResourcePolicy, ReplicateSecretToRegions,
+  # RemoveRegionsFromReplication, StopReplicationToReplica and
+  # CancelRotateSecret: InvalidRequestException, "A parameter value is not
+  # valid for the current state of the resource. Possible causes: The secret
+  # is scheduled for deletion." Each of them lists it among its errors.
+  # RestoreSecret is the way back. The rule is written once, as *scheduled.
   #
   # A version is made only "If you include SecretString or SecretBinary"
   # (CreateSecret); without either the secret has none, and no VersionId.
@@ -107,7 +110,8 @@ operations:
         error: InvalidParameter
         message: "You must provide either SecretString or SecretBinary."
       - { cond: s_found, error: NotFound }
-      - cond: "!('Deleted' in s && s.Deleted == true)"
+      - &scheduled
+        cond: "!('Deleted' in s && s.Deleted == true)"
         error: InvalidRequest
         message: "You can't perform this operation on the secret because it was marked for deletion."
     effects:
@@ -147,9 +151,7 @@ operations:
       prior: "'Versions' in s ? s.Versions : []"
     require:
       - { cond: s_found, error: NotFound }
-      - cond: "!('Deleted' in s && s.Deleted == true)"
-        error: InvalidRequest
-        message: "You can't perform this operation on the secret because it was marked for deletion."
+      - *scheduled
     effects:
       - generate: { bind: ver, kind: hex, bytes: 8 }
       - put:
@@ -194,9 +196,7 @@ operations:
       val: "coalesce(coalesce('SecretString' in input && input.SecretString != '' ? input.SecretString : null, 'SecretString' in cur ? cur.SecretString : null), '')"
     require:
       - { cond: s_found, error: NotFound }
-      - cond: "!('Deleted' in s && s.Deleted == true)"
-        error: InvalidRequest
-        message: "You can't perform this operation on the secret because it was marked for deletion."
+      - *scheduled
     effects:
       - generate: { bind: ver, kind: hex, bytes: 8 }
       - put:
@@ -223,6 +223,7 @@ operations:
       s: { resource: secret }
     require:
       - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - patch:
           resource: secret
@@ -423,9 +424,7 @@ operations:
       oldkeys: "oldtags.map(t, 'Key' in t && t.Key != null ? string(t.Key) : '')"
     require:
       - { cond: s_found, error: NotFound }
-      - cond: "!('Deleted' in s && s.Deleted == true)"
-        error: InvalidRequest
-        message: "You can't perform this operation on the secret because it was marked for deletion."
+      - *scheduled
     effects:
       - put:
           resource: secret
@@ -443,9 +442,7 @@ operations:
       s: { resource: secret }
     require:
       - { cond: s_found, error: NotFound }
-      - cond: "!('Deleted' in s && s.Deleted == true)"
-        error: InvalidRequest
-        message: "You can't perform this operation on the secret because it was marked for deletion."
+      - *scheduled
     effects:
       - put:
           resource: secret
@@ -502,6 +499,7 @@ operations:
       s: { resource: secret }
     require:
       - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - patch:
           resource: secret
@@ -527,6 +525,7 @@ operations:
       s: { resource: secret }
     require:
       - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - patch:
           resource: secret
@@ -559,6 +558,7 @@ operations:
         + extra
     require:
       - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - patch:
           resource: secret
@@ -577,6 +577,7 @@ operations:
             in ('RemoveReplicaRegions' in input && input.RemoveReplicaRegions != null ? input.RemoveReplicaRegions : [])))
     require:
       - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - patch:
           resource: secret
@@ -585,11 +586,13 @@ operations:
       ARN: rec.ARN
       ReplicationStatus: kept
 
-  # Reads nothing, faults on nothing: the answer is the ARN of the name asked
-  # about, whether or not the secret exists.
+  # Faults on nothing but a secret scheduled for deletion: the answer is the
+  # ARN of the name asked about, whether or not the secret exists.
   StopReplicationToReplica:
     reads:
       s: { resource: secret }
+    require:
+      - *scheduled
     output:
       ARN: "arn('aws', ['secretsmanager', string(identity.region), string(identity.account), 'secret:' + id])"
 
@@ -603,6 +606,7 @@ operations:
       uvers: "'Versions' in s ? s.Versions : []"
     require:
       - { cond: s_found, error: NotFound }
+      - *scheduled
     effects:
       - patch:
           resource: secret
@@ -690,5 +694,6 @@ quirks:
       disagree afterwards.
   - operation: StopReplicationToReplica
     note: >
-      Reads nothing and faults on nothing: the answer is the ARN of the name
-      asked about, whether or not the secret exists or was ever replicated.
+      Faults on nothing but a secret scheduled for deletion: the answer is the
+      ARN of the name asked about, whether or not the secret exists or was
+      ever replicated.

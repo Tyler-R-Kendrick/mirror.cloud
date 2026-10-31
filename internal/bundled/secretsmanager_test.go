@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -583,5 +584,64 @@ func TestSecretsManagerASecretWithoutAValueHasNoVersion(t *testing.T) {
 	}
 	if stages, _ := value["VersionStages"].([]any); len(stages) != 1 || stages[0] != "AWSCURRENT" {
 		t.Fatalf("the first version is staged %#v, want AWSCURRENT alone", value["VersionStages"])
+	}
+}
+
+// The rest of the writes to a secret: staging labels, the resource policy,
+// replication and rotation. UpdateSecretVersionStage, PutResourcePolicy,
+// DeleteResourcePolicy, ReplicateSecretToRegions, RemoveRegionsFromReplication,
+// StopReplicationToReplica and CancelRotateSecret each document
+// InvalidRequestException, "A parameter value is not valid for the current
+// state of the resource. Possible causes: The secret is scheduled for
+// deletion." Each refuses a secret scheduled for deletion and changes nothing
+// a read of it shows once it is restored.
+func TestSecretsManagerRefusesEveryOtherWriteToASecretScheduledForDeletion(t *testing.T) {
+	for _, refused := range []struct {
+		op string
+		in func(first, second string) map[string]any
+	}{
+		{"UpdateSecretVersionStage", func(first, second string) map[string]any {
+			return map[string]any{"SecretId": "s", "VersionStage": "AWSCURRENT", "MoveToVersionId": first, "RemoveFromVersionId": second}
+		}},
+		{"PutResourcePolicy", func(string, string) map[string]any {
+			return map[string]any{"SecretId": "s", "ResourcePolicy": `{"Version":"2012-10-17","Statement":[{"Effect":"Deny"}]}`}
+		}},
+		{"DeleteResourcePolicy", func(string, string) map[string]any { return map[string]any{"SecretId": "s"} }},
+		{"ReplicateSecretToRegions", func(string, string) map[string]any {
+			return map[string]any{"SecretId": "s", "AddReplicaRegions": []any{map[string]any{"Region": "eu-west-1"}}}
+		}},
+		{"RemoveRegionsFromReplication", func(string, string) map[string]any {
+			return map[string]any{"SecretId": "s", "RemoveReplicaRegions": []any{"us-west-2"}}
+		}},
+		{"StopReplicationToReplica", func(string, string) map[string]any { return map[string]any{"SecretId": "s"} }},
+		{"CancelRotateSecret", func(string, string) map[string]any { return map[string]any{"SecretId": "s"} }},
+	} {
+		t.Run(refused.op, func(t *testing.T) {
+			call, ok, fault := secretsManager(t)
+			first := ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v1"})["VersionId"].(string)
+			second := ok(t, "PutSecretValue", map[string]any{"SecretId": "s", "SecretString": "v2"})["VersionId"].(string)
+			ok(t, "PutResourcePolicy", map[string]any{"SecretId": "s", "ResourcePolicy": `{"Version":"2012-10-17","Statement":[]}`})
+			ok(t, "ReplicateSecretToRegions", map[string]any{"SecretId": "s", "AddReplicaRegions": []any{map[string]any{"Region": "us-west-2"}}})
+			state := func() []map[string]any {
+				return []map[string]any{
+					ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}),
+					ok(t, "GetResourcePolicy", map[string]any{"SecretId": "s"}),
+					ok(t, "ListSecretVersionIds", map[string]any{"SecretId": "s"}),
+					ok(t, "GetSecretValue", map[string]any{"SecretId": "s"}),
+				}
+			}
+			before := state()
+			ok(t, "DeleteSecret", map[string]any{"SecretId": "s"})
+
+			_, err := call(refused.op, refused.in(first, second))
+			fault(t, err, "InvalidRequestException")
+			if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}); got["DeletedDate"] == nil {
+				t.Fatal("the refused call undeleted the secret")
+			}
+			ok(t, "RestoreSecret", map[string]any{"SecretId": "s"})
+			if after := state(); !reflect.DeepEqual(after, before) {
+				t.Fatalf("the refused call changed the secret:\nbefore %#v\nafter  %#v", before, after)
+			}
+		})
 	}
 }

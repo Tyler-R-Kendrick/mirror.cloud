@@ -1827,3 +1827,93 @@ func TestCloudFormationNoStackDeletesAnothersResource(t *testing.T) {
 		t.Errorf("DeleteStack of a stack claiming other's bucket (%v) left it alive: %v", err, alive("rv-cf-old"))
 	}
 }
+
+// ContinueUpdateRollback "Continues rolling back a stack from
+// UPDATE_ROLLBACK_FAILED to UPDATE_ROLLBACK_COMPLETE state": it deletes again
+// what the rollback could not delete and updates back what it could not
+// restore, but the ResourcesToSkip, which "CloudFormation sets ... to
+// UPDATE_COMPLETE", and which may name only "resources that are in the
+// UPDATE_FAILED state because a rollback failed". A retry that fails leaves
+// the stack UPDATE_ROLLBACK_FAILED with the error as its reason; once it
+// succeeds the stack can be updated. Any other state is ValidationError, a
+// ROLLBACK_FAILED one included (its way forward is DeleteStack). Before,
+// ContinueUpdateRollback refused any stack that still listed a DELETE_FAILED
+// resource, so a stack in UPDATE_ROLLBACK_FAILED stayed there.
+func TestCloudFormationContinueUpdateRollbackFinishesTheRollback(t *testing.T) {
+	h := newStacks(t)
+	resume := func(stack string, skip ...any) error {
+		in := map[string]any{"StackName": stack}
+		if skip != nil {
+			in["ResourcesToSkip"] = skip
+		}
+		_, err := h.invoke("ContinueUpdateRollback", in)
+		return err
+	}
+	h.mustCreate("fine", map[string]map[string]any{"Q": nameable()["Queue"]})
+	if err := resume("fine"); code(err) != "ValidationError" || !strings.Contains(err.Error(), "cannot be called from current stack status") {
+		t.Errorf("ContinueUpdateRollback of a CREATE_COMPLETE stack answered %v, want ValidationError", err)
+	}
+
+	h.mustCreate("u", map[string]map[string]any{"Q": nameable()["Queue"]})
+	objects := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("objects")
+	if err := objects.Put(h.ctx, "landed-cur/k", []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	failing, _ := json.Marshal(map[string]any{"Resources": map[string]any{"Q": nameable()["Queue"],
+		"B": map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "landed-cur"}}, "Z": map[string]any{"Type": "AWS::Nothing::Here"}}})
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "u", "TemplateBody": string(failing)}); err == nil {
+		t.Fatal("the failing update succeeded")
+	}
+	if status, _, _ := h.status("u"); status != "UPDATE_ROLLBACK_FAILED" {
+		t.Fatalf("u is %s, want UPDATE_ROLLBACK_FAILED", status)
+	}
+	if err := resume("u"); err == nil {
+		t.Error("ContinueUpdateRollback answered nothing while the bucket still cannot be deleted")
+	}
+	if status, reason, _ := h.status("u"); status != "UPDATE_ROLLBACK_FAILED" || !strings.Contains(reason, "BucketNotEmpty") {
+		t.Errorf("after a failed retry u is %s (%s), want UPDATE_ROLLBACK_FAILED with S3's error", status, reason)
+	}
+	if err := objects.Delete(h.ctx, "landed-cur/k"); err != nil {
+		t.Fatal(err)
+	}
+	if err := resume("u"); err != nil {
+		t.Errorf("ContinueUpdateRollback once the bucket can be deleted: %v", err)
+	}
+	if status, _, _ := h.status("u"); status != "UPDATE_ROLLBACK_COMPLETE" || !reflect.DeepEqual(h.statuses("u"), map[string]string{"Q": "CREATE_COMPLETE"}) {
+		t.Errorf("u is %s listing %v, want UPDATE_ROLLBACK_COMPLETE with its queue alone", status, h.statuses("u"))
+	}
+	if _, err := h.service("aws.s3", "HeadBucket", map[string]any{"Bucket": "landed-cur"}); err == nil {
+		t.Error("the bucket the rollback could not delete outlived ContinueUpdateRollback")
+	}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "u", "TemplateBody": `{"Resources":{"Q":{"Type":"AWS::SQS::Queue"},"R":{"Type":"AWS::SQS::Queue"}}}`}); err != nil {
+		t.Errorf("an update after the rollback completed: %v", err)
+	}
+
+	// A restore that failed: the parameter holds what the failed update gave it.
+	if _, err := h.service("aws.ssm", "PutParameter", map[string]any{"Name": "cur-p", "Value": "new", "Type": "String"}); err != nil {
+		t.Fatal(err)
+	}
+	for stack, skip := range map[string][]any{"restore": nil, "skip": {"P"}} {
+		record, _ := json.Marshal(map[string]any{"Name": stack, "ID": "arn:aws:cloudformation:us-east-1:000000000000:stack/" + stack + "/1", "Status": "UPDATE_ROLLBACK_FAILED",
+			"Template":  `{"Resources":{"P":{"Type":"AWS::SSM::Parameter","Properties":{"Name":"cur-p","Value":"old"}}}}`,
+			"Resources": []any{map[string]any{"Logical": "P", "Physical": "cur-p", "Type": "AWS::SSM::Parameter", "Name": "cur-p", "Status": "UPDATE_FAILED", "Reason": "restore failed"}},
+			"Refs":      map[string]any{"P": "cur-p"}})
+		if err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, stack, record); err != nil {
+			t.Fatal(err)
+		}
+		if err := resume(stack, skip...); err != nil {
+			t.Errorf("ContinueUpdateRollback %s: %v", stack, err)
+		}
+		out, _ := h.service("aws.ssm", "GetParameter", map[string]any{"Name": "cur-p"})
+		want := map[string]string{"restore": "old", "skip": "new"}[stack] // a skipped resource keeps what it holds
+		if status, _, _ := h.status(stack); status != "UPDATE_ROLLBACK_COMPLETE" || asMap(out["Parameter"])["Value"] != want || h.statuses(stack)["P"] != "UPDATE_COMPLETE" {
+			t.Errorf("%s is %s, P %s, holding %v, want UPDATE_ROLLBACK_COMPLETE, UPDATE_COMPLETE, %s", stack, status, h.statuses(stack)["P"], asMap(out["Parameter"])["Value"], want)
+		}
+		if _, err := h.service("aws.ssm", "PutParameter", map[string]any{"Name": "cur-p", "Value": "new", "Type": "String", "Overwrite": true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := resume("restore", "Q"); code(err) != "ValidationError" {
+		t.Errorf("ResourcesToSkip naming a resource not UPDATE_FAILED answered %v, want ValidationError", err)
+	}
+}

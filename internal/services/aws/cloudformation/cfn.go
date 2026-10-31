@@ -25,7 +25,7 @@ import (
 // natives are the operations behavior/aws/cloudformation lists as native: the template engine. Parsing a
 // template, resolving its intrinsics and provisioning resources through their owning services is Go; the
 // stack, change set, stack set and type bookkeeping is the bundle's.
-var natives = []string{"CreateStack", "UpdateStack", "DeleteStack", "ExecuteChangeSet", "ValidateTemplate", "GetTemplateSummary", "ListExports"}
+var natives = []string{"CreateStack", "UpdateStack", "DeleteStack", "ExecuteChangeSet", "ValidateTemplate", "GetTemplateSummary", "ListExports", "ContinueUpdateRollback"}
 
 func init() {
 	for _, op := range natives {
@@ -48,7 +48,7 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 // Invoke serves one native operation.
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	name := str(req.Input["StackName"])
-	if _, given := req.Input["StackName"]; given && (req.Operation == "ExecuteChangeSet" || req.Operation == "GetTemplateSummary") {
+	if _, given := req.Input["StackName"]; given && (req.Operation == "ExecuteChangeSet" || req.Operation == "GetTemplateSummary" || req.Operation == "ContinueUpdateRollback") {
 		if err := checkStackName(name, true); err != nil { // the model's StackNameOrId
 			return nil, err
 		}
@@ -64,6 +64,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.upsert(ctx, req, name, req.Operation == "UpdateStack")
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
+	case "ContinueUpdateRollback":
+		return p.resume(ctx, req, name)
 	case "GetTemplateSummary":
 		_, tpl, err := p.template(ctx, req)
 		if st, loadErr := p.load(ctx, req, name); err != nil && name != "" && loadErr == nil {
@@ -606,11 +608,61 @@ func (p *Pack) rollback(ctx context.Context, req *spi.Request, old stack, made [
 		if old.Refs[r.Logical] != r.Physical {
 			doomed = append(doomed, r)
 		} else if props := maps.Collect(maps.All(asMap(p.resolve(asMap(asMap(tpl["Resources"])[r.Logical])["Properties"], old.Refs, req, old.Name)))); changed[r.Logical] {
-			_, err := p.provision(ctx, req, r.Type, r.Logical, r.Name, props, r.Physical, old.ID)
-			first = cmp.Or(first, err)
+			if _, err := p.provision(ctx, req, r.Type, r.Logical, r.Name, props, r.Physical, old.ID); err != nil { // UPDATE_FAILED, for ContinueUpdateRollback
+				i := slices.IndexFunc(old.Resources, func(o res) bool { return o.Logical == r.Logical })
+				old.Resources[i].Status, old.Resources[i].Reason, first = "UPDATE_FAILED", err.Error(), cmp.Or(first, err)
+			}
 		}
 	}
 	return p.unwind(ctx, req, old, old.Resources, doomed, first, "UPDATE_ROLLBACK_COMPLETE", "UPDATE_ROLLBACK_FAILED", skip)
+}
+
+// resume is ContinueUpdateRollback, which "Continues rolling back a stack from UPDATE_ROLLBACK_FAILED to
+// UPDATE_ROLLBACK_COMPLETE state": it deletes again what the rollback could not delete (DELETE_FAILED) and
+// updates back what it could not restore (UPDATE_FAILED), but the ResourcesToSkip, which "CloudFormation
+// sets ... to UPDATE_COMPLETE" and which may be only "resources that are in the UPDATE_FAILED state because
+// a rollback failed". A retry that fails leaves the stack UPDATE_ROLLBACK_FAILED, with why.
+func (p *Pack) resume(ctx context.Context, req *spi.Request, name string) (*spi.Response, error) {
+	st, err := p.load(ctx, req, name)
+	skip, _ := req.Input["ResourcesToSkip"].([]any)
+	for k, v := range req.Input { // the query protocol's ResourcesToSkip.member.N
+		if strings.HasPrefix(k, "ResourcesToSkip.member.") {
+			skip = append(skip, v)
+		}
+	}
+	if err == nil && st.Status != "UPDATE_ROLLBACK_FAILED" {
+		err = invalid("ContinueUpdateRollback cannot be called from current stack status")
+	}
+	for _, l := range skip {
+		if err == nil && !slices.ContainsFunc(st.Resources, func(r res) bool { return r.Logical == str(l) && r.Status == "UPDATE_FAILED" }) {
+			err = invalid("ResourcesToSkip may name only resources UPDATE_FAILED because a rollback failed, not " + str(l))
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	tpl, _ := parseTemplate(st.Template)
+	kept, doomed, first := []res{}, []res{}, error(nil)
+	for _, r := range st.Resources {
+		props := maps.Collect(maps.All(asMap(p.resolve(asMap(asMap(tpl["Resources"])[r.Logical])["Properties"], st.Refs, req, st.Name))))
+		if r.Status == "DELETE_FAILED" {
+			doomed = append(doomed, r)
+			continue
+		} else if r.Status == "UPDATE_FAILED" && !slices.Contains(skip, any(r.Logical)) {
+			_, err = p.provision(ctx, req, r.Type, r.Logical, r.Name, props, r.Physical, st.ID)
+		}
+		if r.Status == "UPDATE_FAILED" && err != nil {
+			r.Reason, first, err = err.Error(), cmp.Or(first, err), nil
+		} else if r.Status == "UPDATE_FAILED" {
+			r.Status, r.Reason = "UPDATE_COMPLETE", ""
+		}
+		kept = append(kept, r)
+	}
+	st.Reason = ""
+	if err := p.unwind(ctx, req, st, kept, doomed, first, "UPDATE_ROLLBACK_COMPLETE", "UPDATE_ROLLBACK_FAILED", func(res) bool { return false }); err != nil {
+		return nil, err
+	}
+	return &spi.Response{Output: map[string]any{}}, nil
 }
 
 // ruleBus is the event bus in a rule's ARN, rule/<bus>/<name>: none for the default bus.

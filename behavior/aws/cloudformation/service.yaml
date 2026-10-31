@@ -23,7 +23,7 @@ missing_input_error: Validation
 # deprovisions them in reverse, keeping any it cannot delete; ValidateTemplate and GetTemplateSummary parse
 # without provisioning; ListExports flattens every stack's outputs. The stack
 # record below is the one the engine writes.
-native: [CreateStack, UpdateStack, DeleteStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports]
+native: [CreateStack, UpdateStack, DeleteStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports, ContinueUpdateRollback]
 
 resources:
   # The stack record, written by the native template engine and patched by
@@ -303,9 +303,8 @@ operations:
   # a failed create rolls back at once, so no stack rests in CREATE_FAILED,
   # UPDATE_FAILED or UPDATE_IN_PROGRESS: RollbackStack and CancelUpdateStack
   # refuse every stack, and a ROLLBACK_FAILED stack's way forward is
-  # DeleteStack. ContinueUpdateRollback never marks a stack complete while a
-  # resource the rollback could not delete (DELETE_FAILED) remains, since it
-  # cannot retry that delete. Every refusal is ValidationError, in the words
+  # DeleteStack. ContinueUpdateRollback (native, below) retries a rollback
+  # that failed. Every refusal is ValidationError, in the words
   # CancelUpdateStack uses, and changes nothing; an absent stack does not
   # exist.
   RollbackStack:
@@ -332,24 +331,8 @@ operations:
         message: "CancelUpdateStack cannot be called from current stack status"
     output: {}
 
-  ContinueUpdateRollback:
-    reads:
-      s: { resource: stack }
-    require:
-      - *stackNameOrId
-      - *stackPattern
-      - *stackExists
-      - cond: "s.Status == 'UPDATE_ROLLBACK_FAILED'"
-        error: Validation
-        message: "ContinueUpdateRollback cannot be called from current stack status"
-      - cond: "!('Resources' in s && s.Resources != null && s.Resources.exists(r, 'Status' in r && r.Status == 'DELETE_FAILED'))"
-        error: Validation
-        message: "ContinueUpdateRollback cannot delete the resources left DELETE_FAILED; DeleteStack retries them"
-    effects:
-      - patch:
-          resource: stack
-          record: { Status: "'UPDATE_ROLLBACK_COMPLETE'" }
-    output: {}
+  # ContinueUpdateRollback is native: it retries the rollback's deletes and
+  # restores, which reach the services that own the resources.
 
   # --- change sets -----------------------------------------------------------
   # ExecuteChangeSet is the shadow reason (it provisions the stored

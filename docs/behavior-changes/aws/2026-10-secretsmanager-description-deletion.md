@@ -387,9 +387,15 @@ The oracle is AWS's documentation as it ships in the vendored model
     `DELETE_FAILED` orphan included (its way forward is `DeleteStack`), is
     `ValidationError` ("RollbackStack cannot be called from current stack
     status", in the words `CancelUpdateStack` uses) and changes nothing, and
-    an absent stack "does not exist". `ContinueUpdateRollback` never marks a
-    stack complete while a `DELETE_FAILED` resource remains, since it cannot
-    retry the delete. Before, each operation marked any stack complete,
+    an absent stack "does not exist". `ContinueUpdateRollback` is the
+    engine's: from `UPDATE_ROLLBACK_FAILED` it deletes again what the
+    rollback could not delete and updates back what it could not restore
+    (left `UPDATE_FAILED`), but the `ResourcesToSkip`, which "CloudFormation
+    sets ... to UPDATE_COMPLETE" and which may name only "resources that are
+    in the UPDATE_FAILED state because a rollback failed" (any other is
+    `ValidationError`). Success is `UPDATE_ROLLBACK_COMPLETE`, and the stack
+    can then be updated; a retry that fails leaves it
+    `UPDATE_ROLLBACK_FAILED` with the error as its reason. Before, each operation marked any stack complete,
     orphans and all, and made a stack out of a name that had none. The
     CloudFormation trace's steps 9 to 22 are re-cut accordingly: s1 and s2
     are never made.

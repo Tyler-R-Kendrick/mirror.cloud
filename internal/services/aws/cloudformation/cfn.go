@@ -53,11 +53,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	name := str(req.Input["StackName"])
 	switch req.Operation {
 	case "ValidateTemplate":
-		body, err := p.templateBody(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		tpl, err := parseTemplate(body)
+		_, tpl, err := p.template(ctx, req)
 		if err != nil {
 			return nil, err
 		}
@@ -67,11 +63,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
 	case "GetTemplateSummary":
-		body, err := p.templateBody(ctx, req)
-		tpl, parseErr := parseTemplate(body)
-		if err == nil {
-			err = parseErr
-		}
+		_, tpl, err := p.template(ctx, req)
 		if st, loadErr := p.load(ctx, req, name); err != nil && name != "" && loadErr == nil {
 			tpl, err = parseTemplate(st.Template)
 		}
@@ -92,8 +84,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			var st stack
 			_ = json.Unmarshal(kv.Value, &st)
 			for _, o := range st.Outputs {
-				m := asMap(o)
-				ex = append(ex, map[string]any{"Name": m["OutputKey"], "Value": m["OutputValue"], "ExportingStackId": st.ID})
+				ex = append(ex, map[string]any{"Name": asMap(o)["OutputKey"], "Value": asMap(o)["OutputValue"], "ExportingStackId": st.ID})
 			}
 		}
 		return &spi.Response{Output: map[string]any{"Exports": ex}}, nil
@@ -135,11 +126,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	if name == "" {
 		return nil, invalid("StackName required")
 	}
-	body, err := p.templateBody(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	tpl, err := parseTemplate(body)
+	body, tpl, err := p.template(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -154,8 +141,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	} else if err == nil {
 		old, id = found, found.ID
 	}
-	st := stack{Name: name, ID: id, Status: "CREATE_COMPLETE", Template: body, Refs: map[string]string{}}
-	maps.Copy(st.Refs, params)
+	st := stack{Name: name, ID: id, Status: "CREATE_COMPLETE", Template: body, Refs: params}
 	if update {
 		st.Status = "UPDATE_COMPLETE"
 	}
@@ -199,6 +185,16 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	return &spi.Response{Output: map[string]any{"StackId": id}}, nil
 }
 
+// template reads the request's template body and parses it.
+func (p *Pack) template(ctx context.Context, req *spi.Request) (string, map[string]any, error) {
+	body, err := p.templateBody(ctx, req)
+	if err != nil {
+		return "", nil, err
+	}
+	tpl, err := parseTemplate(body)
+	return body, tpl, err
+}
+
 func (p *Pack) templateBody(ctx context.Context, req *spi.Request) (string, error) {
 	if body := str(req.Input["TemplateBody"]); body != "" {
 		return body, nil
@@ -225,10 +221,7 @@ func (p *Pack) templateBody(ctx context.Context, req *spi.Request) (string, erro
 	}
 	defer reader.Close()
 	body, err := io.ReadAll(reader)
-	if err != nil {
-		return "", err
-	}
-	return string(body), nil
+	return string(body), err
 }
 
 func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Response, error) {
@@ -280,11 +273,9 @@ func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, 
 	return st, nil
 }
 
-// kinds are the types provision names: the property that names one, the
-// longest name its service takes (API Gateway sets none for a REST API, and
-// holds no name to one API; 1024 only bounds it), a read that finds one by
-// name, and the service's error for a name taken (SNS has none, its
-// CreateTopic "is idempotent", so CloudFormation's own).
+// kinds are the types provision names: the property that names one, the longest name its service takes
+// (API Gateway sets none for a REST API, nor holds a name to one; 1024 only bounds it), a read that finds
+// one by name, and the service's error for a name taken (SNS's CreateTopic "is idempotent": CloudFormation's).
 var kinds = map[string]struct {
 	member            string
 	max               int
@@ -304,11 +295,9 @@ var kinds = map[string]struct {
 	"AWS::ApiGateway::RestApi":    {"Name", 1024, "", "", "", ""},
 }
 
-// claim answers the name a resource is made under: the template's, or else
-// physicalName's. A given name that a resource the stack did not make under
-// it already holds is the service's error for a name taken: several services
-// answer a create of a name they hold with what they hold, so the stack
-// would take the resource over, and its rollback or DeleteStack delete it.
+// claim answers the name a resource is made under: the template's, or else physicalName's. A given name
+// that a resource the stack did not make under it holds is the service's error for a name taken: several
+// services answer such a create with what they hold, which a rollback or DeleteStack would then delete.
 func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logical, typ string, props map[string]any) (string, error) {
 	k, n := kinds[typ], str(props[kinds[typ].member])
 	if n == "" {
@@ -331,13 +320,11 @@ var unnameable = regexp.MustCompile(`[^A-Za-z0-9-]+`)
 
 func fifo(p map[string]any) bool { return p["FifoQueue"] == true || str(p["FifoQueue"]) == "true" }
 
-// physicalName is the name of a resource the template leaves unnamed, in
-// the modelled form <stack>-<logical id>-<suffix>. The suffix is twelve hex
-// digits of a hash of the stack id and logical id, so no two stacks, and no
-// two resources of one stack, share a name, and an update finds the name
-// its create made. Only letters, digits and hyphens are kept; a bucket's
-// name is lower case and a FIFO queue's ends in .fifo; and the stack name
-// and logical id, never the suffix, are cut to fit the service's longest.
+// physicalName is the name of a resource the template leaves unnamed, in the modelled form
+// <stack>-<logical id>-<suffix>. The suffix is twelve hex digits of a hash of the stack id and logical
+// id, so no two stacks, and no two resources of one stack, share a name, and an update finds the name its
+// create made. Only letters, digits and hyphens are kept; a bucket's name is lower case and a FIFO
+// queue's ends in .fifo; the stack name and logical id, never the suffix, are cut to the longest name.
 func physicalName(stack, logical, stackID, typ string, props map[string]any) string {
 	k, named := kinds[typ]
 	if !named {
@@ -446,9 +433,9 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 // made answers the id of what a create made: none when it failed.
 func made(id string, err error) (string, error) {
 	if err != nil {
-		return "", err
+		id = ""
 	}
-	return id, nil
+	return id, err
 }
 
 // deprovision deletes a resource through its owner. One already gone (the
@@ -563,10 +550,9 @@ func given(in, props map[string]any, members ...string) map[string]any {
 	return in
 }
 
-// generated is the value GenerateSecretString asks for: a password made as
-// GetRandomPassword makes one, seeded by the stack and logical id, and put
-// under GenerateStringKey in SecretStringTemplate when the template gives one.
-// Each way the property can be wrong has its own ValidationError.
+// generated is the value GenerateSecretString asks for: a password made as GetRandomPassword makes one,
+// seeded by the stack and logical id, put under GenerateStringKey in SecretStringTemplate when there is
+// one. Each way the property can be wrong has its own ValidationError.
 func generated(props map[string]any, seed string) (string, error) {
 	spec, isMap := props["GenerateSecretString"].(map[string]any)
 	key, tpl := str(spec["GenerateStringKey"]), str(spec["SecretStringTemplate"])
@@ -669,17 +655,10 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 }
 
 func (p *Pack) ref(name string, refs map[string]string, req *spi.Request, stack string) string {
-	switch name {
-	case "AWS::AccountId":
-		return req.Identity.Account
-	case "AWS::Region":
-		return req.Identity.Region
-	case "AWS::StackName":
-		return stack
-	case "AWS::Partition":
-		return "aws"
-	case "AWS::URLSuffix":
-		return "amazonaws.com"
+	pseudo := map[string]string{"AWS::AccountId": req.Identity.Account, "AWS::Region": req.Identity.Region,
+		"AWS::StackName": stack, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com"}
+	if v, ok := pseudo[name]; ok {
+		return v
 	}
 	if v, ok := refs[name]; ok {
 		return v
@@ -693,12 +672,8 @@ func (p *Pack) getAtt(g any, refs map[string]string, req *spi.Request) string {
 	case string:
 		logical, attr, _ = strings.Cut(t, ".")
 	case []any:
-		if len(t) > 0 {
-			logical = str(t[0])
-		}
-		if len(t) > 1 {
-			attr = str(t[1])
-		}
+		t = append(slices.Clip(t), nil, nil)
+		logical, attr = str(t[0]), str(t[1])
 	}
 	phys := refs[logical]
 	switch attr {
@@ -706,10 +681,8 @@ func (p *Pack) getAtt(g any, refs map[string]string, req *spi.Request) string {
 		if strings.Contains(phys, "arn:aws:") {
 			return phys
 		}
-		if strings.Contains(phys, "/") && strings.Contains(phys, "://") {
-			// queue URL -> ARN
-			name := lastSlash(phys)
-			return "arn:aws:sqs:" + req.Identity.Region + ":" + req.Identity.Account + ":" + name
+		if strings.Contains(phys, "/") && strings.Contains(phys, "://") { // a queue URL
+			return "arn:aws:sqs:" + req.Identity.Region + ":" + req.Identity.Account + ":" + lastSlash(phys)
 		}
 		return "arn:aws:s3:::" + phys
 	case "QueueName":
@@ -726,19 +699,18 @@ func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack str
 	}
 	sep := str(arr[0])
 	parts, _ := arr[1].([]any)
-	ss := make([]string, 0, len(parts))
-	for _, x := range parts {
-		ss = append(ss, str(p.resolve(x, refs, req, stack)))
+	ss := make([]string, len(parts))
+	for i, x := range parts {
+		ss[i] = str(p.resolve(x, refs, req, stack))
 	}
 	return strings.Join(ss, sep)
 }
 
 func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack string) string {
-	tmpl := str(s)
+	out := str(s)
 	if arr, ok := s.([]any); ok && len(arr) > 0 {
-		tmpl = str(arr[0])
+		out = str(arr[0])
 	}
-	out := tmpl
 	for k, v := range refs {
 		out = strings.ReplaceAll(out, "${"+k+"}", v)
 	}
@@ -794,9 +766,8 @@ func mergeParamDefaults(tpl map[string]any, params map[string]string) {
 }
 
 func paramDecls(tpl map[string]any) []any {
-	pm, _ := tpl["Parameters"].(map[string]any)
 	var out []any
-	for _, k := range slices.Sorted(maps.Keys(pm)) {
+	for _, k := range slices.Sorted(maps.Keys(asMap(tpl["Parameters"]))) {
 		out = append(out, map[string]any{"ParameterKey": k})
 	}
 	return out

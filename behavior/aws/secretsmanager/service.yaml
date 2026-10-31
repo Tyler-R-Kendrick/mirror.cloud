@@ -40,6 +40,12 @@ errors:
     code: ResourceExistsException
     http: 400
     fault: client
+  # What the awsJson1_1 codec answers a body it cannot decode, and so a
+  # member that is not of its shape's type.
+  Serialization:
+    code: SerializationException
+    http: 400
+    fault: client
   # The engine's own answer to a member outside its length constraint.
   Validation:
     code: ValidationException
@@ -384,15 +390,25 @@ operations:
         && (input.ForceDeleteWithoutRecovery == true || input.ForceDeleteWithoutRecovery == 'true'
             || input.ForceDeleteWithoutRecovery == 'True' || input.ForceDeleteWithoutRecovery == '1')
       windowed: "'RecoveryWindowInDays' in input && input.RecoveryWindowInDays != null"
+      # RecoveryWindowInDaysType is a long: an int, or a JSON number that is a
+      # whole number within a long's range, as a JSON decoder hands one over.
+      long: >-
+        !windowed || type(input.RecoveryWindowInDays) == int
+        || (type(input.RecoveryWindowInDays) == double
+            && input.RecoveryWindowInDays >= -9.2e18 && input.RecoveryWindowInDays <= 9.2e18
+            && double(int(input.RecoveryWindowInDays)) == input.RecoveryWindowInDays)
       # "The number of days from 7 to 30": compared as a double, so a window
       # outside it is refused before any arithmetic can overflow on it.
-      inwindow: "!windowed || (double(input.RecoveryWindowInDays) >= 7.0 && double(input.RecoveryWindowInDays) <= 30.0)"
+      inwindow: "!windowed || (long && double(input.RecoveryWindowInDays) >= 7.0 && double(input.RecoveryWindowInDays) <= 30.0)"
       days: "windowed && inwindow ? int(input.RecoveryWindowInDays) : 30"
       # awsJson1_1 writes a timestamp as epoch seconds, a JSON number; a string
       # here fails every Go SDK v2 client, which decodes one only from a number.
       deletion: "int(now + duration(string(days * 24) + 'h'))"
       scheduled: "'Deleted' in s && s.Deleted == true"
     require:
+      - cond: long
+        error: Serialization
+        message: "RecoveryWindowInDays must be a whole number."
       - cond: "!(force && windowed)"
         error: InvalidParameter
         message: "You can't use ForceDeleteWithoutRecovery in conjunction with RecoveryWindowInDays."

@@ -700,3 +700,27 @@ func TestSecretsManagerRefusesAnEmptyValue(t *testing.T) {
 		})
 	}
 }
+
+// DeleteSecretRequest.RecoveryWindowInDays targets RecoveryWindowInDaysType, a
+// "long". A value that is not a whole number is not a long: it is refused as
+// the awsJson1_1 codec refuses a body it cannot decode, SerializationException,
+// before the window is checked. A whole number written as a JSON float, as
+// every JSON decoder hands one over, is still that number.
+func TestSecretsManagerRecoveryWindowIsALong(t *testing.T) {
+	for _, window := range []any{7.5, 29.9, "7", true, map[string]any{}} {
+		t.Run(fmt.Sprintf("%#v", window), func(t *testing.T) {
+			call, ok, fault := secretsManager(t)
+			ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v"})
+			_, err := call("DeleteSecret", map[string]any{"SecretId": "s", "RecoveryWindowInDays": window})
+			fault(t, err, "SerializationException")
+			if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}); got["DeletedDate"] != nil {
+				t.Fatalf("a refused window scheduled the secret: DeletedDate %#v", got["DeletedDate"])
+			}
+		})
+	}
+	_, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v"})
+	if got := ok(t, "DeleteSecret", map[string]any{"SecretId": "s", "RecoveryWindowInDays": float64(7)}); !at(got["DeletionDate"], 7*86400) {
+		t.Fatalf("a window of 7.0 answered DeletionDate %#v, want 7 days", got["DeletionDate"])
+	}
+}

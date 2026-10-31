@@ -72,9 +72,17 @@ The oracle is AWS's documentation as it ships in the vendored model
   - `ForceDeleteWithoutRecovery` together with `RecoveryWindowInDays` is
     `InvalidParameterException`.
   - `RecoveryWindowInDays` must be "from 7 to 30"; any other value is
-    `InvalidParameterException`, checked before the date is computed. Before,
-    any window was accepted, and a huge one overflowed into an internal
-    failure.
+    `InvalidParameterException`, checked before the date is computed. On
+    `main` the window was ignored and the request time answered; the
+    overflow a huge window caused existed only between commits on this
+    branch.
+  - `RecoveryWindowInDays` is a `long` (`RecoveryWindowInDaysType`). A value
+    that is not a whole number (`7.5`, `"7"`, `true`) is
+    `SerializationException`, what the `awsJson1_1` codec answers a body it
+    cannot decode. The engine checks no member types and no bundle in the
+    repository refuses a wrongly typed member, so the codec's answer is the
+    convention used. Before, `7.5` and `"7"` were read as 7. A whole number
+    sent as a JSON float (`7.0`) is still 7.
 - **RestoreSecret** clears `DeletedDate` and answers `ARN` and `Name`.
 - **A secret scheduled for deletion refuses writes.** Every operation that
   writes to a secret answers `InvalidRequestException` ("Possible causes: The

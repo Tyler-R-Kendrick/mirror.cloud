@@ -116,10 +116,10 @@ type stack struct {
 }
 
 // res is a resource a stack made, the name it was made under and, once a
-// delete of it failed, DELETE_FAILED.
+// delete of it failed, DELETE_FAILED with the error as its reason.
 type res struct {
 	Logical, Physical, Type string
-	Name, Status            string `json:",omitempty"`
+	Name, Status, Reason    string `json:",omitempty"`
 }
 
 func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool) (*spi.Response, error) {
@@ -248,7 +248,7 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, done, fai
 	var first error
 	for _, r := range slices.Backward(st.Resources) {
 		if err := p.deprovision(ctx, req, r); err != nil {
-			r.Status, first = "DELETE_FAILED", cmp.Or(first, err)
+			r.Status, r.Reason, first = "DELETE_FAILED", err.Error(), cmp.Or(first, err)
 			left = append([]res{r}, left...)
 		}
 	}

@@ -172,9 +172,10 @@ operations:
       - { cond: s_found, error: Validation }
     output:
       StackResourceSummaries: >-
-        ('Resources' in s && s.Resources != null ? s.Resources : []).map(r, {'LogicalResourceId': r.Logical,
+        ('Resources' in s && s.Resources != null ? s.Resources : []).map(r, merge({'LogicalResourceId': r.Logical,
           'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
-          'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'})
+          'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'},
+          'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))
 
   DescribeStackEvents:
     reads:
@@ -183,10 +184,10 @@ operations:
       - { cond: s_found, error: Validation }
     output:
       StackEvents: >-
-        ('Resources' in s && s.Resources != null ? s.Resources : []).map(r, {'LogicalResourceId': r.Logical,
+        ('Resources' in s && s.Resources != null ? s.Resources : []).map(r, merge({'LogicalResourceId': r.Logical,
           'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
-          'ResourceStatus': 'CREATE_COMPLETE', 'StackName': s.Name,
-          'StackId': s.ID})
+          'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE', 'StackName': s.Name,
+          'StackId': s.ID}, 'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))
         + [{'LogicalResourceId': s.Name,
             'ResourceType': 'AWS::CloudFormation::Stack',
             'ResourceStatus': s.Status, 'StackName': s.Name, 'StackId': s.ID}]
@@ -203,10 +204,10 @@ operations:
     output:
       StackResourceDetail: >-
         rs.filter(r, r.Logical ==
-          string(input.LogicalResourceId)).map(r, {'LogicalResourceId':
+          string(input.LogicalResourceId)).map(r, merge({'LogicalResourceId':
           r.Logical, 'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
           'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE',
-          'StackName': s.Name, 'StackId': s.ID})[0]
+          'StackName': s.Name, 'StackId': s.ID}, 'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))[0]
 
   UpdateTerminationProtection:
     reads:
@@ -234,8 +235,9 @@ operations:
     output:
       StackResources: >-
         s_found && 'Resources' in s && s.Resources != null
-          ? s.Resources.map(r, {'LogicalResourceId': r.Logical, 'PhysicalResourceId': r.Physical,
-              'ResourceType': r.Type, 'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'})
+          ? s.Resources.map(r, merge({'LogicalResourceId': r.Logical, 'PhysicalResourceId': r.Physical,
+              'ResourceType': r.Type, 'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'},
+              'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))
           : []
 
   # The rollback family conjures a fresh record for an absent stack rather

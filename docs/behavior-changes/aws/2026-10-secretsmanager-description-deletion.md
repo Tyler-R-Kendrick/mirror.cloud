@@ -172,7 +172,11 @@ The oracle is AWS's documentation as it ships in the vendored model
     `DeleteStack` removes the stack ("Deleted stacks don't show up in the
     DescribeStacks operation if the deletion has been completed
     successfully"). A resource the rollback cannot delete stays listed by
-    `DescribeStackResources` as `DELETE_FAILED`, the stack is
+    `DescribeStackResources` as `DELETE_FAILED`, with the error as its
+    `ResourceStatusReason` ("Success/failure message associated with the
+    resource"); `ListStackResources`, `DescribeStackResource` and
+    `DescribeStackEvents` answer the same status and reason from the same
+    record, where events said `CREATE_COMPLETE` whatever happened. The stack is
     `ROLLBACK_FAILED`, and the service's error is its `StackStatusReason`
     ("Success/failure message associated with the stack status");
     `DeleteStack` tries the resource again. A `DeleteStack` that cannot delete

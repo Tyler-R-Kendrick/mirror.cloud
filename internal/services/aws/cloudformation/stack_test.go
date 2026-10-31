@@ -741,3 +741,57 @@ func TestCloudFormationANumericDefaultIsItsText(t *testing.T) {
 		}
 	}
 }
+
+// DescribeStackEvents answers each resource's status as the other resource
+// reads do, DELETE_FAILED included, with its ResourceStatusReason
+// ("Success/failure message associated with the resource", a member of the
+// model's StackEvent): all four reads derive both from the stack's record.
+// Before, every event said CREATE_COMPLETE and none carried a reason.
+func TestCloudFormationStackEventsAgreeWithTheResources(t *testing.T) {
+	h := newStacks(t)
+	all := nameable()
+	h.mustCreate("ev", map[string]map[string]any{"Bucket": all["Bucket"], "Queue": all["Queue"]})
+	var bucket string
+	for _, r := range h.resources("ev") {
+		if r.Logical == "Bucket" {
+			bucket = r.Physical
+		}
+	}
+	h.fill(bucket, true)
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "ev"}); code(err) != "BucketNotEmpty" {
+		t.Fatalf("DeleteStack answered %v, want BucketNotEmpty", err)
+	}
+	read := func(op, member string, in map[string]any) []any {
+		t.Helper()
+		out, err := h.invoke(op, in)
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		if one, ok := out[member].(map[string]any); ok {
+			return []any{one}
+		}
+		return out[member].([]any)
+	}
+	for _, c := range []struct {
+		op, member string
+		in         map[string]any
+	}{
+		{"DescribeStackEvents", "StackEvents", map[string]any{"StackName": "ev"}},
+		{"DescribeStackResources", "StackResources", map[string]any{"StackName": "ev"}},
+		{"ListStackResources", "StackResourceSummaries", map[string]any{"StackName": "ev"}},
+		{"DescribeStackResource", "StackResourceDetail", map[string]any{"StackName": "ev", "LogicalResourceId": "Bucket"}},
+	} {
+		found := false
+		for _, raw := range read(c.op, c.member, c.in) {
+			if r := raw.(map[string]any); r["LogicalResourceId"] == "Bucket" {
+				found = r["ResourceStatus"] == "DELETE_FAILED" && strings.Contains(str(r["ResourceStatusReason"]), "BucketNotEmpty")
+				if !found {
+					t.Errorf("%s answered the bucket as %v / %v, want DELETE_FAILED with S3's error", c.op, r["ResourceStatus"], r["ResourceStatusReason"])
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s did not answer the bucket as DELETE_FAILED with S3's error", c.op)
+		}
+	}
+}

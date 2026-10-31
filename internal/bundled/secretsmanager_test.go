@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -23,7 +24,14 @@ type secretsCall func(op string, in map[string]any) (map[string]any, error)
 
 func secretsManager(t *testing.T) (secretsCall, func(t *testing.T, op string, in map[string]any) map[string]any, func(t *testing.T, err error, code string)) {
 	t.Helper()
-	pack, err := bundled.New("aws.secretsmanager", spitest.Deps(t))
+	return secretsManagerOn(t, spitest.Deps(t))
+}
+
+// secretsManagerOn is secretsManager over deps the test keeps, for a test that
+// moves the clock.
+func secretsManagerOn(t *testing.T, deps spi.Deps) (secretsCall, func(t *testing.T, op string, in map[string]any) map[string]any, func(t *testing.T, err error, code string)) {
+	t.Helper()
+	pack, err := bundled.New("aws.secretsmanager", deps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +145,7 @@ func TestSecretsManagerDescribesASecretScheduledForDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DescribeSecret of a secret scheduled for deletion faulted: %v", err)
 	}
-	if !at(described["DeletedDate"], 30*86400) || described["Name"] != "s" {
+	if !at(described["DeletedDate"], 0) || described["Name"] != "s" {
 		t.Fatalf("DescribeSecret of a secret scheduled for deletion answered %#v", described)
 	}
 	// DeleteSecret: "When a secret is scheduled for deletion, you cannot
@@ -167,13 +175,17 @@ func TestSecretsManagerDescribesASecretScheduledForDeletion(t *testing.T) {
 // ResourceNotFoundException." RecoveryWindowInDays: "You can't use both this
 // parameter and ForceDeleteWithoutRecovery in the same call."
 func TestSecretsManagerDeletesASecretOnce(t *testing.T) {
-	call, ok, fault := secretsManager(t)
+	deps := spitest.Deps(t)
+	call, ok, fault := secretsManagerOn(t, deps)
 	ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v"})
 	ok(t, "DeleteSecret", map[string]any{"SecretId": "s"})
 
+	if err := deps.Clock.Advance(time.Hour); err != nil {
+		t.Fatal(err)
+	}
 	_, err := call("DeleteSecret", map[string]any{"SecretId": "s"})
 	fault(t, err, "InvalidRequestException")
-	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}); !at(got["DeletedDate"], 30*86400) {
+	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}); !at(got["DeletedDate"], 0) {
 		t.Fatalf("a refused second DeleteSecret moved DeletedDate to %#v", got["DeletedDate"])
 	}
 
@@ -294,5 +306,31 @@ func TestSecretsManagerRecoveryWindowIsSevenToThirtyDays(t *testing.T) {
 				t.Fatalf("DeletionDate %#v, want the request time plus %d days", deleted["DeletionDate"], days)
 			}
 		})
+	}
+}
+
+// SecretListEntry.DeletedDate: "The date and time the deletion of the secret
+// occurred." DeleteSecretResponse.DeletionDate: "This value is the date and
+// time of the delete request plus the number of days in RecoveryWindowInDays."
+// DescribeSecretResponse.DeletedDate calls the same member "The date the secret
+// is scheduled for deletion"; it is read as the time of the delete request, as
+// the listing's documentation says and as AWS answers, and DeletionDate is the
+// end of the window.
+func TestSecretsManagerDeletedDateIsWhenDeletionWasRequested(t *testing.T) {
+	deps := spitest.Deps(t)
+	_, ok, _ := secretsManagerOn(t, deps)
+	ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v"})
+	if err := deps.Clock.Advance(time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	deleted := ok(t, "DeleteSecret", map[string]any{"SecretId": "s", "RecoveryWindowInDays": 7})
+	if !at(deleted["DeletionDate"], 3600+7*86400) {
+		t.Fatalf("DeletionDate %#v, want the request time plus 7 days", deleted["DeletionDate"])
+	}
+	if err := deps.Clock.Advance(time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}); !at(got["DeletedDate"], 3600) {
+		t.Fatalf("DeletedDate %#v, want 3600, the time the deletion was requested", got["DeletedDate"])
 	}
 }

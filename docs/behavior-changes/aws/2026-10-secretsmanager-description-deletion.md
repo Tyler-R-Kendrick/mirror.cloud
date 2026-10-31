@@ -12,8 +12,16 @@ The oracle is AWS's documentation as it ships in the vendored model
   `SecretString` or `SecretBinary` creates a version. Before, every update
   appended a version holding `""` and made it `AWSCURRENT`.
 - **A secret scheduled for deletion is described.** `DescribeSecret` answers it
-  with `DeletedDate`, "the date the secret is scheduled for deletion", where it
-  answered `InvalidRequestException` before. `GetSecretValue` still refuses it.
+  with `DeletedDate`, where it answered `InvalidRequestException` before.
+  `GetSecretValue` still refuses it.
+- **`DeletedDate` is when the deletion was requested.** The model documents the
+  member two ways: `SecretListEntry.DeletedDate` is "The date and time the
+  deletion of the secret occurred", and `DescribeSecretResponse.DeletedDate`
+  is "The date the secret is scheduled for deletion". AWS answers the time of
+  the `DeleteSecret` request, which is the first reading, so that is what is
+  stored. The end of the window is `DeleteSecret`'s `DeletionDate`, "the date
+  and time of the delete request plus the number of days in
+  RecoveryWindowInDays".
 - **DeleteSecret.**
   - The answer is `ARN`, `Name` and `DeletionDate`. `DeletionDate` is the
     request time plus `RecoveryWindowInDays`, 30 when not given; before, it was

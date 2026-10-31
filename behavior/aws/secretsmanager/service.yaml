@@ -217,10 +217,10 @@ operations:
       VersionStages: "'VersionStages' in picked ? picked.VersionStages : null"
 
   # A secret scheduled for deletion is described, with its DeletedDate:
-  # "The date the secret is scheduled for deletion. If it is not scheduled for
-  # deletion, this field is omitted." (DescribeSecretResponse.DeletedDate in
-  # the vendored model). It is the value, not the description, that is out of
-  # reach until RestoreSecret.
+  # "If it is not scheduled for deletion, this field is omitted."
+  # (DescribeSecretResponse.DeletedDate in the vendored model). It is the time
+  # DeleteSecret was requested; see DeleteSecret. It is the value, not the
+  # description, that is out of reach until RestoreSecret.
   DescribeSecret:
     reads:
       s: { resource: secret }
@@ -261,8 +261,8 @@ operations:
         })
 
   # Force delete drops the record; otherwise it is marked Deleted, stamped with
-  # the end of its recovery window, and keeps answering to RestoreSecret. From
-  # the vendored model's documentation:
+  # the time of the request as its DeletedDate, and keeps answering to
+  # RestoreSecret. From the vendored model's documentation:
   # - DeleteSecret: "Secrets Manager attaches a DeletionDate stamp to the
   #   secret that specifies the end of the recovery window."
   # - RecoveryWindowInDays: "The number of days from 7 to 30 that Secrets
@@ -273,6 +273,11 @@ operations:
   #   "The parameter name or value is invalid."
   # - DeleteSecretResponse.DeletionDate: "the date and time of the delete
   #   request plus the number of days in RecoveryWindowInDays."
+  # - SecretListEntry.DeletedDate: "The date and time the deletion of the
+  #   secret occurred." DescribeSecretResponse.DeletedDate says "The date the
+  #   secret is scheduled for deletion" of the same member; the two readings
+  #   differ, and AWS answers the time of the request, so that is what is
+  #   stored. The end of the window is DeletionDate, answered here only.
   # - InvalidRequestException, possible causes: "The secret is scheduled for
   #   deletion." So a second unforced delete is refused, not repeated.
   # - ForceDeleteWithoutRecovery: "If you forcibly delete an already deleted or
@@ -311,7 +316,10 @@ operations:
       - patch:
           resource: secret
           when: "!force"
-          record: { Deleted: "true", DeletedDate: deletion }
+          # DeletedDate is when the deletion was requested ("The date and time
+          # the deletion of the secret occurred", SecretListEntry); the end of
+          # the window is the DeletionDate this call answers.
+          record: { Deleted: "true", DeletedDate: "int(now)" }
     output:
       ARN: "s_found ? s.ARN : dyn(null)"
       Name: id
@@ -563,9 +571,7 @@ quirks:
       The pack's truthy accepts ForceDeleteWithoutRecovery as the strings
       'true', 'True' and '1' as well as the boolean; the transcription keeps
       all four. A forced delete answers no DeletionDate, and no ARN when the
-      secret did not exist. DescribeSecret's DeletedDate is the same instant
-      as the DeletionDate the delete answered: the documentation calls it "the
-      date the secret is scheduled for deletion".
+      secret did not exist.
   - operation: TagResource
     note: >
       A request carrying the same tag key twice resolves first-wins here; the

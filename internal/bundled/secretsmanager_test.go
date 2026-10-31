@@ -724,3 +724,33 @@ func TestSecretsManagerRecoveryWindowIsALong(t *testing.T) {
 		t.Fatalf("a window of 7.0 answered DeletionDate %#v, want 7 days", got["DeletionDate"])
 	}
 }
+
+// The model's own examples write a timestamp with milliseconds: "CreatedDate":
+// 1523477145.713 (GetSecretValue), "LastChangedDate": 1523477145.729
+// (ListSecrets). Where the clock has sub-second time the answer carries it, to
+// the millisecond.
+func TestSecretsManagerTimestampsCarryMilliseconds(t *testing.T) {
+	deps := spitest.Deps(t)
+	_, ok, _ := secretsManagerOn(t, deps)
+	ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v"})
+	ok(t, "CreateSecret", map[string]any{"Name": "f", "SecretString": "v"})
+	if err := deps.Clock.Advance(1500 * time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	deleted := epochSeconds(t, "DeleteSecret", ok(t, "DeleteSecret", map[string]any{"SecretId": "s"}))
+	if got := deleted["DeleteSecret.DeletionDate"]; got != "2592001.5" {
+		t.Fatalf("DeletionDate %q, want 2592001.5", got)
+	}
+	described := epochSeconds(t, "DescribeSecret", ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}))
+	if got := described["DescribeSecret.DeletedDate"]; got != "1.5" {
+		t.Fatalf("DeletedDate %q, want 1.5", got)
+	}
+	listed := epochSeconds(t, "ListSecrets", ok(t, "ListSecrets", map[string]any{"IncludePlannedDeletion": true}))
+	if got := listed["ListSecrets.SecretList[].DeletedDate"]; got != "1.5" {
+		t.Fatalf("SecretListEntry.DeletedDate %q, want 1.5", got)
+	}
+	forced := epochSeconds(t, "DeleteSecret", ok(t, "DeleteSecret", map[string]any{"SecretId": "f", "ForceDeleteWithoutRecovery": true}))
+	if got := forced["DeleteSecret.DeletionDate"]; got != "1.5" {
+		t.Fatalf("a forced delete's DeletionDate %q, want 1.5", got)
+	}
+}

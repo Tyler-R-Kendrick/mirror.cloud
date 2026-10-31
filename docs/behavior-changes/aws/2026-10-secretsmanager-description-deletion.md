@@ -116,7 +116,9 @@ The oracle is AWS's documentation as it ships in the vendored model
   seconds, a JSON number. They were date strings, which the Go SDK v2 refuses:
   it decodes a timestamp only from a JSON number, so `DescribeSecret` of a
   secret scheduled for deletion failed in every Go SDK v2 client, Terraform's
-  included. `main` wrote `DeletionDate` as a string too.
+  included. `main` wrote `DeletionDate` as a string too. They carry
+  milliseconds where the clock has them (`1.5`, `2592001.5`), as the model's
+  examples do ("CreatedDate": 1523477145.713); they were whole seconds.
 
 Equivalence trace `aws.secretsmanager`, steps counted from 0: steps 49 to 57
 are added, each against the secret scheduled at step 48 (a `PutSecretValue`, a

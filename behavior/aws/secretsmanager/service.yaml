@@ -403,7 +403,9 @@ operations:
       days: "windowed && inwindow ? int(input.RecoveryWindowInDays) : 30"
       # awsJson1_1 writes a timestamp as epoch seconds, a JSON number; a string
       # here fails every Go SDK v2 client, which decodes one only from a number.
-      deletion: "int(now + duration(string(days * 24) + 'h'))"
+      # It carries milliseconds, as the model's examples do ("CreatedDate":
+      # 1523477145.713 in GetSecretValue's).
+      deletion: "double(now_ms + days * 86400000) / 1000.0"
       scheduled: "'Deleted' in s && s.Deleted == true"
     require:
       - cond: long
@@ -427,14 +429,14 @@ operations:
           # DeletedDate is when the deletion was requested ("The date and time
           # the deletion of the secret occurred", SecretListEntry); the end of
           # the window is the DeletionDate this call answers.
-          record: { Deleted: "true", DeletedDate: "int(now)" }
+          record: { Deleted: "true", DeletedDate: "double(now_ms) / 1000.0" }
     omit_null: [ARN]
     output:
       ARN: "s_found ? s.ARN : dyn(null)"
       Name: id
       # A forced delete has no window: "the date and time of the delete
       # request plus the number of days in RecoveryWindowInDays" is the request.
-      DeletionDate: "force ? int(now) : deletion"
+      DeletionDate: "force ? double(now_ms) / 1000.0 : deletion"
 
   # RestoreSecret: "Cancels the scheduled deletion of a secret by removing the
   # DeletedDate time stamp." Its response is the secret's ARN and Name.

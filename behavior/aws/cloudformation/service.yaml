@@ -130,6 +130,16 @@ operations:
     reads:
       s: { resource: stack }
     require:
+      # StackName is "The name or unique stack ID": a name by CreateStack's
+      # rule (letters, digits and hyphens, starting with a letter) or a stack
+      # id, as the native operations check it (checkStackName).
+      - cond: >-
+          !('StackName' in input) || string(input.StackName) == ''
+          || string(input.StackName).matches('^([a-zA-Z][-a-zA-Z0-9]*|arn:[-a-zA-Z0-9:/._+]*)$')
+        error: Validation
+        message_expr: >-
+          "1 validation error detected: Value '" + string(input.StackName)
+          + "' at 'stackName' failed to satisfy constraint: Member must satisfy regular expression pattern: [a-zA-Z][-a-zA-Z0-9]*|arn:[-a-zA-Z0-9:/._+]*"
       - cond: >-
           !('StackName' in input) || string(input.StackName) == '' || s_found
         error: Validation

@@ -730,3 +730,48 @@ func TestCloudFormationARuleWhoseTargetsFailFailsTheStack(t *testing.T) {
 		t.Errorf("tu is %q (%v), want UPDATE_ROLLBACK_COMPLETE", status, err)
 	}
 }
+
+// CreateStack's StackName: "A stack name can contain only alphanumeric
+// characters (case sensitive) and hyphens. It must start with an alphabetical
+// character and can't be longer than 128 characters." Any other name is
+// ValidationError in the framework's wording ("1 validation error detected:
+// Value '...' at 'stackName' failed to satisfy constraint: ...") and makes
+// nothing. UpdateStack, DeleteStack and DescribeStacks take "The name or
+// unique stack ID", so they check the same pattern and admit a stack id.
+// Before, any name was taken, and the naming helper dropped the characters a
+// resource name may not hold.
+func TestCloudFormationChecksTheStackName(t *testing.T) {
+	h := newStacks(t)
+	q := map[string]map[string]any{"Q": nameable()["Queue"]}
+	tpl, _ := json.Marshal(map[string]any{"Resources": q})
+	refused := func(op string, in map[string]any, want string) {
+		t.Helper()
+		_, err := h.invoke(op, in)
+		var f *spi.Fault
+		if !errors.As(err, &f) || f.Code != "ValidationError" || !strings.Contains(f.Message, "at 'stackName' failed to satisfy constraint: Member must "+want) {
+			t.Errorf("%s %v answered %v, want ValidationError: ... %s", op, in["StackName"], err, want)
+		}
+	}
+	for _, name := range []string{"has space!", "1digit", "under_score", "dotted.name"} {
+		refused("CreateStack", map[string]any{"StackName": name, "TemplateBody": string(tpl)}, "satisfy regular expression pattern: [a-zA-Z][-a-zA-Z0-9]*")
+		refused("UpdateStack", map[string]any{"StackName": name, "TemplateBody": string(tpl)}, "satisfy regular expression pattern")
+		refused("DeleteStack", map[string]any{"StackName": name}, "satisfy regular expression pattern")
+		refused("DescribeStacks", map[string]any{"StackName": name}, "satisfy regular expression pattern")
+	}
+	refused("CreateStack", map[string]any{"StackName": strings.Repeat("a", 129), "TemplateBody": string(tpl)}, "have length less than or equal to 128")
+	if queues, _ := h.service("aws.sqs", "ListQueues", map[string]any{}); queues["QueueUrls"] != nil && len(queues["QueueUrls"].([]any)) != 0 {
+		t.Errorf("a refused stack made queues: %v", queues["QueueUrls"])
+	}
+	if stacks, _ := h.invoke("ListStacks", map[string]any{}); stacks["StackSummaries"] != nil && len(stacks["StackSummaries"].([]any)) != 0 {
+		t.Errorf("a refused stack left a record: %v", stacks["StackSummaries"])
+	}
+	h.mustCreate("Ok-1", q)
+	described, err := h.invoke("DescribeStacks", map[string]any{"StackName": "Ok-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := str(described["Stacks"].([]any)[0].(map[string]any)["StackId"])
+	if _, err := h.invoke("DescribeStacks", map[string]any{"StackName": id}); err != nil && strings.Contains(err.Error(), "failed to satisfy constraint") {
+		t.Errorf("DescribeStacks refused the stack id %s as a name: %v", id, err)
+	}
+}

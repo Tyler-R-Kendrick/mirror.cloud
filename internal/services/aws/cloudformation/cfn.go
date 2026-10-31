@@ -53,11 +53,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	name := str(req.Input["StackName"])
 	switch req.Operation {
 	case "ValidateTemplate":
-		body, err := p.templateBody(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		tpl, err := parseTemplate(body)
+		_, tpl, err := p.template(ctx, req)
 		if err != nil {
 			return nil, err
 		}
@@ -67,11 +63,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
 	case "GetTemplateSummary":
-		body, err := p.templateBody(ctx, req)
-		tpl, parseErr := parseTemplate(body)
-		if err == nil {
-			err = parseErr
-		}
+		_, tpl, err := p.template(ctx, req)
 		if st, loadErr := p.load(ctx, req, name); err != nil && name != "" && loadErr == nil {
 			tpl, err = parseTemplate(st.Template)
 		}
@@ -131,14 +123,10 @@ type res struct {
 }
 
 func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool) (*spi.Response, error) {
-	if name == "" {
-		return nil, invalid("StackName required")
-	}
-	body, err := p.templateBody(ctx, req)
-	if err != nil {
+	if err := checkStackName(name, update); err != nil {
 		return nil, err
 	}
-	tpl, err := parseTemplate(body)
+	body, tpl, err := p.template(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -153,8 +141,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	} else if err == nil {
 		old, id = found, found.ID
 	}
-	st := stack{Name: name, ID: id, Status: "CREATE_COMPLETE", Template: body, Refs: map[string]string{}}
-	maps.Copy(st.Refs, params)
+	st := stack{Name: name, ID: id, Status: "CREATE_COMPLETE", Template: body, Refs: params}
 	if update {
 		st.Status = "UPDATE_COMPLETE"
 	}
@@ -200,6 +187,16 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	return &spi.Response{Output: map[string]any{"StackId": id}}, nil
 }
 
+// template reads the request's template body and parses it.
+func (p *Pack) template(ctx context.Context, req *spi.Request) (string, map[string]any, error) {
+	body, err := p.templateBody(ctx, req)
+	if err != nil {
+		return "", nil, err
+	}
+	tpl, err := parseTemplate(body)
+	return body, tpl, err
+}
+
 func (p *Pack) templateBody(ctx context.Context, req *spi.Request) (string, error) {
 	if body := str(req.Input["TemplateBody"]); body != "" {
 		return body, nil
@@ -231,8 +228,8 @@ func (p *Pack) templateBody(ctx context.Context, req *spi.Request) (string, erro
 
 func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Response, error) {
 	st, err := p.load(ctx, req, name)
-	if err != nil {
-		return nil, err
+	if nameErr := checkStackName(name, true); nameErr != nil || err != nil {
+		return nil, cmp.Or(nameErr, err)
 	}
 	if st.Protect {
 		return nil, invalid("stack has termination protection")
@@ -243,12 +240,10 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 	return &spi.Response{Output: map[string]any{}}, nil
 }
 
-// unwind deletes the doomed resources, newest first, as a rollback or a
-// DeleteStack does, and records the outcome on st, which keeps kept. With
-// nothing left over and no earlier error (first) the stack is done (a
-// DELETE_COMPLETE stack is removed); otherwise it is failed, any resource it
-// could not delete listed as DELETE_FAILED for the next DeleteStack to try
-// again, and the first error, which unwind answers, its StackStatusReason.
+// unwind deletes the doomed resources, newest first, for a rollback or DeleteStack, and records the
+// outcome on st, which keeps kept: done (a DELETE_COMPLETE stack is removed) with nothing left and no
+// earlier error (first); else failed, what it could not delete listed as DELETE_FAILED for the next
+// DeleteStack to try again, and the first error, which it answers, as StackStatusReason.
 func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, kept, doomed []res, first error, done, failed string) error {
 	st.Resources = slices.Clip(kept)
 	for _, r := range slices.Backward(doomed) {
@@ -268,6 +263,23 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, kept, doo
 	return cmp.Or(first, p.col(req, "cfn").Put(ctx, st.Name, raw))
 }
 
+// checkStackName is the framework's ValidationError for a StackName outside CreateStack's rule,
+// "alphanumeric characters (case sensitive) and hyphens. It must start with an alphabetical character
+// and can't be longer than 128 characters"; byID also admits a stack id ("The name or unique stack ID").
+func checkStackName(name string, byID bool) error {
+	pattern := `[a-zA-Z][-a-zA-Z0-9]*`
+	if byID {
+		pattern += `|arn:[-a-zA-Z0-9:/._+]*`
+	}
+	constraint := "satisfy regular expression pattern: " + pattern
+	if ok, _ := regexp.MatchString("^("+pattern+")$", name); ok && (len(name) <= 128 || byID) {
+		return nil
+	} else if ok {
+		constraint = "have length less than or equal to 128"
+	}
+	return invalid("1 validation error detected: Value '" + name + "' at 'stackName' failed to satisfy constraint: Member must " + constraint)
+}
+
 func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, error) {
 	var st stack
 	b, ok, _ := p.col(req, "cfn").Get(ctx, name)
@@ -278,11 +290,9 @@ func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, 
 	return st, nil
 }
 
-// kinds are the types provision names: the property that names one, the
-// longest name its service takes (API Gateway sets none for a REST API, and
-// holds no name to one API; 1024 only bounds it), a read that finds one by
-// name, and the service's error for a name taken (SNS has none, its
-// CreateTopic "is idempotent", so CloudFormation's own).
+// kinds are the types provision names: the property that names one, the longest name its service takes
+// (API Gateway sets none for a REST API, nor holds a name to one; 1024 only bounds it), a read that finds
+// one by name, and the service's error for a name taken (SNS's CreateTopic "is idempotent": CloudFormation's).
 var kinds = map[string]struct {
 	member            string
 	max               int
@@ -302,11 +312,9 @@ var kinds = map[string]struct {
 	"AWS::ApiGateway::RestApi":    {"Name", 1024, "", "", "", ""},
 }
 
-// claim answers the name a resource is made under: the template's, or else
-// physicalName's. A given name that a resource the stack did not make under
-// it already holds is the service's error for a name taken: several services
-// answer a create of a name they hold with what they hold, so the stack
-// would take the resource over, and its rollback or DeleteStack delete it.
+// claim answers the name a resource is made under: the template's, or else physicalName's. A given name
+// that a resource the stack did not make under it holds is the service's error for a name taken: several
+// services answer such a create with what they hold, which a rollback or DeleteStack would then delete.
 func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logical, typ string, props map[string]any) (string, error) {
 	k, n := kinds[typ], str(props[kinds[typ].member])
 	if n == "" {
@@ -329,13 +337,11 @@ var unnameable = regexp.MustCompile(`[^A-Za-z0-9-]+`)
 
 func fifo(p map[string]any) bool { return p["FifoQueue"] == true || str(p["FifoQueue"]) == "true" }
 
-// physicalName is the name of a resource the template leaves unnamed, in
-// the modelled form <stack>-<logical id>-<suffix>. The suffix is twelve hex
-// digits of a hash of the stack id and logical id, so no two stacks, and no
-// two resources of one stack, share a name, and an update finds the name
-// its create made. Only letters, digits and hyphens are kept; a bucket's
-// name is lower case and a FIFO queue's ends in .fifo; and the stack name
-// and logical id, never the suffix, are cut to fit the service's longest.
+// physicalName is the name of a resource the template leaves unnamed, in the modelled form
+// <stack>-<logical id>-<suffix>. The suffix is twelve hex digits of a hash of the stack id and logical
+// id, so no two stacks, and no two resources of one stack, share a name, and an update finds the name its
+// create made. Only letters, digits and hyphens are kept; a bucket's name is lower case and a FIFO
+// queue's ends in .fifo; the stack name and logical id, never the suffix, are cut to the longest name.
 func physicalName(stack, logical, stackID, typ string, props map[string]any) string {
 	k, named := kinds[typ]
 	if !named {
@@ -589,10 +595,9 @@ func given(in, props map[string]any, members ...string) map[string]any {
 	return in
 }
 
-// generated is the value GenerateSecretString asks for: a password made as
-// GetRandomPassword makes one, seeded by the stack and logical id, and put
-// under GenerateStringKey in SecretStringTemplate when the template gives one.
-// Each way the property can be wrong has its own ValidationError.
+// generated is the value GenerateSecretString asks for: a password made as GetRandomPassword makes one,
+// seeded by the stack and logical id, put under GenerateStringKey in SecretStringTemplate when there is
+// one. Each way the property can be wrong has its own ValidationError.
 func generated(props map[string]any, seed string) (string, error) {
 	spec, isMap := props["GenerateSecretString"].(map[string]any)
 	key, tpl := str(spec["GenerateStringKey"]), str(spec["SecretStringTemplate"])

@@ -127,7 +127,7 @@ The oracle is AWS's documentation as it ships in the vendored model
     case. A queue with `FifoQueue` true is made a FIFO queue (`FifoQueue` was
     not passed to `CreateQueue` before), and its name, when the engine makes
     it, ends in `.fifo`. Characters other than letters, digits and hyphens are
-    dropped, and the stack name and logical id are cut, never the suffix, to
+    dropped from the logical id (a stack name never holds one, below), and the stack name and logical id are cut, never the suffix, to
     fit the service's longest name: 80 for a queue, 64 for a rule, a role or a
     function, 128 for a stream, 255 for a table, 256 for a topic and 63 for a
     bucket. Before, a secret's suffix was the stack id's, and most other types
@@ -162,6 +162,17 @@ The oracle is AWS's documentation as it ships in the vendored model
     stacks share a name the engine makes, and a given name another resource
     already holds is refused before anything is made (above). `OnFailure` is
     not read, so every failed create rolls back.
+  - A stack name follows `CreateStack`'s rule: "A stack name can contain
+    only alphanumeric characters (case sensitive) and hyphens. It must start
+    with an alphabetical character and can't be longer than 128 characters."
+    Any other name is `ValidationError` in the framework's wording ("1
+    validation error detected: Value 'under_score' at 'stackName' failed to
+    satisfy constraint: Member must satisfy regular expression pattern:
+    [a-zA-Z][-a-zA-Z0-9]*", or "Member must have length less than or equal to
+    128"), and nothing is made. `UpdateStack`, `DeleteStack` and
+    `DescribeStacks` take "The name or unique stack ID", so they check the
+    same pattern with a stack id (`arn:...`) admitted. Before, any name was
+    taken.
   - A rule whose targets EventBridge did not all add fails. `PutTargets` "can
     partially fail ... FailedEntryCount is non-zero in the response and each
     entry in FailedEntries provides the ID of the failed target and the error

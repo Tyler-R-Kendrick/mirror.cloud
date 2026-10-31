@@ -16,14 +16,10 @@ func parseYAML(src string) (map[string]any, error) {
 		return nil, err
 	}
 	v, err := yamlValue(&root)
-	if err != nil {
-		return nil, err
+	if m, ok := v.(map[string]any); ok || err != nil {
+		return m, err
 	}
-	m, ok := v.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("yaml root must be a map")
-	}
-	return m, nil
+	return nil, fmt.Errorf("yaml root must be a map")
 }
 
 func yamlValue(n *yaml.Node) (any, error) {

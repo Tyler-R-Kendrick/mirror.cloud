@@ -167,17 +167,21 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
 		typ, props := str(rm["Type"]), asMap(p.resolve(rm["Properties"], planned, req, name))
-		n, err := p.claim(ctx, req, st, old, logical, typ, props)
-		if planned[logical] = planID(req, typ, n, props); err != nil {
+		prev, how, n, err := p.next(ctx, req, st, old, logical, typ, props)
+		if planned[logical] = planID(req, typ, n, props); how == "" || how == "update" {
+			planned[logical] = prev.Physical
+		}
+		if err != nil {
 			return fail(err)
 		}
 	}
 	for _, logical := range order {
 		rm := asMap(resources[logical]) // props is never nil: provision adds to it
 		typ, props := str(rm["Type"]), maps.Collect(maps.All(asMap(p.resolve(rm["Properties"], st.Refs, req, name))))
-		phys, n, err := "", "", error(nil)
-		if n, err = p.claim(ctx, req, st, old, logical, typ, props); err == nil { // again: a name may come from a resource made before it
-			phys, err = p.provision(ctx, req, typ, logical, n, props, old.Refs[logical], id)
+		prev, how, n, err := p.next(ctx, req, st, old, logical, typ, props) // again: a name may come from a resource made before it
+		phys := map[string]string{"": prev.Physical}[how]                   // one an update keeps as it is
+		if how != "" && err == nil {
+			phys, err = p.provision(ctx, req, typ, logical, n, props, map[string]string{"update": prev.Physical}[how], id)
 		}
 		if phys != "" { // recorded once it exists, so a rollback finds a half-made one too
 			st.Refs[logical] = phys
@@ -323,29 +327,30 @@ func named(s string) string {
 // kind is what the engine knows of a resource type: the property that names one and the longest name its
 // service takes (API Gateway sets none for a REST API, nor holds a name to one; 1024 only bounds it), the
 // read that finds one by name and the service's error for a name taken (SNS's CreateTopic "is idempotent":
-// CloudFormation's), the id one is made with (planID), and the calls (do) that create one, where in their
-// answer its physical id is, and that update and delete one.
+// CloudFormation's), the id one is made with (planID), the properties whose change "Update requires:
+// Replacement" (the type's Template Reference page), and the calls (do) that create one, where in their
+// answer its physical id is, and that update one in place and delete one.
 type kind struct {
-	member                                    string
-	max                                       int
-	find, taken, ref, create, id, update, del string
+	member                                             string
+	max                                                int
+	find, taken, ref, replace, create, id, update, del string
 }
 
 var kinds = map[string]kind{
-	"AWS::S3::Bucket":              {"BucketName", 63, "aws.s3 HeadBucket Bucket={n}", "BucketAlreadyOwnedByYou", "{n}", "aws.s3 CreateBucket Bucket={n}", "Bucket", "", "aws.s3 DeleteBucket Bucket={id}"},
-	"AWS::SQS::Queue":              {"QueueName", 80, "aws.sqs GetQueueUrl QueueName={n}", "QueueAlreadyExists", "", "aws.sqs CreateQueue QueueName={n} Attributes", "QueueUrl", "", "aws.sqs DeleteQueue QueueUrl={id}"},
-	"AWS::SNS::Topic":              {"TopicName", 256, "aws.sns GetTopicAttributes TopicArn=arn:aws:sns:{r}:{a}:{n}", "AlreadyExistsException", "arn:aws:sns:{r}:{a}:{n}", "aws.sns CreateTopic Name={n}", "TopicArn", "", "aws.sns DeleteTopic TopicArn={id}"},
-	"AWS::DynamoDB::Table":         {"TableName", 255, "aws.dynamodb DescribeTable TableName={n}", "ResourceInUseException", "{n}", "aws.dynamodb CreateTable * TableName={n}", "TableName", "", "aws.dynamodb DeleteTable TableName={id}"},
-	"AWS::IAM::Role":               {"RoleName", 64, "aws.iam GetRole RoleName={n}", "EntityAlreadyExists", "arn:aws:iam::{a}:role/{n}", "aws.iam CreateRole RoleName={n} AssumeRolePolicyDocument=%AssumeRolePolicyDocument", "Role.Arn", "", "aws.iam DeleteRole RoleName={id/}"},
-	"AWS::SSM::Parameter":          {"Name", 2048, "aws.ssm GetParameter Name={n}", "ParameterAlreadyExists", "{n}", "aws.ssm PutParameter Name={n} Value= Value=$Value Type=String Type=$Type", "Name", "", "aws.ssm DeleteParameter Name={id}"},
-	"AWS::SecretsManager::Secret":  {"Name", 512, "aws.secretsmanager DescribeSecret SecretId={n}", "ResourceExistsException", "arn:aws:secretsmanager:{r}:{a}:secret:{n}", "aws.secretsmanager CreateSecret Name={n} SecretString=$SecretString Description=$Description", "ARN", "aws.secretsmanager UpdateSecret SecretId={id} SecretString=$SecretString Description=$Description", "aws.secretsmanager DeleteSecret SecretId={id} ForceDeleteWithoutRecovery=true"},
-	"AWS::KMS::Key":                {"", 0, "", "", "", "aws.kms CreateKey Description= Description=$Description", "KeyMetadata.KeyId", "", "aws.kms ScheduleKeyDeletion KeyId={id} PendingWindowInDays=7"},
-	"AWS::Logs::LogGroup":          {"LogGroupName", 512, "aws.logs DescribeLogGroups logGroupNamePrefix={n}", "ResourceAlreadyExistsException", "{n}", "aws.logs CreateLogGroup logGroupName={n}", "logGroupName", "", "aws.logs DeleteLogGroup logGroupName={id}"},
-	"AWS::Events::Rule":            {"Name", 64, "aws.events DescribeRule Name={n} EventBusName=$EventBusName", "ResourceAlreadyExistsException", "arn:aws:events:{r}:{a}:rule/{n}", "aws.events PutRule Name={n} ScheduleExpression=$ScheduleExpression State=$State Description=$Description EventBusName=$EventBusName EventPattern=%EventPattern", "RuleArn", "", "aws.events DeleteRule Name={id/} EventBusName={bus}"},
-	"AWS::Lambda::Function":        {"FunctionName", 64, "aws.lambda GetFunction FunctionName={n}", "ResourceConflictException", "arn:aws:lambda:{r}:{a}:function:{n}", "aws.lambda CreateFunction * FunctionName={n}", "FunctionArn", "", "aws.lambda DeleteFunction FunctionName={id:}"},
-	"AWS::Kinesis::Stream":         {"Name", 128, "aws.kinesis DescribeStreamSummary StreamName={n}", "ResourceInUseException", "{n}", "aws.kinesis CreateStream StreamName={n}", "StreamName", "", "aws.kinesis DeleteStream StreamName={id}"},
-	"AWS::Kinesis::ResourcePolicy": {"", 0, "", "", "", "aws.kinesis PutResourcePolicy ResourceARN=$ResourceARN ResourceARN=$ResourceArn Policy=%Policy Policy=%ResourcePolicy", "ResourceARN", "", "aws.kinesis DeleteResourcePolicy ResourceARN={id}"},
-	"AWS::ApiGateway::RestApi":     {"Name", 1024, "", "", "", "aws.apigateway CreateRestApi name={n}", "id", "", "aws.apigateway DeleteRestApi restApiId={id}"},
+	"AWS::S3::Bucket":              {"BucketName", 63, "aws.s3 HeadBucket Bucket={n}", "BucketAlreadyOwnedByYou", "{n}", "BucketName BucketNamePrefix BucketNamespace", "aws.s3 CreateBucket Bucket={n}", "Bucket", "", "aws.s3 DeleteBucket Bucket={id}"},
+	"AWS::SQS::Queue":              {"QueueName", 80, "aws.sqs GetQueueUrl QueueName={n}", "QueueAlreadyExists", "", "QueueName FifoQueue", "aws.sqs CreateQueue QueueName={n} Attributes", "QueueUrl", "", "aws.sqs DeleteQueue QueueUrl={id}"},
+	"AWS::SNS::Topic":              {"TopicName", 256, "aws.sns GetTopicAttributes TopicArn=arn:aws:sns:{r}:{a}:{n}", "AlreadyExistsException", "arn:aws:sns:{r}:{a}:{n}", "TopicName FifoTopic", "aws.sns CreateTopic Name={n}", "TopicArn", "", "aws.sns DeleteTopic TopicArn={id}"},
+	"AWS::DynamoDB::Table":         {"TableName", 255, "aws.dynamodb DescribeTable TableName={n}", "ResourceInUseException", "{n}", "TableName ImportSourceSpecification", "aws.dynamodb CreateTable * TableName={n}", "TableName", "aws.dynamodb UpdateTable TableName={id} BillingMode ProvisionedThroughput StreamSpecification TableClass DeletionProtectionEnabled", "aws.dynamodb DeleteTable TableName={id}"},
+	"AWS::IAM::Role":               {"RoleName", 64, "aws.iam GetRole RoleName={n}", "EntityAlreadyExists", "arn:aws:iam::{a}:role/{n}", "RoleName Path", "aws.iam CreateRole RoleName={n} AssumeRolePolicyDocument=%AssumeRolePolicyDocument", "Role.Arn", "aws.iam UpdateAssumeRolePolicy RoleName={id/} PolicyDocument=%AssumeRolePolicyDocument", "aws.iam DeleteRole RoleName={id/}"},
+	"AWS::SSM::Parameter":          {"Name", 2048, "aws.ssm GetParameter Name={n}", "ParameterAlreadyExists", "{n}", "Name", "aws.ssm PutParameter Name={n} Value= Value=$Value Type=String Type=$Type", "Name", "aws.ssm PutParameter Name={id} Value= Value=$Value Type=String Type=$Type Overwrite=true", "aws.ssm DeleteParameter Name={id}"},
+	"AWS::SecretsManager::Secret":  {"Name", 512, "aws.secretsmanager DescribeSecret SecretId={n}", "ResourceExistsException", "arn:aws:secretsmanager:{r}:{a}:secret:{n}", "Name", "aws.secretsmanager CreateSecret Name={n} SecretString=$SecretString Description=$Description", "ARN", "aws.secretsmanager UpdateSecret SecretId={id} SecretString=$SecretString Description=$Description", "aws.secretsmanager DeleteSecret SecretId={id} ForceDeleteWithoutRecovery=true"},
+	"AWS::KMS::Key":                {"", 0, "", "", "", "KeySpec KeyUsage MultiRegion", "aws.kms CreateKey Description= Description=$Description", "KeyMetadata.KeyId", "aws.kms UpdateKeyDescription KeyId={id} Description= Description=$Description", "aws.kms ScheduleKeyDeletion KeyId={id} PendingWindowInDays=7"},
+	"AWS::Logs::LogGroup":          {"LogGroupName", 512, "aws.logs DescribeLogGroups logGroupNamePrefix={n}", "ResourceAlreadyExistsException", "{n}", "LogGroupName", "aws.logs CreateLogGroup logGroupName={n}", "logGroupName", "", "aws.logs DeleteLogGroup logGroupName={id}"},
+	"AWS::Events::Rule":            {"Name", 64, "aws.events DescribeRule Name={n} EventBusName=$EventBusName", "ResourceAlreadyExistsException", "arn:aws:events:{r}:{a}:rule/{n}", "Name EventBusName", "aws.events PutRule Name={n} ScheduleExpression=$ScheduleExpression State=$State Description=$Description EventBusName=$EventBusName EventPattern=%EventPattern", "RuleArn", "aws.events PutRule Name={n} ScheduleExpression=$ScheduleExpression State=$State Description=$Description EventBusName=$EventBusName EventPattern=%EventPattern", "aws.events DeleteRule Name={id/} EventBusName={bus}"},
+	"AWS::Lambda::Function":        {"FunctionName", 64, "aws.lambda GetFunction FunctionName={n}", "ResourceConflictException", "arn:aws:lambda:{r}:{a}:function:{n}", "FunctionName PackageType DurableConfig TenancyConfig", "aws.lambda CreateFunction * FunctionName={n}", "FunctionArn", "aws.lambda UpdateFunctionConfiguration * FunctionName={id:}", "aws.lambda DeleteFunction FunctionName={id:}"},
+	"AWS::Kinesis::Stream":         {"Name", 128, "aws.kinesis DescribeStreamSummary StreamName={n}", "ResourceInUseException", "{n}", "Name", "aws.kinesis CreateStream StreamName={n} ShardCount", "StreamName", "aws.kinesis UpdateShardCount StreamName={id} TargetShardCount=1 TargetShardCount=@ShardCount ScalingType=UNIFORM_SCALING", "aws.kinesis DeleteStream StreamName={id}"},
+	"AWS::Kinesis::ResourcePolicy": {"", 0, "", "", "", "ResourceArn", "aws.kinesis PutResourcePolicy ResourceARN=$ResourceARN ResourceARN=$ResourceArn Policy=%Policy Policy=%ResourcePolicy", "ResourceARN", "aws.kinesis PutResourcePolicy ResourceARN=$ResourceARN ResourceARN=$ResourceArn Policy=%Policy Policy=%ResourcePolicy", "aws.kinesis DeleteResourcePolicy ResourceARN={id}"},
+	"AWS::ApiGateway::RestApi":     {"Name", 1024, "", "", "", "", "aws.apigateway CreateRestApi name={n}", "id", "aws.apigateway UpdateRestApi restApiId={id} name={n}", "aws.apigateway DeleteRestApi restApiId={id}"},
 }
 
 // do makes a call a kind spells "service Operation member=value ...", and answers the answer over the
@@ -420,6 +425,43 @@ func (p *Pack) order(req *spi.Request, tpl map[string]any) ([]string, error) {
 	return order, nil
 }
 
+// change is what an update does to the resource of logical the stack holds: "" keeps it as it is,
+// "update" updates it in place, and "replace" makes a new one, when a property whose change "requires
+// replacement" (the type's Template Reference page) changed. A resource the stack does not hold is a "create".
+func (p *Pack) change(req *spi.Request, old stack, logical, typ string, props map[string]any) (res, string) {
+	i := slices.IndexFunc(old.Resources, func(r res) bool { return r.Logical == logical && r.Type == typ && r.Status == "" })
+	if i < 0 {
+		return res{}, "create"
+	}
+	tpl, _ := parseTemplate(old.Template)
+	before, how := asMap(p.resolve(asMap(asMap(tpl["Resources"])[logical])["Properties"], old.Refs, req, old.Name)), ""
+	for _, k := range slices.Concat(slices.Collect(maps.Keys(before)), slices.Collect(maps.Keys(props))) {
+		if jsonText(before[k]) == jsonText(props[k]) {
+			continue
+		} else if how = "update"; slices.Contains(strings.Fields(kinds[typ].replace), k) {
+			return old.Resources[i], "replace"
+		}
+	}
+	return old.Resources[i], how
+}
+
+// next is what an update does to one resource (change) and the name it is kept or made under: its own,
+// claim's, or for a replacement one of its own, made from the old id. A replacement may not keep a name
+// the template gives: "CloudFormation cannot update a stack when a custom-named resource requires replacing".
+func (p *Pack) next(ctx context.Context, req *spi.Request, st, old stack, logical, typ string, props map[string]any) (res, string, string, error) {
+	prev, how := p.change(req, old, logical, typ, props)
+	if how == "" || how == "update" && prev.Name != "" {
+		return prev, how, prev.Name, nil
+	} else if how == "replace" {
+		st.ID += "/" + prev.Physical
+	}
+	n, err := p.claim(ctx, req, st, old, logical, typ, props)
+	if err == nil && how == "replace" && n == prev.Name {
+		err = invalid("CloudFormation cannot update a stack when a custom-named resource requires replacing. Rename " + n + " and update the stack again.")
+	}
+	return prev, how, n, err
+}
+
 // claim answers the name a resource is made under: the template's, or else physicalName's. A given name
 // that a resource the stack did not make under it holds is the service's error for a name taken: several
 // services answer such a create with what they hold, which a rollback or DeleteStack would then delete.
@@ -475,7 +517,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	spec, phys := k.create, ""
 	if !known {
 		return "", invalid("unsupported resource type " + typ)
-	} else if existing != "" && existing == planID(req, typ, n, props) && k.update != "" {
+	} else if existing != "" {
 		spec = k.update
 	}
 	if _, gen := props["GenerateSecretString"]; gen && typ == "AWS::SecretsManager::Secret" {
@@ -488,20 +530,24 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		props["Attributes"] = map[string]any{"FifoQueue": "true"}
 	}
 	out, err := p.do(ctx, req, spec, n, existing, props)
-	for _, member := range strings.Split(k.id, ".") { // where the answer holds the id; none once a create failed
+	for _, member := range strings.Split(k.id, ".") { // where a create's answer holds the id
 		out, phys = asMap(out[member]), str(out[member])
 	}
-	if targets, ok := props["Targets"]; ok && err == nil && typ == "AWS::Events::Rule" {
-		// "each entry in FailedEntries provides the ID of the failed target and the error code":
-		// a target not added fails the rule, as its error does.
-		put, putErr := p.call(ctx, req, "aws.events", "PutTargets", given(map[string]any{"Rule": n, "Targets": targets}, props, "EventBusName"))
-		if failed, _ := put["FailedEntries"].([]any); putErr == nil && len(failed) > 0 {
-			putErr = fault(cmp.Or(str(asMap(failed[0])["ErrorCode"]), "ValidationError"), "PutTargets failed to add targets: "+jsonText(failed))
+	if phys = cmp.Or(existing, phys); err == nil && typ == "AWS::Events::Rule" {
+		targets, set := props["Targets"]
+		keep, _ := targets.([]any)
+		if err = p.dropTargets(ctx, req, phys, keep); set && err == nil { // the rule's targets are the template's, no others
+			// "each entry in FailedEntries provides the ID of the failed target and the error code":
+			// a target not added fails the rule, as its error does.
+			put, putErr := p.call(ctx, req, "aws.events", "PutTargets", given(map[string]any{"Rule": n, "Targets": targets}, props, "EventBusName"))
+			if failed, _ := put["FailedEntries"].([]any); putErr == nil && len(failed) > 0 {
+				putErr = fault(cmp.Or(str(asMap(failed[0])["ErrorCode"]), "ValidationError"), "PutTargets failed to add targets: "+jsonText(failed))
+			}
+			err = putErr
 		}
-		err = putErr
 	} else if err == nil && typ == "AWS::S3::Bucket" {
 		err = p.configureBucket(ctx, req, n, props)
-	} else if err != nil {
+	} else if err != nil && existing == "" { // none once a create failed
 		phys = ""
 	}
 	return phys, err

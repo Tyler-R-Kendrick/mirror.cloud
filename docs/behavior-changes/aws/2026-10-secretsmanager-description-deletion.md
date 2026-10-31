@@ -298,6 +298,33 @@ The oracle is AWS's documentation as it ships in the vendored model
     `ROLLBACK_` or `_FAILED` state), and `DeleteStack` removes the resource
     with the rest. Before, the changes stayed and the new resources were left
     behind.
+  - An update compares each resource's type and resolved properties with
+    what the stack recorded ("CloudFormation updates resources based on
+    differences between what you submit and the stack's current template",
+    Template Reference, UpdateReplacePolicy). An unchanged resource is not
+    touched: no call, and the same physical id. A change to properties the
+    type updates in place ("Update requires: No interruption" or "Some
+    interruptions" on its Template Reference page) is made through its
+    service's update under the same id: `UpdateKeyDescription`,
+    `PutParameter` with `Overwrite`, `UpdateTable`,
+    `UpdateAssumeRolePolicy`, `UpdateFunctionConfiguration`,
+    `UpdateShardCount`, `UpdateSecret`, `UpdateRestApi`, `PutRule` with the
+    rule's targets set to the template's (others removed), and a bucket's
+    configuration; a queue, topic or log group has no property the engine
+    applies but its name, so a change to another of theirs calls nothing. A
+    change to a property that "Update requires: Replacement" (a name,
+    `FifoQueue`, `FifoTopic`, a role's `Path`, a key's `KeySpec`,
+    `KeyUsage` or `MultiRegion`, a rule's `EventBusName`, a function's
+    `PackageType` and so on) makes a new resource, under a new generated
+    name, and the cleanup deletes the old one; a resource whose name the
+    template gives and keeps is `ValidationError`, CloudFormation's
+    "CloudFormation cannot update a stack when a custom-named resource
+    requires replacing. Rename <name> and update the stack again.", and the
+    stack rolls back. A `Ref` to a kept resource answers its id. Before, every
+    update made every resource again: a new KMS key and REST API, whose old
+    ones the cleanup then deleted, and a failure on any parameter, table, log
+    group, function, role or stream, which could only be created. A stream
+    is made with the template's `ShardCount`.
   - A finished `UpdateStack` cleans up. "CloudFormation will replace the
     resource by creating a new one and deleting the old one"
     (`ResourceChange.Replacement`), and for an update "it begins disposing of

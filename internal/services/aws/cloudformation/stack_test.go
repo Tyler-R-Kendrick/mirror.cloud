@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"reflect"
 	"regexp"
 	"strings"
@@ -1504,5 +1505,119 @@ func TestCloudFormationARuleLeavesNoTargets(t *testing.T) {
 	}
 	if _, err := events("PutRule", map[string]any{"Name": "cfn-rule", "ScheduleExpression": "rate(2 hours)"}); err != nil || !none("cfn-rule") {
 		t.Errorf("a new rule of the name holds targets (%v)", err)
+	}
+}
+
+// An update compares each resource's type and resolved properties with what
+// the stack recorded, as CloudFormation "updates resources based on
+// differences between what you submit and the stack's current template"
+// (Template Reference, UpdateReplacePolicy). An unchanged resource is not
+// touched: no call, the same physical id. A change to properties the type
+// updates in place ("Update requires: No interruption" or "Some
+// interruptions" on its Template Reference page) is made through its
+// service's update call (UpdateKeyDescription, PutParameter with Overwrite,
+// UpdateAssumeRolePolicy, UpdateFunctionConfiguration and the rest), under
+// the same id. A change to one that "Update requires: Replacement" makes a
+// new resource and the cleanup deletes the old one; a custom-named resource
+// that needs replacing under the same name is CloudFormation's error. Before,
+// every update made a new KMS key and REST API and deleted the old ones, and
+// failed on a parameter, table, log group, function, role or stream, which
+// the engine could only create.
+func TestCloudFormationAnUpdateTouchesOnlyWhatChanged(t *testing.T) {
+	h := newStacks(t)
+	all := nameable()
+	small := map[string]map[string]any{"Key": {"Type": "AWS::KMS::Key", "Properties": map[string]any{"Description": "d"}}, "Api": all["Api"],
+		"Q": {"Type": "AWS::SQS::Queue", "Properties": map[string]any{"QueueName": "kq-1"}}}
+	h.mustCreate("kq", small)
+	first := map[string]string{}
+	for _, r := range h.resources("kq") {
+		first[r.Logical] = r.Physical
+	}
+	small["Q"] = map[string]any{"Type": "AWS::SQS::Queue", "Properties": map[string]any{"QueueName": "kq-2"}}
+	tpl, _ := json.Marshal(map[string]any{"Resources": small})
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "kq", "TemplateBody": string(tpl)}); err != nil {
+		t.Errorf("renaming the queue beside a key and a REST API: %v", err)
+	}
+	if out, err := h.service("aws.kms", "DescribeKey", map[string]any{"KeyId": first["Key"]}); err != nil || asMap(out["KeyMetadata"])["KeyState"] != "Enabled" {
+		t.Errorf("after renaming the queue, the unchanged key is %v (%v), want Enabled", asMap(out["KeyMetadata"])["KeyState"], err)
+	}
+	if _, err := h.service("aws.apigateway", "GetRestApi", map[string]any{"restApiId": first["Api"]}); err != nil {
+		t.Errorf("after renaming the queue, the unchanged REST API is gone: %v", err)
+	}
+	keep := map[string]map[string]any{"Key": {"Type": "AWS::KMS::Key", "Properties": map[string]any{"Description": "d"}}}
+	for _, logical := range []string{"Api", "Parameter", "Table", "Log", "Function", "Role", "Stream"} {
+		keep[logical] = all[logical]
+	}
+	resources := maps.Clone(keep)
+	resources["Q"] = map[string]any{"Type": "AWS::SQS::Queue", "Properties": map[string]any{"QueueName": "first-q"}}
+	h.mustCreate("k", resources)
+	ids := func() map[string]string {
+		m := map[string]string{}
+		for _, r := range h.resources("k") {
+			m[r.Logical] = r.Physical
+		}
+		return m
+	}
+	update := func(resources map[string]map[string]any) error {
+		tpl, _ := json.Marshal(map[string]any{"Resources": resources})
+		_, err := h.invoke("UpdateStack", map[string]any{"StackName": "k", "TemplateBody": string(tpl)})
+		return err
+	}
+	before := ids()
+	resources["Q"] = map[string]any{"Type": "AWS::SQS::Queue", "Properties": map[string]any{"QueueName": "second-q"}}
+	if err := update(resources); err != nil {
+		t.Fatalf("an update renaming only the queue: %v", err)
+	}
+	after := ids()
+	for logical := range keep {
+		if after[logical] != before[logical] {
+			t.Errorf("%s was %s and is %s after an update that did not change it", logical, before[logical], after[logical])
+		}
+	}
+	if out, err := h.service("aws.kms", "DescribeKey", map[string]any{"KeyId": before["Key"]}); err != nil || asMap(out["KeyMetadata"])["KeyState"] != "Enabled" {
+		t.Errorf("the unchanged key is %v (%v), want Enabled", asMap(out["KeyMetadata"])["KeyState"], err)
+	}
+	if _, err := h.service("aws.apigateway", "GetRestApi", map[string]any{"restApiId": before["Api"]}); err != nil {
+		t.Errorf("the unchanged REST API is gone: %v", err)
+	}
+	if _, err := h.service("aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "first-q"}); err == nil || after["Q"] == before["Q"] {
+		t.Errorf("the renamed queue was not replaced: %s, then %s", before["Q"], after["Q"])
+	}
+
+	resources["Key"] = map[string]any{"Type": "AWS::KMS::Key", "Properties": map[string]any{"Description": "e"}}
+	resources["Parameter"] = map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Value": "w"}}
+	role := maps.Clone(asMap(all["Role"]["Properties"]))
+	role["AssumeRolePolicyDocument"] = map[string]any{"Version": "2012-10-17", "Statement": []any{map[string]any{"Effect": "Allow", "Principal": map[string]any{"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}}}
+	resources["Role"] = map[string]any{"Type": "AWS::IAM::Role", "Properties": role}
+	fn := maps.Clone(asMap(all["Function"]["Properties"]))
+	fn["Timeout"] = 30
+	resources["Function"] = map[string]any{"Type": "AWS::Lambda::Function", "Properties": fn}
+	if err := update(resources); err != nil {
+		t.Fatalf("an update changing properties that update in place: %v", err)
+	}
+	inPlace := ids()
+	for _, logical := range []string{"Key", "Parameter", "Role", "Function"} {
+		if inPlace[logical] != after[logical] {
+			t.Errorf("%s was %s and is %s after an in-place change", logical, after[logical], inPlace[logical])
+		}
+	}
+	if out, _ := h.service("aws.kms", "DescribeKey", map[string]any{"KeyId": inPlace["Key"]}); asMap(out["KeyMetadata"])["Description"] != "e" {
+		t.Errorf("the key's description is %v, want e", asMap(out["KeyMetadata"])["Description"])
+	}
+	if out, _ := h.service("aws.ssm", "GetParameter", map[string]any{"Name": inPlace["Parameter"]}); asMap(out["Parameter"])["Value"] != "w" {
+		t.Errorf("the parameter holds %v, want w", asMap(out["Parameter"])["Value"])
+	}
+	if out, _ := h.service("aws.lambda", "GetFunctionConfiguration", map[string]any{"FunctionName": lastColon(inPlace["Function"])}); jsonText(out["Timeout"]) != "30" {
+		t.Errorf("the function's Timeout is %v, want 30", out["Timeout"])
+	}
+
+	h.mustCreate("fixed", map[string]map[string]any{"R": {"Type": "AWS::IAM::Role", "Properties": map[string]any{"RoleName": "fixed-role", "AssumeRolePolicyDocument": role["AssumeRolePolicyDocument"]}}})
+	tpl, _ = json.Marshal(map[string]any{"Resources": map[string]any{"R": map[string]any{"Type": "AWS::IAM::Role", "Properties": map[string]any{"RoleName": "fixed-role", "Path": "/moved/", "AssumeRolePolicyDocument": role["AssumeRolePolicyDocument"]}}}})
+	const want = "CloudFormation cannot update a stack when a custom-named resource requires replacing. Rename fixed-role and update the stack again."
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "fixed", "TemplateBody": string(tpl)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), want) {
+		t.Errorf("replacing the custom-named role answered %v, want ValidationError: %s", err, want)
+	}
+	if _, err := h.service("aws.iam", "GetRole", map[string]any{"RoleName": "fixed-role"}); err != nil {
+		t.Errorf("the custom-named role is gone: %v", err)
 	}
 }

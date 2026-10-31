@@ -819,3 +819,47 @@ func TestCloudFormationAStackKeepsWhyItFailed(t *testing.T) {
 		}
 	}
 }
+
+// The rollback family follows the states the API reference gives each
+// operation. RollbackStack "Rolls back the specified stack to the last known
+// stable state from CREATE_FAILED or UPDATE_FAILED stack statuses";
+// ContinueUpdateRollback "Continues rolling back a stack from
+// UPDATE_ROLLBACK_FAILED to UPDATE_ROLLBACK_COMPLETE state"; and of
+// CancelUpdateStack, "You can cancel only stacks that are in the
+// UPDATE_IN_PROGRESS state". Every other stack is ValidationError and is left
+// as it was, a ROLLBACK_FAILED one with its DELETE_FAILED orphan included
+// (its way forward is DeleteStack), and an absent one "does not exist".
+// Before, each marked any stack complete, orphans and all, and made a stack
+// out of a name that had none.
+func TestCloudFormationTheRollbackFamilyFollowsItsStates(t *testing.T) {
+	h := newStacks(t)
+	objects := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("objects")
+	if err := objects.Put(h.ctx, "stuck/k", []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	bucket := map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "stuck"}}
+	if err := h.create("failed", map[string]map[string]any{"Bucket": bucket, "ZZZ": {"Type": "AWS::Nope::Thing"}}); err == nil {
+		t.Fatal("a template with an unsupported resource type was created")
+	}
+	h.mustCreate("fine", map[string]map[string]any{"Q": nameable()["Queue"]})
+	want := map[string]string{"failed": "ROLLBACK_FAILED", "fine": "CREATE_COMPLETE"}
+	for _, op := range []string{"RollbackStack", "ContinueUpdateRollback", "CancelUpdateStack"} {
+		for stack, status := range want {
+			if _, err := h.invoke(op, map[string]any{"StackName": stack}); code(err) != "ValidationError" {
+				t.Errorf("%s of the %s stack %s answered %v, want ValidationError", op, status, stack, err)
+			}
+			if got, _, _ := h.status(stack); got != status {
+				t.Errorf("after %s, %s is %s, want %s", op, stack, got, status)
+			}
+		}
+		if _, err := h.invoke(op, map[string]any{"StackName": "absent"}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "does not exist") {
+			t.Errorf("%s of an absent stack answered %v, want ValidationError: does not exist", op, err)
+		}
+		if _, _, err := h.status("absent"); err == nil {
+			t.Errorf("%s made a stack out of the name absent", op)
+		}
+	}
+	if left := h.statuses("failed"); !reflect.DeepEqual(left, map[string]string{"Bucket": "DELETE_FAILED"}) {
+		t.Errorf("failed lists %v, want its bucket, DELETE_FAILED", left)
+	}
+}

@@ -274,7 +274,19 @@ func TestBootedServerCloudFormationRemainder(t *testing.T) {
 	// cfn-rem-b, which still holds its name, so rem2's bucket is unnamed.
 	unnamed := `{"Resources":{"B":{"Type":"AWS::S3::Bucket"}}}`
 	call(url.Values{"Action": {"CreateStack"}, "Version": {"2010-05-15"}, "StackName": {"rem2"}, "TemplateBody": {unnamed}})
-	call(url.Values{"Action": {"RollbackStack"}, "Version": {"2010-05-15"}, "StackName": {"rem2"}})
+	// RollbackStack rolls back "from CREATE_FAILED or UPDATE_FAILED stack
+	// statuses"; rem2 is CREATE_COMPLETE, so it is refused.
+	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(url.Values{"Action": {"RollbackStack"}, "Version": {"2010-05-15"}, "StackName": {"rem2"}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", auth)
+	if res, err = http.DefaultClient.Do(req); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 400 || !strings.Contains(string(b), "cannot be called from current stack status") {
+		t.Fatalf("RollbackStack of a CREATE_COMPLETE stack answered %d %s", res.StatusCode, b)
+	}
 }
 
 func TestBootedServerCloudFormationExtraOps(t *testing.T) {

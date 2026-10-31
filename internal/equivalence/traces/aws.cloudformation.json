@@ -2,7 +2,7 @@
   "schema": "trace/1",
   "service": "aws.cloudformation",
   "source": "pack:internal/services/aws/cloudformation@77fba2e7",
-  "note": "Recorded from the hand-written pack. Every expectation describes that pack, not the real service. The recording covers the pack's expressible surface only: CreateStack, UpdateStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary and ListExports are the template engine (parsing, intrinsic functions, cross-service provisioning, blob reads) and are the bundle's shadow reason. The stack records here are written by the rollback family, so Resources and Outputs are always empty.",
+  "note": "Recorded from the hand-written pack. Every expectation describes that pack, not the real service. The recording covers the pack's expressible surface only: CreateStack, UpdateStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary and ListExports are the template engine (parsing, intrinsic functions, cross-service provisioning, blob reads) and are the bundle's shadow reason. The stack records here were written by the rollback family, which now refuses every stack in a state the API reference does not give it, an absent one included (re-cut steps 9 to 22), so the recording holds no stack.",
   "steps": [
     {
       "operation": "ListStacks",
@@ -172,9 +172,12 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "StackId": ""
-      }
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recut": "RollbackStack \"Rolls back the specified stack to the last known stable state from CREATE_FAILED or UPDATE_FAILED stack statuses\". s1 does not exist, so the call is ValidationError and makes no stack; the pack conjured a ROLLBACK_COMPLETE record."
     },
     {
       "operation": "DescribeStacks",
@@ -188,16 +191,12 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "Stacks": [
-          {
-            "Outputs": null,
-            "StackId": "",
-            "StackName": "s1",
-            "StackStatus": "ROLLBACK_COMPLETE"
-          }
-        ]
-      }
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recut": "s1 does not exist: step 9 no longer makes it (RollbackStack rolls back \"from CREATE_FAILED or UPDATE_FAILED stack statuses\", and refuses an absent stack)."
     },
     {
       "operation": "ListStacks",
@@ -210,14 +209,9 @@
         "Project": ""
       },
       "output": {
-        "StackSummaries": [
-          {
-            "StackId": "",
-            "StackName": "s1",
-            "StackStatus": "ROLLBACK_COMPLETE"
-          }
-        ]
-      }
+        "StackSummaries": []
+      },
+      "recut": "s1 does not exist: step 9 no longer makes it (RollbackStack rolls back \"from CREATE_FAILED or UPDATE_FAILED stack statuses\", and refuses an absent stack)."
     },
     {
       "operation": "GetTemplate",
@@ -231,12 +225,12 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "StagesAvailable": [
-          "Original"
-        ],
-        "TemplateBody": ""
-      }
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recut": "s1 does not exist: step 9 no longer makes it (RollbackStack rolls back \"from CREATE_FAILED or UPDATE_FAILED stack statuses\", and refuses an absent stack)."
     },
     {
       "operation": "ListStackResources",
@@ -250,9 +244,12 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "StackResourceSummaries": null
-      }
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recut": "s1 does not exist: step 9 no longer makes it (RollbackStack rolls back \"from CREATE_FAILED or UPDATE_FAILED stack statuses\", and refuses an absent stack)."
     },
     {
       "operation": "DescribeStackEvents",
@@ -266,17 +263,12 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "StackEvents": [
-          {
-            "LogicalResourceId": "s1",
-            "ResourceStatus": "ROLLBACK_COMPLETE",
-            "ResourceType": "AWS::CloudFormation::Stack",
-            "StackId": "",
-            "StackName": "s1"
-          }
-        ]
-      }
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recut": "s1 does not exist: step 9 no longer makes it (RollbackStack rolls back \"from CREATE_FAILED or UPDATE_FAILED stack statuses\", and refuses an absent stack)."
     },
     {
       "operation": "DescribeStackResource",
@@ -310,9 +302,12 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "StackId": ""
-      }
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recut": "s1 does not exist: step 9 no longer makes it (RollbackStack rolls back \"from CREATE_FAILED or UPDATE_FAILED stack statuses\", and refuses an absent stack)."
     },
     {
       "operation": "DeleteStack",
@@ -345,9 +340,12 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "StackId": ""
-      }
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recut": "s1 does not exist: step 9 no longer makes it (RollbackStack rolls back \"from CREATE_FAILED or UPDATE_FAILED stack statuses\", and refuses an absent stack)."
     },
     {
       "operation": "CancelUpdateStack",
@@ -361,10 +359,12 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "StackId": ""
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
       },
-      "superseded": "CancelUpdateStack answers StackId, which its Unit output shape does not declare; the bundle writes the record the same way and answers the declared empty body."
+      "recut": "CancelUpdateStack: \"You can cancel only stacks that are in the UPDATE_IN_PROGRESS state.\" s2 does not exist, so the call is ValidationError and makes no stack; the pack conjured an UPDATE_ROLLBACK_COMPLETE record."
     },
     {
       "operation": "ContinueUpdateRollback",
@@ -378,10 +378,12 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "StackId": ""
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
       },
-      "superseded": "ContinueUpdateRollback answers StackId, which its output shape does not declare (no members); the bundle writes the record the same way and answers the declared empty body."
+      "recut": "ContinueUpdateRollback \"Continues rolling back a stack from UPDATE_ROLLBACK_FAILED to UPDATE_ROLLBACK_COMPLETE state\". s2 does not exist (step 19 no longer makes it), so the call is ValidationError."
     },
     {
       "operation": "DescribeStacks",
@@ -395,16 +397,12 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "Stacks": [
-          {
-            "Outputs": null,
-            "StackId": "",
-            "StackName": "s2",
-            "StackStatus": "ROLLBACK_COMPLETE"
-          }
-        ]
-      }
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recut": "s2 does not exist: steps 19 and 20 no longer make it (each refuses an absent stack)."
     },
     {
       "operation": "DeleteStack",
@@ -417,7 +415,13 @@
         "AccessKeyID": "",
         "ARN": "",
         "Project": ""
-      }
+      },
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      },
+      "recut": "s1 does not exist: step 9 no longer makes it (RollbackStack rolls back \"from CREATE_FAILED or UPDATE_FAILED stack statuses\", and refuses an absent stack)."
     },
     {
       "operation": "DescribeStacks",

@@ -189,6 +189,23 @@ The oracle is AWS's documentation as it ships in the vendored model
     service's not-found error) counts as deleted. Before, a failed create left
     no stack, and `DeleteStack` dropped every delete error and removed the
     stack whatever was left.
+  - The rollback family accepts only the states the API reference gives
+    each operation: `RollbackStack` rolls back "from CREATE_FAILED or
+    UPDATE_FAILED stack statuses", `ContinueUpdateRollback` "from
+    UPDATE_ROLLBACK_FAILED to UPDATE_ROLLBACK_COMPLETE state", and
+    `CancelUpdateStack` "only stacks that are in the UPDATE_IN_PROGRESS
+    state". Nothing here runs asynchronously and a failed create rolls back at
+    once, so no stack rests in the first, second or last of those states:
+    every call on another stack, a `ROLLBACK_FAILED` one with its
+    `DELETE_FAILED` orphan included (its way forward is `DeleteStack`), is
+    `ValidationError` ("RollbackStack cannot be called from current stack
+    status", in the words `CancelUpdateStack` uses) and changes nothing, and
+    an absent stack "does not exist". `ContinueUpdateRollback` never marks a
+    stack complete while a `DELETE_FAILED` resource remains, since it cannot
+    retry the delete. Before, each operation marked any stack complete,
+    orphans and all, and made a stack out of a name that had none. The
+    CloudFormation trace's steps 9 to 22 are re-cut accordingly: s1 and s2
+    are never made.
   - `GenerateSecretString` makes the value with `GetRandomPassword`'s generator,
     seeded by the stack id and logical id, and puts it under `GenerateStringKey`
     in `SecretStringTemplate` when the template gives one. Its properties are

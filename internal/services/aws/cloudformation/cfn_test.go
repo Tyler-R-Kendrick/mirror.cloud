@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -721,5 +722,74 @@ func TestCloudFormationGeneratesASecretString(t *testing.T) {
 	}
 	if _, err := generate(map[string]any{"GenerateStringKey": "password"}); err == nil {
 		t.Error("GenerateStringKey without SecretStringTemplate was accepted")
+	}
+}
+
+// An UpdateStack that fails rolls back as CloudFormation's UPDATE_ROLLBACK
+// does: what it created is deleted, what it changed is put back from the
+// previous template, and the stack keeps its previous template and resources,
+// as UPDATE_ROLLBACK_COMPLETE. Here the update changes a secret's value, adds
+// a good secret and a resource of an unsupported type; afterwards the stack
+// and its resources are exactly as they were before the update.
+func TestCloudFormationAFailedUpdateRollsBack(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := bundled.Handler("aws.cloudformation", deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	cfn := func(op string, in map[string]any) (map[string]any, error) {
+		out, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			return nil, err
+		}
+		return out.Output, nil
+	}
+	secrets := func(op string, in map[string]any) (map[string]any, error) {
+		return New(deps).call(ctx, &spi.Request{Identity: id}, "aws.secretsmanager", op, in)
+	}
+	before := `{"Resources":{"A":{"Type":"AWS::SecretsManager::Secret","Properties":{"Name":"a","SecretString":"v1","Description":"first"}}}}`
+	failing := `{"Resources":{
+		"A":{"Type":"AWS::SecretsManager::Secret","Properties":{"Name":"a","SecretString":"v2","Description":"second"}},
+		"B":{"Type":"AWS::SecretsManager::Secret","Properties":{"Name":"b","SecretString":"new"}},
+		"Z":{"Type":"AWS::Nope::Thing"}}}`
+	if _, err := cfn("CreateStack", map[string]any{"StackName": "u", "TemplateBody": before}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := func() map[string]any {
+		t.Helper()
+		stack, err := cfn("DescribeStackResources", map[string]any{"StackName": "u"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		template, err := cfn("GetTemplate", map[string]any{"StackName": "u"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err := secrets("GetSecretValue", map[string]any{"SecretId": "a"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		described, err := secrets("DescribeSecret", map[string]any{"SecretId": "a"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return map[string]any{"resources": stack["StackResources"], "template": template["TemplateBody"],
+			"value": value["SecretString"], "description": described["Description"]}
+	}
+	was := snapshot()
+	if _, err := cfn("UpdateStack", map[string]any{"StackName": "u", "TemplateBody": failing}); err == nil {
+		t.Fatal("an update with an unsupported resource type succeeded")
+	}
+	if now := snapshot(); !reflect.DeepEqual(now, was) {
+		t.Errorf("after the failed update the stack is\n%#v\nwant\n%#v", now, was)
+	}
+	if _, err := secrets("DescribeSecret", map[string]any{"SecretId": "b"}); err == nil {
+		t.Error("the secret the failed update created is still there")
+	}
+	stacks, err := cfn("DescribeStacks", map[string]any{"StackName": "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := stacks["Stacks"].([]any)[0].(map[string]any)["StackStatus"]; status != "UPDATE_ROLLBACK_COMPLETE" {
+		t.Errorf("the stack's status is %v, want UPDATE_ROLLBACK_COMPLETE", status)
 	}
 }

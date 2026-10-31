@@ -122,7 +122,14 @@ The oracle is AWS's documentation as it ships in the vendored model
     CloudFormation's default `OnFailure` (`ROLLBACK`) does, deleting a secret
     without a recovery window so its name is free again. The emulator keeps no
     stack record for a failed create, so `DO_NOTHING` and `DELETE` are not
-    distinguished. A failed `UpdateStack` is not rolled back.
+    distinguished.
+  - A failed `UpdateStack` rolls back as `UPDATE_ROLLBACK` does: what it
+    created is deleted, what it changed is provisioned again from the
+    previous template (a secret gets its previous value and description back
+    through `UpdateSecret`, as a new version), and the stack keeps its
+    previous template and resources as `UPDATE_ROLLBACK_COMPLETE`. An update
+    here never deletes a replaced resource, so none needs recreating. Before,
+    the changes stayed and the new resources were left behind.
   - `GenerateSecretString` makes the value with `GetRandomPassword`'s generator,
     seeded by the stack id and logical id, and puts it under `GenerateStringKey`
     in `SecretStringTemplate` when the template gives one. `SecretString` beside

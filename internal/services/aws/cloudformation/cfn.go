@@ -117,9 +117,7 @@ type stack struct {
 	Protect                    bool
 }
 
-type res struct {
-	Logical, Physical, Type string
-}
+type res struct{ Logical, Physical, Type string }
 
 func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool) (*spi.Response, error) {
 	if name == "" {
@@ -151,26 +149,19 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	for _, logical := range slices.Sorted(maps.Keys(resources)) {
 		rm, _ := resources[logical].(map[string]any)
 		typ := str(rm["Type"])
-		props, _ := p.resolve(rm["Properties"], st.Refs, req, name).(map[string]any)
-		if props == nil {
-			props = map[string]any{}
-		}
+		props := map[string]any{}
+		maps.Copy(props, asMap(p.resolve(rm["Properties"], st.Refs, req, name)))
 		phys, err := p.provision(ctx, req, typ, logical, name, props, old.Refs[logical], id)
 		if err != nil {
-			if !update { // a failed create rolls back what it made: OnFailure ROLLBACK, the default
-				p.deprovision(ctx, req, st.Resources...)
-			}
+			p.rollback(ctx, req, name, old, st.Resources)
 			return nil, err
 		}
 		st.Refs[logical] = phys
 		st.Resources = append(st.Resources, res{Logical: logical, Physical: phys, Type: typ})
 	}
-	if outs, ok := tpl["Outputs"].(map[string]any); ok {
-		for _, k := range slices.Sorted(maps.Keys(outs)) {
-			om, _ := outs[k].(map[string]any)
-			val := p.resolve(om["Value"], st.Refs, req, name)
-			st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": val})
-		}
+	outs := asMap(tpl["Outputs"])
+	for _, k := range slices.Sorted(maps.Keys(outs)) {
+		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)})
 	}
 	raw, _ := json.Marshal(st)
 	_ = p.col(req, "cfn").Put(ctx, name, raw)
@@ -321,6 +312,27 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, st
 	}
 }
 
+// rollback undoes a failed create (OnFailure ROLLBACK: delete what it made) or update (UPDATE_ROLLBACK:
+// delete what it made, provision what it changed from the previous template, keep that template and its
+// resources as UPDATE_ROLLBACK_COMPLETE; an update never deletes a replaced resource, so none is recreated).
+func (p *Pack) rollback(ctx context.Context, req *spi.Request, name string, old stack, made []res) {
+	if old.ID == "" {
+		p.deprovision(ctx, req, made...)
+		return
+	}
+	tpl, _ := parseTemplate(old.Template)
+	for i := len(made) - 1; i >= 0; i-- {
+		if r := made[i]; old.Refs[r.Logical] != r.Physical {
+			p.deprovision(ctx, req, r)
+		} else if props := asMap(p.resolve(asMap(asMap(tpl["Resources"])[r.Logical])["Properties"], old.Refs, req, name)); props != nil {
+			_, _ = p.provision(ctx, req, r.Type, r.Logical, name, props, r.Physical, old.ID)
+		}
+	}
+	old.Status = "UPDATE_ROLLBACK_COMPLETE"
+	raw, _ := json.Marshal(old)
+	_ = p.col(req, "cfn").Put(ctx, name, raw)
+}
+
 // deprovision deletes resources through their owners, newest first. Failures
 // are ignored, as a stack delete proceeds past a resource that is already gone.
 func (p *Pack) deprovision(ctx context.Context, req *spi.Request, rs ...res) {
@@ -452,10 +464,7 @@ func invalid(message string) *spi.Fault {
 	return &spi.Fault{Code: "ValidationError", Message: message, HTTPStatus: 400, Fault: "client"}
 }
 
-func asMap(v any) map[string]any {
-	m, _ := v.(map[string]any)
-	return m
-}
+func asMap(v any) map[string]any { m, _ := v.(map[string]any); return m }
 
 // jsonText answers a policy-like property as the JSON text an API takes; a
 // template may give it as an object or as a string already.
@@ -521,11 +530,7 @@ func (p *Pack) getAtt(g any, refs map[string]string, req *spi.Request) string {
 	var logical, attr string
 	switch t := g.(type) {
 	case string:
-		parts := strings.SplitN(t, ".", 2)
-		logical = parts[0]
-		if len(parts) > 1 {
-			attr = parts[1]
-		}
+		logical, attr, _ = strings.Cut(t, ".")
 	case []any:
 		if len(t) > 0 {
 			logical = str(t[0])
@@ -604,14 +609,10 @@ func parseTemplate(body string) (map[string]any, error) {
 func formParams(in map[string]any) map[string]string {
 	keys, vals := map[string]string{}, map[string]string{}
 	for k, v := range in {
-		if !strings.HasPrefix(k, "Parameters.member.") {
-			continue
-		}
-		if strings.HasSuffix(k, ".ParameterKey") {
-			keys[strings.TrimSuffix(k, ".ParameterKey")] = str(v)
-		}
-		if strings.HasSuffix(k, ".ParameterValue") {
-			vals[strings.TrimSuffix(k, ".ParameterValue")] = str(v)
+		if pfx, ok := strings.CutSuffix(k, ".ParameterKey"); ok && strings.HasPrefix(k, "Parameters.member.") {
+			keys[pfx] = str(v)
+		} else if pfx, ok := strings.CutSuffix(k, ".ParameterValue"); ok && strings.HasPrefix(k, "Parameters.member.") {
+			vals[pfx] = str(v)
 		}
 	}
 	out := map[string]string{}
@@ -622,14 +623,11 @@ func formParams(in map[string]any) map[string]string {
 }
 
 func mergeParamDefaults(tpl map[string]any, params map[string]string) {
-	pm, _ := tpl["Parameters"].(map[string]any)
-	for k, v := range pm {
-		if _, ok := params[k]; ok {
-			continue
-		}
-		m, _ := v.(map[string]any)
-		if d, ok := m["Default"]; ok {
-			params[k] = str(d)
+	for k, v := range asMap(tpl["Parameters"]) {
+		if _, given := params[k]; !given {
+			if d, ok := asMap(v)["Default"]; ok {
+				params[k] = str(d)
+			}
 		}
 	}
 }
@@ -650,10 +648,7 @@ func advertise(req *spi.Request) string {
 	return "http://127.0.0.1:4566"
 }
 
-func str(v any) string {
-	s, _ := v.(string)
-	return s
-}
+func str(v any) string { s, _ := v.(string); return s }
 
 func lastSlash(s string) string { return s[strings.LastIndex(s, "/")+1:] }
 

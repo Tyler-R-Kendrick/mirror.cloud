@@ -157,8 +157,12 @@ The oracle is AWS's documentation as it ships in the vendored model
   - A stack name "must be unique in the Region in which you are creating the
     stack", so `CreateStack` of a name a stack already has is
     `AlreadyExistsException` ("Stack [name] already exists") and makes
-    nothing. Before, it made a second set of resources and wrote its record
-    over the first, which then belonged to no stack.
+    nothing. The name is reserved, a `CREATE_IN_PROGRESS` record written in
+    the same store transaction that found it free, before any resource is
+    made, so of concurrent creates of one name exactly one makes anything.
+    Before, it made a second set of resources and wrote its record over the
+    first, which then belonged to no stack, and creates racing on one name
+    each made a set.
   - A `CreateStack` that fails rolls back what it had created, as
     CloudFormation's default `OnFailure` (`ROLLBACK`) does, deleting a secret
     without a recovery window so its name is free again. A resource is

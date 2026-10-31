@@ -133,13 +133,20 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	params := formParams(req.Input)
 	mergeParamDefaults(tpl, params)
 	id := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name + "/" + p.deps.Rand.Hex(8)
-	var old stack // what an update finds already provisioned
-	if found, err := p.load(ctx, req, name); err == nil && !update {
-		return nil, fault("AlreadyExistsException", "Stack ["+name+"] already exists")
-	} else if err == nil && (strings.HasPrefix(found.Status, "ROLLBACK_") || found.Status == "DELETE_FAILED") {
-		return nil, invalid("Stack:" + found.ID + " is in " + found.Status + " state and can not be updated.")
-	} else if err == nil {
-		old, id = found, found.ID
+	var old stack // what an update finds; a create reserves the name, CREATE_IN_PROGRESS, in the same transaction
+	if err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
+		raw, found, _ := tx.Get(name)
+		if _ = json.Unmarshal(raw, &old); found && !update {
+			return fault("AlreadyExistsException", "Stack ["+name+"] already exists")
+		} else if found && (strings.HasPrefix(old.Status, "ROLLBACK_") || old.Status == "DELETE_FAILED") {
+			return invalid("Stack:" + old.ID + " is in " + old.Status + " state and can not be updated.")
+		} else if id = cmp.Or(old.ID, id); found || update { // an update reserves nothing
+			return nil
+		}
+		raw, _ = json.Marshal(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS"})
+		return tx.Put(name, raw)
+	}); err != nil {
+		return nil, err
 	}
 	st := stack{Name: name, ID: id, Status: "CREATE_COMPLETE", Template: body, Refs: params}
 	if update {

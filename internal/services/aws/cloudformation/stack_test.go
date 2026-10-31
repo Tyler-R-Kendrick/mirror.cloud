@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -959,5 +960,45 @@ func TestCloudFormationARuleLivesOnItsBus(t *testing.T) {
 	}
 	if !onBus("y", "default") {
 		t.Error("DeleteStack deleted the default bus's rule y, which no stack made")
+	}
+}
+
+// A stack name is reserved before any resource is made: the record is
+// written, CREATE_IN_PROGRESS, in the same transaction that finds no stack
+// of that name. Of eight CreateStacks of one name at once, exactly one makes
+// the stack and seven are AlreadyExistsException with nothing made for them.
+// Before, all eight passed the check and made their resources, and seven
+// sets were left behind when the last record written won.
+func TestCloudFormationConcurrentCreatesMakeOneStack(t *testing.T) {
+	h := newStacks(t)
+	all := nameable()
+	errs := make([]error, 8)
+	var wg sync.WaitGroup
+	for i := range errs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs[i] = h.create("race", map[string]map[string]any{"Q": all["Queue"], "S": all["Secret"]})
+		}()
+	}
+	wg.Wait()
+	made := 0
+	for _, err := range errs {
+		if err == nil {
+			made++
+		} else if code(err) != "AlreadyExistsException" {
+			t.Errorf("a concurrent CreateStack answered %v, want AlreadyExistsException", err)
+		}
+	}
+	if made != 1 {
+		t.Errorf("%d of 8 concurrent CreateStacks of one name succeeded, want 1", made)
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "race"}); err != nil {
+		t.Fatal(err)
+	}
+	queues, _ := h.service("aws.sqs", "ListQueues", map[string]any{})
+	secrets, _ := h.service("aws.secretsmanager", "ListSecrets", map[string]any{})
+	if q, s := queues["QueueUrls"], secrets["SecretList"]; q != nil && len(q.([]any)) > 0 || len(s.([]any)) > 0 {
+		t.Errorf("after DeleteStack, queues %v and secrets %v are left", q, s)
 	}
 }

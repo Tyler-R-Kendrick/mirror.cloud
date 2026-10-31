@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -721,5 +722,40 @@ func TestCloudFormationGeneratesASecretString(t *testing.T) {
 	}
 	if _, err := generate(map[string]any{"GenerateStringKey": "password"}); err == nil {
 		t.Error("GenerateStringKey without SecretStringTemplate was accepted")
+	}
+}
+
+// A YAML template is YAML: flow collections, block scalars and the short-form
+// intrinsics (!Ref, !GetAtt, !Sub, and !Name for any other Fn::Name) all read
+// as their JSON-template equivalents. The hand-written subset this replaced
+// read a flow sequence as a string and refused a block scalar.
+func TestParseYAMLReadsYAML(t *testing.T) {
+	m, err := parseYAML(`Resources:
+  Q:
+    Type: AWS::SQS::Queue
+    Properties:
+      Tags: [{Key: env, Value: dev}, {Key: team, Value: "a: b"}]
+      Policy: |
+        line one
+        line two
+      Arn: !GetAtt [Other, Arn]
+      Joined: !Join ["-", [a, !Ref B]]
+      Port: 8080
+      Ratio: 0.5
+      On: true
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	props := m["Resources"].(map[string]any)["Q"].(map[string]any)["Properties"].(map[string]any)
+	want := map[string]any{
+		"Tags":   []any{map[string]any{"Key": "env", "Value": "dev"}, map[string]any{"Key": "team", "Value": "a: b"}},
+		"Policy": "line one\nline two\n",
+		"Arn":    map[string]any{"Fn::GetAtt": []any{"Other", "Arn"}},
+		"Joined": map[string]any{"Fn::Join": []any{"-", []any{"a", map[string]any{"Ref": "B"}}}},
+		"Port":   8080, "Ratio": 0.5, "On": true,
+	}
+	if !reflect.DeepEqual(props, want) {
+		t.Fatalf("parsed %#v\nwant   %#v", props, want)
 	}
 }

@@ -278,10 +278,15 @@ The oracle is AWS's documentation as it ships in the vendored model
     scheduled for deletion as `ListSecrets` does, and answers a secret with no
     value as a not-found `Errors` row. Only the filter form pages:
     `MaxResults` says "To use this parameter, you must also use the Filters
-    parameter", so the `SecretIdList` form with `MaxResults`, or with a
-    `NextToken`, which only the filter form answers, is
-    `InvalidParameterException`, and the `SecretIdList` form never answers a
-    `NextToken`. `MaxResults` outside its range, 1 to 20, is
+    parameter", so the `SecretIdList` form with `MaxResults` is
+    `InvalidParameterException`, and that form never answers a `NextToken`.
+    Of a `NextToken` beside `SecretIdList` the API reference says nothing
+    specific; no listing of that form answers one, so it is
+    `InvalidNextTokenException` ("The NextToken value is invalid."), which the
+    operation lists. `SecretIdList` holds "Minimum number of 1 item. Maximum
+    number of 20 items.", so an empty list (beside `Filters` too) or 21 ids is
+    `ValidationException`, ahead of the rules on the two forms, and
+    `ListSecrets`' `MaxResults` outside 1 to 100 is `ValidationException`. `MaxResults` outside its range, 1 to 20, is
     `ValidationException` in either form. `MaxResults` is an integer ("Type:
     Integer", in `ListSecrets` too), so a value the awsJson1_1 codec cannot
     read as one (`"abc"`, `"5"`, `1.5`, `true`) is `SerializationException`,

@@ -57,6 +57,11 @@ errors:
     code: ValidationException
     http: 400
     fault: client
+  # "The NextToken value is invalid." (a NextToken no listing answered).
+  InvalidNextToken:
+    code: InvalidNextTokenException
+    http: 400
+    fault: client
 
 operations:
   # The pack served CreateSecret, PutSecretValue and UpdateSecret as one
@@ -373,6 +378,13 @@ operations:
               && double(int(input.MaxResults)) == input.MaxResults)
         error: Serialization
         message: "MaxResults must be a whole number."
+      # MaxResultsType's range is 1 to 100.
+      - cond: "!('MaxResults' in input && input.MaxResults != null) || (int(input.MaxResults) >= 1 && int(input.MaxResults) <= 100)"
+        error: Validation
+        message_expr: >-
+          "1 validation error detected: Value '" + string(int(input.MaxResults))
+          + "' at 'maxResults' failed to satisfy constraint: Member must have value "
+          + (int(input.MaxResults) < 1 ? "greater than or equal to 1" : "less than or equal to 100")
       - &filterKeys
         cond: >-
           !('Filters' in input && input.Filters != null) || input.Filters.all(f, !('Key' in f) || f.Key == null
@@ -639,6 +651,12 @@ operations:
           + "' at 'maxResults' failed to satisfy constraint: Member must have value "
           + (int(input.MaxResults) < 1 ? "greater than or equal to 1" : "less than or equal to 20")
       - *filterKeys
+      # SecretIdList: "Minimum number of 1 item. Maximum number of 20 items."
+      - cond: "!('SecretIdList' in input && input.SecretIdList != null) || (size(input.SecretIdList) >= 1 && size(input.SecretIdList) <= 20)"
+        error: Validation
+        message_expr: >-
+          "1 validation error detected: Value at 'secretIdList' failed to satisfy constraint: Member must have length "
+          + (size(input.SecretIdList) < 1 ? "greater than or equal to 1" : "less than or equal to 20")
       - cond: "!('Filters' in input && input.Filters != null && 'SecretIdList' in input && input.SecretIdList != null)"
         error: InvalidParameter
         message: "You must include Filters or SecretIdList, but not both."
@@ -648,9 +666,11 @@ operations:
       - cond: "('Filters' in input && input.Filters != null) || !('MaxResults' in input && input.MaxResults != null)"
         error: InvalidParameter
         message: "To use MaxResults, you must also use the Filters parameter."
+      # Of a NextToken beside SecretIdList the API reference says nothing
+      # specific: no listing of that form answers one, so it is invalid.
       - cond: "('Filters' in input && input.Filters != null) || !('NextToken' in input && input.NextToken != null && input.NextToken != '')"
-        error: InvalidParameter
-        message: "To use NextToken, you must also use the Filters parameter."
+        error: InvalidNextToken
+        message: "The NextToken value is invalid: only the Filters form answers one."
     list:
       resource: secret
       member: SecretValues

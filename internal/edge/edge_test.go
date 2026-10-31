@@ -1115,6 +1115,24 @@ func TestJournalLimit(t *testing.T) {
 			t.Fatalf("limit=%s: status %d, want 400", bad, status)
 		}
 	}
+	// An empty limit= names the parameter and gives it no value. That is not
+	// the absent parameter, so it is not answered with the default: §4.7 says
+	// anything but 1 to 10000 is a 400, in the plain-text http.Error body the
+	// other diagnostics routes answer a bad request with.
+	for _, query := range []string{"?limit=", "?service=aws.s3&limit="} {
+		response, err := http.Get(ts.URL + "/_mirror/journal" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != http.StatusBadRequest || response.Header.Get("Content-Type") != "text/plain; charset=utf-8" || string(body) != "limit must be an integer from 1 to 10000\n" {
+			if len(body) > 80 {
+				body = append(body[:80], "..."...)
+			}
+			t.Fatalf("%s: %d %q %q, want 400 and the range as plain text", query, response.StatusCode, response.Header.Get("Content-Type"), body)
+		}
+	}
 }
 
 func TestDiagnostics(t *testing.T) {

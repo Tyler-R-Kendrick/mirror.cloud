@@ -661,9 +661,10 @@ func (s *Server) diag(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/_mirror/journal" && r.Method == http.MethodGet:
 		q := r.URL.Query()
 		limit := 100
-		if v := q.Get("limit"); v != "" {
+		// An empty limit= is a value, and not one from 1 to 10000; only an absent limit is the default.
+		if q.Has("limit") {
 			// ponytail: the journal is kept whole in memory; 10000 bounds one answer, not what is kept.
-			n, err := strconv.Atoi(v)
+			n, err := strconv.Atoi(q.Get("limit"))
 			if err != nil || n < 1 || n > 10000 {
 				http.Error(w, "limit must be an integer from 1 to 10000", http.StatusBadRequest)
 				return

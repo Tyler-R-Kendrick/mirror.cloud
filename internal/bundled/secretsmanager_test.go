@@ -435,3 +435,30 @@ func TestSecretsManagerBatchGetLeavesOutASecretScheduledForDeletion(t *testing.T
 		t.Fatalf("Errors row = %#v, want SecretId gone, ErrorCode InvalidRequestException and a Message", row)
 	}
 }
+
+// DescribeSecret: "Secrets Manager only returns fields that have a value in the
+// response." DescribeSecretResponse.DeletedDate: "If it is not scheduled for
+// deletion, this field is omitted." A member with no value is left out rather
+// than answered as null; so are UpdateSecret's VersionId when it created no
+// version and DeleteSecret's ARN for a secret that never existed.
+func TestSecretsManagerOmitsMembersWithNoValue(t *testing.T) {
+	_, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "plain", "SecretString": "v"})
+	described := ok(t, "DescribeSecret", map[string]any{"SecretId": "plain"})
+	for _, member := range []string{"Description", "DeletedDate", "Tags", "ReplicationStatus", "RotationEnabled", "RotationLambdaARN", "RotationRules"} {
+		if v, present := described[member]; present {
+			t.Errorf("DescribeSecret answered %s = %#v for a secret that has none", member, v)
+		}
+	}
+	if updated := ok(t, "UpdateSecret", map[string]any{"SecretId": "plain", "Description": "d"}); hasKey(updated, "VersionId") {
+		t.Errorf("a description-only UpdateSecret answered VersionId = %#v", updated["VersionId"])
+	}
+	if forced := ok(t, "DeleteSecret", map[string]any{"SecretId": "never", "ForceDeleteWithoutRecovery": true}); hasKey(forced, "ARN") {
+		t.Errorf("a forced delete of a secret that never existed answered ARN = %#v", forced["ARN"])
+	}
+}
+
+func hasKey(m map[string]any, k string) bool {
+	_, present := m[k]
+	return present
+}

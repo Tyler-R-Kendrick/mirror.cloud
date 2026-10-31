@@ -53,6 +53,11 @@ The oracle is AWS's documentation as it ships in the vendored model
   is not answered; it is an `Errors` row, an `APIErrorType` of `SecretId`,
   `ErrorCode` `InvalidRequestException` and `Message`. Before, its value was
   answered in `SecretValues`.
+- **A member with no value is left out.** `DescribeSecret` "only returns
+  fields that have a value in the response", so `Description`, `DeletedDate`,
+  `Tags`, `ReplicationStatus` and the rotation members are absent when unset,
+  not null. So are `UpdateSecret`'s `VersionId` when it made no version and
+  `DeleteSecret`'s `ARN` for a secret that never existed.
 - **Timestamps are epoch seconds.** `DeletionDate` and `DeletedDate` are
   timestamps (`DeletionDateType`, `DeletedDateType`) on an `awsJson1_1`
   service with no `timestampFormat` trait, so they are written as epoch

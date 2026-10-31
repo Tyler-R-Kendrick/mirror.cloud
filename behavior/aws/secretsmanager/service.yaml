@@ -151,6 +151,7 @@ operations:
             # "The description of the secret."): a write that names none keeps it.
             Description: "'Description' in input && input.Description != null ? input.Description : ('Description' in s ? s.Description : dyn(null))"
             Deleted: "false"
+    omit_null: [VersionId]
     output:
       ARN: rec.ARN
       Name: rec.Name
@@ -243,11 +244,15 @@ operations:
   # (DescribeSecretResponse.DeletedDate in the vendored model). It is the time
   # DeleteSecret was requested; see DeleteSecret. It is the value, not the
   # description, that is out of reach until RestoreSecret.
+  #
+  # DescribeSecret: "Secrets Manager only returns fields that have a value in
+  # the response." A member with none is left out, not answered as null.
   DescribeSecret:
     reads:
       s: { resource: secret }
     require:
       - { cond: s_found, error: NotFound }
+    omit_null: [Description, DeletedDate, Tags, ReplicationStatus, RotationEnabled, RotationLambdaARN, RotationRules]
     output:
       ARN: s.ARN
       Name: s.Name
@@ -342,6 +347,7 @@ operations:
           # the deletion of the secret occurred", SecretListEntry); the end of
           # the window is the DeletionDate this call answers.
           record: { Deleted: "true", DeletedDate: "int(now)" }
+    omit_null: [ARN]
     output:
       ARN: "s_found ? s.ARN : dyn(null)"
       Name: id

@@ -4275,17 +4275,15 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-reject-api-gateway-resource",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old: `case "AWS::ApiGateway::RestApi":
-		out, err := p.call(`,
-		new: `case "AWS::ApiGateway::RestApiMutated":
-		out, err := p.call(`,
-		pkg: "./internal/services/aws/cloudformation",
-		run: "TestCloudFormationProvisionedResourceLifecycle",
+		old:  `"aws.apigateway CreateRestApi name={n}"`,
+		new:  `"aws.apigateway RejectRestApi name={n}"`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationProvisionedResourceLifecycle",
 	},
 	{
 		name: "cloudformation-describe-stack-resources-answers-none",
 		file: filepath.Join("behavior", "aws", "cloudformation", "service.yaml"),
-		old:  `        s_found && 'Resources' in s && s.Resources != null`,
+		old:  `        ok && 'Resources' in s && s.Resources != null`,
 		new:  `        false`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationProvisionedResourceLifecycle",
@@ -4293,16 +4291,16 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-provision-queue-without-creating-it",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `p.call(ctx, req, "aws.sqs", "CreateQueue",`,
-		new:  `p.call(ctx, req, "aws.sqs", "ListQueues",`,
+		old:  `"aws.sqs CreateQueue QueueName={n} Attributes"`,
+		new:  `"aws.sqs ListQueues QueueName={n} Attributes"`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationProvisionedResourceLifecycle",
 	},
 	{
 		name: "cloudformation-delete-stack-keeps-table",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `{"aws.dynamodb", "DeleteTable", map[string]any{"TableName": id}},`,
-		new:  `{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": id}},`,
+		old:  `"aws.dynamodb DeleteTable TableName={id}"`,
+		new:  `"aws.dynamodb DescribeTable TableName={id}"`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationProvisionedResourceLifecycle",
 	},

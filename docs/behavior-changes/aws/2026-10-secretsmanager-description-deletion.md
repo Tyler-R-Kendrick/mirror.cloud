@@ -109,7 +109,13 @@ The oracle is AWS's documentation as it ships in the vendored model
     block scalars and every short-form intrinsic (`!Ref`, `!GetAtt`, `!Sub`,
     and `!Name` for any other `Fn::Name`). The hand-written subset it replaced
     read a flow sequence such as `Tags: [{Key: env, Value: dev}]` as a string
-    and refused a block scalar.
+    and refused a block scalar. CloudFormation "doesn't support the following
+    features: ... Aliases[,] Hash merges" (User Guide, Template formats), so
+    an anchor, an alias or a merge key is `ValidationError`, and a template
+    nesting deeper than 100 levels or holding more than 100,000 nodes is
+    refused too. Without that, the library's aliases let a template refer to
+    itself (`a: &a [*a]`, which overflowed the stack) or multiply (a billion
+    laughs, which ran without end).
   - A resource the template does not name, of any type, is made under
     `<stack>-<logical id>-<suffix>`, the modelled form: the suffix is twelve
     hex digits of a hash of the stack id and logical id, so no two stacks, and

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
@@ -629,5 +631,48 @@ func TestCloudFormationReadsGenerateSecretStringAsATemplateDoes(t *testing.T) {
 		if _, err := generate(spec(member, value), nil); code(err) != "ValidationError" || !strings.Contains(err.Error(), member) {
 			t.Errorf("%s %v answered %v, want a ValidationError naming %s", member, value, err, member)
 		}
+	}
+}
+
+// "CloudFormation supports the YAML Version 1.1 specification with a few
+// exceptions. CloudFormation doesn't support the following features: ...
+// Aliases[,] Hash merges" (User Guide, Template formats). An anchor, an alias
+// or a merge key is ValidationError, so no alias can recurse (a: &a [*a]),
+// multiply (a billion laughs) or carry a tag away from its node; and a
+// template nesting deeper than 100 levels or holding more than 100,000 nodes
+// is ValidationError too, whatever its shape. Before, the self-alias
+// overflowed the stack and killed the process, the billion laughs ran without
+// end, and a !Ref behind an alias became a plain string.
+func TestCloudFormationRefusesYAMLAliases(t *testing.T) {
+	h := newStacks(t)
+	queue := "Resources:\n  Q:\n    Type: AWS::SQS::Queue\n    Properties:\n      Tags: "
+	laughs := "a0: &a0 [x, x, x, x, x, x, x, x, x, x]\n"
+	for i := 1; i < 10; i++ {
+		laughs += fmt.Sprintf("a%d: &a%d [%s]\n", i, i, strings.TrimSuffix(strings.Repeat(fmt.Sprintf("*a%d, ", i-1), 10), ", "))
+	}
+	for _, c := range []struct{ name, body, says string }{
+		{"self-alias", "a: &a [*a]\n" + queue + "[]\n", "aliases"},
+		{"billion laughs", laughs + queue + "*a9\n", "aliases"},
+		{"tag behind an alias", "Resources:\n  Q:\n    Type: AWS::SQS::Queue\n    Properties:\n      QueueName: &x !Ref AWS::StackName\n      RedrivePolicy: *x\n", "aliases"},
+		{"merge key", "Resources:\n  Q:\n    <<: {Type: AWS::SQS::Queue}\n", "merge"},
+		{"101 levels", queue + strings.Repeat("[", 101) + strings.Repeat("]", 101) + "\n", "levels"},
+		{"100,001 nodes", queue + "[" + strings.Repeat("1, ", 100_000) + "1]\n", "nodes"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			for _, op := range []string{"ValidateTemplate", "CreateStack", "GetTemplateSummary"} {
+				start := time.Now()
+				_, err := h.invoke(op, map[string]any{"StackName": "y", "TemplateBody": c.body})
+				if code(err) != "ValidationError" || !strings.Contains(err.Error(), c.says) {
+					t.Errorf("%s answered %v, want a ValidationError about %s", op, err, c.says)
+				}
+				if took := time.Since(start); took > 2*time.Second {
+					t.Errorf("%s took %v", op, took)
+				}
+			}
+		})
+	}
+	within := queue + strings.Repeat("[", 90) + strings.Repeat("]", 90) + "\n  W:\n    Type: AWS::SQS::Queue\n    Properties:\n      Tags: [" + strings.Repeat("1, ", 90_000) + "1]\n"
+	if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": within}); err != nil {
+		t.Errorf("a template of 90 levels and 90,000 nodes was refused: %v", err)
 	}
 }

@@ -334,3 +334,25 @@ func TestSecretsManagerDeletedDateIsWhenDeletionWasRequested(t *testing.T) {
 		t.Fatalf("DeletedDate %#v, want 3600, the time the deletion was requested", got["DeletedDate"])
 	}
 }
+
+// DeleteSecretResponse.DeletionDate: "This value is the date and time of the
+// delete request plus the number of days in RecoveryWindowInDays." A forced
+// delete has no window, so its DeletionDate is the time of the request, as AWS
+// answers it; it was answered as null.
+func TestSecretsManagerForcedDeleteAnswersTheRequestTime(t *testing.T) {
+	deps := spitest.Deps(t)
+	_, ok, _ := secretsManagerOn(t, deps)
+	ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v"})
+	if err := deps.Clock.Advance(time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	forced := ok(t, "DeleteSecret", map[string]any{"SecretId": "s", "ForceDeleteWithoutRecovery": true})
+	if !at(forced["DeletionDate"], 3600) {
+		t.Fatalf("a forced delete answered DeletionDate %#v, want 3600, the time of the request", forced["DeletionDate"])
+	}
+	epochSeconds(t, "DeleteSecret", forced)
+	never := ok(t, "DeleteSecret", map[string]any{"SecretId": "never", "ForceDeleteWithoutRecovery": true})
+	if !at(never["DeletionDate"], 3600) {
+		t.Fatalf("a forced delete of a secret that never existed answered DeletionDate %#v", never["DeletionDate"])
+	}
+}

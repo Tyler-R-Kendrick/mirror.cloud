@@ -323,7 +323,9 @@ operations:
     output:
       ARN: "s_found ? s.ARN : dyn(null)"
       Name: id
-      DeletionDate: "force ? dyn(null) : deletion"
+      # A forced delete has no window: "the date and time of the delete
+      # request plus the number of days in RecoveryWindowInDays" is the request.
+      DeletionDate: "force ? int(now) : deletion"
 
   # RestoreSecret: "Cancels the scheduled deletion of a secret by removing the
   # DeletedDate time stamp." Its response is the secret's ARN and Name.
@@ -570,8 +572,7 @@ quirks:
     note: >
       The pack's truthy accepts ForceDeleteWithoutRecovery as the strings
       'true', 'True' and '1' as well as the boolean; the transcription keeps
-      all four. A forced delete answers no DeletionDate, and no ARN when the
-      secret did not exist.
+      all four. A forced delete answers no ARN when the secret did not exist.
   - operation: TagResource
     note: >
       A request carrying the same tag key twice resolves first-wins here; the

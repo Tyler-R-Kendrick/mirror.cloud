@@ -30,6 +30,9 @@ The oracle is AWS's documentation as it ships in the vendored model
     scheduled for deletion"). Before, it was scheduled again.
   - A forced delete of a secret that is already deleted or never existed
     succeeds.
+  - A forced delete answers `DeletionDate` as the time of the request: with no
+    recovery window, "the date and time of the delete request plus the number
+    of days in RecoveryWindowInDays" is the request itself. It answered null.
   - `ForceDeleteWithoutRecovery` together with `RecoveryWindowInDays` is
     `InvalidParameterException`.
   - `RecoveryWindowInDays` must be "from 7 to 30"; any other value is

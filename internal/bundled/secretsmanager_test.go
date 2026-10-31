@@ -645,3 +645,31 @@ func TestSecretsManagerRefusesEveryOtherWriteToASecretScheduledForDeletion(t *te
 		})
 	}
 }
+
+// CreateSecretRequest.SecretString: "Either SecretString or SecretBinary must
+// have a value, but not both." PutSecretValueRequest.SecretString: "You must
+// include SecretBinary or SecretString, but not both." UpdateSecretRequest:
+// "Either SecretBinary or SecretString must have a value, but not both." Both
+// at once is InvalidParameterException, "The parameter name or value is
+// invalid": the model names no error for the combination, and this is the one
+// about the request rather than the secret's state.
+func TestSecretsManagerRefusesAStringAndABinaryTogether(t *testing.T) {
+	for _, op := range []string{"CreateSecret", "PutSecretValue", "UpdateSecret"} {
+		t.Run(op, func(t *testing.T) {
+			call, ok, fault := secretsManager(t)
+			ok(t, "CreateSecret", map[string]any{"Name": "existing", "SecretString": "v1"})
+			in := map[string]any{"SecretId": "existing", "SecretString": "a", "SecretBinary": "YQ=="}
+			if op == "CreateSecret" {
+				in = map[string]any{"Name": "fresh", "SecretString": "a", "SecretBinary": "YQ=="}
+			}
+			_, err := call(op, in)
+			fault(t, err, "InvalidParameterException")
+			if _, err := call("DescribeSecret", map[string]any{"SecretId": "fresh"}); err == nil {
+				t.Fatal("a refused CreateSecret created the secret")
+			}
+			if got := ok(t, "GetSecretValue", map[string]any{"SecretId": "existing"}); got["SecretString"] != "v1" {
+				t.Fatalf("a refused %s changed the value to %#v", op, got["SecretString"])
+			}
+		})
+	}
+}

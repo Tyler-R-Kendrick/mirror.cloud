@@ -20,6 +20,15 @@ The oracle is AWS's documentation as it ships in the vendored model
   empty version holding `""`. `PutSecretValue` with neither value ("You must
   include SecretBinary or SecretString") is `InvalidParameterException`;
   before, it stored `""`.
+- **A string and a binary together are refused.** `CreateSecret`,
+  `PutSecretValue` and `UpdateSecret` each say "Either SecretString or
+  SecretBinary must have a value, but not both" (in `PutSecretValue`'s words,
+  "You must include SecretBinary or SecretString, but not both"). Both at once
+  is `InvalidParameterException` now. The model names no error for the
+  combination, so the code is this note's reading: of the errors the three
+  operations list, it is the one about the request ("The parameter name or
+  value is invalid") rather than the secret's state. Before, the string was
+  stored and the binary dropped.
 - **Description.** `CreateSecret` and `UpdateSecret` keep `Description`, and
   `DescribeSecret` answers it. Before, it was accepted and dropped. A write
   that names no description keeps the one already stored.

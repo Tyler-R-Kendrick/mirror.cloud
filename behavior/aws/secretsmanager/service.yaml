@@ -13,6 +13,12 @@ provenance: authored
 # the key is a derive.
 missing_input_error: NotFound
 
+# GetRandomPassword's character classes and exclusions, drawn from a seeded
+# generator; CEL has no way to pick characters at random.
+primitives:
+  random_password: { name: secretsmanager.random_password, version: 1 }
+  random_password_error: { name: secretsmanager.random_password_error, version: 1 }
+
 resources:
   secret:
     collection: secrets
@@ -548,11 +554,27 @@ operations:
                   in ('TagKeys' in input && input.TagKeys != null ? input.TagKeys : [])))
     output: {}
 
+  # GetRandomPassword honours its parameters: PasswordLength ("the default
+  # length is 32 characters"), ExcludeCharacters, the four Exclude* classes,
+  # IncludeSpace and RequireEachIncludedType ("the password contains at least
+  # one of every character type" unless it is false). The default classes are
+  # the documented ones: "uppercase and lowercase letters, numbers, and the
+  # following characters in passwords: !\"#$%&'()*+,-./:;?@[\\]^_`{|}~".
+  # Parameters no password satisfies -- a length outside PasswordLengthType's
+  # 1 to 4096, every class excluded, fewer characters than required types --
+  # are InvalidParameterException. It answered 32 hex digits whatever it was
+  # asked.
   GetRandomPassword:
+    let:
+      pwerr: "prim('secretsmanager.random_password_error', [input])"
+    require:
+      - cond: "pwerr == ''"
+        error: InvalidParameter
+        message_expr: pwerr
     effects:
-      - generate: { bind: pw, kind: hex, bytes: 32 }
+      - generate: { bind: seed, kind: hex, bytes: 32 }
     output:
-      RandomPassword: fx.pw
+      RandomPassword: "prim('secretsmanager.random_password', [input, fx.seed])"
 
   # Every id is looked up in request order; an unknown one is an Errors row,
   # not a fault. The pack reads the id as a raw store key -- an ARN does not

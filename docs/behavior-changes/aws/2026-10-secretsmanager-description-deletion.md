@@ -114,6 +114,15 @@ The oracle is AWS's documentation as it ships in the vendored model
   `GetSecretValue` refused it already ("When a secret is scheduled for
   deletion, you cannot retrieve the secret value. You must first cancel the
   deletion with RestoreSecret").
+- **GetRandomPassword honours its parameters.** It answers `PasswordLength`
+  characters (32 when absent) from the documented classes, minus
+  `ExcludeCharacters` and any class an `Exclude*` switch drops, plus a space
+  with `IncludeSpace`, and at least one of each class unless
+  `RequireEachIncludedType` is false. Parameters no password satisfies (a
+  length outside 1 to 4096, every class excluded, fewer characters than
+  required classes) are `InvalidParameterException`. Before, it answered 32
+  hex digits whatever it was asked. The generator is seeded, so a seed
+  answers one password; CloudFormation's `GenerateSecretString` uses it.
 - **Filters choose secrets.** `BatchGetSecretValue` and `ListSecrets` apply
   `Filters` as `Filter.Key` describes them: `name`, `tag-key`, `tag-value` and
   `primary-region` are case-sensitive prefix matches, `description` a prefix

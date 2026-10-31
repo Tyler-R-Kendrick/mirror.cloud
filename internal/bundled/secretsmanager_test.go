@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -933,5 +934,73 @@ func TestSecretsManagerFiltersChooseSecrets(t *testing.T) {
 	if values, errs := names(rows["SecretValues"], "Name"), names(rows["Errors"], "ErrorCode"); !reflect.DeepEqual(values, []string{"app/db"}) ||
 		!reflect.DeepEqual(errs, []string{"InvalidRequestException", "ResourceNotFoundException"}) {
 		t.Errorf("SecretIdList answered %v and %v", values, errs)
+	}
+}
+
+// GetRandomPassword: "By default, Secrets Manager uses uppercase and lowercase
+// letters, numbers, and the following characters in passwords:
+// !\"#$%&'()*+,-./:;?@[\\]^_`{|}~". PasswordLength: "If you don't include this
+// parameter, the default length is 32 characters." ExcludeCharacters: "A string
+// of the characters that you don't want in the password." ExcludeLowercase,
+// ExcludeUppercase, ExcludeNumbers and ExcludePunctuation each drop a class;
+// IncludeSpace: "the password can contain space characters".
+// RequireEachIncludedType: "If you don't include this switch, the password
+// contains at least one of every character type." PasswordLengthType's range
+// is 1 to 4096.
+func TestSecretsManagerGetRandomPasswordHonoursItsParameters(t *testing.T) {
+	call, ok, fault := secretsManager(t)
+	const (
+		lower       = "abcdefghijklmnopqrstuvwxyz"
+		upper       = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		digits      = "0123456789"
+		punctuation = "!\"#$%&'()*+,-./:;?@[\\]^_`{|}~"
+	)
+	password := func(in map[string]any) string {
+		t.Helper()
+		pw, _ := ok(t, "GetRandomPassword", in)["RandomPassword"].(string)
+		return pw
+	}
+	has := func(pw, set string) bool { return strings.ContainsAny(pw, set) }
+
+	pw := password(map[string]any{})
+	if len(pw) != 32 {
+		t.Fatalf("the default password %q has %d characters, want 32", pw, len(pw))
+	}
+	for _, c := range pw {
+		if !strings.ContainsRune(lower+upper+digits+punctuation, c) {
+			t.Fatalf("the default password %q holds %q, outside the documented characters", pw, c)
+		}
+	}
+	for _, set := range []string{lower, upper, digits, punctuation} {
+		if !has(pw, set) {
+			t.Fatalf("the default password %q has none of %q", pw, set)
+		}
+	}
+	if pw := password(map[string]any{"PasswordLength": 16}); len(pw) != 16 {
+		t.Fatalf("PasswordLength 16 answered %q", pw)
+	}
+	if pw := password(map[string]any{"PasswordLength": 200, "ExcludeCharacters": "abcABC123!@"}); has(pw, "abcABC123!@") {
+		t.Fatalf("ExcludeCharacters left one in %q", pw)
+	}
+	for member, set := range map[string]string{"ExcludeLowercase": lower, "ExcludeUppercase": upper, "ExcludeNumbers": digits, "ExcludePunctuation": punctuation} {
+		if pw := password(map[string]any{"PasswordLength": 200, member: true}); has(pw, set) || len(pw) != 200 {
+			t.Fatalf("%s answered %q", member, pw)
+		}
+	}
+	if pw := password(map[string]any{"PasswordLength": 200, "IncludeSpace": true}); !has(pw, " ") {
+		t.Fatalf("IncludeSpace with RequireEachIncludedType answered no space in %q", pw)
+	}
+	if pw := password(map[string]any{"PasswordLength": 1, "RequireEachIncludedType": false}); len(pw) != 1 {
+		t.Fatalf("a one-character password answered %q", pw)
+	}
+	for _, in := range []map[string]any{
+		{"PasswordLength": 0},
+		{"PasswordLength": 4097},
+		{"PasswordLength": 3}, // four types are required by default
+		{"ExcludeLowercase": true, "ExcludeUppercase": true, "ExcludeNumbers": true, "ExcludePunctuation": true},
+		{"ExcludeNumbers": true, "ExcludePunctuation": true, "ExcludeUppercase": true, "ExcludeCharacters": lower},
+	} {
+		_, err := call("GetRandomPassword", in)
+		fault(t, err, "InvalidParameterException")
 	}
 }

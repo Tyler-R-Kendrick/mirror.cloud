@@ -3464,7 +3464,7 @@ func TestStatesLifecycleAndWalkerUnits(t *testing.T) {
 		t.Fatalf("executions %#v", executions)
 	}
 	storedExecution, _ := getRecord(ctx, p.col(&spi.Request{Identity: id}, "ex"), executionARN)
-	if events := asSlice(storedExecution["history"]); storedExecution["status"] != "SUCCEEDED" || len(events) != 2 {
+	if events := spi.Slice(storedExecution["history"]); storedExecution["status"] != "SUCCEEDED" || len(events) != 2 {
 		t.Fatalf("history %#v", events)
 	}
 	if sync := must("StartSyncExecution", map[string]any{"StateMachineArn": arn, "Input": `{"n":2}`}).Output; sync["status"] != "SUCCEEDED" || sync["stopDate"] == nil {

@@ -405,7 +405,7 @@ func (p *Pack) do(ctx context.Context, req *spi.Request, spec, n, id string, pro
 	if len(f) < 2 {
 		return in, nil
 	}
-	sub := strings.NewReplacer("{n}", n, "{id}", id, "{id/}", lastSlash(id), "{id:}", lastColon(id), "{bus}", ruleBus(id), "{r}", req.Identity.Region, "{a}", req.Identity.Account)
+	sub := strings.NewReplacer("{n}", n, "{id}", id, "{id/}", spi.LastSlash(id), "{id:}", lastColon(id), "{bus}", ruleBus(id), "{r}", req.Identity.Region, "{a}", req.Identity.Account)
 	for _, arg := range f[2:] {
 		k, v, set := strings.Cut(arg, "=")
 		if !set {
@@ -415,7 +415,7 @@ func (p *Pack) do(ctx context.Context, req *spi.Request, spec, n, id string, pro
 			maps.Copy(in, props)
 		} else if sigil := strings.IndexByte("@$%", (v + " ")[0]); sigil >= 0 {
 			if given {
-				in[k] = []any{pv, str(pv), jsonText(pv)}[sigil]
+				in[k] = []any{pv, str(pv), spi.JSONText(pv)}[sigil]
 			}
 		} else if b, isBool := coerce(v, "Boolean"); isBool {
 			in[k] = b
@@ -437,7 +437,7 @@ const unknown = "\uffff"
 // service gives it back. A queue's URL (its endpoint's business), a KMS key's id and a REST API's are
 // known only once made, as is an id built on one: unknown. A Kinesis resource policy's is its ARN.
 func planID(req *spi.Request, typ, n string, props map[string]any) string {
-	if bus := lastSlash(str(props["EventBusName"])); typ == "AWS::Events::Rule" && bus != "" && bus != "default" {
+	if bus := spi.LastSlash(str(props["EventBusName"])); typ == "AWS::Events::Rule" && bus != "" && bus != "default" {
 		n = bus + "/" + n
 	}
 	if f := kinds[typ].ref; f != "" && !strings.Contains(n, unknown) {
@@ -457,7 +457,7 @@ func (p *Pack) order(req *spi.Request, tpl map[string]any) ([]string, error) {
 	}
 	for len(todo) > 0 {
 		i := slices.IndexFunc(todo, func(l string) bool {
-			return !strings.Contains(jsonText(p.resolve(asMap(resources[l])["Properties"], marks, req, "")), unknown)
+			return !strings.Contains(spi.JSONText(p.resolve(asMap(resources[l])["Properties"], marks, req, "")), unknown)
 		})
 		if i < 0 {
 			return nil, invalid("Circular dependency between resources: [" + strings.Join(todo, ", ") + "]")
@@ -478,7 +478,7 @@ func (p *Pack) change(req *spi.Request, old stack, logical, typ string, props ma
 	tpl, _ := parseTemplate(old.Template)
 	before, how := asMap(p.resolve(asMap(asMap(tpl["Resources"])[logical])["Properties"], old.Refs, req, old.Name)), ""
 	for _, k := range slices.Concat(slices.Collect(maps.Keys(before)), slices.Collect(maps.Keys(props))) {
-		if jsonText(before[k]) == jsonText(props[k]) {
+		if spi.JSONText(before[k]) == spi.JSONText(props[k]) {
 			continue
 		} else if how = "update"; slices.Contains(strings.Fields(kinds[typ].replace), k) {
 			return old.Resources[i], "replace"
@@ -583,7 +583,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 			// a target not added fails the rule, as its error does.
 			put, putErr := p.call(ctx, req, "aws.events", "PutTargets", given(map[string]any{"Rule": n, "Targets": targets}, props, "EventBusName"))
 			if failed, _ := put["FailedEntries"].([]any); putErr == nil && len(failed) > 0 {
-				putErr = fault(cmp.Or(str(asMap(failed[0])["ErrorCode"]), "ValidationError"), "PutTargets failed to add targets: "+jsonText(failed))
+				putErr = fault(cmp.Or(str(asMap(failed[0])["ErrorCode"]), "ValidationError"), "PutTargets failed to add targets: "+spi.JSONText(failed))
 			}
 			err = putErr
 		}
@@ -781,7 +781,7 @@ func coerce(v any, want string) (any, bool) {
 	default:
 		return v, false
 	}
-	if text, yes := jsonText(v), strings.EqualFold(jsonText(v), "true"); want == "Boolean" {
+	if text, yes := spi.JSONText(v), strings.EqualFold(spi.JSONText(v), "true"); want == "Boolean" {
 		return yes, yes || strings.EqualFold(text, "false")
 	} else if n, err := strconv.Atoi(text); want == "Integer" {
 		return n, err == nil && strings.TrimLeft(text, "0123456789") == ""
@@ -800,7 +800,7 @@ func generated(props map[string]any, seed string) (string, error) {
 	var doc any
 	switch {
 	case !isMap:
-		return "", invalid("GenerateSecretString must be an object, not " + jsonText(props["GenerateSecretString"]))
+		return "", invalid("GenerateSecretString must be an object, not " + spi.JSONText(props["GenerateSecretString"]))
 	case both:
 		return "", invalid("SecretString and GenerateSecretString can't both be given")
 	case tpl == "" && key != "":
@@ -818,7 +818,7 @@ func generated(props map[string]any, seed string) (string, error) {
 		if generateTypes[member] == "" {
 			return "", invalid("GenerateSecretString has no property " + member)
 		} else if !ok {
-			return "", invalid("GenerateSecretString." + member + " must be " + generateTypes[member] + ", not " + jsonText(v))
+			return "", invalid("GenerateSecretString." + member + " must be " + generateTypes[member] + ", not " + spi.JSONText(v))
 		}
 		params[member] = typed
 	}
@@ -845,15 +845,6 @@ func fault(code, message string) *spi.Fault {
 }
 
 func asMap(v any) map[string]any { m, _ := v.(map[string]any); return m }
-
-// jsonText is a policy-like property as the JSON text an API takes: an object's, or a string as given.
-func jsonText(v any) string {
-	if text, ok := v.(string); ok {
-		return text
-	}
-	raw, _ := json.Marshal(v)
-	return string(raw)
-}
 
 func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack string) any {
 	switch t := v.(type) {
@@ -911,11 +902,11 @@ func (p *Pack) getAtt(g any, refs map[string]string, req *spi.Request) string {
 			return phys
 		}
 		if strings.Contains(phys, "/") && strings.Contains(phys, "://") { // a queue URL
-			return "arn:aws:sqs:" + req.Identity.Region + ":" + req.Identity.Account + ":" + lastSlash(phys)
+			return "arn:aws:sqs:" + req.Identity.Region + ":" + req.Identity.Account + ":" + spi.LastSlash(phys)
 		}
 		return "arn:aws:s3:::" + phys
 	case "QueueName":
-		return lastSlash(phys)
+		return spi.LastSlash(phys)
 	default:
 		return phys
 	}
@@ -973,7 +964,7 @@ func parseTemplate(body string) (map[string]any, error) {
 	for logical, r := range asMap(m["Resources"]) {
 		for attr, options := range map[string]string{"DeletionPolicy": "Delete Retain RetainExceptOnCreate", "UpdateReplacePolicy": "Delete Retain Snapshot"} {
 			if v, set := asMap(r)[attr]; set && !slices.Contains(strings.Fields(options), str(v)) {
-				return nil, invalid("Template format error: " + logical + "'s " + attr + " must be one of [" + strings.ReplaceAll(options, " ", ", ") + "], not " + jsonText(v))
+				return nil, invalid("Template format error: " + logical + "'s " + attr + " must be one of [" + strings.ReplaceAll(options, " ", ", ") + "], not " + spi.JSONText(v))
 			}
 		}
 	}
@@ -1017,7 +1008,7 @@ func formParams(in map[string]any) map[string]string {
 func mergeParamDefaults(tpl map[string]any, params map[string]string) {
 	for k, v := range asMap(tpl["Parameters"]) {
 		if _, given := params[k]; !given && asMap(v)["Default"] != nil {
-			params[k] = jsonText(asMap(v)["Default"]) // a parameter "becomes a string": Default 16 is "16"
+			params[k] = spi.JSONText(asMap(v)["Default"]) // a parameter "becomes a string": Default 16 is "16"
 		}
 	}
 }
@@ -1039,7 +1030,5 @@ func advertise(req *spi.Request) string {
 
 // str is a String property's value: a scalar's text (coerce), nothing for anything else.
 func str(v any) string { s, _ := coerce(v, "String"); t, _ := s.(string); return t }
-
-func lastSlash(s string) string { return s[strings.LastIndex(s, "/")+1:] }
 
 func lastColon(s string) string { return s[strings.LastIndex(s, ":")+1:] }

@@ -27,8 +27,8 @@ func (p *native) invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	scope := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region)
 	switch req.Operation {
 	case "SimulatePrincipalPolicy":
-		source := first(req.Input, "PolicySourceArn", "RoleName")
-		kind, name := "role", roleNameFrom(source)
+		source := spi.First(req.Input, "PolicySourceArn", "RoleName")
+		kind, name := "role", spi.LastSlash(source)
 		if strings.Contains(source, ":user/") {
 			kind, name = "user", userFromARN(source)
 		}
@@ -93,7 +93,7 @@ func simulationContextValues(req *spi.Request) map[string]string {
 		for _, raw := range entries {
 			entry, _ := raw.(map[string]any)
 			if vals := asStrings(entry["ContextKeyValues"]); len(vals) > 0 {
-				values[first(entry, "ContextKeyName")] = vals[0]
+				values[spi.First(entry, "ContextKeyName")] = vals[0]
 			}
 		}
 	}
@@ -136,20 +136,4 @@ func collectMembers(in map[string]any, name string) []string {
 		}
 	}
 	return out
-}
-
-func roleNameFrom(s string) string {
-	if i := strings.LastIndex(s, "/"); i >= 0 {
-		return s[i+1:]
-	}
-	return s
-}
-
-func first(m map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if s, ok := m[k].(string); ok && s != "" {
-			return s
-		}
-	}
-	return ""
 }

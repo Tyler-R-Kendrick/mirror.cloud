@@ -47,7 +47,7 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 		accts := stringList(req.Input, "AWSAccountIds", "AWSAccountId")
 		acts := stringList(req.Input, "ActionNames", "ActionName")
 		for _, statement := range stmts {
-			if str(asMap(statement)["Sid"]) == label {
+			if str(spi.Object(statement)["Sid"]) == label {
 				return nil, clientFault("InvalidParameter", "A policy statement with this label already exists", 400)
 			}
 		}
@@ -71,7 +71,7 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 	var kept []any
 	found := false
 	for _, s := range stmts {
-		if str(asMap(s)["Sid"]) == label {
+		if str(spi.Object(s)["Sid"]) == label {
 			found = true
 			continue
 		}
@@ -232,7 +232,7 @@ func (p *Pack) dataProtection(ctx context.Context, req *spi.Request) (*spi.Respo
 		b, _, _ := p.col(req, "topics").Get(ctx, name)
 		m := map[string]any{"arn": arn, "name": name}
 		_ = json.Unmarshal(b, &m)
-		attrs := asMap(m["attrs"])
+		attrs := spi.Object(m["attrs"])
 		if attrs == nil {
 			attrs = map[string]any{}
 		}
@@ -685,7 +685,7 @@ func validateEndpointAttributes(attrs map[string]any) *spi.Fault {
 }
 
 func flattenAttrEntries(in map[string]any, prefix string) map[string]any {
-	attrs := asMap(in[prefix])
+	attrs := spi.Object(in[prefix])
 	if len(attrs) > 0 && attrs["entry"] == nil {
 		return attrs
 	}

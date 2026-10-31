@@ -38,7 +38,7 @@ func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, ke
 			continue
 		}
 		blob := scopedBlobKey(ref.Account, ref.Region, ref.Bucket, key)
-		version := str(meta["versionId"])
+		version := spi.Str(meta["versionId"])
 		if version != "" {
 			if _, err := p.deps.Blobs.Put(ctx, blob+"@"+version, bytes.NewReader(body)); err != nil {
 				continue
@@ -48,7 +48,7 @@ func (p *Pack) replicateObject(ctx context.Context, req *spi.Request, bucket, ke
 		if err != nil {
 			continue
 		}
-		dstMeta := cloneMap(meta)
+		dstMeta := spi.Clone(meta)
 		dstMeta["etag"], dstMeta["md5"], dstMeta["size"] = `"`+info.MD5+`"`, info.MD5, info.Size
 		dstMeta["replicationStatus"] = "REPLICA"
 		if storageClass != "" {
@@ -90,8 +90,8 @@ func (p *Pack) replicateDeleteMarker(ctx context.Context, req *spi.Request, buck
 	matched, copied := false, false
 	tags := p.storedTags(ctx, req, bucket, key, "")
 	for _, rule := range p.replicationRules(ctx, req, bucket) {
-		deleteCfg := asMap(rule["DeleteMarkerReplication"])
-		if !strings.EqualFold(str(deleteCfg["Status"]), "Enabled") || !ruleMatches(rule, key, tags) {
+		deleteCfg := spi.Object(rule["DeleteMarkerReplication"])
+		if !strings.EqualFold(spi.Str(deleteCfg["Status"]), "Enabled") || !ruleMatches(rule, key, tags) {
 			continue
 		}
 		matched = true
@@ -108,7 +108,7 @@ func (p *Pack) replicateDeleteMarker(ctx context.Context, req *spi.Request, buck
 		meta["replicationStatus"] = "REPLICA"
 		raw, _ := json.Marshal(meta)
 		_ = scope.Collection("objects").Put(ctx, ref.Bucket+"/"+key, raw)
-		if version := str(meta["versionId"]); version != "" {
+		if version := spi.Str(meta["versionId"]); version != "" {
 			_ = scope.Collection("versions").Put(ctx, ref.Bucket+"/"+key+"/"+version, raw)
 		}
 		copied = true
@@ -131,8 +131,8 @@ func (p *Pack) storedTags(ctx context.Context, req *spi.Request, bucket, key, ve
 	_ = json.Unmarshal(raw, &values)
 	tags := make(map[string]string, len(values))
 	for _, value := range values {
-		tag := asMap(value)
-		tags[str(tag["Key"])] = str(tag["Value"])
+		tag := spi.Object(value)
+		tags[spi.Str(tag["Key"])] = spi.Str(tag["Value"])
 	}
 	return tags
 }
@@ -155,7 +155,7 @@ func (p *Pack) replicationRules(ctx context.Context, req *spi.Request, bucket st
 	values := replicationConfigurationRules(doc)
 	rules := make([]map[string]any, 0, len(values))
 	for _, rule := range values {
-		if !strings.EqualFold(str(rule["Status"]), "Disabled") {
+		if !strings.EqualFold(spi.Str(rule["Status"]), "Disabled") {
 			rules = append(rules, rule)
 		}
 	}
@@ -163,43 +163,43 @@ func (p *Pack) replicationRules(ctx context.Context, req *spi.Request, bucket st
 }
 
 func replicationConfigurationRules(value any) []map[string]any {
-	doc := asMap(value)
-	if nested := asMap(doc["ReplicationConfiguration"]); len(nested) > 0 {
+	doc := spi.Object(value)
+	if nested := spi.Object(doc["ReplicationConfiguration"]); len(nested) > 0 {
 		doc = nested
 	}
 	var values []any
-	if v := asSlice(doc["Rules"]); len(v) > 0 {
+	if v := spi.Slice(doc["Rules"]); len(v) > 0 {
 		values = v
-	} else if v := asSlice(doc["Rule"]); len(v) > 0 {
+	} else if v := spi.Slice(doc["Rule"]); len(v) > 0 {
 		values = v
-	} else if v := asMap(doc["Rule"]); len(v) > 0 {
+	} else if v := spi.Object(doc["Rule"]); len(v) > 0 {
 		values = []any{v}
 	}
 	rules := make([]map[string]any, 0, len(values))
 	for _, value := range values {
-		rules = append(rules, asMap(value))
+		rules = append(rules, spi.Object(value))
 	}
 	return rules
 }
 
 func validateReplicationConfiguration(value any) error {
-	configuration := asMap(value)
+	configuration := spi.Object(value)
 	rules := replicationConfigurationRules(configuration)
 	malformed := func() error {
 		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
-	if str(configuration["Role"]) == "" || len(rules) < 1 || len(rules) > 1000 {
+	if spi.Str(configuration["Role"]) == "" || len(rules) < 1 || len(rules) > 1000 {
 		return malformed()
 	}
 	for _, rule := range rules {
-		if status := str(rule["Status"]); status != "Enabled" && status != "Disabled" {
+		if status := spi.Str(rule["Status"]); status != "Enabled" && status != "Disabled" {
 			return malformed()
 		}
-		if str(asMap(rule["Destination"])["Bucket"]) == "" {
+		if spi.Str(spi.Object(rule["Destination"])["Bucket"]) == "" {
 			return malformed()
 		}
 		deleteMarker, hasDeleteMarker := rule["DeleteMarkerReplication"]
-		deleteStatus := str(asMap(deleteMarker)["Status"])
+		deleteStatus := spi.Str(spi.Object(deleteMarker)["Status"])
 		if hasDeleteMarker && deleteStatus != "Enabled" && deleteStatus != "Disabled" {
 			return malformed()
 		}
@@ -210,9 +210,9 @@ func validateReplicationConfiguration(value any) error {
 		if _, hasPriority := rule["Priority"]; !hasPriority || !hasDeleteMarker {
 			return malformed()
 		}
-		filterDoc := asMap(filter)
-		and := asMap(filterDoc["And"])
-		if deleteStatus == "Enabled" && (len(asMap(filterDoc["Tag"])) > 0 || len(asMap(and["Tag"])) > 0 || len(asSlice(and["Tags"])) > 0) {
+		filterDoc := spi.Object(filter)
+		and := spi.Object(filterDoc["And"])
+		if deleteStatus == "Enabled" && (len(spi.Object(filterDoc["Tag"])) > 0 || len(spi.Object(and["Tag"])) > 0 || len(spi.Slice(and["Tags"])) > 0) {
 			return &spi.Fault{Code: "InvalidRequest", Message: "Delete marker replication cannot be enabled for tag-based rules", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
 	}
@@ -234,21 +234,21 @@ func (p *Pack) prepareReplicationConfiguration(ctx context.Context, req *spi.Req
 		}
 	}
 	for index, rule := range rules {
-		if str(rule["ID"]) == "" {
-			rule["ID"] = p.deps.Rand.Derive("s3-replication-rule:" + req.Identity.Account + ":" + req.Identity.Region + ":" + str(req.Input["Bucket"]) + ":" + strconv.Itoa(index)).Hex(8)
+		if spi.Str(rule["ID"]) == "" {
+			rule["ID"] = p.deps.Rand.Derive("s3-replication-rule:" + req.Identity.Account + ":" + req.Identity.Region + ":" + spi.Str(req.Input["Bucket"]) + ":" + strconv.Itoa(index)).Hex(8)
 		}
 	}
 	return nil
 }
 
 func ruleMatches(rule map[string]any, key string, tags map[string]string) bool {
-	prefix := str(rule["Prefix"])
-	filter := asMap(rule["Filter"])
-	if v := str(filter["Prefix"]); v != "" {
+	prefix := spi.Str(rule["Prefix"])
+	filter := spi.Object(rule["Filter"])
+	if v := spi.Str(filter["Prefix"]); v != "" {
 		prefix = v
 	}
-	and := asMap(filter["And"])
-	if v := str(and["Prefix"]); v != "" {
+	and := spi.Object(filter["And"])
+	if v := spi.Str(and["Prefix"]); v != "" {
 		prefix = v
 	}
 	if !strings.HasPrefix(key, prefix) {
@@ -256,12 +256,12 @@ func ruleMatches(rule map[string]any, key string, tags map[string]string) bool {
 	}
 	want := map[string]string{}
 	for _, source := range []map[string]any{filter, and} {
-		if tag := asMap(source["Tag"]); len(tag) > 0 {
-			want[str(tag["Key"])] = str(tag["Value"])
+		if tag := spi.Object(source["Tag"]); len(tag) > 0 {
+			want[spi.Str(tag["Key"])] = spi.Str(tag["Value"])
 		}
-		for _, value := range asSlice(source["Tags"]) {
-			tag := asMap(value)
-			want[str(tag["Key"])] = str(tag["Value"])
+		for _, value := range spi.Slice(source["Tags"]) {
+			tag := spi.Object(value)
+			want[spi.Str(tag["Key"])] = spi.Str(tag["Value"])
 		}
 	}
 	for k, v := range want {
@@ -273,12 +273,12 @@ func ruleMatches(rule map[string]any, key string, tags map[string]string) bool {
 }
 
 func (p *Pack) replicationDestination(ctx context.Context, req *spi.Request, rule map[string]any, key string) (replicaRef, string) {
-	dst := asMap(rule["Destination"])
-	bucket := str(dst["Bucket"])
+	dst := spi.Object(rule["Destination"])
+	bucket := spi.Str(dst["Bucket"])
 	if i := strings.LastIndex(bucket, ":::"); i >= 0 {
 		bucket = bucket[i+3:]
 	}
-	account, region := str(dst["Account"]), str(dst["Region"])
+	account, region := spi.Str(dst["Account"]), spi.Str(dst["Region"])
 	if account == "" {
 		account = req.Identity.Account
 	}
@@ -288,18 +288,18 @@ func (p *Pack) replicationDestination(ctx context.Context, req *spi.Request, rul
 	if raw, ok, _ := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Get(ctx, bucket); ok {
 		var location map[string]any
 		_ = json.Unmarshal(raw, &location)
-		if str(dst["Account"]) == "" {
-			account = str(location["account"])
+		if spi.Str(dst["Account"]) == "" {
+			account = spi.Str(location["account"])
 		}
-		if str(dst["Region"]) == "" {
-			region = str(location["region"])
+		if spi.Str(dst["Region"]) == "" {
+			region = spi.Str(location["region"])
 		}
 	}
-	return replicaRef{Account: account, Region: region, Bucket: bucket, Key: key}, str(dst["StorageClass"])
+	return replicaRef{Account: account, Region: region, Bucket: bucket, Key: key}, spi.Str(dst["StorageClass"])
 }
 
 func requestTags(req *spi.Request) (map[string]string, error) {
-	tagging := str(req.Input["Tagging"])
+	tagging := spi.Str(req.Input["Tagging"])
 	if tagging == "" && req.HTTP != nil {
 		tagging = req.HTTP.Header.Get("x-amz-tagging")
 	}
@@ -390,22 +390,14 @@ func (p *Pack) syncReplicaObjectLock(ctx context.Context, req *spi.Request, buck
 }
 
 func setReplicationHeaders(headers http.Header, meta map[string]any) {
-	if status := str(meta["replicationStatus"]); status != "" {
+	if status := spi.Str(meta["replicationStatus"]); status != "" {
 		headers.Set("x-amz-replication-status", status)
 	}
-	if storageClass := str(meta["storageClass"]); storageClass != "" && storageClass != "STANDARD" {
+	if storageClass := spi.Str(meta["storageClass"]); storageClass != "" && storageClass != "STANDARD" {
 		headers.Set("x-amz-storage-class", storageClass)
 	}
 }
 
 func scopedBlobKey(account, region, bucket, key string) string {
 	return account + "/" + region + "/" + bucket + "/" + key
-}
-
-func cloneMap(source map[string]any) map[string]any {
-	clone := make(map[string]any, len(source))
-	for key, value := range source {
-		clone[key] = value
-	}
-	return clone
 }

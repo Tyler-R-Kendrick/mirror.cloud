@@ -31,7 +31,7 @@ func TestDynamoDBTransactionCharacterization(t *testing.T) {
 		if stream {
 			input["StreamSpecification"] = map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_AND_OLD_IMAGES"}
 		}
-		return asMap(must("CreateTable", input).Output["TableDescription"])
+		return spi.Object(must("CreateTable", input).Output["TableDescription"])
 	}
 	table := create("T", true)
 	create("Plain", false)
@@ -82,13 +82,13 @@ func TestDynamoDBTransactionCharacterization(t *testing.T) {
 	must("UpdateItem", map[string]any{"TableName": "Plain", "Key": map[string]any{"id": map[string]any{"S": "created-by-update"}}, "ConditionExpression": "attribute_not_exists(id)", "UpdateExpression": "SET value = :v", "ExpressionAttributeValues": map[string]any{":v": map[string]any{"S": "created"}}})
 	createdByUpdate := must("GetItem", map[string]any{"TableName": "Plain", "Key": map[string]any{"id": map[string]any{"S": "created-by-update"}}}).Output["Item"]
 
-	arn := str(table["LatestStreamArn"])
+	arn := spi.Str(table["LatestStreamArn"])
 	iterator := must("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": "shardId-000000000000", "ShardIteratorType": "TRIM_HORIZON"}).Output["ShardIterator"]
-	records := asSlice(must("GetRecords", map[string]any{"ShardIterator": iterator}).Output["Records"])
+	records := spi.Slice(must("GetRecords", map[string]any{"ShardIterator": iterator}).Output["Records"])
 	stream := make([]any, 0, len(records))
 	for _, raw := range records {
-		record := asMap(raw)
-		dynamodb := asMap(record["dynamodb"])
+		record := spi.Object(raw)
+		dynamodb := spi.Object(record["dynamodb"])
 		stream = append(stream, map[string]any{"eventName": record["eventName"], "keys": dynamodb["Keys"], "newImage": dynamodb["NewImage"], "oldImage": dynamodb["OldImage"]})
 	}
 	mismatchFault := mismatchErr.(*spi.Fault)

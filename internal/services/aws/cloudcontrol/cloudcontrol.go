@@ -38,32 +38,32 @@ func notFound() error {
 func (p reader) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	switch req.Operation {
 	case "GetResource":
-		id := first(req.Input, "Identifier")
+		id := spi.First(req.Input, "Identifier")
 		b, ok, _ := p.col(req, "ccres").Get(ctx, id)
 		if ok {
 			var rec map[string]any
 			_ = json.Unmarshal(b, &rec)
 			return &spi.Response{Output: map[string]any{"ResourceDescription": rec}}, nil
 		}
-		if first(req.Input, "TypeName") == "AWS::S3::Bucket" {
+		if spi.First(req.Input, "TypeName") == "AWS::S3::Bucket" {
 			return p.s3Resource(ctx, req, id)
 		}
-		if collection := backingCollection(first(req.Input, "TypeName")); collection != "" {
+		if collection := backingCollection(spi.First(req.Input, "TypeName")); collection != "" {
 			b, ok, _ = p.col(req, collection).Get(ctx, id)
 		}
 		if !ok {
 			return nil, notFound()
 		}
-		return resourceDescription(id, first(req.Input, "TypeName"), b), nil
+		return resourceDescription(id, spi.First(req.Input, "TypeName"), b), nil
 	default: // ListResources
-		if records := listRecords(ctx, p.col(req, "ccres"), first(req.Input, "TypeName")); len(records) != 0 {
+		if records := listRecords(ctx, p.col(req, "ccres"), spi.First(req.Input, "TypeName")); len(records) != 0 {
 			return &spi.Response{Output: map[string]any{"ResourceDescriptions": records}}, nil
 		}
-		if first(req.Input, "TypeName") == "AWS::S3::Bucket" {
+		if spi.First(req.Input, "TypeName") == "AWS::S3::Bucket" {
 			return p.listS3Resources(ctx, req), nil
 		}
-		if collection := backingCollection(first(req.Input, "TypeName")); collection != "" {
-			return listBacking(ctx, p.col(req, collection), first(req.Input, "TypeName")), nil
+		if collection := backingCollection(spi.First(req.Input, "TypeName")); collection != "" {
+			return listBacking(ctx, p.col(req, collection), spi.First(req.Input, "TypeName")), nil
 		}
 		return &spi.Response{Output: map[string]any{"ResourceDescriptions": listRecords(ctx, p.col(req, "ccres"), "")}}, nil
 	}
@@ -151,16 +151,4 @@ func listRecords(ctx context.Context, c spi.Collection, typeName string) []any {
 		items = append(items, rec)
 	}
 	return items
-}
-
-func first(in map[string]any, keys ...string) string {
-	if in == nil {
-		return ""
-	}
-	for _, k := range keys {
-		if s, ok := in[k].(string); ok && s != "" {
-			return s
-		}
-	}
-	return ""
 }

@@ -125,8 +125,8 @@ func (h *stacks) lookup(r res) (name string, err error) {
 		_, err = h.service("aws.s3", "HeadBucket", in("Bucket", r.Physical))
 		return r.Physical, err
 	case "AWS::SQS::Queue":
-		_, err = h.service("aws.sqs", "GetQueueUrl", in("QueueName", lastSlash(r.Physical)))
-		return lastSlash(r.Physical), err
+		_, err = h.service("aws.sqs", "GetQueueUrl", in("QueueName", spi.LastSlash(r.Physical)))
+		return spi.LastSlash(r.Physical), err
 	case "AWS::SNS::Topic":
 		_, err = h.service("aws.sns", "GetTopicAttributes", in("TopicArn", r.Physical))
 		return lastColon(r.Physical), err
@@ -134,8 +134,8 @@ func (h *stacks) lookup(r res) (name string, err error) {
 		_, err = h.service("aws.dynamodb", "DescribeTable", in("TableName", r.Physical))
 		return r.Physical, err
 	case "AWS::IAM::Role":
-		_, err = h.service("aws.iam", "GetRole", in("RoleName", lastSlash(r.Physical)))
-		return lastSlash(r.Physical), err
+		_, err = h.service("aws.iam", "GetRole", in("RoleName", spi.LastSlash(r.Physical)))
+		return spi.LastSlash(r.Physical), err
 	case "AWS::SSM::Parameter":
 		_, err = h.service("aws.ssm", "GetParameter", in("Name", r.Physical))
 		return r.Physical, err
@@ -144,13 +144,13 @@ func (h *stacks) lookup(r res) (name string, err error) {
 		return lastColon(r.Physical), err
 	case "AWS::Logs::LogGroup":
 		out, err := h.service("aws.logs", "DescribeLogGroups", in("logGroupNamePrefix", r.Physical))
-		if err == nil && !strings.Contains(jsonText(out), `"logGroupName":"`+r.Physical+`"`) {
+		if err == nil && !strings.Contains(spi.JSONText(out), `"logGroupName":"`+r.Physical+`"`) {
 			err = &spi.Fault{Code: "ResourceNotFoundException"}
 		}
 		return r.Physical, err
 	case "AWS::Events::Rule":
-		_, err = h.service("aws.events", "DescribeRule", in("Name", lastSlash(r.Physical)))
-		return lastSlash(r.Physical), err
+		_, err = h.service("aws.events", "DescribeRule", in("Name", spi.LastSlash(r.Physical)))
+		return spi.LastSlash(r.Physical), err
 	case "AWS::Lambda::Function":
 		_, err = h.service("aws.lambda", "GetFunction", in("FunctionName", lastColon(r.Physical)))
 		return lastColon(r.Physical), err
@@ -843,7 +843,7 @@ func TestCloudFormationAnUpdateDeletesWhatItReplaced(t *testing.T) {
 	var rows []string
 	for _, raw := range listed["StackResources"].([]any) {
 		r := raw.(map[string]any)
-		row := str(r["LogicalResourceId"]) + " " + lastSlash(str(r["PhysicalResourceId"])) + " " + str(r["ResourceStatus"])
+		row := str(r["LogicalResourceId"]) + " " + spi.LastSlash(str(r["PhysicalResourceId"])) + " " + str(r["ResourceStatus"])
 		if reason := str(r["ResourceStatusReason"]); strings.Contains(reason, "BucketNotEmpty") {
 			row += " BucketNotEmpty"
 		}
@@ -862,7 +862,7 @@ func TestCloudFormationAnUpdateDeletesWhatItReplaced(t *testing.T) {
 	events, _ := h.invoke("DescribeStackEvents", map[string]any{"StackName": "rp"})
 	failed := 0
 	for _, e := range events["StackEvents"].([]any) {
-		if r := asMap(e); lastSlash(str(r["PhysicalResourceId"])) == "old-b" && r["ResourceStatus"] == "DELETE_FAILED" && strings.Contains(str(r["ResourceStatusReason"]), "BucketNotEmpty") {
+		if r := asMap(e); spi.LastSlash(str(r["PhysicalResourceId"])) == "old-b" && r["ResourceStatus"] == "DELETE_FAILED" && strings.Contains(str(r["ResourceStatusReason"]), "BucketNotEmpty") {
 			failed++
 		}
 	}
@@ -1196,7 +1196,7 @@ func TestCloudFormationARuleLivesOnItsBus(t *testing.T) {
 		t.Errorf("the bus-b rule y has targets %v (%v), want the template's one", targets["Targets"], err)
 	}
 	h.mustCreate("unnamed", rule("", false))
-	unnamed := lastSlash(h.resources("unnamed")[0].Physical)
+	unnamed := spi.LastSlash(h.resources("unnamed")[0].Physical)
 	for _, stack := range []string{"ony", "unnamed"} {
 		if _, err := h.invoke("DeleteStack", map[string]any{"StackName": stack}); err != nil {
 			t.Fatalf("DeleteStack %s: %v", stack, err)
@@ -1623,7 +1623,7 @@ func TestCloudFormationAnUpdateTouchesOnlyWhatChanged(t *testing.T) {
 	if out, _ := h.service("aws.ssm", "GetParameter", map[string]any{"Name": inPlace["Parameter"]}); asMap(out["Parameter"])["Value"] != "w" {
 		t.Errorf("the parameter holds %v, want w", asMap(out["Parameter"])["Value"])
 	}
-	if out, _ := h.service("aws.lambda", "GetFunctionConfiguration", map[string]any{"FunctionName": lastColon(inPlace["Function"])}); jsonText(out["Timeout"]) != "30" {
+	if out, _ := h.service("aws.lambda", "GetFunctionConfiguration", map[string]any{"FunctionName": lastColon(inPlace["Function"])}); spi.JSONText(out["Timeout"]) != "30" {
 		t.Errorf("the function's Timeout is %v, want 30", out["Timeout"])
 	}
 
@@ -1670,7 +1670,7 @@ func TestCloudFormationARollbackRestoresExactly(t *testing.T) {
 	if status, reason, _ := h.status("exact"); status != "UPDATE_ROLLBACK_COMPLETE" {
 		t.Errorf("exact is %s (%s), want UPDATE_ROLLBACK_COMPLETE", status, reason)
 	}
-	out, err := h.service("aws.events", "ListTargetsByRule", map[string]any{"Rule": lastSlash(ids["R"])})
+	out, err := h.service("aws.events", "ListTargetsByRule", map[string]any{"Rule": spi.LastSlash(ids["R"])})
 	if targets, _ := out["Targets"].([]any); err != nil || len(targets) != 1 || asMap(targets[0])["Id"] != "t1" {
 		t.Errorf("after the rollback the rule's targets are %v (%v), want t1 alone", out["Targets"], err)
 	}

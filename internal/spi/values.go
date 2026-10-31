@@ -1,0 +1,74 @@
+package spi
+
+import (
+	"encoding/json"
+	"strings"
+)
+
+// The value helpers below read the loosely typed members a request or a
+// stored record carries. Packs share them here instead of each keeping its
+// own copy.
+
+// First answers the first of keys whose member in m is a non-empty string, or
+// "" when none is.
+func First(m map[string]any, keys ...string) string {
+	for _, k := range keys {
+		if s, ok := m[k].(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// Str answers v when it is a string, and "" otherwise.
+func Str(v any) string {
+	s, _ := v.(string)
+	return s
+}
+
+// Slice answers v when it is a list, and nil otherwise.
+func Slice(v any) []any {
+	s, _ := v.([]any)
+	return s
+}
+
+// Object answers v when it is a map, and an empty map otherwise, never nil.
+func Object(v any) map[string]any {
+	if m, ok := v.(map[string]any); ok && m != nil {
+		return m
+	}
+	return map[string]any{}
+}
+
+// Clone answers a shallow copy of m, never nil.
+func Clone(m map[string]any) map[string]any {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// LastSlash answers what follows the last "/" in s, or s when it has none.
+func LastSlash(s string) string { return s[strings.LastIndex(s, "/")+1:] }
+
+// JSONText answers v's text: a string as it is, anything else as JSON.
+func JSONText(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	raw, _ := json.Marshal(v)
+	return string(raw)
+}
+
+// Int answers v as an int when it is an int or a float64 (truncated), and 0
+// otherwise.
+func Int(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case float64:
+		return int(n)
+	}
+	return 0
+}

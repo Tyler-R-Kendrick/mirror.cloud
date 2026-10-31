@@ -99,13 +99,13 @@ func TestTableCRUDDescriptionCharacterization(t *testing.T) {
 		"AttributeDefinitions":  []any{map[string]any{"AttributeName": "id", "AttributeType": "S"}},
 		"ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5},
 	}
-	created := asMap(call("CreateTable", input).Output["TableDescription"])
-	described := asMap(call("DescribeTable", map[string]any{"TableName": "crud-detail"}).Output["Table"])
-	deleted := asMap(call("DeleteTable", map[string]any{"TableName": "crud-detail"}).Output["TableDescription"])
-	if created["TableStatus"] != "CREATING" || asInt(asMap(created["ProvisionedThroughput"])["NumberOfDecreasesToday"]) != 0 {
+	created := spi.Object(call("CreateTable", input).Output["TableDescription"])
+	described := spi.Object(call("DescribeTable", map[string]any{"TableName": "crud-detail"}).Output["Table"])
+	deleted := spi.Object(call("DeleteTable", map[string]any{"TableName": "crud-detail"}).Output["TableDescription"])
+	if created["TableStatus"] != "CREATING" || asInt(spi.Object(created["ProvisionedThroughput"])["NumberOfDecreasesToday"]) != 0 {
 		t.Fatalf("create description %#v", created)
 	}
-	warm := asMap(described["WarmThroughput"])
+	warm := spi.Object(described["WarmThroughput"])
 	if described["TableStatus"] != "ACTIVE" || asInt(warm["ReadUnitsPerSecond"]) != 5 || asInt(warm["WriteUnitsPerSecond"]) != 5 || warm["Status"] != "ACTIVE" {
 		t.Fatalf("describe warm throughput %#v", described)
 	}
@@ -156,7 +156,7 @@ func TestDynamoDBTTLDoesNotSurviveTableRecreation(t *testing.T) {
 	must("UpdateTimeToLive", map[string]any{"TableName": "T", "TimeToLiveSpecification": map[string]any{"Enabled": true, "AttributeName": "ttl"}})
 	must("DeleteTable", table)
 	must("CreateTable", table)
-	description := asMap(must("DescribeTimeToLive", table).Output["TimeToLiveDescription"])
+	description := spi.Object(must("DescribeTimeToLive", table).Output["TimeToLiveDescription"])
 	if description["TimeToLiveStatus"] != "DISABLED" || description["AttributeName"] != nil {
 		t.Fatalf("recreated table retained ttl %#v", description)
 	}
@@ -325,17 +325,17 @@ func TestDynamoDBTagLifecycle(t *testing.T) {
 	created := must("CreateTable", map[string]any{"TableName": "T", "Tags": []any{
 		map[string]any{"Key": "env", "Value": "dev"}, map[string]any{"Key": "team", "Value": "platform"},
 	}})
-	arn := str(asMap(created.Output["TableDescription"])["TableArn"])
+	arn := spi.Str(spi.Object(created.Output["TableDescription"])["TableArn"])
 	if arn != "arn:aws:dynamodb:us-east-1:000000000000:table/T" {
 		t.Fatalf("table arn %q", arn)
 	}
-	if tags := must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"].([]any); len(tags) != 2 || str(asMap(tags[0])["Value"]) != "dev" || str(asMap(tags[1])["Value"]) != "platform" {
+	if tags := must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"].([]any); len(tags) != 2 || spi.Str(spi.Object(tags[0])["Value"]) != "dev" || spi.Str(spi.Object(tags[1])["Value"]) != "platform" {
 		t.Fatalf("creation tags %#v", tags)
 	}
 	must("TagResource", map[string]any{"ResourceArn": arn, "Tags": []any{map[string]any{"Key": "env", "Value": "prod"}}})
 	must("UntagResource", map[string]any{"ResourceArn": arn, "TagKeys": []any{"team"}})
 	tags := must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"].([]any)
-	if len(tags) != 1 || str(asMap(tags[0])["Key"]) != "env" || str(asMap(tags[0])["Value"]) != "prod" {
+	if len(tags) != 1 || spi.Str(spi.Object(tags[0])["Key"]) != "env" || spi.Str(spi.Object(tags[0])["Value"]) != "prod" {
 		t.Fatalf("tags %#v", tags)
 	}
 	must("DeleteTable", map[string]any{"TableName": "T"})
@@ -357,7 +357,7 @@ func TestDynamoDBTagCharacterization(t *testing.T) {
 		return response
 	}
 	created := must("CreateTable", map[string]any{"TableName": "T", "Tags": []any{map[string]any{"Key": "Name", "Value": "test"}, map[string]any{"Key": "env", "Value": "dev"}}})
-	arn := str(asMap(created.Output["TableDescription"])["TableArn"])
+	arn := spi.Str(spi.Object(created.Output["TableDescription"])["TableArn"])
 	initial := must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"]
 	must("TagResource", map[string]any{"ResourceArn": arn, "Tags": []any{map[string]any{"Key": "env", "Value": "prod"}, map[string]any{"Key": "team", "Value": "storage"}}})
 	updated := must("ListTagsOfResource", map[string]any{"ResourceArn": arn}).Output["Tags"]
@@ -386,8 +386,8 @@ func TestDynamoDBUnicodeAndLargeScan(t *testing.T) {
 	for i, value := range []string{"foobar123 ✓", "foobar123 £", "foobar123 ¢"} {
 		id := "unicode-" + strconv.Itoa(i)
 		must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": id}, "data": map[string]any{"S": value}}})
-		got := asMap(must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": id}}}).Output["Item"])
-		if str(asMap(got["data"])["S"]) != value {
+		got := spi.Object(must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": id}}}).Output["Item"])
+		if spi.Str(spi.Object(got["data"])["S"]) != value {
 			t.Fatalf("unicode item %#v", got)
 		}
 	}
@@ -395,7 +395,7 @@ func TestDynamoDBUnicodeAndLargeScan(t *testing.T) {
 		must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "large-" + strconv.Itoa(i)}, "data": map[string]any{"S": strings.Repeat("foobar123 ", 1000)}}})
 	}
 	scan := must("Scan", map[string]any{"TableName": "T"}).Output
-	if scan["Count"] != 23 || scan["ScannedCount"] != 23 || len(asSlice(scan["Items"])) != 23 {
+	if scan["Count"] != 23 || scan["ScannedCount"] != 23 || len(spi.Slice(scan["Items"])) != 23 {
 		t.Fatalf("large scan %#v", scan)
 	}
 }
@@ -502,7 +502,7 @@ func TestDynamoDBQueryIndexProjection(t *testing.T) {
 		t.Fatalf("missing index fault %#v", err)
 	}
 	response, err := query("all", "fieldB", "b", "ALL_ATTRIBUTES")
-	if err != nil || len(asSlice(response.Output["Items"])) != 1 || str(asMap(asMap(asSlice(response.Output["Items"])[0])["data"])["S"]) != "value" {
+	if err != nil || len(spi.Slice(response.Output["Items"])) != 1 || spi.Str(spi.Object(spi.Object(spi.Slice(response.Output["Items"])[0])["data"])["S"]) != "value" {
 		t.Fatalf("all projection %#v %v", response, err)
 	}
 }
@@ -540,8 +540,8 @@ func TestDynamoDBMultipleUpdateExpressions(t *testing.T) {
 	must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
 	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "1"}, "data": map[string]any{"S": "original"}}})
 	updated := must("UpdateItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "1"}}, "UpdateExpression": "SET attr1 = :v1, attr2 = :v2", "ExpressionAttributeValues": map[string]any{":v1": map[string]any{"S": "value1"}, ":v2": map[string]any{"S": "value2"}}, "ReturnValues": "ALL_NEW"})
-	item := asMap(must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "1"}}}).Output["Item"])
-	if str(asMap(item["attr1"])["S"]) != "value1" || str(asMap(item["attr2"])["S"]) != "value2" {
+	item := spi.Object(must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "1"}}}).Output["Item"])
+	if spi.Str(spi.Object(item["attr1"])["S"]) != "value1" || spi.Str(spi.Object(item["attr2"])["S"]) != "value2" {
 		t.Fatalf("updated item %#v", item)
 	}
 	golden.AssertJSON(t, map[string]any{"response": updated.Output, "item": item})
@@ -565,7 +565,7 @@ func TestDynamoDBSecondaryIndexes(t *testing.T) {
 	item := map[string]any{"PK": map[string]any{"S": "test one"}, "SK": map[string]any{"S": "hello"}, "LSI1SK": map[string]any{"N": "123"}, "data": map[string]any{"S": "value"}}
 	must("PutItem", map[string]any{"TableName": "LSI", "Item": item})
 	query := must("Query", map[string]any{"TableName": "LSI", "IndexName": "LSI1", "KeyConditionExpression": "PK = :v", "ExpressionAttributeValues": map[string]any{":v": map[string]any{"S": "test one"}}, "Select": "ALL_ATTRIBUTES"})
-	if len(asSlice(query.Output["Items"])) != 1 {
+	if len(spi.Slice(query.Output["Items"])) != 1 {
 		t.Fatalf("local index query %#v", query.Output)
 	}
 	indexes := make([]any, 25)
@@ -573,11 +573,11 @@ func TestDynamoDBSecondaryIndexes(t *testing.T) {
 		indexes[i] = map[string]any{"IndexName": "gsi_" + strconv.Itoa(i), "KeySchema": []any{map[string]any{"AttributeName": "a" + strconv.Itoa(i), "KeyType": "HASH"}}, "Projection": map[string]any{"ProjectionType": "ALL"}}
 	}
 	must("CreateTable", map[string]any{"TableName": "Many", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "GlobalSecondaryIndexes": indexes})
-	described := asMap(must("DescribeTable", map[string]any{"TableName": "Many"}).Output["Table"])
-	if len(asSlice(described["GlobalSecondaryIndexes"])) != 25 {
+	described := spi.Object(must("DescribeTable", map[string]any{"TableName": "Many"}).Output["Table"])
+	if len(spi.Slice(described["GlobalSecondaryIndexes"])) != 25 {
 		t.Fatalf("global indexes %#v", described["GlobalSecondaryIndexes"])
 	}
-	golden.AssertJSON(t, map[string]any{"localItems": query.Output["Items"], "globalIndexCount": len(asSlice(described["GlobalSecondaryIndexes"]))})
+	golden.AssertJSON(t, map[string]any{"localItems": query.Output["Items"], "globalIndexCount": len(spi.Slice(described["GlobalSecondaryIndexes"]))})
 }
 
 func TestDynamoDBPutItemReturnValues(t *testing.T) {
@@ -638,7 +638,7 @@ func TestDynamoDBBatchCharacterization(t *testing.T) {
 		}
 		return response
 	}
-	created := asMap(must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_AND_OLD_IMAGES"}}).Output["TableDescription"])
+	created := spi.Object(must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_AND_OLD_IMAGES"}}).Output["TableDescription"])
 	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "Fred"}}})
 	overwrite := must("BatchWriteItem", map[string]any{"RequestItems": map[string]any{"T": []any{
 		map[string]any{"PutRequest": map[string]any{"Item": map[string]any{"id": map[string]any{"S": "Fred"}}}},
@@ -652,13 +652,13 @@ func TestDynamoDBBatchCharacterization(t *testing.T) {
 		map[string]any{"id": map[string]any{"S": "Fred"}},
 		map[string]any{"id": map[string]any{"S": "missing"}},
 	}}}}).Output
-	arn := str(created["LatestStreamArn"])
+	arn := spi.Str(created["LatestStreamArn"])
 	iterator := must("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": "shardId-000000000000", "ShardIteratorType": "TRIM_HORIZON"}).Output["ShardIterator"]
-	records := asSlice(must("GetRecords", map[string]any{"ShardIterator": iterator}).Output["Records"])
+	records := spi.Slice(must("GetRecords", map[string]any{"ShardIterator": iterator}).Output["Records"])
 	stream := make([]any, 0, len(records))
 	for _, raw := range records {
-		record := asMap(raw)
-		dynamodb := asMap(record["dynamodb"])
+		record := spi.Object(raw)
+		dynamodb := spi.Object(record["dynamodb"])
 		stream = append(stream, map[string]any{"eventName": record["eventName"], "keys": dynamodb["Keys"], "newImage": dynamodb["NewImage"], "oldImage": dynamodb["OldImage"], "size": dynamodb["SizeBytes"]})
 	}
 	golden.AssertJSON(t, map[string]any{"overwrite": overwrite, "changed": changed, "batchGet": batchGet, "stream": stream})
@@ -684,7 +684,7 @@ func TestDynamoDBTableMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sse := asMap(asMap(explicit.Output["TableDescription"])["SSEDescription"])
+	sse := spi.Object(spi.Object(explicit.Output["TableDescription"])["SSEDescription"])
 	if sse["Status"] != "ENABLED" || sse["SSEType"] != "KMS" || sse["KMSMasterKeyArn"] != "arn:aws:kms:us-east-1:000000000000:key/key-id" {
 		t.Fatalf("explicit SSE description %#v", sse)
 	}
@@ -692,13 +692,13 @@ func TestDynamoDBTableMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	partialSSE := asMap(asMap(partial.Output["TableDescription"])["SSEDescription"])
-	keyARN := str(partialSSE["KMSMasterKeyArn"])
+	partialSSE := spi.Object(spi.Object(partial.Output["TableDescription"])["SSEDescription"])
+	keyARN := spi.Str(partialSSE["KMSMasterKeyArn"])
 	key, err := bundled.Handler("aws.kms", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeKey", Input: map[string]any{"KeyId": keyARN}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	metadata := asMap(key.Output["KeyMetadata"])
+	metadata := spi.Object(key.Output["KeyMetadata"])
 	if partialSSE["Status"] != "ENABLED" || !strings.HasPrefix(keyARN, "arn:aws:kms:us-east-1:000000000000:key/") || metadata["KeyManager"] != "AWS" || metadata["Description"] != "Default key that protects my DynamoDB data when no other key is defined" {
 		t.Fatalf("default SSE key: sse=%#v key=%#v", partialSSE, metadata)
 	}
@@ -706,14 +706,14 @@ func TestDynamoDBTableMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if asMap(asMap(disabled.Output["TableDescription"])["SSEDescription"])["Status"] != "UPDATING" {
+	if spi.Object(spi.Object(disabled.Output["TableDescription"])["SSEDescription"])["Status"] != "UPDATING" {
 		t.Fatalf("disable SSE response %#v", disabled)
 	}
 	updated, err := call("UpdateTable", map[string]any{"TableName": "DefaultEncrypted", "BillingMode": "PAY_PER_REQUEST"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	updatedSSE := asMap(asMap(updated.Output["TableDescription"])["SSEDescription"])
+	updatedSSE := spi.Object(spi.Object(updated.Output["TableDescription"])["SSEDescription"])
 	if updatedSSE["Status"] != "ENABLED" || updatedSSE["KMSMasterKeyArn"] != keyARN {
 		t.Fatalf("unrelated update changed SSE %#v", updated)
 	}
@@ -721,7 +721,7 @@ func TestDynamoDBTableMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := asMap(describedDefault.Output["Table"])["SSESpecification"]; ok {
+	if _, ok := spi.Object(describedDefault.Output["Table"])["SSESpecification"]; ok {
 		t.Fatalf("describe leaked SSESpecification %#v", describedDefault)
 	}
 	created, err := call("CreateTable", map[string]any{
@@ -733,21 +733,21 @@ func TestDynamoDBTableMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	createdTable := asMap(created.Output["TableDescription"])
-	createdIndex := asMap(asSlice(createdTable["GlobalSecondaryIndexes"])[0])
-	if str(asMap(createdTable["BillingModeSummary"])["BillingMode"]) != "PAY_PER_REQUEST" || createdTable["TableStatus"] != "CREATING" || asInt(asMap(createdTable["ProvisionedThroughput"])["ReadCapacityUnits"]) != 0 || createdIndex["IndexStatus"] != "CREATING" || asInt(asMap(createdIndex["ProvisionedThroughput"])["WriteCapacityUnits"]) != 0 || asMap(createdTable["WarmThroughput"])["Status"] != "UPDATING" {
+	createdTable := spi.Object(created.Output["TableDescription"])
+	createdIndex := spi.Object(spi.Slice(createdTable["GlobalSecondaryIndexes"])[0])
+	if spi.Str(spi.Object(createdTable["BillingModeSummary"])["BillingMode"]) != "PAY_PER_REQUEST" || createdTable["TableStatus"] != "CREATING" || asInt(spi.Object(createdTable["ProvisionedThroughput"])["ReadCapacityUnits"]) != 0 || createdIndex["IndexStatus"] != "CREATING" || asInt(spi.Object(createdIndex["ProvisionedThroughput"])["WriteCapacityUnits"]) != 0 || spi.Object(createdTable["WarmThroughput"])["Status"] != "UPDATING" {
 		t.Fatalf("create metadata %#v", createdTable)
 	}
 	described, err := call("DescribeTable", map[string]any{"TableName": "Metadata"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	describedTable := asMap(described.Output["Table"])
-	if describedTable["TableStatus"] != "ACTIVE" || asMap(describedTable["WarmThroughput"])["Status"] != "ACTIVE" || asMap(asSlice(describedTable["GlobalSecondaryIndexes"])[0])["IndexStatus"] != "ACTIVE" {
+	describedTable := spi.Object(described.Output["Table"])
+	if describedTable["TableStatus"] != "ACTIVE" || spi.Object(describedTable["WarmThroughput"])["Status"] != "ACTIVE" || spi.Object(spi.Slice(describedTable["GlobalSecondaryIndexes"])[0])["IndexStatus"] != "ACTIVE" {
 		t.Fatalf("describe metadata %#v", describedTable)
 	}
 	provisioned, err := call("CreateTable", map[string]any{"TableName": "Provisioned", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}, "GlobalSecondaryIndexes": []any{map[string]any{"IndexName": "by-value", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 1, "WriteCapacityUnits": 1}}}})
-	if err != nil || asInt(asMap(asSlice(asMap(provisioned.Output["TableDescription"])["GlobalSecondaryIndexes"])[0])["ProvisionedThroughput"].(map[string]any)["ReadCapacityUnits"]) != 1 {
+	if err != nil || asInt(spi.Object(spi.Slice(spi.Object(provisioned.Output["TableDescription"])["GlobalSecondaryIndexes"])[0])["ProvisionedThroughput"].(map[string]any)["ReadCapacityUnits"]) != 1 {
 		t.Fatalf("provisioned GSI %#v %v", provisioned, err)
 	}
 }
@@ -790,7 +790,7 @@ func TestDynamoDBDefaultSSECharacterization(t *testing.T) {
 		return response.Output
 	}
 	created := must("CreateTable", map[string]any{"TableName": "Encrypted", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}, "SSESpecification": map[string]any{"Enabled": true}})
-	sse := asMap(asMap(created["TableDescription"])["SSEDescription"])
+	sse := spi.Object(spi.Object(created["TableDescription"])["SSEDescription"])
 	key, err := bundled.Handler("aws.kms", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "DescribeKey", Input: map[string]any{"KeyId": sse["KMSMasterKeyArn"]}})
 	if err != nil {
 		t.Fatal(err)
@@ -806,16 +806,16 @@ func TestDynamoDBDefaultSSECharacterization(t *testing.T) {
 	disabled := must("UpdateTable", map[string]any{"TableName": "Encrypted", "SSESpecification": map[string]any{"Enabled": false}})
 	updated := must("UpdateTable", map[string]any{"TableName": "Encrypted", "BillingMode": "PAY_PER_REQUEST"})
 	described := must("DescribeTable", map[string]any{"TableName": "Encrypted"})
-	describedTable := asMap(described["Table"])
+	describedTable := spi.Object(described["Table"])
 	_, hasSSESpecification := describedTable["SSESpecification"]
 	golden.AssertJSON(t, map[string]any{
 		"created":             sse,
 		"key":                 key.Output["KeyMetadata"],
 		"reusedKey":           reusedKey.Output["KeyMetadata"],
-		"reused":              asMap(asMap(second["TableDescription"])["SSEDescription"]),
-		"disabled":            asMap(asMap(disabled["TableDescription"])["SSEDescription"]),
-		"updated":             asMap(asMap(updated["TableDescription"])["SSEDescription"]),
-		"described":           asMap(describedTable["SSEDescription"]),
+		"reused":              spi.Object(spi.Object(second["TableDescription"])["SSEDescription"]),
+		"disabled":            spi.Object(spi.Object(disabled["TableDescription"])["SSEDescription"]),
+		"updated":             spi.Object(spi.Object(updated["TableDescription"])["SSEDescription"]),
+		"described":           spi.Object(describedTable["SSEDescription"]),
 		"hasSSESpecification": hasSSESpecification,
 	})
 }
@@ -836,11 +836,11 @@ func TestDynamoDBBackupsAndContributorInsights(t *testing.T) {
 		return response.Output
 	}
 	must("CreateTable", map[string]any{"TableName": "T"})
-	disabled := asMap(asMap(must("DescribeContinuousBackups", map[string]any{"TableName": "T"})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
+	disabled := spi.Object(spi.Object(must("DescribeContinuousBackups", map[string]any{"TableName": "T"})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
 	if disabled["PointInTimeRecoveryStatus"] != "DISABLED" {
 		t.Fatalf("default continuous backups %#v", disabled)
 	}
-	enabled := asMap(asMap(must("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": true}})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
+	enabled := spi.Object(spi.Object(must("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": true}})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
 	earliest := asInt(enabled["EarliestRestorableDateTime"])
 	if enabled["PointInTimeRecoveryStatus"] != "ENABLED" || asInt(enabled["LatestRestorableDateTime"]) != earliest || asInt(enabled["RecoveryPeriodInDays"]) != 35 {
 		t.Fatalf("enabled continuous backups %#v", enabled)
@@ -848,11 +848,11 @@ func TestDynamoDBBackupsAndContributorInsights(t *testing.T) {
 	if err := deps.Clock.Advance(time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	reenabled := asMap(asMap(must("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": true}})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
+	reenabled := spi.Object(spi.Object(must("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": true}})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
 	if asInt(reenabled["EarliestRestorableDateTime"]) != earliest || asInt(reenabled["LatestRestorableDateTime"]) <= earliest {
 		t.Fatalf("continuous backup window %#v", reenabled)
 	}
-	described := asMap(asMap(must("DescribeContinuousBackups", map[string]any{"TableName": "T"})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
+	described := spi.Object(spi.Object(must("DescribeContinuousBackups", map[string]any{"TableName": "T"})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
 	if described["PointInTimeRecoveryStatus"] != "ENABLED" || asInt(described["EarliestRestorableDateTime"]) != earliest || asInt(described["RecoveryPeriodInDays"]) != 35 {
 		t.Fatalf("described continuous backups %#v", described)
 	}
@@ -908,7 +908,7 @@ func TestDynamoDBTableClass(t *testing.T) {
 	describedStandard := must("DescribeTable", map[string]any{"TableName": "T"})
 	updated := must("UpdateTable", map[string]any{"TableName": "T", "TableClass": "STANDARD_INFREQUENT_ACCESS"})
 	describedInfrequent := must("DescribeTable", map[string]any{"TableName": "T"})
-	golden.AssertJSON(t, map[string]any{"created": asMap(created["TableDescription"])["TableClassSummary"], "describedStandard": asMap(describedStandard["Table"])["TableClassSummary"], "updated": asMap(updated["TableDescription"])["TableClassSummary"], "describedInfrequent": asMap(describedInfrequent["Table"])["TableClassSummary"]})
+	golden.AssertJSON(t, map[string]any{"created": spi.Object(created["TableDescription"])["TableClassSummary"], "describedStandard": spi.Object(describedStandard["Table"])["TableClassSummary"], "updated": spi.Object(updated["TableDescription"])["TableClassSummary"], "describedInfrequent": spi.Object(describedInfrequent["Table"])["TableClassSummary"]})
 }
 
 func TestDynamoDBPartiQLCharacterization(t *testing.T) {
@@ -978,7 +978,7 @@ func TestDynamoDBExtendedOperations(t *testing.T) {
 	}
 	if responses := must("BatchExecuteStatement", map[string]any{"Statements": []any{
 		map[string]any{"Statement": "SELECT * FROM T WHERE id = 'k1'"}, map[string]any{"Statement": "INSERT"},
-	}}).Output["Responses"].([]any); len(responses) != 2 || asMap(responses[1])["Error"] == nil {
+	}}).Output["Responses"].([]any); len(responses) != 2 || spi.Object(responses[1])["Error"] == nil {
 		t.Fatalf("batch statements %#v", responses)
 	}
 	if responses := must("ExecuteTransaction", map[string]any{"TransactStatements": []any{map[string]any{"Statement": "SELECT * FROM T"}}}).Output["Responses"].([]any); len(responses) != 1 {
@@ -1016,7 +1016,7 @@ func TestDynamoDBExtendedOperations(t *testing.T) {
 
 	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "vector-hit"}}})
 	exported := must("ExportTableToPointInTime", map[string]any{"TableName": "T", "S3Bucket": "bucket"}).Output["ExportDescription"].(map[string]any)
-	exportARN := str(exported["ExportArn"])
+	exportARN := spi.Str(exported["ExportArn"])
 	if exported["ExportedItemCount"] != 1 || must("DescribeExport", map[string]any{"ExportArn": exportARN}).Output["ExportDescription"] == nil {
 		t.Fatalf("export %#v", exported)
 	}
@@ -1030,7 +1030,7 @@ func TestDynamoDBExtendedOperations(t *testing.T) {
 	imported := must("ImportTable", map[string]any{"TableCreationParameters": map[string]any{
 		"TableName": "Imported", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}},
 	}}).Output["ImportTableDescription"].(map[string]any)
-	importARN := str(imported["ImportArn"])
+	importARN := spi.Str(imported["ImportArn"])
 	if must("DescribeImport", map[string]any{"ImportArn": importARN}).Output["ImportTableDescription"] == nil {
 		t.Fatalf("import %#v", imported)
 	}

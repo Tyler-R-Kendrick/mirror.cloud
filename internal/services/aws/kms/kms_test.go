@@ -105,8 +105,8 @@ func TestBootedServerKMSEncryptDecrypt(t *testing.T) {
 		t.Fatalf("encrypt %v", enc)
 	}
 	_, dec := call("Decrypt", `{"CiphertextBlob":"`+ct+`"}`)
-	got, _ := base64.StdEncoding.DecodeString(str(dec["Plaintext"]))
-	if !bytes.Equal(got, []byte("hello-kms")) && str(dec["Plaintext"]) != "hello-kms" {
+	got, _ := base64.StdEncoding.DecodeString(spi.Str(dec["Plaintext"]))
+	if !bytes.Equal(got, []byte("hello-kms")) && spi.Str(dec["Plaintext"]) != "hello-kms" {
 		t.Fatalf("decrypt %v", dec)
 	}
 	_, listed := call("ListKeys", `{}`)
@@ -132,7 +132,7 @@ func TestBootedServerKMSEncryptDecrypt(t *testing.T) {
 		t.Fatalf("grant %v", grant)
 	}
 	call("ListGrants", `{"KeyId":"`+kid+`"}`)
-	call("RevokeGrant", `{"KeyId":"`+kid+`","GrantId":"`+str(grant["GrantId"])+`"}`)
+	call("RevokeGrant", `{"KeyId":"`+kid+`","GrantId":"`+spi.Str(grant["GrantId"])+`"}`)
 	msg := base64.StdEncoding.EncodeToString([]byte("payload"))
 	_, signed := call("Sign", `{"KeyId":"`+kid+`","Message":"`+msg+`"}`)
 	sig, _ := signed["Signature"].(string)

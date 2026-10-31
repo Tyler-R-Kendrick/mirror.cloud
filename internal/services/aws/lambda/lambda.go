@@ -55,12 +55,12 @@ func Start(d spi.Deps) func() error {
 }
 
 func (p *runner) emitDLQ(ctx context.Context, req *spi.Request, rec map[string]any, payload []byte, invokeErr error) {
-	target := str(asMap(rec["DeadLetterConfig"])["TargetArn"])
+	target := spi.Str(asMap(rec["DeadLetterConfig"])["TargetArn"])
 	if target == "" || PublishSNS == nil || !strings.Contains(target, ":sns:") {
 		return
 	}
 	envelope, _ := json.Marshal(map[string]any{
-		"requestContext":  map[string]any{"condition": "RetriesExhausted", "functionArn": "arn:aws:lambda:" + req.Identity.Region + ":" + req.Identity.Account + ":function:" + str(rec["FunctionName"])},
+		"requestContext":  map[string]any{"condition": "RetriesExhausted", "functionArn": "arn:aws:lambda:" + req.Identity.Region + ":" + req.Identity.Account + ":function:" + spi.Str(rec["FunctionName"])},
 		"requestPayload":  json.RawMessage(payload),
 		"responseContext": map[string]any{"functionError": "Unhandled"},
 		"responsePayload": invokeErr.Error(),
@@ -93,19 +93,19 @@ func (p *runner) invokeStream(ctx context.Context, req *spi.Request) (*spi.Respo
 }
 
 func (p *runner) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := str(req.Input["FunctionName"])
+	name := spi.Str(req.Input["FunctionName"])
 	b, ok, _ := p.col(req, "lambda").Get(ctx, name)
 	if !ok {
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 404, Fault: "client"}
 	}
 	var rec map[string]any
 	_ = json.Unmarshal(b, &rec)
-	invocationType := str(req.Input["InvocationType"])
+	invocationType := spi.Str(req.Input["InvocationType"])
 	if invocationType == "DryRun" {
 		return &spi.Response{Status: http.StatusNoContent, Output: map[string]any{"StatusCode": http.StatusNoContent}}, nil
 	}
 	var payload []byte
-	switch raw := str(req.Input["Payload"]); {
+	switch raw := spi.Str(req.Input["Payload"]); {
 	case req.Body != nil:
 		var err error
 		payload, err = io.ReadAll(req.Body)
@@ -135,7 +135,7 @@ func (p *runner) invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 			payload = []byte("{}")
 		}
 	}
-	out, err := runHandler(name, str(rec["Runtime"]), str(rec["Handler"]), rec["Code"], rec["Environment"], payload)
+	out, err := runHandler(name, spi.Str(rec["Runtime"]), spi.Str(rec["Handler"]), rec["Code"], rec["Environment"], payload)
 	if invocationType == "Event" {
 		if err != nil {
 			p.emitDLQ(ctx, req, rec, payload, err)
@@ -156,15 +156,15 @@ func (p *runner) consumeSQS(ctx context.Context, payload []byte) {
 	if json.Unmarshal(payload, &event) != nil {
 		return
 	}
-	queue := stringValue(event["queue"])
+	queue := spi.Str(event["queue"])
 	if queue == "" {
 		return
 	}
-	identity := spi.Identity{Account: stringValue(event["account"]), Region: stringValue(event["region"])}
+	identity := spi.Identity{Account: spi.Str(event["account"]), Region: spi.Str(event["region"])}
 	if identity.Account == "" || identity.Region == "" {
 		return
 	}
-	sourceARN := stringValue(event["queueArn"])
+	sourceARN := spi.Str(event["queueArn"])
 	if sourceARN == "" {
 		sourceARN = "arn:aws:sqs:" + identity.Region + ":" + identity.Account + ":" + queue
 	}
@@ -172,16 +172,16 @@ func (p *runner) consumeSQS(ctx context.Context, payload []byte) {
 	kvs, _, _ := p.col(req, "lambdaesm").List(ctx, "", "", 0)
 	for _, kv := range kvs {
 		var mapping map[string]any
-		if json.Unmarshal(kv.Value, &mapping) != nil || stringValue(mapping["EventSourceArn"]) != sourceARN {
+		if json.Unmarshal(kv.Value, &mapping) != nil || spi.Str(mapping["EventSourceArn"]) != sourceARN {
 			continue
 		}
 		if enabled, ok := mapping["Enabled"].(bool); ok && !enabled {
 			continue
 		}
-		if stringValue(mapping["State"]) == "Disabled" {
+		if spi.Str(mapping["State"]) == "Disabled" {
 			continue
 		}
-		p.processSQSMapping(ctx, identity, queue, sourceARN, stringValue(mapping["FunctionName"]))
+		p.processSQSMapping(ctx, identity, queue, sourceARN, spi.Str(mapping["FunctionName"]))
 	}
 }
 
@@ -207,7 +207,7 @@ func (p *runner) processSQSMapping(ctx context.Context, identity spi.Identity, q
 		if err != nil {
 			return
 		}
-		messages := anySlice(received.Output["Messages"])
+		messages := spi.Slice(received.Output["Messages"])
 		if len(messages) == 0 {
 			return
 		}
@@ -232,7 +232,7 @@ func (p *runner) processSQSMapping(ctx context.Context, identity spi.Identity, q
 		failed := failedSQSRecords(response)
 		for _, raw := range messages {
 			message, ok := raw.(map[string]any)
-			if !ok || failed[stringValue(message["MessageId"])] {
+			if !ok || failed[spi.Str(message["MessageId"])] {
 				continue
 			}
 			_, _ = queuePack.Invoke(ctx, &spi.Request{Identity: identity, Operation: "DeleteMessage", Input: map[string]any{
@@ -261,22 +261,12 @@ func failedSQSRecords(response *spi.Response) map[string]bool {
 	items, _ := output["batchItemFailures"].([]any)
 	for _, item := range items {
 		if entry, ok := item.(map[string]any); ok {
-			if id := stringValue(entry["itemIdentifier"]); id != "" {
+			if id := spi.Str(entry["itemIdentifier"]); id != "" {
 				failed[id] = true
 			}
 		}
 	}
 	return failed
-}
-
-func anySlice(value any) []any {
-	values, _ := value.([]any)
-	return values
-}
-
-func stringValue(value any) string {
-	s, _ := value.(string)
-	return s
 }
 
 func runHandler(name, runtime, handler string, code, environment any, payload []byte) ([]byte, error) {
@@ -293,7 +283,7 @@ func runHandler(name, runtime, handler string, code, environment any, payload []
 	if configuration, ok := environment.(map[string]any); ok {
 		if variables, ok := configuration["Variables"].(map[string]any); ok {
 			for key, value := range variables {
-				env = append(env, key+"="+str(value))
+				env = append(env, key+"="+spi.Str(value))
 			}
 		}
 	}
@@ -384,14 +374,3 @@ func splitHandler(h string) (mod, fn string) {
 	}
 	return mod, fn
 }
-
-func first(in map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if s := str(in[k]); s != "" {
-			return s
-		}
-	}
-	return ""
-}
-
-func str(v any) string { s, _ := v.(string); return s }

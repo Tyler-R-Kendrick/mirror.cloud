@@ -1152,3 +1152,39 @@ func TestSecretsManagerLeavesOutAnEmptyReplicationStatus(t *testing.T) {
 		t.Errorf("with its last replica removed, DescribeSecret answered ReplicationStatus %#v, want none", got["ReplicationStatus"])
 	}
 }
+
+// CreateSecret's Tags: "A list of tags to attach to the secret. Each tag is a
+// key and value pair of strings". They are kept as TagResource keeps them, so
+// DescribeSecret answers them, the tag-key and tag-value filters find the
+// secret, and a later TagResource adds to them. Before, CreateSecret dropped
+// them.
+func TestSecretsManagerCreateSecretKeepsItsTags(t *testing.T) {
+	_, ok, _ := secretsManager(t)
+	env := map[string]any{"Key": "env", "Value": "prod"}
+	ok(t, "CreateSecret", map[string]any{"Name": "a", "SecretString": "1", "Tags": []any{env}})
+	ok(t, "CreateSecret", map[string]any{"Name": "b", "SecretString": "1"})
+	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "a"})["Tags"]; !reflect.DeepEqual(got, []any{env}) {
+		t.Errorf("DescribeSecret answered Tags %v, want those CreateSecret gave", got)
+	}
+	names := func(rows any) []string {
+		var out []string
+		list, _ := rows.([]any)
+		for _, r := range list {
+			out = append(out, fmt.Sprint(r.(map[string]any)["Name"]))
+		}
+		return out
+	}
+	for _, f := range []map[string]any{{"Key": "tag-key", "Values": []any{"env"}}, {"Key": "tag-value", "Values": []any{"prod"}}} {
+		if got := names(ok(t, "ListSecrets", map[string]any{"Filters": []any{f}})["SecretList"]); !reflect.DeepEqual(got, []string{"a"}) {
+			t.Errorf("ListSecrets %v listed %v, want a", f, got)
+		}
+		if got := names(ok(t, "BatchGetSecretValue", map[string]any{"Filters": []any{f}})["SecretValues"]); !reflect.DeepEqual(got, []string{"a"}) {
+			t.Errorf("BatchGetSecretValue %v answered %v, want a", f, got)
+		}
+	}
+	team := map[string]any{"Key": "team", "Value": "core"}
+	ok(t, "TagResource", map[string]any{"SecretId": "a", "Tags": []any{team}})
+	if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "a"})["Tags"]; !reflect.DeepEqual(got, []any{env, team}) {
+		t.Errorf("after TagResource DescribeSecret answered Tags %v, want env and team", got)
+	}
+}

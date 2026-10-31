@@ -242,6 +242,10 @@ The oracle is AWS's documentation as it ships in the vendored model
   - A listing page that keeps nothing while more secrets follow now moves
     `NextToken` past what it read; before, `ListSecrets` with a scheduled
     secret between two listed ones lost the second (an engine fix).
+- **CreateSecret keeps its Tags** ("A list of tags to attach to the
+  secret"), as `TagResource` keeps them, so `DescribeSecret` answers them, the
+  `tag-key` and `tag-value` filters find the secret and a later `TagResource`
+  adds to them. Before, `CreateSecret` dropped them.
 - **BatchGetSecretValue leaves out a secret scheduled for deletion.** Its value
   is not answered; it is an `Errors` row, an `APIErrorType` of `SecretId`,
   `ErrorCode` `InvalidRequestException` and `Message`. Before, its value was

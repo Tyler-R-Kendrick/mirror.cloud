@@ -129,6 +129,8 @@ operations:
             # The description is metadata beside the value (DescribeSecretResponse:
             # "The description of the secret.").
             Description: "'Description' in input && input.Description != null ? input.Description : dyn(null)"
+            # Tags: "A list of tags to attach to the secret", kept as TagResource keeps them.
+            Tags: "'Tags' in input && input.Tags != null && size(input.Tags) > 0 ? input.Tags : dyn(null)"
             Deleted: "false"
     omit_null: [VersionId]
     output:

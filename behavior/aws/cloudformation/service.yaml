@@ -33,7 +33,9 @@ resources:
     # StackName is "The name or unique stack ID". A stack id,
     # arn:...:stack/<name>/<id>, finds the record by its name, and a read takes
     # it only while the record's id is the one given (stackExists); no record
-    # is keyed by an id.
+    # is keyed by an id. A deleted stack's record stays, DELETE_COMPLETE, and
+    # answers only its id ("Deleted stacks don't show up in the DescribeStacks
+    # operation if the deletion has been completed successfully").
     id:
       derive: >-
         'StackName' in input && string(input.StackName).contains(':stack/')
@@ -157,13 +159,14 @@ operations:
           + "' at 'stackName' failed to satisfy constraint: Member must satisfy regular expression pattern: ^([a-zA-Z][-a-zA-Z0-9]*)|(arn:\\b(aws|aws-us-gov|aws-cn)\\b:[-a-zA-Z0-9:/._+]*)$"
       - cond: >-
           !('StackName' in input) || string(input.StackName) == ''
-          || s_found && (!string(input.StackName).startsWith('arn:') || s.ID == string(input.StackName))
+          || s_found && (string(input.StackName).startsWith('arn:') ? s.ID == string(input.StackName) : s.Status != 'DELETE_COMPLETE')
         error: Validation
         message_expr: "'Stack [' + string(input.StackName) + '] does not exist'"
     list:
       resource: stack
       member: Stacks
       paginate: model
+      filter: "'StackName' in input && string(input.StackName).startsWith('arn:') ? item.ID == string(input.StackName) : item.Status != 'DELETE_COMPLETE'"
       key: >-
         'StackName' in input && string(input.StackName).contains(':stack/')
           ? string(split(string(split(string(input.StackName), ':stack/')[1]), '/')[0])
@@ -192,7 +195,7 @@ operations:
     require:
       - *stackPattern
       - &stackExists
-        cond: "s_found && (!string(input.StackName).startsWith('arn:') || s.ID == string(input.StackName))"
+        cond: "s_found && (string(input.StackName).startsWith('arn:') ? s.ID == string(input.StackName) : s.Status != 'DELETE_COMPLETE')"
         error: Validation
         message_expr: "'Stack [' + string(input.StackName) + '] does not exist'"
     output:
@@ -223,6 +226,9 @@ operations:
         ('Resources' in s && s.Resources != null ? s.Resources : []).map(r, merge({'LogicalResourceId': r.Logical,
           'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
           'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE', 'StackName': s.Name,
+          'StackId': s.ID}, 'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))
+        + ('Events' in s && s.Events != null ? s.Events : []).map(r, merge({'LogicalResourceId': r.Logical,
+          'PhysicalResourceId': r.Physical, 'ResourceType': r.Type, 'ResourceStatus': r.Status, 'StackName': s.Name,
           'StackId': s.ID}, 'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))
         + [{'LogicalResourceId': s.Name,
             'ResourceType': 'AWS::CloudFormation::Stack',
@@ -280,7 +286,7 @@ operations:
     require:
       - *stackPattern
     let:
-      ok: "s_found && (!string(input.StackName).startsWith('arn:') || s.ID == string(input.StackName))"
+      ok: "s_found && (string(input.StackName).startsWith('arn:') ? s.ID == string(input.StackName) : s.Status != 'DELETE_COMPLETE')"
     output:
       StackResources: >-
         ok && 'Resources' in s && s.Resources != null

@@ -334,6 +334,28 @@ The oracle is AWS's documentation as it ships in the vendored model
     have a value"); what the update kept is not called. Before, the rollback
     provisioned the previous properties on top of the new ones, and every
     kept resource again.
+  - `DeletionPolicy` and `UpdateReplacePolicy` are read as the Template
+    Reference gives them (the model's `TemplateConfiguration` names the same
+    `DELETE` and `RETAIN`). `Retain` "keeps the resource without deleting the
+    resource or its contents": on `DeleteStack`, on an update that drops the
+    resource ("it's deleted from CloudFormation's scope"), and on the rollback
+    of the create, or of the update, that made it, since
+    `RetainExceptOnCreate` is the one that "deletes the resource" when "the
+    stack operation that created the resource is rolled back" and otherwise
+    retains it. `UpdateReplacePolicy: Retain` keeps the old resource a
+    replacement leaves; its `Snapshot` "reverts to the default option, which
+    is Delete" for a type with no snapshots, which is every type the engine
+    makes. `DeletionPolicy: Snapshot` is for the types the page lists, none
+    of them the engine's, so it is refused, as is a value neither attribute
+    has: `ValidationError`, "Template format error: Q's DeletionPolicy must
+    be one of [Delete, Retain, RetainExceptOnCreate], not "Snapshot"" (this
+    wording is the emulator's). A retained resource leaves the stack and is
+    listed by `DescribeStackEvents` as `DELETE_SKIPPED`, the model's
+    `ResourceStatus`. A deleted stack's record stays, `DELETE_COMPLETE`,
+    answered by its stack id alone (`DescribeStacks`, `DescribeStackEvents`
+    and the other reads; `ListStacks` lists it), and exports nothing; by its
+    name it does not exist, and the name is free. Before, neither attribute
+    was read, every resource was deleted, and a deleted stack was gone.
   - A finished `UpdateStack` cleans up. "CloudFormation will replace the
     resource by creating a new one and deleting the old one"
     (`ResourceChange.Replacement`), and for an update "it begins disposing of

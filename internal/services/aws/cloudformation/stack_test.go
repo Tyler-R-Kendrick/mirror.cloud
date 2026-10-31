@@ -10,6 +10,7 @@ import (
 	"maps"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1660,5 +1661,101 @@ func TestCloudFormationARollbackRestoresExactly(t *testing.T) {
 	}
 	if out, err := h.service("aws.secretsmanager", "DescribeSecret", map[string]any{"SecretId": ids["S"]}); err != nil || out["Description"] != nil {
 		t.Errorf("after the rollback the secret's description is %v (%v), want none", out["Description"], err)
+	}
+}
+
+// DeletionPolicy and UpdateReplacePolicy are read as the Template Reference
+// gives them. Retain "keeps the resource without deleting the resource or its
+// contents": on DeleteStack, on an update that drops it ("it's deleted from
+// CloudFormation's scope"), and on the rollback of the create that made it,
+// since RetainExceptOnCreate is the one that "deletes the resource" when "the
+// stack operation that created the resource is rolled back". UpdateReplacePolicy
+// Retain keeps the old resource a replacement leaves; Snapshot there "reverts
+// to the default option, which is Delete" for a type with no snapshots, and
+// DeletionPolicy Snapshot, which only the types the page lists support, is
+// refused, as is a value neither attribute has. A retained resource is listed
+// DELETE_SKIPPED (the model's ResourceStatus) by DescribeStackEvents and leaves
+// the stack; a deleted stack is still answered by its StackId, as
+// DELETE_COMPLETE, with its events. Before, neither attribute was read and
+// every resource was deleted.
+func TestCloudFormationRetainKeepsAResource(t *testing.T) {
+	h := newStacks(t)
+	queue := func(name string, attrs ...string) map[string]any {
+		r := map[string]any{"Type": "AWS::SQS::Queue", "Properties": map[string]any{"QueueName": name}}
+		for i := 0; i+1 < len(attrs); i += 2 {
+			r[attrs[i]] = attrs[i+1]
+		}
+		return r
+	}
+	alive := func(name string) bool {
+		_, err := h.service("aws.sqs", "GetQueueUrl", map[string]any{"QueueName": name})
+		return err == nil
+	}
+	update := func(stack string, resources map[string]map[string]any) error {
+		tpl, _ := json.Marshal(map[string]any{"Resources": resources})
+		_, err := h.invoke("UpdateStack", map[string]any{"StackName": stack, "TemplateBody": string(tpl)})
+		return err
+	}
+	skipped := func(stack, logical string) bool {
+		t.Helper()
+		out, err := h.invoke("DescribeStackEvents", map[string]any{"StackName": stack})
+		if err != nil {
+			t.Errorf("DescribeStackEvents %s: %v", stack, err)
+		}
+		events, _ := out["StackEvents"].([]any)
+		return slices.ContainsFunc(events, func(e any) bool {
+			return asMap(e)["LogicalResourceId"] == logical && asMap(e)["ResourceStatus"] == "DELETE_SKIPPED"
+		})
+	}
+
+	h.mustCreate("rv", map[string]map[string]any{"Q": queue("rv-q", "DeletionPolicy", "Retain"), "B": queue("rv-b")})
+	if err := update("rv", map[string]map[string]any{"B": queue("rv-b")}); err != nil {
+		t.Fatalf("dropping Q: %v", err)
+	}
+	if !alive("rv-q") || !skipped("rv", "Q") || len(h.resources("rv")) != 1 {
+		t.Errorf("a dropped Retain queue: alive %v, DELETE_SKIPPED %v, resources %v", alive("rv-q"), skipped("rv", "Q"), h.resources("rv"))
+	}
+
+	h.mustCreate("urp", map[string]map[string]any{"A": queue("rv-urp-a", "UpdateReplacePolicy", "Retain"), "S": queue("rv-urp-s", "UpdateReplacePolicy", "Snapshot")})
+	if err := update("urp", map[string]map[string]any{"A": queue("rv-urp-b", "UpdateReplacePolicy", "Retain"), "S": queue("rv-urp-t", "UpdateReplacePolicy", "Snapshot")}); err != nil {
+		t.Fatalf("renaming A and S: %v", err)
+	}
+	if !alive("rv-urp-a") || !alive("rv-urp-b") || !skipped("urp", "A") {
+		t.Errorf("a replaced UpdateReplacePolicy Retain queue: old alive %v, new alive %v, DELETE_SKIPPED %v", alive("rv-urp-a"), alive("rv-urp-b"), skipped("urp", "A"))
+	}
+	if alive("rv-urp-s") {
+		t.Error("UpdateReplacePolicy Snapshot on a queue kept the old queue; it reverts to Delete")
+	}
+
+	h.mustCreate("del", map[string]map[string]any{"Q": queue("rv-del-q", "DeletionPolicy", "Retain"), "E": queue("rv-del-e", "DeletionPolicy", "RetainExceptOnCreate"), "D": queue("rv-del-d")})
+	out, _ := h.invoke("DescribeStacks", map[string]any{"StackName": "del"})
+	id := str(asMap(out["Stacks"].([]any)[0])["StackId"])
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "del"}); err != nil {
+		t.Fatalf("DeleteStack: %v", err)
+	}
+	if !alive("rv-del-q") || !alive("rv-del-e") || alive("rv-del-d") || !skipped(id, "Q") || !skipped(id, "E") {
+		t.Errorf("DeleteStack: Retain alive %v, RetainExceptOnCreate alive %v, Delete alive %v, DELETE_SKIPPED %v %v",
+			alive("rv-del-q"), alive("rv-del-e"), alive("rv-del-d"), skipped(id, "Q"), skipped(id, "E"))
+	}
+	if _, _, err := h.status("del"); err == nil {
+		t.Error("a deleted stack is still answered by its name")
+	} else if status, _, err := h.status(id); err != nil || status != "DELETE_COMPLETE" {
+		t.Errorf("the deleted stack by its id is %q (%v), want DELETE_COMPLETE", status, err)
+	}
+
+	if err := h.create("rb", map[string]map[string]any{"Q": queue("rv-rb-q", "DeletionPolicy", "Retain"), "E": queue("rv-rb-e", "DeletionPolicy", "RetainExceptOnCreate"), "Z": {"Type": "AWS::Nothing::Here"}}); err == nil {
+		t.Fatal("a stack with an unsupported type was created")
+	}
+	if !alive("rv-rb-q") || alive("rv-rb-e") {
+		t.Errorf("a failed create's rollback: Retain alive %v (want true), RetainExceptOnCreate alive %v (want false)", alive("rv-rb-q"), alive("rv-rb-e"))
+	}
+
+	for policy, value := range map[string]string{"DeletionPolicy": "Snapshot", "UpdateReplacePolicy": "Bogus"} {
+		tpl, _ := json.Marshal(map[string]any{"Resources": map[string]any{"Q": queue("rv-bad", policy, value)}})
+		for _, op := range []string{"ValidateTemplate", "CreateStack"} {
+			if _, err := h.invoke(op, map[string]any{"StackName": "bad", "TemplateBody": string(tpl)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), policy) {
+				t.Errorf("%s with %s %s answered %v, want ValidationError naming %s", op, policy, value, err, policy)
+			}
+		}
 	}
 }

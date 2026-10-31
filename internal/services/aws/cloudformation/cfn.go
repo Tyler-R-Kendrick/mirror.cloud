@@ -112,6 +112,7 @@ type stack struct {
 	Name, ID, Status, Template string
 	Reason                     string `json:",omitempty"` // StackStatusReason
 	Resources                  []res
+	Events                     []res `json:",omitempty"` // what left the stack and how: DELETE_SKIPPED
 	Outputs                    []any
 	Refs                       map[string]string
 	Protect                    bool
@@ -139,7 +140,10 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	given, name := name, named(name)
 	if err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
 		raw, found, _ := tx.Get(name)
-		if _ = json.Unmarshal(raw, &old); found && !update {
+		if _ = json.Unmarshal(raw, &old); old.Status == "DELETE_COMPLETE" { // a deleted stack's name is free
+			found, old = false, stack{}
+		}
+		if found && !update {
 			return fault("AlreadyExistsException", "Stack ["+name+"] already exists")
 		} else if update && (!found || given != name && old.ID != given) { // an update of a stack that does not exist makes none
 			return invalid("Stack [" + given + "] does not exist")
@@ -157,9 +161,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	changed := map[string]bool{} // what the update changed in place, which a rollback changes back
 	fail := func(err error) (*spi.Response, error) {
 		if st.Reason, old.Reason = err.Error(), err.Error(); !update || old.ID == "" { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
-			_ = p.unwind(ctx, req, st, nil, st.Resources, nil, "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
+			_ = p.unwind(ctx, req, st, nil, st.Resources, nil, "ROLLBACK_COMPLETE", "ROLLBACK_FAILED", retains(tpl, "DeletionPolicy", "Retain"))
 		} else {
-			_ = p.rollback(ctx, req, old, st.Resources, changed)
+			_ = p.rollback(ctx, req, old, st.Resources, changed, retains(tpl, "DeletionPolicy", "Retain"))
 		}
 		return nil, err
 	}
@@ -198,11 +202,18 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)})
 	}
 	// The update is done, so its cleanup deletes the old resources the stack no longer holds, replaced
-	// ("creating a new one and deleting the old one") or dropped; one it cannot delete stays listed.
+	// ("creating a new one and deleting the old one") or dropped; one it cannot delete stays listed. A
+	// replaced one the template's UpdateReplacePolicy retains, a dropped one the old DeletionPolicy.
 	stale := slices.DeleteFunc(slices.Clone(old.Resources), func(r res) bool {
 		return slices.ContainsFunc(st.Resources, func(n res) bool { return n.Physical == r.Physical })
 	})
-	_ = p.unwind(ctx, req, st, st.Resources, stale, nil, st.Status, st.Status)
+	oldTpl, _ := parseTemplate(old.Template)
+	_ = p.unwind(ctx, req, st, st.Resources, stale, nil, st.Status, st.Status, func(r res) bool {
+		if _, replaced := resources[r.Logical]; replaced {
+			return retains(tpl, "UpdateReplacePolicy", "Retain")(r)
+		}
+		return retains(oldTpl, "DeletionPolicy", "Retain", "RetainExceptOnCreate")(r)
+	})
 	return &spi.Response{Output: map[string]any{"StackId": id}}, nil
 }
 
@@ -255,7 +266,8 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 	} else if st.Protect {
 		err = invalid("stack has termination protection")
 	} else {
-		err = p.unwind(ctx, req, st, nil, st.Resources, nil, "DELETE_COMPLETE", "DELETE_FAILED")
+		tpl, _ := parseTemplate(st.Template)
+		err = p.unwind(ctx, req, st, nil, st.Resources, nil, "DELETE_COMPLETE", "DELETE_FAILED", retains(tpl, "DeletionPolicy", "Retain", "RetainExceptOnCreate"))
 	}
 	if err != nil {
 		return nil, err
@@ -264,13 +276,17 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 }
 
 // unwind deletes the doomed resources, newest first, for a rollback or DeleteStack, and records the outcome on
-// st, which keeps kept: done, keeping st's reason (a DELETE_COMPLETE stack is removed), with nothing left and
-// no earlier error (first); else failed, what it could not delete listed as DELETE_FAILED for the next
-// DeleteStack to try again, and the first error, which it answers, as StackStatusReason.
-func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, kept, doomed []res, first error, done, failed string) error {
+// st, which keeps kept: done, keeping st's reason, with nothing left and no earlier error (first); else failed,
+// what it could not delete listed as DELETE_FAILED for the next DeleteStack to try again, and the first error,
+// which it answers, as StackStatusReason. One its policy keeps (skip) is not deleted: it leaves the stack,
+// DELETE_SKIPPED. A DELETE_COMPLETE stack is answered by its stack id alone, and exports nothing.
+func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, kept, doomed []res, first error, done, failed string, skip func(res) bool) error {
 	st.Resources = append([]res{}, kept...) // never null: every read of the stack lists its resources
 	for _, r := range slices.Backward(doomed) {
-		if err := p.deprovision(ctx, req, r); err != nil {
+		if skip(r) { // "Retain ... keeps the resource without deleting the resource or its contents"
+			r.Status = "DELETE_SKIPPED"
+			st.Events = append(st.Events, r)
+		} else if err := p.deprovision(ctx, req, r); err != nil {
 			r.Status, r.Reason, first = "DELETE_FAILED", err.Error(), cmp.Or(first, err)
 			st.Resources = slices.Insert(st.Resources, len(kept), r)
 		}
@@ -280,7 +296,7 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, kept, doo
 		st.Status, st.Reason = failed, first.Error()
 	}
 	if st.Status == "DELETE_COMPLETE" {
-		return p.col(req, "cfn").Delete(ctx, st.Name)
+		st.Outputs = nil
 	}
 	raw, _ := json.Marshal(st)
 	return cmp.Or(first, p.col(req, "cfn").Put(ctx, st.Name, raw))
@@ -307,11 +323,16 @@ func checkStackName(name string, byID bool) error {
 	return invalid("1 validation error detected: Value '" + name + "' at 'stackName' failed to satisfy constraint: Member must " + constraint)
 }
 
+// retains answers whether tpl's policy attr keeps a resource rather than deleting it: it is one of keep.
+func retains(tpl map[string]any, attr string, keep ...string) func(res) bool {
+	return func(r res) bool { return slices.Contains(keep, str(asMap(asMap(tpl["Resources"])[r.Logical])[attr])) }
+}
+
 // load reads the stack a StackName names: by its name, or by its stack id while the stack has that id.
 func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, error) {
 	var st stack
 	b, ok, _ := p.col(req, "cfn").Get(ctx, named(name))
-	if _ = json.Unmarshal(b, &st); !ok || named(name) != name && st.ID != name {
+	if _ = json.Unmarshal(b, &st); !ok || named(name) != name && st.ID != name || named(name) == name && st.Status == "DELETE_COMPLETE" {
 		return stack{}, invalid("Stack [" + name + "] does not exist")
 	}
 	return st, nil
@@ -560,7 +581,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 // ones included, is deleted; what it kept is not called. The stack keeps the previous template and
 // resources, UPDATE_ROLLBACK_COMPLETE, or UPDATE_ROLLBACK_FAILED with what it could not delete still listed
 // for DeleteStack. Only a finished update deletes what it replaced.
-func (p *Pack) rollback(ctx context.Context, req *spi.Request, old stack, made []res, changed map[string]bool) error {
+func (p *Pack) rollback(ctx context.Context, req *spi.Request, old stack, made []res, changed map[string]bool, skip func(res) bool) error {
 	tpl, _ := parseTemplate(old.Template)
 	var doomed []res
 	var first error
@@ -572,7 +593,7 @@ func (p *Pack) rollback(ctx context.Context, req *spi.Request, old stack, made [
 			first = cmp.Or(first, err)
 		}
 	}
-	return p.unwind(ctx, req, old, old.Resources, doomed, first, "UPDATE_ROLLBACK_COMPLETE", "UPDATE_ROLLBACK_FAILED")
+	return p.unwind(ctx, req, old, old.Resources, doomed, first, "UPDATE_ROLLBACK_COMPLETE", "UPDATE_ROLLBACK_FAILED", skip)
 }
 
 // ruleBus is the event bus in a rule's ARN, rule/<bus>/<name>: none for the default bus.
@@ -874,6 +895,15 @@ func parseTemplate(body string) (map[string]any, error) {
 	}
 	if len(asMap(m["Resources"])) == 0 { // "The Resources section is required in every CloudFormation template"
 		return nil, invalid("Template format error: At least one Resources member must be defined.")
+	}
+	// DeletionPolicy's options and UpdateReplacePolicy's (Template Reference): DeletionPolicy's Snapshot is
+	// for the types it lists, none of which the engine makes; UpdateReplacePolicy's "reverts to ... Delete".
+	for logical, r := range asMap(m["Resources"]) {
+		for attr, options := range map[string]string{"DeletionPolicy": "Delete Retain RetainExceptOnCreate", "UpdateReplacePolicy": "Delete Retain Snapshot"} {
+			if v, set := asMap(r)[attr]; set && !slices.Contains(strings.Fields(options), str(v)) {
+				return nil, invalid("Template format error: " + logical + "'s " + attr + " must be one of [" + strings.ReplaceAll(options, " ", ", ") + "], not " + jsonText(v))
+			}
+		}
 	}
 	return m, nil
 }

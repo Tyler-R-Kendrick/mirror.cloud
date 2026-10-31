@@ -86,8 +86,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			var st stack
 			_ = json.Unmarshal(kv.Value, &st)
 			for _, o := range st.Outputs {
-				m := asMap(o)
-				ex = append(ex, map[string]any{"Name": m["OutputKey"], "Value": m["OutputValue"], "ExportingStackId": st.ID})
+				ex = append(ex, map[string]any{"Name": asMap(o)["OutputKey"], "Value": asMap(o)["OutputValue"], "ExportingStackId": st.ID})
 			}
 		}
 		return &spi.Response{Output: map[string]any{"Exports": ex}}, nil
@@ -508,17 +507,10 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 }
 
 func (p *Pack) ref(name string, refs map[string]string, req *spi.Request, stack string) string {
-	switch name {
-	case "AWS::AccountId":
-		return req.Identity.Account
-	case "AWS::Region":
-		return req.Identity.Region
-	case "AWS::StackName":
-		return stack
-	case "AWS::Partition":
-		return "aws"
-	case "AWS::URLSuffix":
-		return "amazonaws.com"
+	pseudo := map[string]string{"AWS::AccountId": req.Identity.Account, "AWS::Region": req.Identity.Region,
+		"AWS::StackName": stack, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com"}
+	if v, ok := pseudo[name]; ok {
+		return v
 	}
 	if v, ok := refs[name]; ok {
 		return v
@@ -532,12 +524,8 @@ func (p *Pack) getAtt(g any, refs map[string]string, req *spi.Request) string {
 	case string:
 		logical, attr, _ = strings.Cut(t, ".")
 	case []any:
-		if len(t) > 0 {
-			logical = str(t[0])
-		}
-		if len(t) > 1 {
-			attr = str(t[1])
-		}
+		t = append(slices.Clip(t), nil, nil)
+		logical, attr = str(t[0]), str(t[1])
 	}
 	phys := refs[logical]
 	switch attr {
@@ -545,10 +533,8 @@ func (p *Pack) getAtt(g any, refs map[string]string, req *spi.Request) string {
 		if strings.Contains(phys, "arn:aws:") {
 			return phys
 		}
-		if strings.Contains(phys, "/") && strings.Contains(phys, "://") {
-			// queue URL -> ARN
-			name := lastSlash(phys)
-			return "arn:aws:sqs:" + req.Identity.Region + ":" + req.Identity.Account + ":" + name
+		if strings.Contains(phys, "/") && strings.Contains(phys, "://") { // a queue URL
+			return "arn:aws:sqs:" + req.Identity.Region + ":" + req.Identity.Account + ":" + lastSlash(phys)
 		}
 		return "arn:aws:s3:::" + phys
 	case "QueueName":
@@ -565,19 +551,18 @@ func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack str
 	}
 	sep := str(arr[0])
 	parts, _ := arr[1].([]any)
-	ss := make([]string, 0, len(parts))
-	for _, x := range parts {
-		ss = append(ss, str(p.resolve(x, refs, req, stack)))
+	ss := make([]string, len(parts))
+	for i, x := range parts {
+		ss[i] = str(p.resolve(x, refs, req, stack))
 	}
 	return strings.Join(ss, sep)
 }
 
 func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack string) string {
-	tmpl := str(s)
+	out := str(s)
 	if arr, ok := s.([]any); ok && len(arr) > 0 {
-		tmpl = str(arr[0])
+		out = str(arr[0])
 	}
-	out := tmpl
 	for k, v := range refs {
 		out = strings.ReplaceAll(out, "${"+k+"}", v)
 	}

@@ -501,3 +501,43 @@ func TestSecretsManagerListSecretsAnswersDescriptionAndDeletedDate(t *testing.T)
 		t.Fatalf("with IncludePlannedDeletion, active answered %#v", planned["active"])
 	}
 }
+
+// CreateSecret: "Creates a new secret." ResourceExistsException: "A resource
+// with the ID you requested already exists." ResourceNotFoundException:
+// "Secrets Manager can't find the resource that you asked for." PutSecretValue,
+// UpdateSecret and RotateSecret each document ResourceNotFoundException. A
+// second CreateSecret of one name used to write a new version, and a put,
+// update or rotation of a name never created used to create it.
+func TestSecretsManagerCreatesOnceAndWritesOnlyWhatExists(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v1"})
+	_, err := call("CreateSecret", map[string]any{"Name": "s", "SecretString": "v2"})
+	if f, isFault := err.(*spi.Fault); !isFault || f.Code != "ResourceExistsException" {
+		t.Errorf("a second CreateSecret of one name: want ResourceExistsException, got %v", err)
+	}
+	if got := ok(t, "GetSecretValue", map[string]any{"SecretId": "s"}); got["SecretString"] != "v1" {
+		t.Errorf("a second CreateSecret changed the value to %#v", got["SecretString"])
+	}
+	if versions, _ := ok(t, "ListSecretVersionIds", map[string]any{"SecretId": "s"})["Versions"].([]any); len(versions) != 1 {
+		t.Errorf("a second CreateSecret left %d versions, want 1", len(versions))
+	}
+
+	for _, missing := range []struct {
+		op string
+		in map[string]any
+	}{
+		{"PutSecretValue", map[string]any{"SecretId": "never", "SecretString": "v"}},
+		{"UpdateSecret", map[string]any{"SecretId": "never", "SecretString": "v"}},
+		{"UpdateSecret", map[string]any{"SecretId": "never", "Description": "d"}},
+		{"RotateSecret", map[string]any{"SecretId": "never"}},
+	} {
+		_, err := call(missing.op, missing.in)
+		if f, isFault := err.(*spi.Fault); !isFault || f.Code != "ResourceNotFoundException" {
+			t.Errorf("%s %v of a secret never created: want ResourceNotFoundException, got %v", missing.op, missing.in, err)
+		}
+		if _, err := call("DescribeSecret", map[string]any{"SecretId": "never"}); err == nil {
+			t.Errorf("%s created the secret it could not find", missing.op)
+			ok(t, "DeleteSecret", map[string]any{"SecretId": "never", "ForceDeleteWithoutRecovery": true})
+		}
+	}
+}

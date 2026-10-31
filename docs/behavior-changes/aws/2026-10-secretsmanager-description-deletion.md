@@ -4,6 +4,15 @@ The oracle is AWS's documentation as it ships in the vendored model
 (`secrets-manager-2017-10-17.json`, sha256 `2738bd8d…`, pinned in
 `specs/mirror.lock`).
 
+- **CreateSecret creates; the writes need a secret.** `CreateSecret` of a name
+  that exists is `ResourceExistsException` ("A resource with the ID you
+  requested already exists"). `PutSecretValue`, `UpdateSecret` and
+  `RotateSecret` of a name never created are `ResourceNotFoundException`
+  ("Secrets Manager can't find the resource that you asked for"), which each
+  documents. Before, the four were one upsert: a second `CreateSecret` wrote a
+  new version, and the others created the secret. CloudFormation's
+  `UpdateStack` relied on that and now updates its secret through
+  `UpdateSecret`.
 - **Description.** `CreateSecret` and `UpdateSecret` keep `Description`, and
   `DescribeSecret` answers it. Before, it was accepted and dropped. A write
   that names no description keeps the one already stored.

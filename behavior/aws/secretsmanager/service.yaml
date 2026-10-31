@@ -36,12 +36,19 @@ errors:
     code: InvalidParameterException
     http: 400
     fault: client
+  Exists:
+    code: ResourceExistsException
+    http: 400
+    fault: client
 
 operations:
-  # CreateSecret, PutSecretValue and UpdateSecret are one code path in the
-  # pack: merge onto the record if it exists, rotate AWSCURRENT to
-  # AWSPREVIOUS on every older version and append the new version as
-  # AWSCURRENT. A put that was never created creates.
+  # The pack served CreateSecret, PutSecretValue and UpdateSecret as one
+  # upsert. CreateSecret "Creates a new secret": a name that exists is
+  # ResourceExistsException, "A resource with the ID you requested already
+  # exists". PutSecretValue and UpdateSecret write to a secret that exists,
+  # moving AWSCURRENT to AWSPREVIOUS on every older version and appending the
+  # new version as AWSCURRENT; a name never created is
+  # ResourceNotFoundException, which both document, as RotateSecret does.
   #
   # A secret scheduled for deletion refuses every write, here and in
   # RotateSecret, TagResource and UntagResource: InvalidRequestException, "A
@@ -53,11 +60,13 @@ operations:
       s: { resource: secret }
     let:
       val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
-      prior: "'Versions' in s ? s.Versions : []"
     require:
       - cond: "!('Deleted' in s && s.Deleted == true)"
         error: InvalidRequest
         message: "You can't create this secret because a secret with this name is already scheduled for deletion."
+      - cond: "!s_found"
+        error: Exists
+        message: "The operation failed because the secret already exists."
     effects:
       - generate: { bind: ver, kind: hex, bytes: 8 }
       - put:
@@ -65,17 +74,13 @@ operations:
           record:
             Name: id
             ARN: "arn('aws', ['secretsmanager', string(identity.region), string(identity.account), 'secret:' + id])"
-            Versions: >-
-              prior.map(v, merge(v, {'VersionStages':
-                ('VersionStages' in v ? v.VersionStages : []).filter(st, st != 'AWSCURRENT' && st != 'AWSPREVIOUS')
-                + (('VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')) ? ['AWSPREVIOUS'] : [])}))
-              + [{'VersionId': fx.ver, 'SecretString': val, 'VersionStages': ['AWSCURRENT']}]
+            Versions: "[{'VersionId': fx.ver, 'SecretString': val, 'VersionStages': ['AWSCURRENT']}]"
             VersionId: fx.ver
             SecretString: val
             VersionStages: "['AWSCURRENT']"
             # The description is metadata beside the value (DescribeSecretResponse:
-            # "The description of the secret."): a write that names none keeps it.
-            Description: "'Description' in input && input.Description != null ? input.Description : ('Description' in s ? s.Description : dyn(null))"
+            # "The description of the secret.").
+            Description: "'Description' in input && input.Description != null ? input.Description : dyn(null)"
             Deleted: "false"
     output:
       ARN: rec.ARN
@@ -89,6 +94,7 @@ operations:
       val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
       prior: "'Versions' in s ? s.Versions : []"
     require:
+      - { cond: s_found, error: NotFound }
       - cond: "!('Deleted' in s && s.Deleted == true)"
         error: InvalidRequest
         message: "You can't perform this operation on the secret because it was marked for deletion."
@@ -128,6 +134,7 @@ operations:
       val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
       prior: "'Versions' in s ? s.Versions : []"
     require:
+      - { cond: s_found, error: NotFound }
       - cond: "!('Deleted' in s && s.Deleted == true)"
         error: InvalidRequest
         message: "You can't perform this operation on the secret because it was marked for deletion."
@@ -158,8 +165,9 @@ operations:
       VersionId: "hasval ? fx.ver : dyn(null)"
 
   # The pack's RotateSecret is PutSecretValue with the value defaulted to the
-  # current one: it re-seats the same SecretString under a fresh version. On a
-  # secret that does not exist that means it creates one, holding "".
+  # current one: it re-seats the same SecretString under a fresh version. A
+  # secret that does not exist is ResourceNotFoundException; the pack created
+  # one, holding "".
   RotateSecret:
     reads:
       s: { resource: secret }
@@ -173,6 +181,7 @@ operations:
         : {}
       val: "coalesce(coalesce('SecretString' in input && input.SecretString != '' ? input.SecretString : null, 'SecretString' in cur ? cur.SecretString : null), '')"
     require:
+      - { cond: s_found, error: NotFound }
       - cond: "!('Deleted' in s && s.Deleted == true)"
         error: InvalidRequest
         message: "You can't perform this operation on the secret because it was marked for deletion."
@@ -593,13 +602,11 @@ operations:
 quirks:
   - operation: CreateSecret
     note: >
-      CreateSecret, PutSecretValue and UpdateSecret are one code path: a put
-      against a name that was never created creates the secret, where the real
-      service answers ResourceNotFoundException. The value stored is the first
-      of SecretString or SecretBinary, so a binary-only write answers its
-      bytes through the SecretString member everywhere. The pack answered an
-      absent Name by storing a record keyed ""; the model requires Name and
-      the engine rejects its absence now, so that row is unreachable.
+      The value stored is the first of SecretString or SecretBinary, so a
+      binary-only write answers its bytes through the SecretString member
+      everywhere. The pack answered an absent Name by storing a record keyed
+      ""; the model requires Name and the engine rejects its absence now, so
+      that row is unreachable.
   - operation: GetSecretValue
     note: >
       A VersionId or VersionStage that matches no stored version is not a
@@ -651,9 +658,8 @@ quirks:
     note: >
       No rotation ever runs: the current value is re-seated under a fresh
       version id, and RotationLambdaARN, RotationRules and RotateImmediately
-      are accepted and discarded. Rotating a secret that does not exist
-      creates it, holding the empty string. The pack read a SecretString
-      member the model does not declare on this operation; kept.
+      are accepted and discarded. The pack read a SecretString member the
+      model does not declare on this operation; kept.
   - operation: UpdateSecretVersionStage
     note: >
       With neither MoveToVersionId nor RemoveFromVersionId the call is a

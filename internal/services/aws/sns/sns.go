@@ -299,8 +299,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		for _, e := range entries {
 			m := asMap(e)
 			entryID := str(m["Id"])
-			if !validBatchEntryID(entryID) || seenIDs[entryID] {
-				return nil, clientFault("InvalidParameter", "Id is invalid or duplicated.", 400)
+			if !validBatchEntryID(entryID) {
+				return nil, clientFault("InvalidBatchEntryId", "The Id of a batch entry in a batch request doesn't abide by the specification.", 400)
+			}
+			if seenIDs[entryID] {
+				return nil, clientFault("BatchEntryIdsNotDistinct", "Two or more batch entries in the request have the same Id.", 400)
 			}
 			seenIDs[entryID] = true
 			attrs := asMap(m["MessageAttributes"])
@@ -339,7 +342,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if err != nil {
 				return nil, err
 			}
-			ok = append(ok, map[string]any{"Id": ids[i], "MessageId": resp.Output["MessageId"]})
+			resp.Output["Id"] = ids[i]
+			ok = append(ok, resp.Output)
 		}
 		return &spi.Response{Output: map[string]any{"Successful": ok, "Failed": []any{}}}, nil
 	case "Subscribe":
@@ -708,12 +712,7 @@ func (p *Pack) validateSQSSubscription(ctx context.Context, req *spi.Request, to
 
 func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, msgAttrs map[string]any) (*spi.Response, error) {
 	arn := topicARN(req.Input)
-	fifo := false
-	if b, found, _ := p.col(req, "topics").Get(ctx, topicName(arn)); found {
-		var topic map[string]any
-		_ = json.Unmarshal(b, &topic)
-		fifo = str(asMap(topic["attrs"])["FifoTopic"]) == "true"
-	}
+	fifo := p.topicAttr(ctx, req, arn, "FifoTopic") == "true"
 	dedupKey := ""
 	if fifo {
 		dedupKey = str(req.Input["MessageDeduplicationId"])
@@ -727,18 +726,22 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		defer dedupMu.Unlock()
 		if b, found, _ := p.col(req, "snsdedup").Get(ctx, arn+"\x1f"+dedupKey); found {
 			var prior map[string]any
-			until, _ := strconv.ParseInt(fmt.Sprint(prior["until"]), 10, 64)
-			if json.Unmarshal(b, &prior) == nil {
-				if value, ok := prior["until"].(float64); ok {
-					until = int64(value)
-				}
-			}
-			if until > 0 && p.deps.Clock.Now().UnixNano() < until {
-				return &spi.Response{Output: map[string]any{"MessageId": prior["id"]}}, nil
+			_ = json.Unmarshal(b, &prior)
+			if until, _ := prior["until"].(float64); float64(p.deps.Clock.Now().UnixNano()) < until {
+				return &spi.Response{Output: map[string]any{"MessageId": prior["id"], "SequenceNumber": prior["seq"]}}, nil
 			}
 		}
 	}
 	mid := p.deps.Rand.Hex(16)
+	out := map[string]any{"MessageId": mid}
+	if fifo { // a SequenceNumber "continues to increase" (API_Publish): one counter per topic, 20 digits wide
+		var n int64
+		if b, found, _ := p.col(req, "snsseq").Get(ctx, arn); found {
+			_ = json.Unmarshal(b, &n)
+		}
+		_ = p.col(req, "snsseq").Put(ctx, arn, mustJSON(n+1))
+		out["SequenceNumber"] = fmt.Sprintf("1%019d", n+1)
+	}
 	_ = p.deps.Bus.Publish(ctx, "sns:"+arn, []byte(body))
 	kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
 	for _, kv := range kvs {
@@ -845,9 +848,9 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		}
 	}
 	if dedupKey != "" {
-		_ = p.col(req, "snsdedup").Put(ctx, arn+"\x1f"+dedupKey, mustJSON(map[string]any{"id": mid, "until": p.deps.Clock.Now().Add(5 * time.Minute).UnixNano()}))
+		_ = p.col(req, "snsdedup").Put(ctx, arn+"\x1f"+dedupKey, mustJSON(map[string]any{"id": mid, "seq": out["SequenceNumber"], "until": p.deps.Clock.Now().Add(5 * time.Minute).UnixNano()}))
 	}
-	return &spi.Response{Output: map[string]any{"MessageId": mid}}, nil
+	return &spi.Response{Output: out}, nil
 }
 
 func (p *Pack) smsOptedOut(ctx context.Context, req *spi.Request, phone string) bool {
@@ -1110,26 +1113,17 @@ func (p *Pack) deliverLambda(ctx context.Context, req *spi.Request, sub map[stri
 
 func (p *Pack) recordLambdaDelivery(ctx context.Context, req *spi.Request, sub map[string]any, messageID string, deliveryErr error) {
 	topicARN := str(req.Input["TopicArn"])
-	b, found, _ := p.col(req, "topics").Get(ctx, topicName(topicARN))
-	if !found {
-		return
-	}
-	var topic map[string]any
-	if json.Unmarshal(b, &topic) != nil {
-		return
-	}
-	attrs := asMap(topic["attrs"])
 	feedback := "LambdaSuccessFeedbackRoleArn"
 	feedbackRate := "LambdaSuccessFeedbackSampleRate"
 	if deliveryErr != nil {
 		feedback = "LambdaFailureFeedbackRoleArn"
 		feedbackRate = "LambdaFailureFeedbackSampleRate"
 	}
-	if str(attrs[feedback]) == "" {
+	if p.topicAttr(ctx, req, topicARN, feedback) == "" {
 		return
 	}
 	sample := 100
-	if value, err := strconv.Atoi(str(attrs[feedbackRate])); err == nil {
+	if value, err := strconv.Atoi(p.topicAttr(ctx, req, topicARN, feedbackRate)); err == nil {
 		sample = value
 	}
 	if sample <= 0 || (sample < 100 && p.deps.Rand.Intn(100) >= sample) {
@@ -1222,14 +1216,19 @@ func notificationAttributes(attrs map[string]any, lambda bool) map[string]any {
 
 // topicSignatureVersion is the SignatureVersion a topic's messages are signed with.
 func (p *Pack) topicSignatureVersion(ctx context.Context, req *spi.Request, topicARN string) string {
-	if b, found, _ := p.col(req, "topics").Get(ctx, topicName(topicARN)); found {
-		var topic map[string]any
-		_ = json.Unmarshal(b, &topic)
-		if str(asMap(topic["attrs"])["SignatureVersion"]) == "2" {
-			return "2"
-		}
+	if p.topicAttr(ctx, req, topicARN, "SignatureVersion") == "2" {
+		return "2"
 	}
 	return "1"
+}
+
+// topicAttr is one of a topic's attributes, and "" when the topic or the attribute is absent.
+func (p *Pack) topicAttr(ctx context.Context, req *spi.Request, topicARN, name string) string {
+	var topic map[string]any
+	if b, found, _ := p.col(req, "topics").Get(ctx, topicName(topicARN)); found {
+		_ = json.Unmarshal(b, &topic)
+	}
+	return str(asMap(topic["attrs"])[name])
 }
 
 func sqsMessageAttributes(attrs map[string]any) map[string]any {

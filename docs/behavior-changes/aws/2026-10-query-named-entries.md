@@ -11,7 +11,8 @@
   read as absent.
 - AWS docs: the SQS attribute digest
   ([MD5 message digest calculation](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-message-metadata.html#sqs-attributes-md5-message-digest-calculation)),
-  `SendMessageBatchResultEntry`, the SNS notification body
+  `SendMessageBatchResultEntry`, SNS `Publish`'s and `PublishBatchResultEntry`'s
+  `SequenceNumber`, `PublishBatch`'s errors, the SNS notification body
   ([HTTP/HTTPS notification JSON](https://docs.aws.amazon.com/sns/latest/dg/http-notification-json.html)),
   the Lambda SNS event, and `PublishBatch`'s `PublishBatchRequestEntries`,
   `Successful` and `Failed`.
@@ -29,6 +30,8 @@
 | SNS PublishBatch (query) | `PublishBatchRequestEntries` unread: every request `EmptyBatchRequest` | Entries published, each with its own notification |
 | SNS PublishBatch, an entry refused after a valid one | Valid entries delivered, then a 400 | Nothing delivered, then the 400 |
 | SNS PublishBatch answer | `Successful` only | `Successful` and an empty `Failed` |
+| SNS Publish / PublishBatch to a FIFO topic | No `SequenceNumber` | `SequenceNumber` on Publish and on each Successful entry: 20 digits, increasing per topic, the same on every run |
+| SNS PublishBatch, an invalid or a duplicate entry Id | 400 `InvalidParameter` "Id is invalid or duplicated." | 400 `InvalidBatchEntryId` or `BatchEntryIdsNotDistinct`, with AWS's messages |
 | RDS and other awsQuery lists named by their member | `SubnetIds.SubnetIdentifier.N`, `Parameters.Parameter.N`, `Tags.Tag.N` read as absent | Read; `.member.N` still accepted |
 
 ## Equivalence

@@ -40,6 +40,15 @@ The oracle is AWS's documentation as it ships in the vendored model
     any window was accepted, and a huge one overflowed into an internal
     failure.
 - **RestoreSecret** clears `DeletedDate` and answers `ARN` and `Name`.
+- **A secret scheduled for deletion refuses writes.** `CreateSecret` on its
+  name, `PutSecretValue`, `UpdateSecret`, `RotateSecret`, `TagResource` and
+  `UntagResource` answer `InvalidRequestException` ("Possible causes: The
+  secret is scheduled for deletion."), which each of them documents, and leave
+  the secret as it was. Before, each of the first four wrote the value and
+  undeleted the secret, and the tag operations changed its tags.
+  `GetSecretValue` refused it already ("When a secret is scheduled for
+  deletion, you cannot retrieve the secret value. You must first cancel the
+  deletion with RestoreSecret").
 - **Timestamps are epoch seconds.** `DeletionDate` and `DeletedDate` are
   timestamps (`DeletionDateType`, `DeletedDateType`) on an `awsJson1_1`
   service with no `timestampFormat` trait, so they are written as epoch

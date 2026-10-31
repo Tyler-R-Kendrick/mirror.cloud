@@ -356,3 +356,53 @@ func TestSecretsManagerForcedDeleteAnswersTheRequestTime(t *testing.T) {
 		t.Fatalf("a forced delete of a secret that never existed answered DeletionDate %#v", never["DeletionDate"])
 	}
 }
+
+// InvalidRequestException: "A parameter value is not valid for the current
+// state of the resource. Possible causes: The secret is scheduled for
+// deletion." CreateSecret, PutSecretValue, UpdateSecret, RotateSecret,
+// TagResource, UntagResource and GetSecretValue each document it. DeleteSecret:
+// "When a secret is scheduled for deletion, you cannot retrieve the secret
+// value. You must first cancel the deletion with RestoreSecret and then you can
+// retrieve the secret." A write to a scheduled secret used to undelete it.
+func TestSecretsManagerRefusesWritesToASecretScheduledForDeletion(t *testing.T) {
+	for _, refused := range []struct {
+		name, op string
+		in       map[string]any
+	}{
+		{"CreateSecret", "CreateSecret", map[string]any{"Name": "s", "SecretString": "v2"}},
+		{"PutSecretValue", "PutSecretValue", map[string]any{"SecretId": "s", "SecretString": "v2"}},
+		{"UpdateSecret/value", "UpdateSecret", map[string]any{"SecretId": "s", "SecretString": "v2"}},
+		{"UpdateSecret/description", "UpdateSecret", map[string]any{"SecretId": "s", "Description": "other"}},
+		{"RotateSecret", "RotateSecret", map[string]any{"SecretId": "s"}},
+		{"TagResource", "TagResource", map[string]any{"SecretId": "s", "Tags": []any{map[string]any{"Key": "k", "Value": "other"}}}},
+		{"UntagResource", "UntagResource", map[string]any{"SecretId": "s", "TagKeys": []any{"k"}}},
+		{"GetSecretValue", "GetSecretValue", map[string]any{"SecretId": "s"}},
+	} {
+		t.Run(refused.name, func(t *testing.T) {
+			call, ok, fault := secretsManager(t)
+			ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v1", "Description": "d"})
+			ok(t, "TagResource", map[string]any{"SecretId": "s", "Tags": []any{map[string]any{"Key": "k", "Value": "v"}}})
+			ok(t, "DeleteSecret", map[string]any{"SecretId": "s"})
+
+			_, err := call(refused.op, refused.in)
+			fault(t, err, "InvalidRequestException")
+			if got := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"}); got["DeletedDate"] == nil {
+				t.Fatal("the refused call undeleted the secret")
+			}
+			// Nothing the refused call carried landed.
+			ok(t, "RestoreSecret", map[string]any{"SecretId": "s"})
+			described := ok(t, "DescribeSecret", map[string]any{"SecretId": "s"})
+			tags, _ := described["Tags"].([]any)
+			if described["Description"] != "d" || len(tags) != 1 || tags[0].(map[string]any)["Value"] != "v" {
+				t.Fatalf("after RestoreSecret, DescribeSecret answered %#v", described)
+			}
+			if value := ok(t, "GetSecretValue", map[string]any{"SecretId": "s"}); value["SecretString"] != "v1" {
+				t.Fatalf("after RestoreSecret, the value is %#v, want v1", value["SecretString"])
+			}
+			versions, _ := ok(t, "ListSecretVersionIds", map[string]any{"SecretId": "s"})["Versions"].([]any)
+			if len(versions) != 1 {
+				t.Fatalf("after RestoreSecret, %d versions, want 1", len(versions))
+			}
+		})
+	}
+}

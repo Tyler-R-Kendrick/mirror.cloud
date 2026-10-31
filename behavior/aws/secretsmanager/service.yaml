@@ -40,14 +40,24 @@ errors:
 operations:
   # CreateSecret, PutSecretValue and UpdateSecret are one code path in the
   # pack: merge onto the record if it exists, rotate AWSCURRENT to
-  # AWSPREVIOUS on every older version, append the new version as AWSCURRENT,
-  # and undelete. A put that was never created creates.
+  # AWSPREVIOUS on every older version and append the new version as
+  # AWSCURRENT. A put that was never created creates.
+  #
+  # A secret scheduled for deletion refuses every write, here and in
+  # RotateSecret, TagResource and UntagResource: InvalidRequestException, "A
+  # parameter value is not valid for the current state of the resource.
+  # Possible causes: The secret is scheduled for deletion." Each of them
+  # documents it. RestoreSecret is the way back.
   CreateSecret:
     reads:
       s: { resource: secret }
     let:
       val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
       prior: "'Versions' in s ? s.Versions : []"
+    require:
+      - cond: "!('Deleted' in s && s.Deleted == true)"
+        error: InvalidRequest
+        message: "You can't create this secret because a secret with this name is already scheduled for deletion."
     effects:
       - generate: { bind: ver, kind: hex, bytes: 8 }
       - put:
@@ -78,6 +88,10 @@ operations:
     let:
       val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
       prior: "'Versions' in s ? s.Versions : []"
+    require:
+      - cond: "!('Deleted' in s && s.Deleted == true)"
+        error: InvalidRequest
+        message: "You can't perform this operation on the secret because it was marked for deletion."
     effects:
       - generate: { bind: ver, kind: hex, bytes: 8 }
       - put:
@@ -113,6 +127,10 @@ operations:
       hasval: "('SecretString' in input && input.SecretString != null) || ('SecretBinary' in input && input.SecretBinary != null)"
       val: "coalesce(coalesce('SecretString' in input ? input.SecretString : null, 'SecretBinary' in input ? input.SecretBinary : null), '')"
       prior: "'Versions' in s ? s.Versions : []"
+    require:
+      - cond: "!('Deleted' in s && s.Deleted == true)"
+        error: InvalidRequest
+        message: "You can't perform this operation on the secret because it was marked for deletion."
     effects:
       - generate: { bind: ver, kind: hex, bytes: 8 }
       - put:
@@ -153,6 +171,10 @@ operations:
           : s)
         : {}
       val: "coalesce(coalesce('SecretString' in input && input.SecretString != '' ? input.SecretString : null, 'SecretString' in cur ? cur.SecretString : null), '')"
+    require:
+      - cond: "!('Deleted' in s && s.Deleted == true)"
+        error: InvalidRequest
+        message: "You can't perform this operation on the secret because it was marked for deletion."
     effects:
       - generate: { bind: ver, kind: hex, bytes: 8 }
       - put:
@@ -363,6 +385,9 @@ operations:
       oldkeys: "oldtags.map(t, 'Key' in t && t.Key != null ? string(t.Key) : '')"
     require:
       - { cond: s_found, error: NotFound }
+      - cond: "!('Deleted' in s && s.Deleted == true)"
+        error: InvalidRequest
+        message: "You can't perform this operation on the secret because it was marked for deletion."
     effects:
       - put:
           resource: secret
@@ -380,6 +405,9 @@ operations:
       s: { resource: secret }
     require:
       - { cond: s_found, error: NotFound }
+      - cond: "!('Deleted' in s && s.Deleted == true)"
+        error: InvalidRequest
+        message: "You can't perform this operation on the secret because it was marked for deletion."
     effects:
       - put:
           resource: secret
@@ -547,11 +575,9 @@ quirks:
       against a name that was never created creates the secret, where the real
       service answers ResourceNotFoundException. The value stored is the first
       of SecretString or SecretBinary, so a binary-only write answers its
-      bytes through the SecretString member everywhere. A write to a secret
-      scheduled for deletion undeletes it (Deleted flips back to false), which
-      the real service refuses. The pack answered an absent Name by storing a
-      record keyed ""; the model requires Name and the engine rejects its
-      absence now, so that row is unreachable.
+      bytes through the SecretString member everywhere. The pack answered an
+      absent Name by storing a record keyed ""; the model requires Name and
+      the engine rejects its absence now, so that row is unreachable.
   - operation: GetSecretValue
     note: >
       A VersionId or VersionStage that matches no stored version is not a

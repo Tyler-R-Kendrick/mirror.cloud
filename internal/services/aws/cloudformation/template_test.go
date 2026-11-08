@@ -423,3 +423,24 @@ func TestCloudFormationReadsALoneAnchor(t *testing.T) {
 		t.Errorf("an alias of the anchor answered %v, want ValidationError: aliases", err)
 	}
 }
+
+// The same sentence: "CloudFormation doesn't support ... The binary, omap,
+// pairs, set, and timestamp tags". Each, written on a node, is
+// ValidationError naming the tag. A date written plainly is not a tag, and
+// stays the string it is (AWSTemplateFormatVersion: 2010-09-09, which the
+// User Guide's own example writes so). Before, each tag was read: !!binary
+// as its decoded bytes, !!timestamp as a time, !!set as a map of nulls.
+func TestCloudFormationRefusesTheUnsupportedTags(t *testing.T) {
+	h := newStacks(t)
+	queue := "Resources:\n  Q:\n    Type: AWS::SQS::Queue\n"
+	for _, tagged := range []string{"!!binary aGVsbG8=", "!!omap [{a: 1}]", "!!pairs [{a: 1}]", "!!set {a, b}", "!!timestamp 2010-09-09"} {
+		body := "AWSTemplateFormatVersion: 2010-09-09\nMetadata:\n  M: " + tagged + "\n" + queue
+		_, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": body})
+		if tag, _, _ := strings.Cut(tagged, " "); code(err) != "ValidationError" || !strings.Contains(err.Error(), tag) {
+			t.Errorf("%s answered %v, want ValidationError naming %s", tagged, err, tag)
+		}
+	}
+	if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": "AWSTemplateFormatVersion: 2010-09-09\n" + queue}); err != nil {
+		t.Errorf("a plain date answered %v", err)
+	}
+}

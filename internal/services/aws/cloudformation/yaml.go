@@ -30,6 +30,8 @@ func parseYAML(src string) (map[string]any, error) {
 func yamlValue(n *yaml.Node) (any, error) {
 	if n.Kind == yaml.AliasNode || n.Tag == "!!merge" {
 		return nil, fmt.Errorf("line %d: YAML aliases and merge keys are not supported", n.Line)
+	} else if tag := n.ShortTag(); n.Style&yaml.TaggedStyle != 0 && strings.Contains(" !!binary !!omap !!pairs !!set !!timestamp ", " "+tag+" ") {
+		return nil, fmt.Errorf("line %d: the YAML %s tag is not supported", n.Line, tag) // "The binary, omap, pairs, set, and timestamp tags"
 	}
 	tag := ""
 	if strings.HasPrefix(n.Tag, "!") && !strings.HasPrefix(n.Tag, "!!") {

@@ -114,6 +114,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     an alias or a merge key is `ValidationError`. An anchor no alias refers
     to is read as if it were not there, as the sentence names aliases and
     hash merges and no anchor (a reading; round 7 refused every anchor).
+    The same sentence's "binary, omap, pairs, set, and timestamp tags",
+    written on a node, are each `ValidationError` naming the tag; a date
+    written plainly is not a tag and stays a string
+    (`AWSTemplateFormatVersion: 2010-09-09`). Before, each tag was read.
     Without that, the
     library's aliases let a template refer to itself (`a: &a [*a]`, which
     overflowed the stack) or multiply (a billion laughs, which ran without

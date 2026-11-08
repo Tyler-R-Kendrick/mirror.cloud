@@ -500,11 +500,13 @@
             "ChangeSetId": "arn:aws:cloudformation:us-east-1:000000000000:changeSet/cs1/7c589129",
             "ChangeSetName": "cs1",
             "StackName": "rem",
-            "Status": "CREATE_COMPLETE",
+            "Status": "FAILED",
+            "StatusReason": "ValidationError: Template format error: At least one Resources member must be defined.",
             "TemplateBody": "{\"AWSTemplateFormatVersion\":\"2010-09-09\",\"Resources\":{}}"
           }
         ]
-      }
+      },
+      "recut": "cs1's template has no Resources, which \"is required in every CloudFormation template\", and a change set's template is now validated when it is created: the change set is FAILED, and its summary carries the error as StatusReason (\"if your attempt to create a change set failed, CloudFormation shows the error message\"). Vendored model cloudformation-2010-05-15.json, sha256 9992e820."
     },
     {
       "operation": "DescribeChangeSet",

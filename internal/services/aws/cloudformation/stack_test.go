@@ -1922,7 +1922,8 @@ func TestCloudFormationContinueUpdateRollbackFinishesTheRollback(t *testing.T) {
 // Ref) a parameter or pseudo parameter the template declares; one that names
 // neither is CloudFormation's "Template format error: Unresolved resource
 // dependencies [Q] in the Resources block of the template", on CreateStack,
-// UpdateStack, ValidateTemplate and ExecuteChangeSet, and nothing is made.
+// UpdateStack and ValidateTemplate, and leaves a change set FAILED, and nothing
+// is made.
 // Before, such a Ref answered its own text, so a parameter was named "Q".
 func TestCloudFormationRefusesAnUnresolvedDependency(t *testing.T) {
 	h := newStacks(t)
@@ -1936,11 +1937,14 @@ func TestCloudFormationRefusesAnUnresolvedDependency(t *testing.T) {
 	}
 	for op, in := range map[string]map[string]any{
 		"CreateStack": {"StackName": "unres", "TemplateBody": string(bad)}, "UpdateStack": {"StackName": "ok", "TemplateBody": string(bad)},
-		"ValidateTemplate": {"TemplateBody": string(bad)}, "ExecuteChangeSet": {"StackName": "ok", "ChangeSetName": "cs"},
+		"ValidateTemplate": {"TemplateBody": string(bad)},
 	} {
 		if _, err := h.invoke(op, in); code(err) != "ValidationError" || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s answered %v, want ValidationError: %s", op, err, want)
 		}
+	}
+	if out, err := h.invoke("DescribeChangeSet", map[string]any{"StackName": "ok", "ChangeSetName": "cs"}); err != nil || out["Status"] != "FAILED" || !strings.Contains(str(out["StatusReason"]), want) {
+		t.Errorf("the change set of that template is %v / %v (%v), want FAILED: %s", out["Status"], out["StatusReason"], err, want)
 	}
 	if _, _, err := h.status("unres"); err == nil {
 		t.Error("a template with unresolved dependencies made a stack")
@@ -1993,5 +1997,44 @@ func TestCloudFormationReadsDependsOn(t *testing.T) {
 		if _, _, err := h.status(name); err == nil {
 			t.Errorf("%s made a stack", name)
 		}
+	}
+}
+
+// A change set's template is parsed and validated when it is created, as
+// CloudFormation does: CreateChangeSet answers its Id, and a template that is
+// wrong leaves the change set FAILED, its StatusReason "A description of the
+// change set's status. For example, if your attempt to create a change set
+// failed, CloudFormation shows the error message." ExecuteChangeSet of a FAILED
+// change set is InvalidChangeSetStatusException ("The specified change set
+// can't be used to update the stack"), the model's error, and changes nothing.
+// A change set with a sound template still executes. Before, CreateChangeSet
+// stored the body unread, its change set was CREATE_COMPLETE, and the error
+// came only from ExecuteChangeSet.
+func TestCloudFormationAChangeSetIsValidatedWhenCreated(t *testing.T) {
+	h := newStacks(t)
+	h.mustCreate("cs", map[string]map[string]any{"Q": nameable()["Queue"]})
+	bad := `{"Resources":{"P":{"Type":"AWS::SSM::Parameter","Properties":{"Name":{"Ref":"Q2"},"Value":"v"}}}}`
+	good := `{"Resources":{"Q":{"Type":"AWS::SQS::Queue"},"R":{"Type":"AWS::SQS::Queue"}}}`
+	for csn, body := range map[string]string{"bad": bad, "good": good} {
+		out, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "cs", "ChangeSetName": csn, "TemplateBody": body})
+		if err != nil || !strings.Contains(str(out["Id"]), ":changeSet/"+csn+"/") {
+			t.Fatalf("CreateChangeSet %s answered %v (%v), want its Id", csn, out, err)
+		}
+	}
+	described, err := h.invoke("DescribeChangeSet", map[string]any{"StackName": "cs", "ChangeSetName": "bad"})
+	if err != nil || described["Status"] != "FAILED" || !strings.Contains(str(described["StatusReason"]), "Unresolved resource dependencies [Q2]") {
+		t.Errorf("the bad change set is %v / %v (%v), want FAILED with the template's error", described["Status"], described["StatusReason"], err)
+	}
+	if _, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "cs", "ChangeSetName": "bad"}); code(err) != "InvalidChangeSetStatus" {
+		t.Errorf("ExecuteChangeSet of the FAILED change set answered %v, want InvalidChangeSetStatus", err)
+	}
+	if statuses := h.statuses("cs"); len(statuses) != 1 {
+		t.Errorf("executing the FAILED change set changed the stack: %v", statuses)
+	}
+	if described, _ := h.invoke("DescribeChangeSet", map[string]any{"StackName": "cs", "ChangeSetName": "good"}); described["Status"] != "CREATE_COMPLETE" || described["StatusReason"] != nil {
+		t.Errorf("the good change set is %v / %v, want CREATE_COMPLETE", described["Status"], described["StatusReason"])
+	}
+	if _, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "cs", "ChangeSetName": "good"}); err != nil || len(h.statuses("cs")) != 2 {
+		t.Errorf("ExecuteChangeSet of the good change set: %v, resources %v", err, h.statuses("cs"))
 	}
 }

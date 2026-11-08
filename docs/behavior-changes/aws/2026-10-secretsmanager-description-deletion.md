@@ -269,10 +269,23 @@ The oracle is AWS's documentation as it ships in the vendored model
     parameter; one that names neither is CloudFormation's `ValidationError`,
     "Template format error: Unresolved resource dependencies [Q] in the
     Resources block of the template", every such name listed, on
-    `CreateStack`, `UpdateStack`, `ValidateTemplate`, `GetTemplateSummary`
-    and `ExecuteChangeSet`, and nothing is made. (`CreateChangeSet` records
-    the body unparsed, so its change set is refused when executed.) Before,
-    such a `Ref` answered its own text.
+    `CreateStack`, `UpdateStack`, `ValidateTemplate` and
+    `GetTemplateSummary`, and a change set of such a template is `FAILED`
+    (below); nothing is made. Before, such a `Ref` answered its own text.
+  - A change set's template is parsed and validated when `CreateChangeSet`
+    makes it, as CloudFormation does: the call answers the change set's `Id`,
+    and a template that is wrong leaves the change set `FAILED` with the
+    error as its `StatusReason` ("if your attempt to create a change set
+    failed, CloudFormation shows the error message"), which
+    `DescribeChangeSet` and `ListChangeSets` answer. `ExecuteChangeSet` of a
+    `FAILED` change set is `InvalidChangeSetStatus` (the model's
+    `InvalidChangeSetStatusException`, "The specified change set can't be
+    used to update the stack"; the message is the emulator's) and changes
+    nothing. `CreateChangeSet` is the engine's now; it still takes the
+    template as `TemplateBody` only, as the bundle did. The CloudFormation trace's `cs1` has no Resources, so its
+    `ListChangeSets` summary (step 26) is re-cut to `FAILED`. Before, the body
+    was stored unread, the change set was `CREATE_COMPLETE`, and only
+    `ExecuteChangeSet` found the error.
   - "The Resources section is required in every CloudFormation template"
     (User Guide, Template sections), so a template without one is
     `ValidationError`, "Template format error: At least one Resources member

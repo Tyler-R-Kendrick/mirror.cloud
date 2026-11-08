@@ -25,7 +25,7 @@ import (
 // natives are the operations behavior/aws/cloudformation lists as native: the template engine. Parsing a
 // template, resolving its intrinsics and provisioning resources through their owning services is Go; the
 // stack, change set, stack set and type bookkeeping is the bundle's.
-var natives = []string{"CreateStack", "UpdateStack", "DeleteStack", "ExecuteChangeSet", "ValidateTemplate", "GetTemplateSummary", "ListExports", "ContinueUpdateRollback"}
+var natives = []string{"CreateStack", "UpdateStack", "DeleteStack", "ExecuteChangeSet", "ValidateTemplate", "GetTemplateSummary", "ListExports", "ContinueUpdateRollback", "CreateChangeSet"}
 
 func init() {
 	for _, op := range natives {
@@ -48,7 +48,7 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 // Invoke serves one native operation.
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	name := str(req.Input["StackName"])
-	if _, given := req.Input["StackName"]; given && (req.Operation == "ExecuteChangeSet" || req.Operation == "GetTemplateSummary" || req.Operation == "ContinueUpdateRollback") {
+	if _, given := req.Input["StackName"]; given && (req.Operation == "ExecuteChangeSet" || req.Operation == "GetTemplateSummary" || req.Operation == "ContinueUpdateRollback" || req.Operation == "CreateChangeSet") {
 		if err := checkStackName(name, true); err != nil { // the model's StackNameOrId
 			return nil, err
 		}
@@ -92,6 +92,21 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 		}
 		return &spi.Response{Output: map[string]any{"Exports": ex}}, nil
+	case "CreateChangeSet": // the template is read now: "if your attempt to create a change set failed, CloudFormation shows the error message" (StatusReason)
+		csn, body := str(req.Input["ChangeSetName"]), str(req.Input["TemplateBody"])
+		if body == "" {
+			return nil, invalid("TemplateBody required")
+		}
+		rec := map[string]any{"ChangeSetName": csn, "ChangeSetId": "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":changeSet/" + csn + "/" + p.deps.Rand.Hex(8),
+			"StackName": name, "ChangeSetType": cmp.Or(str(req.Input["ChangeSetType"]), "UPDATE"), "Status": "CREATE_COMPLETE", "TemplateBody": body}
+		if _, _, err := p.template(ctx, req); err != nil {
+			rec["Status"], rec["StatusReason"] = "FAILED", err.Error()
+		}
+		raw, _ := json.Marshal(rec)
+		if err := p.col(req, "cfn-cs").Put(ctx, named(name)+":"+csn, raw); err != nil {
+			return nil, err
+		}
+		return &spi.Response{Output: map[string]any{"Id": rec["ChangeSetId"], "StackId": "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name}}, nil
 	case "ExecuteChangeSet":
 		csn := str(req.Input["ChangeSetName"])
 		b, ok, _ := p.col(req, "cfn-cs").Get(ctx, named(name)+":"+csn)
@@ -99,7 +114,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
 		}
 		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		if _ = json.Unmarshal(b, &rec); rec["Status"] == "FAILED" { // "The specified change set can't be used to update the stack"
+			return nil, fault("InvalidChangeSetStatus", "ChangeSet ["+str(rec["ChangeSetId"])+"] cannot be executed in its current status of [FAILED]")
+		}
 		req.Input["TemplateBody"] = rec["TemplateBody"]
 		if _, err := p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE"); err != nil { // an UPDATE change set's stack must exist
 			return nil, err

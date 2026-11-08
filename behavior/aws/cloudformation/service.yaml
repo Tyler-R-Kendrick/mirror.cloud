@@ -23,7 +23,7 @@ missing_input_error: Validation
 # deprovisions them in reverse, keeping any it cannot delete; ValidateTemplate and GetTemplateSummary parse
 # without provisioning; ListExports flattens every stack's outputs. The stack
 # record below is the one the engine writes.
-native: [CreateStack, UpdateStack, DeleteStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports, ContinueUpdateRollback]
+native: [CreateStack, UpdateStack, DeleteStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports, ContinueUpdateRollback, CreateChangeSet]
 
 resources:
   # The stack record, written by the native template engine and patched by
@@ -340,31 +340,9 @@ operations:
   # equally shadowed; only the inline TemplateBody path is transcribed, and
   # the bundle faults ValidationError where the pack would have fetched.
 
-  CreateChangeSet:
-    require:
-      - *stackNameOrId
-      - *stackPattern
-      - cond: "'TemplateBody' in input && string(input.TemplateBody) != ''"
-        error: Validation
-    effects:
-      - generate: { bind: csid, kind: hex, bytes: 8 }
-      - create:
-          resource: changeset
-          record:
-            ChangeSetName: string(input.ChangeSetName)
-            ChangeSetId: >-
-              'arn:aws:cloudformation:' + identity.region + ':'
-              + identity.account + ':changeSet/' + string(input.ChangeSetName)
-              + '/' + fx.csid
-            StackName: string(input.StackName)
-            ChangeSetType: "'ChangeSetType' in input ? string(input.ChangeSetType) : 'UPDATE'"
-            Status: "'CREATE_COMPLETE'"
-            TemplateBody: string(input.TemplateBody)
-    output:
-      Id: rec.ChangeSetId
-      StackId: >-
-        'arn:aws:cloudformation:' + identity.region + ':' + identity.account
-        + ':stack/' + string(input.StackName)
+  # CreateChangeSet is native: it parses and validates the template as it
+  # records the change set, FAILED with the error as its StatusReason when the
+  # template is wrong.
 
   # The pack answers the whole stored record, TemplateBody included; the
   # response shape does not declare TemplateBody, so the bundle answers the
@@ -376,11 +354,15 @@ operations:
       - *stackNameOrId
       - *stackPattern
       - { cond: cs_found, error: ChangeSetNotFound }
+    # StatusReason: "if your attempt to create a change set failed,
+    # CloudFormation shows the error message".
+    omit_null: [StatusReason]
     output:
       ChangeSetId: cs.ChangeSetId
       ChangeSetName: cs.ChangeSetName
       StackName: cs.StackName
       Status: cs.Status
+      StatusReason: "'StatusReason' in cs ? cs.StatusReason : dyn(null)"
 
   ListChangeSets:
     require: [*stackNameOrId, *stackPattern]

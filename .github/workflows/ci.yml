@@ -126,9 +126,15 @@ jobs:
       - name: fuzz shard ${{ matrix.shard }} of 6
         run: scripts/fuzz.sh ${{ matrix.shard }} 6
 
+  # The race build of the whole suite was 20 minutes in one job, the longest
+  # there is. Four jobs each take every fourth package.
   race:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v6
         with:
@@ -137,19 +143,37 @@ jobs:
         with:
           cache: race
           mtimes: "true"
+          save: ${{ matrix.shard == 0 }}
       - name: drop cached results
         if: ${{ github.ref == 'refs/heads/main' }}
         run: go clean -testcache
-      - name: race detector
-        run: set -o pipefail; make test-race 2>&1 | tee -a ci-run.log
+      - name: race detector, shard ${{ matrix.shard }} of 4
+        run: set -o pipefail; make test-race RACE_SHARD=${{ matrix.shard }} RACE_SHARDS=4 2>&1 | tee -a ci-run.log
       - name: known red triage
         if: ${{ !cancelled() }}
         run: make known-red RUN=ci-run.log
 
+  # The Dockerfile is built here and nowhere else, so a change that breaks it
+  # shows up on the pull request and not in the first release that needs it.
+  # Only the slim build: it is the one with an argument to get wrong, and the
+  # whole image is the same Dockerfile.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: build with a service list
+        run: docker build --build-arg SERVICES=@profiles/core.txt -t mirror-core .
+      - name: it serves exactly that list, from a scratch image
+        run: |
+          got=$(docker run --rm mirror-core services | cut -f1 | sort | tr '\n' ' ')
+          want=$(grep -v '^#' profiles/core.txt | sort | tr '\n' ' ')
+          [ "$got" = "$want" ] || { echo "::error::image serves: $got; profile lists: $want"; exit 1; }
+
   # Fails unless every job above passed. A job that is skipped or cancelled is
   # not a pass, and `needs` alone would skip this one with it.
   test:
-    needs: [check, unit, suites, fuzz, race]
+    needs: [check, unit, suites, fuzz, race, image]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -180,15 +204,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/go
         with:
           cache: mutation
           save: ${{ matrix.shard == 0 }}
-      - name: mutation shard ${{ matrix.shard }} of 8
-        run: set -o pipefail; make test-mutation-shard MUTATION_SHARD=${{ matrix.shard }} MUTATION_SHARDS=8 2>&1 | tee -a ci-run.log
+      - name: mutation shard ${{ matrix.shard }} of 12
+        run: set -o pipefail; make test-mutation-shard MUTATION_SHARD=${{ matrix.shard }} MUTATION_SHARDS=12 2>&1 | tee -a ci-run.log
       - name: known red triage
         if: ${{ !cancelled() }}
         run: make known-red RUN=ci-run.log

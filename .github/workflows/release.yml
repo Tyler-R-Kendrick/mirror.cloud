@@ -69,6 +69,9 @@ jobs:
           export SOURCE_DATE_EPOCH
           go version
           scripts/release-archive.sh archive "$TAG" "$TARGET_OS" "$TARGET_ARCH" dist
+          # The same build with only the services in profiles/core.txt: roughly
+          # half the download and a start measured in a fraction of a second.
+          MIRROR_PROFILE=core scripts/release-archive.sh archive "$TAG" "$TARGET_OS" "$TARGET_ARCH" dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: archive-${{ matrix.goos }}-${{ matrix.goarch }}

@@ -33,6 +33,10 @@
 #   - the zip: -X (no extra attributes), mtimes set to SOURCE_DATE_EPOCH and
 #     read in UTC, members in the order given.
 #
+# MIRROR_PROFILE=core (a file under profiles/) builds only the services it lists
+# and names the archive mirror_<TAG>_<GOOS>_<GOARCH>_core: the same binary name
+# and reproducibility, about 40% less to download and keep. See profiles/.
+#
 # SOURCE_DATE_EPOCH is required rather than guessed so that two runs cannot
 # differ because one of them was on another commit. GNU tar and gzip and
 # Info-ZIP zip are required, which is to say a Linux machine; the Go toolchain
@@ -73,6 +77,14 @@ cmd_archive() {
   check_target "$1" "$2" "$3"
   local tag=$1 goos=$2 goarch=$3 out=$4 bin
   bin=$WORK/build/$(binary_name "$goos")
+  local overlay=()
+  if [ -n "${MIRROR_PROFILE:-}" ]; then
+    [[ $MIRROR_PROFILE =~ ^[a-z0-9-]+$ && -f $ROOT/profiles/$MIRROR_PROFILE.txt ]] \
+      || die "no profile $MIRROR_PROFILE (profiles/$MIRROR_PROFILE.txt)"
+    mkdir -p "$WORK/overlay"
+    python3 -I "$ROOT/scripts/slim-overlay.py" "$WORK/overlay/overlay.json" "@$ROOT/profiles/$MIRROR_PROFILE.txt"
+    overlay=(-overlay "$WORK/overlay/overlay.json")
+  fi
   (
     cd "$ROOT"
     env -u GOFLAGS -u GOEXPERIMENT -u GOFIPS140 -u GODEBUG -u GO_EXTLINK_ENABLED \
@@ -80,7 +92,7 @@ cmd_archive() {
       -u GO386 -u GOARM -u GOMIPS -u GOMIPS64 -u GOPPC64 -u GORISCV64 -u GOWASM \
       GOENV=off GOTOOLCHAIN=local GOWORK=off \
       GOAMD64=v1 GOARM64=v8.0 CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-      "${GO:-go}" build -trimpath -buildvcs=false \
+      "${GO:-go}" build -trimpath -buildvcs=false "${overlay[@]}" \
       -ldflags "-s -w -X ${MODULE}/internal/runtime.Version=${tag#v}" \
       -o "$bin" ./cmd/mirror
   )
@@ -95,7 +107,7 @@ cmd_pack() {
   mkdir -p "$5"
   out=$(cd "$5" && pwd)
   bin=$(binary_name "$goos")
-  name=mirror_${tag}_${goos}_${goarch}
+  name=mirror_${tag}_${goos}_${goarch}${MIRROR_PROFILE:+_$MIRROR_PROFILE}
   stage=$WORK/stage
   rm -rf "$stage"
   mkdir -p "$stage"

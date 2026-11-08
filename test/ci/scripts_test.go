@@ -85,3 +85,36 @@ func TestFuzzScriptFailsWhereGoTestStaysGreen(t *testing.T) {
 		t.Errorf("a shard with no target passed: err=%v\n%s", err, out)
 	}
 }
+
+// A build of some of the services must list exactly those and refuse a name that
+// is not one: a profile that quietly built a different set is the failure that
+// matters here, since nothing else would notice.
+func TestSlimBuildServesExactlyTheServicesItWasGiven(t *testing.T) {
+	root, _ := filepath.Abs("../..")
+	script := filepath.Join(root, "scripts", "slim-overlay.py")
+	dir := t.TempDir()
+
+	if out, err := run(t, root, nil, "python3", "-I", script, filepath.Join(dir, "o.json"), "aws.nosuchservice"); err == nil || !strings.Contains(out, "no service") {
+		t.Errorf("an unknown service was accepted: err=%v\n%s", err, out)
+	}
+
+	if out, err := run(t, root, nil, "python3", "-I", script, filepath.Join(dir, "o.json"), "aws.s3", "aws.sqs"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	bin := filepath.Join(dir, "mirror")
+	env := []string{"CGO_ENABLED=0", "GOFLAGS=-buildvcs=false"}
+	if out, err := run(t, root, env, "go", "build", "-overlay", filepath.Join(dir, "o.json"), "-o", bin, "./cmd/mirror"); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	out, err := run(t, dir, nil, bin, "services")
+	if err != nil {
+		t.Fatalf("mirror services: %v\n%s", err, out)
+	}
+	var got []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		got = append(got, strings.Fields(line)[0])
+	}
+	if strings.Join(got, " ") != "aws.s3 aws.sqs" {
+		t.Errorf("the slim build lists %v; want exactly aws.s3 aws.sqs", got)
+	}
+}

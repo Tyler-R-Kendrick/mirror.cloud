@@ -5,7 +5,7 @@ GO  := go
 COUNT ?= -count=1
 export CGO_ENABLED := 0
 
-.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-cicd-core test-cicd-process test-cicd-e2e cloudflare-evidence test-cloudflare-miniflare test-cloudflare-celld test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
+.PHONY: all build build-slim test test-unit test-contract test-snapshot test-chaos test-bdd test-cicd-core test-cicd-process test-cicd-e2e cloudflare-evidence test-cloudflare-miniflare test-cloudflare-celld test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
 
 all: build
 
@@ -14,6 +14,13 @@ build:
 	$(GO) build -o $(BIN)/mirror ./cmd/mirror
 	$(GO) build -o $(BIN)/awslocal ./cmd/awslocal
 	$(GO) build -o $(BIN)/gcslocal ./cmd/gcslocal
+
+# A build of only some services: make build-slim SERVICES=@profiles/core.txt, or
+# SERVICES="aws.s3 aws.sqs". See scripts/slim-overlay.py.
+build-slim:
+	mkdir -p $(BIN)
+	python3 scripts/slim-overlay.py $(BIN)/slim-overlay.json $(SERVICES)
+	$(GO) build -trimpath -ldflags '-s -w' -overlay $(BIN)/slim-overlay.json -o $(BIN)/mirror-slim ./cmd/mirror
 
 test: test-unit test-contract
 
@@ -97,8 +104,12 @@ test-mutation-shard:
 	MUTATION_SHARD=$(MUTATION_SHARD) MUTATION_SHARDS=$(MUTATION_SHARDS) \
 	  $(GO) test ./internal/mutation -count=1 -parallel 4 -timeout 1800s
 
+# RACE_SHARD of RACE_SHARDS takes every Nth package; CI runs four, because the
+# race build of this suite is the longest single job there is.
+RACE_SHARD ?= 0
+RACE_SHARDS ?= 1
 test-race:
-	CGO_ENABLED=1 $(GO) test -race $$($(GO) list ./... | grep -v '/internal/mutation$$')
+	CGO_ENABLED=1 $(GO) test -race $$($(GO) list ./... | grep -v '/internal/mutation$$' | awk -v s=$(RACE_SHARD) -v n=$(RACE_SHARDS) 'NR % n == s')
 
 # Say which of a run's failures were expected, by name, and which were not.
 #

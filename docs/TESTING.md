@@ -24,7 +24,7 @@ See [PARITY.md](PARITY.md) for the pinned LocalStack behavioral traceability den
 
 ## How CI runs these
 
-`.github/workflows/ci.yml` runs the tiers above as parallel jobs (`check`, `unit`, `suites`, `fuzz` in six shards, `race`, `mutation` in eight), so a run takes as long as its slowest job, not the sum. The `test` job only reports whether the five before it passed, and keeps the name the single job had.
+`.github/workflows/ci.yml` runs the tiers above as parallel jobs (`check`, `unit`, `suites`, `fuzz` in six shards, `race`, `mutation`, `image`), so a run takes as long as its slowest job, not the sum. `race` runs four shards and `mutation` twelve. `image` builds the Dockerfile with a service list and checks the image serves exactly that list. The `test` job only reports whether `check`, `unit`, `suites`, `fuzz`, `race` and `image` passed, and keeps the name the single job had.
 
 - **Cache.** `.github/actions/go` restores a Go build and test-result cache per job. Only pushes to `main` write it, so a pull request never changes what another run restores. `go test` keys a cached result on the size and mtime of every file the test opened, so the action also runs `scripts/restore-mtimes.py`, which sets each file's mtime to the time of the last commit that touched it. Both are needed: without the second, a fresh checkout invalidates every package that reads a file.
 - **Cached results.** Pull requests reuse a package's cached result when nothing it depends on changed (`COUNT` is empty); `main` clears the test cache and runs everything. A test that depends on something `go test` does not track (the clock, the network, a port) can therefore pass on a pull request from a stale result and fail on `main`.

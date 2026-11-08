@@ -50,7 +50,31 @@ stops before publishing if the tag's commit is not an ancestor of `main`.
 | `mirror_<tag>_linux_arm64.tar.gz` | Linux, arm64 |
 | `mirror_<tag>_darwin_arm64.tar.gz` | macOS, Apple silicon |
 | `mirror_<tag>_windows_amd64.zip` | Windows, x86-64 |
-| `SHA256SUMS` | checksums of the four archives |
+| `mirror_<tag>_<platform>_core.tar.gz` (`.zip` on Windows) | the same, with only the services in [`profiles/core.txt`](../profiles/core.txt) |
+| `SHA256SUMS` | checksums of all eight archives |
+
+## The `core` archives and smaller builds of your own
+
+The full binary embeds the models and behavior of every service (7.5 MB of its
+29.5 MB) and decodes them all at start. A `_core` archive is the same build with
+only the services in `profiles/core.txt`, measured on linux/amd64:
+
+| | full | `core` (12 services) |
+|---|---|---|
+| download (`.tar.gz`) | 14.1 MB | 7.8 MB |
+| binary | 29.5 MB | 20.8 MB |
+| `mirror up` until it listens | 4.6 s | 0.8 s |
+| resident memory after start | 415 MB | 59 MB |
+
+For a different set, build it: `make build-slim SERVICES="aws.s3 aws.sqs"`
+(or `SERVICES=@your-list.txt`), or
+`docker build --build-arg SERVICES="aws.s3 aws.sqs" .`. Both run
+`scripts/slim-overlay.py`, which hides the other services from the build without
+changing a source file. A service left out answers nothing, and a call from a
+kept service into one that was left out (S3 notifying a queue, SNS invoking a
+function) fails at that call and names it. `mirror services` lists what a binary
+serves. A release builds a profile with `MIRROR_PROFILE=core`; the archive is
+reproducible like the others.
 
 Each archive holds exactly two files: `LICENSE` and the binary (`mirror`, or
 `mirror.exe`). `mirror version` prints the tag without its `v` (`0.1.0`), the

@@ -300,10 +300,17 @@ operations:
   # equally shadowed; only the inline TemplateBody path is transcribed, and
   # the bundle faults ValidationError where the pack would have fetched.
 
+  # A stack in any _IN_PROGRESS state takes no change set, in the words
+  # UpdateStack refuses it with (the pack's).
   CreateChangeSet:
+    reads:
+      s: { resource: stack }
     require:
       - cond: "'TemplateBody' in input && string(input.TemplateBody) != ''"
         error: Validation
+      - cond: "!s_found || !string(s.Status).endsWith('_IN_PROGRESS')"
+        error: Validation
+        message_expr: "'Stack:' + string(s.ID) + ' is in ' + string(s.Status) + ' state and can not be updated.'"
       # TemplateBody is "a maximum length of 51,200 bytes" (API reference,
       # CreateChangeSet), as the pack holds every operation's.
       - cond: "size(bytes(string(input.TemplateBody))) <= 51200"

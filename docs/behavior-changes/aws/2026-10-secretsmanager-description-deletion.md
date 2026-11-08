@@ -193,6 +193,35 @@ The oracle is AWS's documentation as it ships in the vendored model
     Before, it made a second set of resources and wrote its record over the
     first, which then belonged to no stack, and creates racing on one name
     each made a set.
+  - A stack in any `_IN_PROGRESS` state takes no update: `UpdateStack`,
+    `CreateChangeSet` and `ExecuteChangeSet` are `ValidationError`,
+    "Stack:<id> is in CREATE_IN_PROGRESS state and can not be updated.", the
+    words used for a `ROLLBACK_COMPLETE` stack. `DeleteStack` follows its API
+    reference, "Once the call completes successfully, stack deletion starts":
+    of a stack being created it answers at once and leaves the stack
+    `DELETE_IN_PROGRESS` ("Ongoing removal of one or more stacks", User Guide,
+    stack status codes), its name still taken; the create, whose last write is
+    a compare-and-set on its reservation (the stack's id, still
+    `CREATE_IN_PROGRESS`), finds the reservation changed, deletes everything it
+    made, and then the stack. A `DeleteStack` of a stack already
+    `DELETE_IN_PROGRESS` is answered and changes nothing; that it is not
+    refused is a reading. Every write of the record after the reservation, a
+    rollback's and a delete's included, is a compare-and-set on what its
+    writer read, so a create that finds its stack deleted under it writes
+    nothing back. An update reserves nothing, as here an update has no
+    `UPDATE_IN_PROGRESS` state for `CancelUpdateStack` to act on, but writes
+    only over the record it read (termination protection aside, which it
+    keeps); one that finds the stack changed by another update or a
+    `DeleteStack` deletes what it made that the stack does not now hold (all
+    of it when the stack is being deleted) and is `ValidationError`, "...is in
+    UPDATE_IN_PROGRESS state..." or "...DELETE_IN_PROGRESS...", naming the
+    change that came first as in progress throughout, a reading. Before, a
+    `DeleteStack` during a create removed the empty reservation, a second
+    `CreateStack` of the name made a second set of resources, the first
+    create's last write brought its stack back over the second's record, and
+    a final delete left the second set behind (300 parameters in the round-8
+    repro); and the later of two updates wrote over the earlier's record,
+    whose resources then belonged to no stack.
   - A `CreateStack` that fails rolls back what it had created, as
     CloudFormation's default `OnFailure` (`ROLLBACK`) does, deleting a secret
     without a recovery window so its name is free again. A resource is

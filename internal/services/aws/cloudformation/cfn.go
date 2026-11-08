@@ -11,6 +11,7 @@ import (
 	"io"
 	"maps"
 	"net/url"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -135,12 +136,12 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		raw, found, _ := tx.Get(name)
 		if _ = json.Unmarshal(raw, &old); found && !update {
 			return fault("AlreadyExistsException", "Stack ["+name+"] already exists")
-		} else if found && (strings.HasPrefix(old.Status, "ROLLBACK_") || old.Status == "DELETE_FAILED") {
+		} else if found && (strings.HasPrefix(old.Status, "ROLLBACK_") || strings.HasSuffix(old.Status, "_IN_PROGRESS") || old.Status == "DELETE_FAILED") {
 			return invalid("Stack:" + old.ID + " is in " + old.Status + " state and can not be updated.")
-		} else if id = cmp.Or(old.ID, id); found || update { // an update reserves nothing
+		} else if id = cmp.Or(old.ID, id); found || update { // an update reserves nothing: it writes only over what it read
 			return nil
 		}
-		raw, _ = json.Marshal(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Resources: []res{}, Outputs: []any{}})
+		raw, _ = json.Marshal(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}})
 		return tx.Put(name, raw)
 	}); err != nil {
 		return nil, err
@@ -149,7 +150,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		Resources: []res{}, Outputs: []any{}} // never null: every read of a stack lists both
 	fail := func(err error) (*spi.Response, error) {
 		if st.Reason = err.Error(); !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
-			_ = p.unwind(ctx, req, st, "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
+			_ = p.unwind(ctx, req, st, "CREATE_IN_PROGRESS", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
 		}
 		return nil, err
 	}
@@ -182,9 +183,62 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	for _, k := range slices.Sorted(maps.Keys(outs)) {
 		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)})
 	}
-	raw, _ := json.Marshal(st)
-	_ = p.col(req, "cfn").Put(ctx, name, raw)
+	if !update { // a DeleteStack begun during the create ends here: what it made goes, and then the stack
+		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS")); err == nil && !wrote {
+			_ = p.unwind(ctx, req, st, "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED")
+		}
+	} else if cur, wrote, err := p.settle(ctx, req, name, as(old, st)); err == nil && !wrote {
+		// Another change came first, in progress while this update ran: what this update made that the stack
+		// does not hold goes, all of it when the stack is being deleted (its delete may have run first).
+		rival := map[bool]string{true: "DELETE_IN_PROGRESS", false: "UPDATE_IN_PROGRESS"}[cur.ID != id || strings.HasPrefix(cur.Status, "DELETE_")]
+		if cur.ID == id && rival == "DELETE_IN_PROGRESS" {
+			cur.Resources = nil
+		}
+		st.Resources = slices.DeleteFunc(st.Resources, func(r res) bool {
+			return slices.ContainsFunc(cur.Resources, func(c res) bool { return c.Physical == r.Physical })
+		})
+		_ = p.unwind(ctx, req, st, "", "", "")
+		return nil, invalid("Stack:" + id + " is in " + rival + " state and can not be updated.")
+	}
 	return &spi.Response{Output: map[string]any{"StackId": id}}, nil
+}
+
+// settle rewrites the stack record in one store transaction: take, given the record (empty when there is
+// none), answers the record to write instead, and whether to write it; a DELETE_COMPLETE one is removed.
+// settle answers the record it found and whether it wrote.
+func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take func(stack) (stack, bool)) (stack, bool, error) {
+	var cur stack
+	wrote := false
+	err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
+		raw, _, _ := tx.Get(name)
+		_ = json.Unmarshal(raw, &cur)
+		next, yes := take(cur)
+		if wrote = yes; !yes {
+			return nil
+		} else if next.Status == "DELETE_COMPLETE" {
+			return tx.Delete(name)
+		}
+		raw, _ = json.Marshal(next)
+		return tx.Put(name, raw)
+	})
+	return cur, wrote, err
+}
+
+// from writes st while the record is still st's stack in status was, keeping the record's termination
+// protection, which UpdateTerminationProtection sets whenever it runs.
+func from(st stack, was string) func(stack) (stack, bool) {
+	return func(cur stack) (stack, bool) {
+		st.Protect = cur.Protect
+		return st, cur.ID == st.ID && cur.Status == was
+	}
+}
+
+// as writes st while the record is still old, termination protection aside: st keeps the record's.
+func as(old, st stack) func(stack) (stack, bool) {
+	return func(cur stack) (stack, bool) {
+		st.Protect, cur.Protect = cur.Protect, old.Protect
+		return st, reflect.DeepEqual(cur, old)
+	}
 }
 
 // template reads the request's template body and parses it.
@@ -237,12 +291,22 @@ func (p *Pack) templateBody(ctx context.Context, req *spi.Request) (string, erro
 	return string(body), err
 }
 
+// drop starts a stack's deletion ("Once the call completes successfully, stack deletion starts", API
+// reference, DeleteStack): the record becomes DELETE_IN_PROGRESS, written only over the record read, and
+// its resources are deleted. One being created is left to its create, which deletes what it made and then
+// the stack; one already being deleted is left to that delete.
 func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Response, error) {
 	st, err := p.load(ctx, req, name)
 	if err == nil && st.Protect {
 		err = invalid("stack has termination protection")
-	} else if err == nil {
-		err = p.unwind(ctx, req, st, "DELETE_COMPLETE", "DELETE_FAILED")
+	} else if was, del := st.Status, st; err == nil && was != "DELETE_IN_PROGRESS" {
+		del.Status = "DELETE_IN_PROGRESS"
+		_, started, settleErr := p.settle(ctx, req, name, func(cur stack) (stack, bool) { return del, reflect.DeepEqual(cur, st) })
+		if err = settleErr; err == nil && !started { // it changed since it was read
+			return p.drop(ctx, req, name)
+		} else if err == nil && was != "CREATE_IN_PROGRESS" {
+			err = p.unwind(ctx, req, del, "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED")
+		}
 	}
 	if err != nil {
 		return nil, err
@@ -251,10 +315,11 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 }
 
 // unwind deletes a stack's resources, newest first, as a rollback or a DeleteStack does, and records the
-// outcome. With nothing left the stack is done, keeping st's reason (a DELETE_COMPLETE stack is removed);
-// else failed, the resources left listed as DELETE_FAILED for the next DeleteStack to try again and the
-// first error, which unwind answers, its StackStatusReason.
-func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, done, failed string) error {
+// outcome while the record is still st's stack in status was ("" records nothing). With nothing left the
+// stack is done, keeping st's reason (a DELETE_COMPLETE stack is removed); else failed, the resources left
+// listed as DELETE_FAILED for the next DeleteStack to try again and the first error, which unwind answers,
+// its StackStatusReason. A create's rollback that finds a DeleteStack begun ends that delete instead.
+func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, was, done, failed string) error {
 	left, first := []res{}, error(nil) // left is never null: every read of the stack lists its resources
 	for _, r := range slices.Backward(st.Resources) {
 		if err := p.deprovision(ctx, req, r); err != nil {
@@ -266,11 +331,12 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, done, fai
 	if first != nil {
 		st.Status, st.Reason = failed, first.Error()
 	}
-	if st.Status == "DELETE_COMPLETE" {
-		return p.col(req, "cfn").Delete(ctx, st.Name)
+	_, wrote, err := p.settle(ctx, req, st.Name, from(st, was))
+	if !wrote && err == nil && was == "CREATE_IN_PROGRESS" {
+		st.Status = map[bool]string{true: "DELETE_COMPLETE", false: "DELETE_FAILED"}[first == nil]
+		_, _, err = p.settle(ctx, req, st.Name, from(st, "DELETE_IN_PROGRESS"))
 	}
-	raw, _ := json.Marshal(st)
-	return cmp.Or(first, p.col(req, "cfn").Put(ctx, st.Name, raw))
+	return cmp.Or(first, err)
 }
 
 func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, error) {

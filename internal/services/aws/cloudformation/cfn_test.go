@@ -493,13 +493,12 @@ func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
 			t.Fatalf("invalid template accepted %q", body)
 		}
 	}
-	params := formParams(map[string]any{
-		"Parameters.member.1.ParameterKey": "Explicit", "Parameters.member.1.ParameterValue": "set", "ignored": "value",
-	})
 	tpl := map[string]any{"Parameters": map[string]any{
 		"Defaulted": map[string]any{"Default": "fallback"}, "Explicit": map[string]any{"Default": "wrong"}, "Required": map[string]any{},
 	}}
-	mergeParamDefaults(tpl, params)
+	params := parameters(map[string]any{
+		"Parameters.member.1.ParameterKey": "Explicit", "Parameters.member.1.ParameterValue": "set", "ignored": "value",
+	}, tpl)
 	if params["Explicit"] != "set" || params["Defaulted"] != "fallback" || len(paramDecls(tpl)) != 3 {
 		t.Fatalf("parameters %#v %#v", params, tpl)
 	}

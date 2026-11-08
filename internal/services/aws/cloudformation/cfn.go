@@ -133,8 +133,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	if err != nil {
 		return nil, err
 	}
-	params := formParams(req.Input)
-	mergeParamDefaults(tpl, params)
+	params := parameters(req.Input, tpl)
 	id := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name + "/" + p.deps.Rand.Hex(8)
 	var old stack // what an update finds; a create reserves the name, CREATE_IN_PROGRESS, in the same transaction
 	if err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
@@ -948,17 +947,11 @@ func getAtt(g any, refs map[string]string) string {
 }
 
 func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack string) string {
-	arr, _ := j.([]any)
-	if len(arr) < 2 {
-		return ""
+	arr, parts := append(spi.Slice(j), nil, nil), []string(nil) // [separator, [values]]
+	for _, x := range spi.Slice(arr[1]) {
+		parts = append(parts, str(p.resolve(x, refs, req, stack)))
 	}
-	sep := str(arr[0])
-	parts, _ := arr[1].([]any)
-	ss := make([]string, len(parts))
-	for i, x := range parts {
-		ss[i] = str(p.resolve(x, refs, req, stack))
-	}
-	return strings.Join(ss, sep)
+	return strings.Join(parts, str(arr[0]))
 }
 
 // fnSub is the Fn::Sub string with each ${...} substituted: ${!Literal} is the literal ${Literal}, a
@@ -1002,22 +995,20 @@ func parseTemplate(body string) (map[string]any, error) {
 	return m, nil
 }
 
-func formParams(in map[string]any) map[string]string {
+// parameters are the request's parameter values, and each Default of a parameter it does not give.
+func parameters(in, tpl map[string]any) map[string]string {
 	out := map[string]string{}
 	for k, v := range in {
 		if pfx, ok := strings.CutSuffix(k, ".ParameterKey"); ok && strings.HasPrefix(k, "Parameters.member.") {
 			out[str(v)] = str(in[pfx+".ParameterValue"])
 		}
 	}
-	return out
-}
-
-func mergeParamDefaults(tpl map[string]any, params map[string]string) {
 	for k, v := range asMap(tpl["Parameters"]) {
-		if _, given := params[k]; !given && asMap(v)["Default"] != nil {
-			params[k] = spi.JSONText(asMap(v)["Default"]) // a parameter "becomes a string": Default 16 is "16"
+		if _, given := out[k]; !given && asMap(v)["Default"] != nil {
+			out[k] = spi.JSONText(asMap(v)["Default"]) // a parameter "becomes a string": Default 16 is "16"
 		}
 	}
+	return out
 }
 
 func paramDecls(tpl map[string]any) []any {

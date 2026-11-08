@@ -4317,8 +4317,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-ignore-join-separator",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `return strings.Join(ss, sep)`,
-		new:  `_ = sep; return strings.Join(ss, "")`,
+		old:  `return strings.Join(parts, str(arr[0]))`,
+		new:  `return strings.Join(parts, "")`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationIntrinsicAndYAMLUnits",
 	},

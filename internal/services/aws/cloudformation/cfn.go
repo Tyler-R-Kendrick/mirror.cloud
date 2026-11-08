@@ -232,9 +232,6 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	for _, k := range slices.Sorted(maps.Keys(outs)) {
 		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)})
 	}
-	// The update is done, so its cleanup deletes the old resources the stack no longer holds, replaced
-	// ("creating a new one and deleting the old one") or dropped; one it cannot delete stays listed. A
-	// replaced one the template's UpdateReplacePolicy retains, a dropped one the old DeletionPolicy.
 	if cur, wrote, err := p.settle(ctx, req, map[bool]stack{false: reserved, true: read}[update], st); err == nil && !wrote && !update {
 		// A DeleteStack begun during the create ends here: what it made goes, and then the stack.
 		if cur.ID != id || cur.Status != "DELETE_IN_PROGRESS" {
@@ -255,6 +252,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		_ = p.unwind(ctx, req, stack{}, st, nil, made, nil, "", "", func(res) bool { return false })
 		return nil, invalid("Stack:" + id + " is in " + rival + " state and can not be updated.")
 	}
+	// The update is done, so its cleanup deletes the old resources the stack no longer holds, replaced
+	// ("creating a new one and deleting the old one") or dropped; one it cannot delete stays listed. A
+	// replaced one the template's UpdateReplacePolicy retains, a dropped one the old DeletionPolicy.
 	stale := slices.DeleteFunc(slices.Clone(old.Resources), func(r res) bool {
 		return slices.ContainsFunc(st.Resources, func(n res) bool { return n.Physical == r.Physical })
 	})

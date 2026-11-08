@@ -175,15 +175,21 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		}
 		return nil, err
 	}
-	resources, planned := asMap(tpl["Resources"]), maps.Clone(st.Refs)
+	resources, planned, outs := asMap(tpl["Resources"]), maps.Clone(st.Refs), asMap(tpl["Outputs"])
 	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
-		typ, props := str(rm["Type"]), asMap(p.resolve(rm["Properties"], planned, req, name))
-		n, err := p.claim(ctx, req, st, old, logical, typ, props)
-		if planned[logical] = planID(req, typ, n, props); err != nil {
+		resolved, err := p.value(rm["Properties"], planned, req, name)
+		typ, props := str(rm["Type"]), asMap(resolved)
+		n, claimErr := p.claim(ctx, req, st, old, logical, typ, props)
+		if planned[logical], err = planID(req, typ, n, props), cmp.Or(err, claimErr); err != nil {
 			return fail(err)
 		}
 		attribute(planned, req, typ, logical, planned[logical])
+	}
+	for _, o := range outs {
+		if _, err := p.value(asMap(o)["Value"], planned, req, name); err != nil {
+			return fail(err)
+		}
 	}
 	for _, logical := range order {
 		rm := asMap(resources[logical]) // props is never nil: provision adds to it
@@ -201,7 +207,6 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			return fail(err)
 		}
 	}
-	outs := asMap(tpl["Outputs"])
 	for _, k := range slices.Sorted(maps.Keys(outs)) {
 		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)})
 	}
@@ -1063,12 +1068,22 @@ func getAtt(g any, refs map[string]string) string {
 	return cmp.Or(refs[logical+"."+attr], refs[logical])
 }
 
-func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack string) string {
-	arr, parts := append(spi.Slice(j), nil, nil), []string(nil) // [separator, [values]]
-	for _, x := range spi.Slice(arr[1]) {
-		parts = append(parts, str(p.resolve(x, refs, req, stack)))
+// value is v resolved, which AWS::NoValue may leave only as a property it removes or a list element: it
+// "Removes the corresponding resource property" (User Guide, pseudo parameters), so it is never a value,
+// and as part of one, a Fn::Join's separator, a Fn::Sub's string or variable, an output, it is refused.
+func (p *Pack) value(v any, refs map[string]string, req *spi.Request, stack string) (any, error) {
+	if r := p.resolve(v, refs, req, stack); !strings.Contains(spi.JSONText(r), noValue) {
+		return r, nil
 	}
-	return strings.Join(parts, str(arr[0]))
+	return nil, invalid("Template error: AWS::NoValue removes a property or a list element; it cannot be part of a value")
+}
+
+func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack string) string {
+	arr, parts := append(spi.Slice(j), nil, nil), []string(nil)        // [separator, [values]]
+	for _, x := range spi.Slice(p.resolve(arr[1], refs, req, stack)) { // a list, from which AWS::NoValue removes its element
+		parts = append(parts, str(x))
+	}
+	return strings.Join(parts, str(p.resolve(arr[0], refs, req, stack)))
 }
 
 // fnSub is the Fn::Sub string with each ${...} substituted: ${!Literal} is the literal ${Literal}, a

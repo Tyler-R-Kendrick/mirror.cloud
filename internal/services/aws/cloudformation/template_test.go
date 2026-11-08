@@ -699,3 +699,70 @@ func TestCloudFormationReadsANegativeInteger(t *testing.T) {
 		}
 	}
 }
+
+// AWS::NoValue "Removes the corresponding resource property when specified
+// as a return value in the Fn::If intrinsic function" (User Guide, pseudo
+// parameters), so it is never a value itself. Each intrinsic that builds a
+// value is walked: in a Fn::Join's list it removes its element, the list rule
+// that removes it from any list (whether CloudFormation's Fn::Join does so the
+// Template Reference does not say: a reading); as a whole property it removes
+// the property. Where it would be part of a value, a Fn::Join's separator, a
+// Fn::Sub string or variable, an output's value, it is ValidationError, and
+// nothing is made. No stored value holds the sentinel that stands for it.
+// Before, Fn::Join and Fn::Sub wrote the sentinel into the string: "\ufffe,b",
+// "a,\ufffe,b", "a\ufffeb".
+func TestCloudFormationNoValueIsNeverAValue(t *testing.T) {
+	no := map[string]any{"Ref": "AWS::NoValue"}
+	when := func(c string, a, b any) any { return map[string]any{"Fn::If": []any{c, a, b}} }
+	join := func(sep any, parts ...any) any { return map[string]any{"Fn::Join": []any{sep, parts}} }
+	param := func(value any) map[string]any {
+		return map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": value}}
+	}
+	template := func(resources map[string]any, outputs map[string]any) string {
+		body, _ := json.Marshal(map[string]any{"Conditions": map[string]any{"No": map[string]any{"Fn::Equals": []any{"a", "b"}}},
+			"Resources": resources, "Outputs": outputs})
+		return string(body)
+	}
+	h := newStacks(t)
+	kept := map[string]any{
+		"If":   param(join(",", when("No", "a", no), "b")),
+		"Ref":  param(join(",", "a", no, "b")),
+		"Both": param(join("-", when("No", no, "a"), no, when("No", "b", no), "c")),
+		"S":    map[string]any{"Type": "AWS::SecretsManager::Secret", "Properties": map[string]any{"Name": "nv-s", "SecretString": "v", "Description": no}},
+	}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "nv", "TemplateBody": template(kept, nil)}); err != nil {
+		t.Fatalf("CreateStack of every place AWS::NoValue removes something: %v", err)
+	}
+	want := map[string]string{"If": "b", "Ref": "a,b", "Both": "a-c"}
+	for _, r := range h.resources("nv") {
+		if r.Type != "AWS::SSM::Parameter" {
+			continue
+		}
+		got, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": r.Physical})
+		if v := str(asMap(got["Parameter"])["Value"]); err != nil || v != want[r.Logical] {
+			t.Errorf("%s's value is %q (%v), want %q", r.Logical, v, err, want[r.Logical])
+		}
+	}
+	if got, err := h.service("aws.secretsmanager", "DescribeSecret", map[string]any{"SecretId": "nv-s"}); err != nil || got["Description"] != nil {
+		t.Errorf("the secret is %v (%v), want no Description", got, err)
+	}
+	if strings.Contains(spi.JSONText(h.record("nv")), noValue) {
+		t.Errorf("the stack record holds the sentinel: %v", h.record("nv"))
+	}
+	refused := map[string]string{
+		"separator": template(map[string]any{"P": param(join(no, "a", "b"))}, nil),
+		"sub":       template(map[string]any{"P": param(map[string]any{"Fn::Sub": "a${AWS::NoValue}b"})}, nil),
+		"variable":  template(map[string]any{"P": param(map[string]any{"Fn::Sub": []any{"a${X}", map[string]any{"X": no}}})}, nil),
+		"output":    template(map[string]any{"P": param("v")}, map[string]any{"O": map[string]any{"Value": when("No", "x", no)}}),
+		"bare":      template(map[string]any{"P": param("v")}, map[string]any{"O": map[string]any{"Value": no}}),
+	}
+	for name, body := range refused {
+		_, err := h.invoke("CreateStack", map[string]any{"StackName": "nv-" + name, "TemplateBody": body})
+		if code(err) != "ValidationError" || !strings.Contains(err.Error(), "AWS::NoValue") {
+			t.Errorf("AWS::NoValue as part of a value (%s) answered %v, want ValidationError naming it", name, err)
+		}
+		if strings.Contains(spi.JSONText(h.record("nv-"+name)), noValue) || len(h.params("nv-"+name)) != 0 {
+			t.Errorf("AWS::NoValue as part of a value (%s) left %v", name, h.record("nv-"+name))
+		}
+	}
+}

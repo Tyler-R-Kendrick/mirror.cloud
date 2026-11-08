@@ -237,7 +237,12 @@ The oracle is AWS's documentation as it ships in the vendored model
     not settle (one on a pseudo parameter, or one that names itself) orders
     by both branches, a reading. A settled `Fn::If` also resolves to its branch,
     and `AWS::NoValue` there "Removes the corresponding resource property"
-    (an element of a list too); an unsettled one reaches the service as
+    (an element of a list too, a `Fn::Join`'s list among them, which the
+    Template Reference does not spell out: a reading). It is never a value:
+    as part of one, a `Fn::Join`'s separator, a `Fn::Sub`'s string or
+    variable, or an output's value, it is `ValidationError` before anything
+    is made (round 9 wrote the sentinel standing for it into the string,
+    `"\ufffe,b"`, `"a\ufffeb"`); an unsettled one reaches the service as
     written, a reading. `AWS::StackId` "Returns the ID (ARN) of the stack"
     (User Guide, pseudo parameters). Round 8 resolved no `Fn::If`, so its
     map reached the service, and left `AWS::StackId` as written. Before, every `Fn::If` ordered by

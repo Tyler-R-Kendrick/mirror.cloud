@@ -221,7 +221,12 @@ The oracle is AWS's documentation as it ships in the vendored model
     `${Literal}`; each orders by what it names (a resource named by
     `${Name.Attribute}` or by a variable's value is made first, one a variable
     or `${!...}` merely spells is not). Before, `${Name.Attribute}` and the
-    variable map were left as written and ordered nothing.
+    variable map were left as written and ordered nothing. A variable "can be template
+    parameter names, resource logical IDs, resource attributes, or a variable
+    in a key-value map", and a pseudo parameter; any other, `${Nope}`, is
+    `ValidationError`, "Template format error: Unresolved resource
+    dependencies [Nope] in the Resources block of the template" (round 8 left
+    it in the string).
     A `Fn::If` whose condition the parameters settle orders by the branch it
     takes and only that one: `Fn::Equals` of literals and `Ref`s to
     parameters, and `Fn::Not`, `Fn::And`, `Fn::Or` and `Condition` over such

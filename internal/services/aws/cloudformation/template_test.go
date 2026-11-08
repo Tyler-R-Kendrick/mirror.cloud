@@ -665,3 +665,26 @@ func TestCloudFormationResolvesFnIf(t *testing.T) {
 		t.Errorf("the outputs are %v, want O out-p", h.record("ifs")["Outputs"])
 	}
 }
+
+// A Fn::Sub variable "can be template parameter names, resource logical IDs,
+// resource attributes, or a variable in a key-value map" (Template Reference,
+// Fn::Sub), and pseudo parameters, which its examples use; ${Nope}, which is
+// none, is "Template format error: Unresolved resource dependencies [Nope] in
+// the Resources block of the template", ValidationError. Before, it was left
+// in the string as written.
+func TestCloudFormationRefusesAnUnresolvedSubVariable(t *testing.T) {
+	h := newStacks(t)
+	sub := func(s any) map[string]any {
+		return map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": map[string]any{"Fn::Sub": s}}}
+	}
+	for text, ok := range map[string]bool{"${Nope}": false, "${Nope.Arn}": false, "${Env}-${AWS::Region}-${Q}-${Q.Arn}-${!Lit}": true} {
+		body, _ := json.Marshal(map[string]any{"Parameters": map[string]any{"Env": map[string]any{"Type": "String", "Default": "e"}},
+			"Resources": map[string]any{"Q": map[string]any{"Type": "AWS::SQS::Queue"}, "P": sub(text), "V": sub([]any{"${X}", map[string]any{"X": "x"}})}})
+		_, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": string(body)})
+		if ok && err != nil {
+			t.Errorf("%s answered %v", text, err)
+		} else if !ok && (code(err) != "ValidationError" || !strings.Contains(err.Error(), "Unresolved resource dependencies [Nope]")) {
+			t.Errorf("%s answered %v, want ValidationError: Unresolved resource dependencies [Nope]", text, err)
+		}
+	}
+}

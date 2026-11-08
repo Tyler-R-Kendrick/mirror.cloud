@@ -447,20 +447,25 @@ func planID(req *spi.Request, typ, n string, props map[string]any) string {
 // CloudFormation's error. A Fn::If whose condition params settle names only what its branch taken does.
 func (p *Pack) order(tpl map[string]any, params map[string]string) ([]string, error) {
 	resources, waiting, users := asMap(tpl["Resources"]), map[string]int{}, map[string][]string{}
-	var ready, order []string
+	var ready, order, undeclared []string
 	refs := conditions(tpl, params)
 	for logical, r := range resources {
 		p.walks++
 		named := map[string]bool{}
 		names(asMap(r)["Properties"], named, refs)
-		for n := range named {
-			if _, ok := resources[n]; ok {
+		for n := range named { // a Fn::Sub variable "can be template parameter names, resource logical IDs, resource attributes"
+			if v, sub := strings.CutPrefix(n, "${"); sub && resources[v] == nil && asMap(tpl["Parameters"])[v] == nil && !strings.HasPrefix(v, "AWS::") {
+				undeclared = append(undeclared, v)
+			} else if _, ok := resources[n]; ok {
 				waiting[logical], users[n] = waiting[logical]+1, append(users[n], logical)
 			}
 		}
 		if waiting[logical] == 0 {
 			ready = append(ready, logical)
 		}
+	}
+	if len(undeclared) > 0 {
+		return nil, invalid("Template format error: Unresolved resource dependencies [" + strings.Join(slices.Compact(slices.Sorted(slices.Values(undeclared))), ", ") + "] in the Resources block of the template")
 	}
 	for slices.Sort(ready); len(ready) > 0; ready = ready[1:] {
 		order = append(order, ready[0])
@@ -536,7 +541,7 @@ func names(v any, named map[string]bool, refs map[string]string) {
 				parts := append(spi.Slice(x), x, nil) // "text", or ["text", {variables}]
 				for _, m := range subVariable.FindAllStringSubmatch(str(parts[0]), -1) {
 					if n, _, _ := strings.Cut(m[1], "."); asMap(parts[1])[m[1]] == nil && !strings.HasPrefix(n, "!") {
-						named[n] = true
+						named[n], named["${"+n] = true, true // a variable, which order checks is declared
 					}
 				}
 				names(parts[1], named, refs)

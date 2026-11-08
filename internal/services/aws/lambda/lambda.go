@@ -98,8 +98,7 @@ func (p *runner) invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	if !ok {
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 404, Fault: "client"}
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	invocationType := spi.Str(req.Input["InvocationType"])
 	if invocationType == "DryRun" {
 		return &spi.Response{Status: http.StatusNoContent, Output: map[string]any{"StatusCode": http.StatusNoContent}}, nil

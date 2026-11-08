@@ -119,8 +119,7 @@ func principal(ctx context.Context, scope spi.Scope, id spi.Identity) (kind, nam
 	if id.AccessKeyID != "" {
 		kvs, _, _ := scope.Collection("iamak").List(ctx, "", "", 0)
 		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
+			rec := spi.JSONObject(kv.Value)
 			if spi.Str(rec["AccessKeyId"]) == id.AccessKeyID {
 				return "user", spi.Str(rec["UserName"]), !strings.EqualFold(spi.Str(rec["Status"]), "Inactive")
 			}
@@ -202,8 +201,7 @@ func loadInlineDocs(ctx context.Context, col spi.Collection, prefix string) []ma
 	var docs []map[string]any
 	kvs, _, _ := col.List(ctx, prefix, "", 0)
 	for _, kv := range kvs {
-		var rec map[string]any
-		_ = json.Unmarshal(kv.Value, &rec)
+		rec := spi.JSONObject(kv.Value)
 		if d := parseDoc(rec["PolicyDocument"]); len(statements(d)) > 0 {
 			docs = append(docs, d)
 		}
@@ -215,8 +213,7 @@ func loadAttachedDocs(ctx context.Context, scope spi.Scope, attachments, prefix 
 	var docs []map[string]any
 	atts, _, _ := scope.Collection(attachments).List(ctx, prefix, "", 0)
 	for _, kv := range atts {
-		var rec map[string]any
-		_ = json.Unmarshal(kv.Value, &rec)
+		rec := spi.JSONObject(kv.Value)
 		arn, _ := rec["PolicyArn"].(string)
 		name := arn
 		if i := strings.LastIndex(arn, "/"); i >= 0 {
@@ -226,13 +223,11 @@ func loadAttachedDocs(ctx context.Context, scope spi.Scope, attachments, prefix 
 		if !ok {
 			continue
 		}
-		var pol map[string]any
-		_ = json.Unmarshal(b, &pol)
+		pol := spi.JSONObject(b)
 		doc := pol["PolicyDocument"]
 		if version := spi.Str(pol["DefaultVersionId"]); version != "" && version != "v1" {
 			if vb, found, _ := scope.Collection("iampolver:"+name).Get(ctx, name+":"+version); found {
-				var rec map[string]any
-				_ = json.Unmarshal(vb, &rec)
+				rec := spi.JSONObject(vb)
 				doc = rec["Document"]
 			}
 		}
@@ -248,8 +243,7 @@ func loadSCPDocs(ctx context.Context, st spi.Store, id spi.Identity) []map[strin
 	if !ok {
 		return nil
 	}
-	var member map[string]any
-	_ = json.Unmarshal(b, &member)
+	member := spi.JSONObject(b)
 	scope := st.Scope(spi.Str(member["ManagementAccount"]), spi.Str(member["Region"]))
 	col := scope.Collection("oattach")
 	policies := scope.Collection("opolicy")
@@ -261,8 +255,7 @@ func loadSCPDocs(ctx context.Context, st spi.Store, id spi.Identity) []map[strin
 		if !found {
 			break
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(ou, &rec)
+		rec := spi.JSONObject(ou)
 		parent = spi.Str(rec["ParentId"])
 	}
 	targets = append(targets, id.Account)
@@ -270,14 +263,12 @@ func loadSCPDocs(ctx context.Context, st spi.Store, id spi.Identity) []map[strin
 	for _, target := range targets {
 		attachments, _, _ := col.List(ctx, target+"/", "", 0)
 		for _, attachment := range attachments {
-			var link map[string]any
-			_ = json.Unmarshal(attachment.Value, &link)
+			link := spi.JSONObject(attachment.Value)
 			policy, found, _ := policies.Get(ctx, spi.Str(link["PolicyId"]))
 			if !found {
 				continue
 			}
-			var rec map[string]any
-			_ = json.Unmarshal(policy, &rec)
+			rec := spi.JSONObject(policy)
 			if doc := parseDoc(rec["Content"]); len(statements(doc)) > 0 {
 				docs = append(docs, doc)
 			}

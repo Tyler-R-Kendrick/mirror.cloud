@@ -64,8 +64,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	switch req.Operation {
 	case "CreateTable":
 		b, _ := json.Marshal(req.Input)
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		if spi.Str(rec["BillingMode"]) == "PAY_PER_REQUEST" && len(spi.Object(rec["ProvisionedThroughput"])) > 0 {
 			return nil, &spi.Fault{Code: "ValidationException", Message: "One or more parameter values were invalid: Neither ReadCapacityUnits nor WriteCapacityUnits can be specified when BillingMode is PAY_PER_REQUEST", HTTPStatus: 400, Fault: "client"}
 		}
@@ -132,8 +131,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
-		var m map[string]any
-		_ = json.Unmarshal(b, &m)
+		m := spi.JSONObject(b)
 		return &spi.Response{Output: map[string]any{"Table": tableDescription(m, "ACTIVE")}}, nil
 	case "PutItem":
 		item, _ := req.Input["Item"].(map[string]any)
@@ -251,8 +249,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "BackupNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
-		var m map[string]any
-		_ = json.Unmarshal(b, &m)
+		m := spi.JSONObject(b)
 		dst := spi.First(req.Input, "TargetTableName")
 		if s := spi.Str(m["Table"]); s != "" {
 			_ = p.col(req, "tables").Put(ctx, dst, []byte(s))
@@ -283,8 +280,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 					if !ok {
 						continue
 					}
-					var item map[string]any
-					_ = json.Unmarshal(b, &item)
+					item := spi.JSONObject(b)
 					items = append(items, item)
 				}
 				out[tbl] = items
@@ -441,8 +437,7 @@ func (p *Pack) listItems(ctx context.Context, req *spi.Request, table, keyCond, 
 	values := spi.Object(req.Input["ExpressionAttributeValues"])
 	var matched []map[string]any
 	for _, kv := range kvs {
-		var item map[string]any
-		_ = json.Unmarshal(kv.Value, &item)
+		item := spi.JSONObject(kv.Value)
 		if keyCond != "" {
 			ok, err := expr.EvalBool(keyCond, item, names, values)
 			if err != nil || !ok {
@@ -537,8 +532,7 @@ func cloneMap(m map[string]any) map[string]any {
 		return nil
 	}
 	b, _ := json.Marshal(m)
-	var o map[string]any
-	_ = json.Unmarshal(b, &o)
+	o := spi.JSONObject(b)
 	return o
 }
 
@@ -602,8 +596,7 @@ func (p *Pack) defaultDynamoDBKey(ctx context.Context, req *spi.Request) (string
 		if raw, ok, err := aliases.Get(alias); err != nil {
 			return err
 		} else if ok {
-			var record map[string]any
-			_ = json.Unmarshal(raw, &record)
+			record := spi.JSONObject(raw)
 			if raw, ok, err = keys.Get(spi.Str(record["TargetKeyId"])); err != nil {
 				return err
 			} else if ok {
@@ -660,8 +653,7 @@ func (p *Pack) loadItem(ctx context.Context, req *spi.Request, table, key string
 	if !ok {
 		return nil
 	}
-	var item map[string]any
-	_ = json.Unmarshal(b, &item)
+	item := spi.JSONObject(b)
 	return item
 }
 
@@ -731,8 +723,7 @@ func (p *Pack) tableDef(ctx context.Context, req *spi.Request, table string) map
 	if !ok {
 		return map[string]any{}
 	}
-	var m map[string]any
-	_ = json.Unmarshal(b, &m)
+	m := spi.JSONObject(b)
 	return m
 }
 
@@ -804,8 +795,7 @@ func itemKey(m map[string]any) string {
 func (p *Pack) itemKeyFrom(ctx context.Context, req *spi.Request, table string, attrs map[string]any) string {
 	b, ok, _ := p.col(req, "tables").Get(ctx, table)
 	if ok {
-		var td map[string]any
-		_ = json.Unmarshal(b, &td)
+		td := spi.JSONObject(b)
 		return itemKeyFromDefinition(td, attrs)
 	}
 	return itemKey(attrs)
@@ -850,8 +840,7 @@ func ExpireItems(ctx context.Context, deps spi.Deps, id spi.Identity) (int, erro
 		}
 		definition := p.tableDef(ctx, req, table)
 		for _, itemRecord := range items {
-			var item map[string]any
-			_ = json.Unmarshal(itemRecord.Value, &item)
+			item := spi.JSONObject(itemRecord.Value)
 			expires, err := strconv.ParseInt(spi.Str(spi.Object(item[spi.Str(ttl["AttributeName"])])["N"]), 10, 64)
 			if err != nil || expires > p.deps.Clock.Now().Unix() {
 				continue

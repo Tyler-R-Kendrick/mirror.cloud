@@ -419,8 +419,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		publish := inputBool(req.Input, "publish", "Publish")
 		versionDescription := spi.First(req.Input, "versionDescription", "VersionDescription")
 		if len(versionDescription) > 256 || versionDescription != "" && !publish {
@@ -504,8 +503,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		if collection == "ver" {
 			rec["stateMachineArn"], rec["name"], rec["status"] = arn, name, "ACTIVE"
 		}
@@ -530,8 +528,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var machine map[string]any
-		_ = json.Unmarshal(b, &machine)
+		machine := spi.JSONObject(b)
 		revision := spi.First(machine, "revisionId")
 		if wanted := spi.First(req.Input, "revisionId", "RevisionId"); wanted != "" && wanted != revision {
 			return nil, &spi.Fault{Code: "ConflictException", HTTPStatus: 409, Fault: "client"}
@@ -542,8 +539,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		next := 1
 		for _, version := range versions {
-			var record map[string]any
-			_ = json.Unmarshal(version.Value, &record)
+			record := spi.JSONObject(version.Value)
 			if spi.First(record, "revisionId") == revision {
 				return &spi.Response{Output: map[string]any{"stateMachineVersionArn": record["stateMachineVersionArn"], "creationDate": record["creationDate"]}}, nil
 			}
@@ -568,8 +564,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		versions, _, _ := p.col(req, "ver").List(ctx, name+":", "", 0)
 		items := make([]any, 0, len(versions))
 		for _, version := range versions {
-			var record map[string]any
-			_ = json.Unmarshal(version.Value, &record)
+			record := spi.JSONObject(version.Value)
 			items = append(items, map[string]any{"stateMachineVersionArn": record["stateMachineVersionArn"], "creationDate": record["creationDate"], "description": record["description"]})
 		}
 		sort.Slice(items, func(i, j int) bool {
@@ -587,8 +582,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		aliases, _, _ := p.col(req, "alias").List(ctx, "", "", 0)
 		for _, alias := range aliases {
-			var record map[string]any
-			_ = json.Unmarshal(alias.Value, &record)
+			record := spi.JSONObject(alias.Value)
 			for _, raw := range spi.Slice(record["routingConfiguration"]) {
 				route, _ := raw.(map[string]any)
 				if spi.First(route, "stateMachineVersionArn", "StateMachineVersionArn") == arn {
@@ -625,8 +619,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		aliases, _, _ := p.col(req, "alias").List(ctx, baseARN+":", "", 0)
 		items := make([]any, 0, len(aliases))
 		for _, alias := range aliases {
-			var record map[string]any
-			_ = json.Unmarshal(alias.Value, &record)
+			record := spi.JSONObject(alias.Value)
 			if versionNumber(requestedARN) > 0 && !aliasReferences(record, requestedARN) {
 				continue
 			}
@@ -642,8 +635,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFound", HTTPStatus: 400, Fault: "client"}
 		}
-		var record map[string]any
-		_ = json.Unmarshal(b, &record)
+		record := spi.JSONObject(b)
 		routesValue, hasRoutes := inputValue(req.Input, "routingConfiguration", "RoutingConfiguration")
 		description, hasDescription := inputValue(req.Input, "description", "Description")
 		if !hasRoutes && !hasDescription || hasDescription && len(fmt.Sprint(description)) > 256 {
@@ -786,8 +778,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		if spi.First(rec, "type") == "EXPRESS" {
 			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
 		}
@@ -817,8 +808,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		if spi.First(rec, "type") == "EXPRESS" && spi.First(rec, "mapRunArn") == "" {
 			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
 		}
@@ -890,8 +880,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		records, _, _ := p.col(req, "maprun").List(ctx, "", "", 0)
 		items := make([]any, 0)
 		for _, item := range records {
-			var record map[string]any
-			_ = json.Unmarshal(item.Value, &record)
+			record := spi.JSONObject(item.Value)
 			if spi.First(record, "executionArn") == executionARN {
 				items = append(items, map[string]any{
 					"executionArn": record["executionArn"], "mapRunArn": record["mapRunArn"], "startDate": record["startDate"],
@@ -963,8 +952,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		if spi.First(rec, "type") == "EXPRESS" {
 			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
 		}
@@ -1025,8 +1013,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ActivityDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		if encryption := rec["_encryption"]; encryption != nil {
 			rec["encryptionConfiguration"] = encryption
 		}
@@ -6492,8 +6479,7 @@ func listRecords(ctx context.Context, collection spi.Collection, selectRecord fu
 	kvs, _, _ := collection.List(ctx, "", "", 0)
 	items := make([]any, 0, len(kvs))
 	for _, kv := range kvs {
-		var record map[string]any
-		_ = json.Unmarshal(kv.Value, &record)
+		record := spi.JSONObject(kv.Value)
 		if selected, keep := selectRecord(record); keep {
 			items = append(items, selected)
 		}

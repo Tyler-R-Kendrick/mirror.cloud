@@ -211,8 +211,7 @@ func (p *crypto) material(ctx context.Context, req *spi.Request, id string) ([]b
 	if !ok {
 		return nil, &spi.Fault{Code: "NotFoundException", HTTPStatus: 400, Fault: "client"}
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	if st := spi.Str(rec["KeyState"]); st == "Disabled" || st == "PendingDeletion" {
 		return nil, &spi.Fault{Code: "DisabledException", HTTPStatus: 400, Fault: "client"}
 	}
@@ -318,8 +317,7 @@ func (p *crypto) loadKey(ctx context.Context, req *spi.Request) (map[string]any,
 	if !ok {
 		return nil, &spi.Fault{Code: "NotFoundException", HTTPStatus: 400, Fault: "client"}
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	return rec, nil
 }
 
@@ -339,7 +337,6 @@ func (p *crypto) loadExtra(ctx context.Context, req *spi.Request, col, id string
 	if !ok {
 		return nil, false
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	return rec, true
 }

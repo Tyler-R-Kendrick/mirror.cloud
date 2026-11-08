@@ -236,15 +236,13 @@ func (p *Pack) globalTable(ctx context.Context, req *spi.Request) (*spi.Response
 		if !ok {
 			return nil, &spi.Fault{Code: "GlobalTableNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		return &spi.Response{Output: map[string]any{"GlobalTableDescription": rec}}, nil
 	case "ListGlobalTables":
 		kvs, _, _ := col.List(ctx, "", "", 0)
 		var out []any
 		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
+			rec := spi.JSONObject(kv.Value)
 			out = append(out, rec)
 		}
 		return &spi.Response{Output: map[string]any{"GlobalTables": out}}, nil
@@ -287,8 +285,7 @@ func (p *Pack) globalTable(ctx context.Context, req *spi.Request) (*spi.Response
 		if !ok {
 			return &spi.Response{Output: map[string]any{"GlobalTableName": name, "ReplicaSettings": []any{}}}, nil
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		return &spi.Response{Output: rec}, nil
 	}
 	return nil, spi.NotImplemented("aws.dynamodb", req.Operation, "emulate")
@@ -387,8 +384,7 @@ func (p *Pack) globalTableIdentities(ctx context.Context, req *spi.Request, tabl
 	if !ok {
 		return []spi.Identity{req.Identity}
 	}
-	var state map[string]any
-	_ = json.Unmarshal(encoded, &state)
+	state := spi.JSONObject(encoded)
 	regions := []string{spi.Str(state["SourceRegion"])}
 	for _, replica := range spi.Slice(state["ReplicationGroup"]) {
 		regions = append(regions, spi.Str(spi.Object(replica)["RegionName"]))
@@ -499,8 +495,7 @@ func (p *Pack) searchVectors(ctx context.Context, req *spi.Request) (*spi.Respon
 		if q != "" && !strings.Contains(string(kv.Value), q) {
 			continue
 		}
-		var item map[string]any
-		_ = json.Unmarshal(kv.Value, &item)
+		item := spi.JSONObject(kv.Value)
 		hits = append(hits, item)
 	}
 	return &spi.Response{Output: map[string]any{"Items": hits}}, nil

@@ -72,3 +72,11 @@ func Int(v any) int {
 	}
 	return 0
 }
+
+// JSONObject answers raw decoded as a JSON object, and nil when it is none: a
+// stored record read back.
+func JSONObject(raw []byte) map[string]any {
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	return m
+}

@@ -62,8 +62,7 @@ func (t *Tables) ApplyRows(ctx context.Context, identity spi.Identity, bucket, n
 	if !ok {
 		return errors.New("S3 table not found")
 	}
-	var description map[string]any
-	_ = json.Unmarshal(encoded, &description)
+	description := spi.JSONObject(encoded)
 	columns := stringsFrom(description["columns"])
 	if len(columns) == 0 {
 		return errors.New("S3 table schema is unavailable")
@@ -131,8 +130,7 @@ func (t *Tables) TableRows(ctx context.Context, identity spi.Identity, bucket, n
 	if !ok {
 		return nil, errors.New("S3 table not found")
 	}
-	var description map[string]any
-	_ = json.Unmarshal(descriptionBody, &description)
+	description := spi.JSONObject(descriptionBody)
 	columns := stringsFrom(description["columns"])
 	rowsBody, _, _ := t.col(identity, "s3trows").Get(ctx, key)
 	var doc rowsDoc

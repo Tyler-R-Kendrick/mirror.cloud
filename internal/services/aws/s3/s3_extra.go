@@ -307,8 +307,7 @@ func (p *Pack) objectAnnotation(ctx context.Context, req *spi.Request) (*spi.Res
 		kvs, _, _ := col.List(ctx, b+"/"+key+"/", "", 0)
 		var items []any
 		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
+			rec := spi.JSONObject(kv.Value)
 			items = append(items, rec)
 		}
 		return &spi.Response{Output: map[string]any{"Annotations": items}}, nil
@@ -317,8 +316,7 @@ func (p *Pack) objectAnnotation(ctx context.Context, req *spi.Request) (*spi.Res
 	if !ok {
 		return nil, &spi.Fault{Code: "NoSuchAnnotation", HTTPStatus: 404, Fault: "client"}
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(raw, &rec)
+	rec := spi.JSONObject(raw)
 	return &spi.Response{Output: rec}, nil
 }
 
@@ -349,8 +347,7 @@ func (p *Pack) metadataCfg(ctx context.Context, req *spi.Request) (*spi.Response
 		if !ok {
 			return nil, &spi.Fault{Code: "NoSuchMetadataConfiguration", HTTPStatus: 404, Fault: "client"}
 		}
-		var doc map[string]any
-		_ = json.Unmarshal(raw, &doc)
+		doc := spi.JSONObject(raw)
 		return &spi.Response{Output: doc}, nil
 	}
 	doc := map[string]any{"Bucket": b}

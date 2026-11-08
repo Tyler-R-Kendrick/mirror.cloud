@@ -534,8 +534,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		return &spi.Response{Output: map[string]any{"DeliveryStreamDescription": describeRecord(rec, after)}}, nil
 	case "PutRecord":
 		stream, ok, _ := p.col(req, "fh").Get(ctx, name)
@@ -610,8 +609,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if !ok {
 				return &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 			}
-			var rec map[string]any
-			_ = json.Unmarshal(b, &rec)
+			rec := spi.JSONObject(b)
 			current := spi.First(req.Input, "CurrentDeliveryStreamVersionId")
 			if current == "" || spi.First(req.Input, "DestinationId") != destinationID {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -740,8 +738,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
-		var current map[string]any
-		_ = json.Unmarshal(stored, &current)
+		current := spi.JSONObject(stored)
 		if spi.First(current, "DeliveryStreamType") != "DirectPut" {
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -758,8 +755,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if !ok {
 				return &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 			}
-			var rec map[string]any
-			_ = json.Unmarshal(b, &rec)
+			rec := spi.JSONObject(b)
 			rec["DeliveryStreamEncryptionConfiguration"] = encryption
 			rec["LastUpdateTimestamp"] = float64(p.deps.Clock.Now().UnixNano()) / float64(time.Second)
 			nb, _ := json.Marshal(rec)
@@ -847,8 +843,7 @@ func (p *Pack) ensureEncryptionKey(ctx context.Context, req *spi.Request, encryp
 }
 
 func (p *Pack) recordEncryptionKey(ctx context.Context, req *spi.Request, stream []byte) (string, error) {
-	var rec map[string]any
-	_ = json.Unmarshal(stream, &rec)
+	rec := spi.JSONObject(stream)
 	encryption, _ := rec["DeliveryStreamEncryptionConfiguration"].(map[string]any)
 	return p.ensureEncryptionKey(ctx, req, encryption)
 }
@@ -901,21 +896,18 @@ func invalidKMSResource(err error) *spi.Fault {
 }
 
 func streamEncrypted(b []byte) bool {
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	encryption, _ := rec["DeliveryStreamEncryptionConfiguration"].(map[string]any)
 	return spi.First(encryption, "Status") == "ENABLED"
 }
 
 func directPutStream(b []byte) bool {
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	return spi.First(rec, "DeliveryStreamType") == "DirectPut"
 }
 
 func requiresCloudWatchLogsSource(b []byte) bool {
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration"} {
 		if destination, ok := rec[key].(map[string]any); ok && hasProcessor(destination, "Decompression") {
 			return true
@@ -2423,8 +2415,7 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 	if !ok {
 		return
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(raw, &rec)
+	rec := spi.JSONObject(raw)
 	var destination map[string]any
 	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration"} {
 		if configuration, ok := rec[key].(map[string]any); ok {
@@ -2820,8 +2811,7 @@ func (p *Pack) runRedshiftRetry(ctx context.Context, identity spi.Identity, coll
 		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
-	var stream map[string]any
-	_ = json.Unmarshal(raw, &stream)
+	stream := spi.JSONObject(raw)
 	destination, ok := stream["RedshiftDestinationConfiguration"].(map[string]any)
 	if !ok {
 		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)
@@ -3237,8 +3227,7 @@ func (p *Pack) flushSearchBuffer(ctx context.Context, identity spi.Identity, col
 		p.deleteSearchItems(ctx, collection, items)
 		return time.Time{}
 	}
-	var stream map[string]any
-	_ = json.Unmarshal(raw, &stream)
+	stream := spi.JSONObject(raw)
 	destination, ok := stream[persistedSearchDestinationKey(items[0].Work.Destination)].(map[string]any)
 	if !ok {
 		p.deleteSearchItems(ctx, collection, items)
@@ -3332,8 +3321,7 @@ func (p *Pack) runSearchRetry(ctx context.Context, identity spi.Identity, collec
 		p.deleteSearchWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
-	var stream map[string]any
-	_ = json.Unmarshal(raw, &stream)
+	stream := spi.JSONObject(raw)
 	destination, ok := stream[persistedSearchDestinationKey(work.Destination)].(map[string]any)
 	if !ok {
 		p.deleteSearchWork(ctx, collection, key, work.DataKey)
@@ -3701,8 +3689,7 @@ func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, colle
 		p.deleteHTTPBuffer(ctx, collection, items)
 		return time.Time{}
 	}
-	var stream map[string]any
-	_ = json.Unmarshal(raw, &stream)
+	stream := spi.JSONObject(raw)
 	destinationKey := endpointDestinationKey(items[0].Buffer.Destination)
 	destination, ok := stream[destinationKey].(map[string]any)
 	if !ok {
@@ -3802,8 +3789,7 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
 		return time.Time{}
 	}
-	var stream map[string]any
-	_ = json.Unmarshal(raw, &stream)
+	stream := spi.JSONObject(raw)
 	destinationKey := endpointDestinationKey(retry.Destination)
 	destination, ok := stream[destinationKey].(map[string]any)
 	if !ok {

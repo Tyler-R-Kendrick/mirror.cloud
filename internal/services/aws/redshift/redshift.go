@@ -64,8 +64,7 @@ func (w *Warehouse) Copy(ctx context.Context, identity spi.Identity, input CopyI
 	if !ok {
 		return errors.New("Redshift cluster not found")
 	}
-	var cluster map[string]any
-	_ = json.Unmarshal(clusterBody, &cluster)
+	cluster := spi.JSONObject(clusterBody)
 	if spi.First(cluster, "ClusterStatus") != "available" || spi.First(cluster, "DBName") != input.Database {
 		return errors.New("Redshift cluster is unavailable or database does not exist")
 	}
@@ -73,8 +72,7 @@ func (w *Warehouse) Copy(ctx context.Context, identity spi.Identity, input CopyI
 	if !ok {
 		return errors.New("Redshift credentials are unavailable")
 	}
-	var credential map[string]any
-	_ = json.Unmarshal(credentialBody, &credential)
+	credential := spi.JSONObject(credentialBody)
 	if spi.First(credential, "Username") != input.Username || spi.First(credential, "PasswordHash") != fmt.Sprintf("%x", sha256.Sum256([]byte(input.Password))) {
 		return errors.New("Redshift credentials are invalid")
 	}

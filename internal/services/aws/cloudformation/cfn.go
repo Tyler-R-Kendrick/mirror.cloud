@@ -165,6 +165,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		if planned[logical] = planID(req, typ, n, props); err != nil {
 			return fail(err)
 		}
+		attribute(planned, req, typ, logical, planned[logical])
 	}
 	for _, logical := range order {
 		rm := asMap(resources[logical]) // props is never nil: provision adds to it
@@ -175,6 +176,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		}
 		if phys != "" { // recorded once it exists, so a rollback finds a half-made one too
 			st.Refs[logical] = phys
+			attribute(st.Refs, req, typ, logical, phys)
 			st.Resources = append(st.Resources, res{Logical: logical, Physical: phys, Type: typ, Name: n})
 		}
 		if err != nil {
@@ -364,14 +366,47 @@ var kinds = map[string]struct {
 	"AWS::SQS::Queue":             {"QueueName", 80, "aws.sqs", "GetQueueUrl", "QueueName", "QueueAlreadyExists", ""},
 	"AWS::SNS::Topic":             {"TopicName", 256, "aws.sns", "GetTopicAttributes", "TopicArn", "AlreadyExistsException", "arn:aws:sns:{r}:{a}:{n}"},
 	"AWS::DynamoDB::Table":        {"TableName", 255, "aws.dynamodb", "DescribeTable", "TableName", "ResourceInUseException", "{n}"},
-	"AWS::IAM::Role":              {"RoleName", 64, "aws.iam", "GetRole", "RoleName", "EntityAlreadyExists", "arn:aws:iam::{a}:role/{n}"},
+	"AWS::IAM::Role":              {"RoleName", 64, "aws.iam", "GetRole", "RoleName", "EntityAlreadyExists", "{n}"},
 	"AWS::SSM::Parameter":         {"Name", 2048, "aws.ssm", "GetParameter", "Name", "ParameterAlreadyExists", "{n}"},
 	"AWS::SecretsManager::Secret": {"Name", 512, "aws.secretsmanager", "DescribeSecret", "SecretId", "ResourceExistsException", "arn:aws:secretsmanager:{r}:{a}:secret:{n}"},
 	"AWS::Logs::LogGroup":         {"LogGroupName", 512, "aws.logs", "DescribeLogGroups", "logGroupNamePrefix", "ResourceAlreadyExistsException", "{n}"},
-	"AWS::Events::Rule":           {"Name", 64, "aws.events", "DescribeRule", "Name", "ResourceAlreadyExistsException", "arn:aws:events:{r}:{a}:rule/{n}"},
-	"AWS::Lambda::Function":       {"FunctionName", 64, "aws.lambda", "GetFunction", "FunctionName", "ResourceConflictException", "arn:aws:lambda:{r}:{a}:function:{n}"},
+	"AWS::Events::Rule":           {"Name", 64, "aws.events", "DescribeRule", "Name", "ResourceAlreadyExistsException", "{n}"},
+	"AWS::Lambda::Function":       {"FunctionName", 64, "aws.lambda", "GetFunction", "FunctionName", "ResourceConflictException", "{n}"},
 	"AWS::Kinesis::Stream":        {"Name", 128, "aws.kinesis", "DescribeStreamSummary", "StreamName", "ResourceInUseException", "{n}"},
 	"AWS::ApiGateway::RestApi":    {"Name", 1024, "", "", "", "", ""},
+}
+
+// attributes are each type's Fn::GetAtt attributes, from the id its Ref answers, as its Template Reference
+// page lists them: {id/} is the id's last path segment, {id:} its last colon-separated one, {rule} a rule's
+// name and {bus/} the bus before it, and {param} a parameter's name without a leading slash.
+var attributes = map[string]string{
+	"AWS::S3::Bucket":             "Arn=arn:aws:s3:::{id} DomainName={id}.s3.amazonaws.com",
+	"AWS::SQS::Queue":             "Arn=arn:aws:sqs:{r}:{a}:{id/} QueueName={id/} QueueUrl={id}",
+	"AWS::SNS::Topic":             "TopicArn={id} TopicName={id:}",
+	"AWS::DynamoDB::Table":        "Arn=arn:aws:dynamodb:{r}:{a}:table/{id}",
+	"AWS::IAM::Role":              "Arn=arn:aws:iam::{a}:role/{id}",
+	"AWS::SSM::Parameter":         "Arn=arn:aws:ssm:{r}:{a}:parameter/{param}",
+	"AWS::SecretsManager::Secret": "Id={id}",
+	"AWS::KMS::Key":               "Arn=arn:aws:kms:{r}:{a}:key/{id} KeyId={id}",
+	"AWS::Logs::LogGroup":         "Arn=arn:aws:logs:{r}:{a}:log-group:{id}:*",
+	"AWS::Events::Rule":           "Arn=arn:aws:events:{r}:{a}:rule/{bus/}{rule} RuleName={rule}",
+	"AWS::Lambda::Function":       "Arn=arn:aws:lambda:{r}:{a}:function:{id}",
+	"AWS::Kinesis::Stream":        "Arn=arn:aws:kinesis:{r}:{a}:stream/{id}",
+	"AWS::ApiGateway::RestApi":    "RestApiId={id}",
+}
+
+// attribute sets refs' <logical>.<attribute> for each attribute of typ, from id, what its Ref answers.
+func attribute(refs map[string]string, req *spi.Request, typ, logical, id string) {
+	bus, rule, onBus := strings.Cut(id, "|")
+	if bus += "/"; !onBus {
+		bus, rule = "", id
+	}
+	sub := strings.NewReplacer("{r}", req.Identity.Region, "{a}", req.Identity.Account, "{id}", id, "{id/}", spi.LastSlash(id),
+		"{id:}", lastColon(id), "{rule}", rule, "{bus/}", bus, "{param}", strings.TrimPrefix(id, "/"))
+	for _, a := range strings.Fields(attributes[typ]) {
+		k, f, _ := strings.Cut(a, "=")
+		refs[logical+"."+k] = sub.Replace(f)
+	}
 }
 
 // unknown stands for an id known only once its resource is made, and in order for one not yet ordered.
@@ -382,7 +417,7 @@ const unknown = "\uffff"
 // known only once made, as is an id built on one: unknown. A Kinesis resource policy's is its ARN.
 func planID(req *spi.Request, typ, n string, props map[string]any) string {
 	if bus := spi.LastSlash(str(props["EventBusName"])); typ == "AWS::Events::Rule" && bus != "" && bus != "default" {
-		n = bus + "/" + n
+		n = bus + "|" + n // a rule's "event rule ID": <bus>|<name> on any bus but the default (a reading)
 	}
 	if f := kinds[typ].ref; f != "" && !strings.Contains(n, unknown) {
 		return strings.NewReplacer("{r}", req.Identity.Region, "{a}", req.Identity.Account, "{n}", n).Replace(f)
@@ -547,8 +582,8 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		_, err := p.call(ctx, req, "aws.dynamodb", "CreateTable", in)
 		return made(n, err)
 	case "AWS::IAM::Role":
-		out, err := p.call(ctx, req, "aws.iam", "CreateRole", map[string]any{"RoleName": n, "AssumeRolePolicyDocument": spi.JSONText(props["AssumeRolePolicyDocument"])})
-		return str(asMap(out["Role"])["Arn"]), err
+		_, err := p.call(ctx, req, "aws.iam", "CreateRole", map[string]any{"RoleName": n, "AssumeRolePolicyDocument": spi.JSONText(props["AssumeRolePolicyDocument"])})
+		return made(n, err)
 	case "AWS::SSM::Parameter":
 		_, err := p.call(ctx, req, "aws.ssm", "PutParameter", map[string]any{"Name": n, "Value": str(props["Value"]), "Type": cmp.Or(str(props["Type"]), "String")})
 		return made(n, err)
@@ -582,12 +617,15 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		if targets, ok := props["Targets"]; ok && err == nil {
 			_, err = p.call(ctx, req, "aws.events", "PutTargets", given(map[string]any{"Rule": in["Name"], "Targets": targets}, props, "EventBusName"))
 		}
-		return str(out["RuleArn"]), err
+		if out["RuleArn"] == nil { // PutRule made nothing
+			return "", err
+		}
+		return planID(req, typ, n, props), err
 	case "AWS::Lambda::Function":
 		in := maps.Clone(props)
 		in["FunctionName"] = n
-		out, err := p.call(ctx, req, "aws.lambda", "CreateFunction", in)
-		return str(out["FunctionArn"]), err
+		_, err := p.call(ctx, req, "aws.lambda", "CreateFunction", in)
+		return made(n, err)
 	case "AWS::Kinesis::Stream":
 		_, err := p.call(ctx, req, "aws.kinesis", "CreateStream", map[string]any{"StreamName": n})
 		return made(n, err)
@@ -607,9 +645,13 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	}
 }
 
-// ruleBus is the event bus in a rule's ARN, rule/<bus>/<name>: none for the default bus.
-func ruleBus(arn string) string {
-	_, path, _ := strings.Cut(arn, ":rule/")
+// ruleBus is the event bus in a rule's id, <bus>|<name>, or its ARN, rule/<bus>/<name> (a stack recorded
+// before Ref answered the id): none for the default bus.
+func ruleBus(id string) string {
+	if bus, _, ok := strings.Cut(id, "|"); ok {
+		return bus
+	}
+	_, path, _ := strings.Cut(id, ":rule/")
 	return path[:max(strings.LastIndex(path, "/"), 0)]
 }
 
@@ -638,7 +680,7 @@ func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) error {
 		"AWS::SecretsManager::Secret":  {"aws.secretsmanager", "DeleteSecret", map[string]any{"SecretId": id, "ForceDeleteWithoutRecovery": true}},
 		"AWS::KMS::Key":                {"aws.kms", "ScheduleKeyDeletion", map[string]any{"KeyId": id, "PendingWindowInDays": 7}},
 		"AWS::Logs::LogGroup":          {"aws.logs", "DeleteLogGroup", map[string]any{"logGroupName": id}},
-		"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": spi.LastSlash(id), "Force": true, "EventBusName": ruleBus(id)}},
+		"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": spi.LastSlash(id[strings.Index(id, "|")+1:]), "Force": true, "EventBusName": ruleBus(id)}},
 		"AWS::Lambda::Function":        {"aws.lambda", "DeleteFunction", map[string]any{"FunctionName": lastColon(id)}},
 		"AWS::Kinesis::Stream":         {"aws.kinesis", "DeleteStream", map[string]any{"StreamName": id}},
 		"AWS::Kinesis::ResourcePolicy": {"aws.kinesis", "DeleteResourcePolicy", map[string]any{"ResourceARN": id}},
@@ -805,7 +847,7 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 			return v
 		}
 		if g, ok := t["Fn::GetAtt"]; ok {
-			return p.getAtt(g, refs, req)
+			return getAtt(g, refs)
 		}
 		if j, ok := t["Fn::Join"]; ok {
 			return p.fnJoin(j, refs, req, stack)
@@ -841,27 +883,14 @@ func (p *Pack) ref(name string, refs map[string]string, req *spi.Request, stack 
 	return cmp.Or(v, name), ok
 }
 
-func (p *Pack) getAtt(g any, refs map[string]string, req *spi.Request) string {
+// getAtt is a Fn::GetAtt's value: the attribute the resource's type has (attribute), or else its Ref's.
+func getAtt(g any, refs map[string]string) string {
 	logical, attr, _ := strings.Cut(str(g), ".") // "A.B", or [A, B]
 	if t, ok := g.([]any); ok {
 		t = append(slices.Clip(t), nil, nil)
 		logical, attr = str(t[0]), str(t[1])
 	}
-	phys := refs[logical]
-	switch attr {
-	case "Arn":
-		if strings.Contains(phys, "arn:aws:") {
-			return phys
-		}
-		if strings.Contains(phys, "/") && strings.Contains(phys, "://") { // a queue URL
-			return "arn:aws:sqs:" + req.Identity.Region + ":" + req.Identity.Account + ":" + spi.LastSlash(phys)
-		}
-		return "arn:aws:s3:::" + phys
-	case "QueueName":
-		return spi.LastSlash(phys)
-	default:
-		return phys
-	}
+	return cmp.Or(refs[logical+"."+attr], refs[logical])
 }
 
 func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack string) string {
@@ -890,7 +919,7 @@ func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack stri
 		} else if v, ok := asMap(parts[1])[name]; ok {
 			return str(p.resolve(v, refs, req, stack))
 		} else if logical, attr, ok := strings.Cut(name, "."); ok {
-			return p.getAtt([]any{logical, attr}, refs, req)
+			return getAtt([]any{logical, attr}, refs)
 		} else if v, ok := p.ref(name, refs, req, stack); ok {
 			return v
 		}

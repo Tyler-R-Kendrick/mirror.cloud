@@ -4309,8 +4309,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-treat-queue-url-as-bucket",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `if strings.Contains(phys, "/") && strings.Contains(phys, "://") {`,
-		new:  `if false {`,
+		old:  `"Arn=arn:aws:sqs:{r}:{a}:{id/} QueueName={id/} QueueUrl={id}"`,
+		new:  `"Arn=arn:aws:s3:::{id} QueueName={id/} QueueUrl={id}"`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationIntrinsicAndYAMLUnits",
 	},

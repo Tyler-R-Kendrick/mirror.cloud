@@ -146,9 +146,10 @@ func (h *stacks) lookup(r res) (name string, err error) {
 			err = &spi.Fault{Code: "ResourceNotFoundException"}
 		}
 		return r.Physical, err
-	case "AWS::Events::Rule":
-		_, err = h.service("aws.events", "DescribeRule", in("Name", spi.LastSlash(r.Physical)))
-		return spi.LastSlash(r.Physical), err
+	case "AWS::Events::Rule": // its id, <bus>|<name> on any bus but the default
+		name := r.Physical[strings.Index(r.Physical, "|")+1:]
+		_, err = h.service("aws.events", "DescribeRule", map[string]any{"Name": name, "EventBusName": cmp.Or(ruleBus(r.Physical), "default")})
+		return name, err
 	case "AWS::Lambda::Function":
 		_, err = h.service("aws.lambda", "GetFunction", in("FunctionName", lastColon(r.Physical)))
 		return lastColon(r.Physical), err
@@ -949,7 +950,10 @@ func TestCloudFormationARuleLivesOnItsBus(t *testing.T) {
 		t.Errorf("the bus-b rule y has targets %v (%v), want the template's one", targets["Targets"], err)
 	}
 	h.mustCreate("unnamed", rule("", false))
-	unnamed := spi.LastSlash(h.resources("unnamed")[0].Physical)
+	unnamed, ok := strings.CutPrefix(h.resources("unnamed")[0].Physical, "b|") // the rule's id on bus b
+	if !ok {
+		t.Errorf("the unnamed rule's id is %s, want b|<name>", h.resources("unnamed")[0].Physical)
+	}
 	for _, stack := range []string{"ony", "unnamed"} {
 		if _, err := h.invoke("DeleteStack", map[string]any{"StackName": stack}); err != nil {
 			t.Fatalf("DeleteStack %s: %v", stack, err)

@@ -154,9 +154,36 @@ The oracle is AWS's documentation as it ships in the vendored model
     exists."). The resource is left as it was. A name built on another
     resource's id is checked by the id that resource will be made with: before
     anything is made, each resource's id is planned in the order resources are
-    made, so a `Ref` answers what the type's `Ref` will answer (a bucket's
-    name, a topic's, role's, rule's, function's or secret's ARN), never the
-    logical id. A queue's URL (its endpoint's business), a KMS key's id and a
+    made, so a `Ref` answers what the type's `Ref` will answer, never the
+    logical id.
+  - A `Ref` answers what each type's Template Reference page says its `Ref`
+    returns, and `Fn::GetAtt` each attribute the page lists, derived from it:
+
+    | Type | `Ref` | `Fn::GetAtt` |
+    | --- | --- | --- |
+    | `AWS::S3::Bucket` | bucket name | `Arn`, `DomainName` |
+    | `AWS::SQS::Queue` | queue URL | `Arn`, `QueueName`, `QueueUrl` |
+    | `AWS::SNS::Topic` | topic ARN | `TopicArn`, `TopicName` |
+    | `AWS::DynamoDB::Table` | table name | `Arn` |
+    | `AWS::IAM::Role` | role name (was its ARN) | `Arn` |
+    | `AWS::SSM::Parameter` | parameter name | `Arn` |
+    | `AWS::SecretsManager::Secret` | secret ARN | `Id` |
+    | `AWS::KMS::Key` | key id | `Arn`, `KeyId` |
+    | `AWS::Logs::LogGroup` | log group name | `Arn` |
+    | `AWS::Events::Rule` | "event rule ID": the name, `<bus>\|<name>` on another bus (was its ARN) | `Arn`, `RuleName` |
+    | `AWS::Lambda::Function` | function name (was its ARN) | `Arn` |
+    | `AWS::Kinesis::Stream` | stream name | `Arn` |
+    | `AWS::ApiGateway::RestApi` | REST API id | `RestApiId` |
+    | `AWS::Kinesis::ResourcePolicy` | the stream ARN it attaches to (its page lists no `Ref`; a reading) | none |
+
+    `<bus>|<name>` for a rule on another bus is a reading: the page's example
+    is a default-bus rule. `PhysicalResourceId` is the `Ref`'s id, and
+    `DeleteStack` deletes each resource by it, and by the ARN a stack
+    recorded before this change holds. An attribute the table does not list
+    answers the `Ref`'s value, as before (a REST API's `RootResourceId`, a
+    role's `RoleId`, a table's `StreamArn`). Before, `GetAtt` of `Arn`
+    guessed from the id's shape, so a table's, parameter's, log group's,
+    stream's and key's `Arn` was `arn:aws:s3:::<id>`. A queue's URL (its endpoint's business), a KMS key's id and a
     REST API's id are known only once made, so a name built on one is checked
     just before its create instead. Resources are made in dependency order,
     each after those its properties name by `Ref`, `Fn::GetAtt` or `Fn::Sub`
@@ -190,7 +217,7 @@ The oracle is AWS's documentation as it ships in the vendored model
     rule, role, stream, log group or bucket here) took the resource over, and
     the stack's rollback or `DeleteStack` deleted it.
   - EventBridge keys a rule by its event bus and its name, and the rule's
-    ARN carries the bus (`rule/<bus>/<name>`), so the check of a rule's name,
+    id carries the bus (`<bus>|<name>`, its ARN `rule/<bus>/<name>`), so the check of a rule's name,
     its `PutTargets` and its delete all carry the bus: the `EventBusName`
     property, or the bus in the ARN. A named rule already on bus `b` fails
     the stack and is left as it was, a rule of that name on the default bus

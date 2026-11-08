@@ -248,3 +248,97 @@ func TestCloudFormationSubstitutesEveryForm(t *testing.T) {
 		}
 	}
 }
+
+// A Ref answers what each type's Template Reference page says its Ref
+// returns, and Fn::GetAtt each attribute the page lists, from it: a role's
+// and a function's Ref is its name, a rule's its "event rule ID", the name on
+// the default bus and, on another bus, <bus>|<name> (a reading: the page's
+// example is a default-bus rule); every other type's Ref was already its
+// page's (a bucket's, table's, parameter's, log group's and stream's name, a
+// queue's URL, a topic's and a secret's ARN, a key's and a REST API's id).
+// The ARNs are Fn::GetAtt's Arn, which a DynamoDB table answered as a
+// bucket's. DescribeStackResources' PhysicalResourceId is the Ref's id, and
+// DeleteStack deletes each resource by it. Before, a role's, a function's and
+// a rule's Ref answered its ARN, and GetAtt Table.Arn arn:aws:s3:::<table>.
+func TestCloudFormationARefAnswersWhatItsTypeDocuments(t *testing.T) {
+	h := newStacks(t)
+	all := nameable()
+	named := map[string]string{"Bucket": "BucketName", "Queue": "QueueName", "Topic": "TopicName", "Table": "TableName", "Role": "RoleName",
+		"Parameter": "Name", "Secret": "Name", "Log": "LogGroupName", "Rule": "Name", "Function": "FunctionName", "Stream": "Name"}
+	resources := map[string]any{"Key": map[string]any{"Type": "AWS::KMS::Key"}}
+	for logical, member := range named {
+		all[logical]["Properties"].(map[string]any)[member] = "ref-" + strings.ToLower(logical)
+		resources[logical] = all[logical]
+	}
+	resources["Api"] = all["Api"]
+	resources["BusRule"] = map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"Name": "ref-busrule", "EventBusName": "ref-bus", "EventPattern": map[string]any{"source": []any{"app"}}}}
+	outputs := map[string]any{}
+	attributes := map[string][]string{"Bucket": {"Arn", "DomainName"}, "Queue": {"Arn", "QueueName", "QueueUrl"}, "Topic": {"TopicArn", "TopicName"},
+		"Table": {"Arn"}, "Role": {"Arn"}, "Parameter": {"Arn"}, "Secret": {"Id"}, "Key": {"Arn", "KeyId"}, "Log": {"Arn"},
+		"Rule": {"Arn", "RuleName"}, "BusRule": {"Arn", "RuleName"}, "Function": {"Arn"}, "Stream": {"Arn"}, "Api": {"RestApiId"}}
+	for logical, attrs := range attributes {
+		outputs["Ref"+logical] = map[string]any{"Value": map[string]any{"Ref": logical}}
+		for _, a := range attrs {
+			outputs[logical+a] = map[string]any{"Value": map[string]any{"Fn::GetAtt": []any{logical, a}}}
+		}
+	}
+	body, _ := json.Marshal(map[string]any{"Resources": resources, "Outputs": outputs})
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "refs", "TemplateBody": string(body)}); err != nil {
+		t.Fatal(err)
+	}
+	physical := map[string]string{}
+	for _, r := range h.resources("refs") {
+		physical[r.Logical] = r.Physical
+	}
+	out, _ := h.invoke("DescribeStacks", map[string]any{"StackName": "refs"})
+	got := map[string]string{}
+	for _, o := range out["Stacks"].([]any)[0].(map[string]any)["Outputs"].([]any) {
+		got[str(o.(map[string]any)["OutputKey"])] = str(o.(map[string]any)["OutputValue"])
+	}
+	region := "us-east-1:000000000000:"
+	want := map[string]string{
+		"RefBucket": "ref-bucket", "BucketArn": "arn:aws:s3:::ref-bucket", "BucketDomainName": "ref-bucket.s3.amazonaws.com",
+		"QueueArn": "arn:aws:sqs:" + region + "ref-queue", "QueueQueueName": "ref-queue",
+		"RefTopic": "arn:aws:sns:" + region + "ref-topic", "TopicTopicArn": "arn:aws:sns:" + region + "ref-topic", "TopicTopicName": "ref-topic",
+		"RefTable": "ref-table", "TableArn": "arn:aws:dynamodb:" + region + "table/ref-table",
+		"RefRole": "ref-role", "RoleArn": "arn:aws:iam::000000000000:role/ref-role",
+		"RefParameter": "ref-parameter", "ParameterArn": "arn:aws:ssm:" + region + "parameter/ref-parameter",
+		"KeyArn": "arn:aws:kms:" + region + "key/" + physical["Key"], "RefKey": physical["Key"], "KeyKeyId": physical["Key"],
+		"RefLog": "ref-log", "LogArn": "arn:aws:logs:" + region + "log-group:ref-log:*",
+		"RefRule": "ref-rule", "RuleArn": "arn:aws:events:" + region + "rule/ref-rule", "RuleRuleName": "ref-rule",
+		"RefBusRule": "ref-bus|ref-busrule", "BusRuleArn": "arn:aws:events:" + region + "rule/ref-bus/ref-busrule", "BusRuleRuleName": "ref-busrule",
+		"RefFunction": "ref-function", "FunctionArn": "arn:aws:lambda:" + region + "function:ref-function",
+		"RefStream": "ref-stream", "StreamArn": "arn:aws:kinesis:" + region + "stream/ref-stream",
+		"RefApi": physical["Api"], "ApiRestApiId": physical["Api"],
+	}
+	for k, v := range want {
+		if got[k] != v || v == "" {
+			t.Errorf("%s is %q, want %q", k, got[k], v)
+		}
+	}
+	for logical, p := range physical {
+		if logical != "Queue" && logical != "Secret" && got["Ref"+logical] != p {
+			t.Errorf("%s's PhysicalResourceId is %q, its Ref %q", logical, p, got["Ref"+logical])
+		}
+	}
+	if !strings.HasPrefix(got["RefSecret"], "arn:aws:secretsmanager:"+region+"secret:ref-secret") || got["SecretId"] != got["RefSecret"] {
+		t.Errorf("the secret's Ref is %q and Id %q, want its ARN", got["RefSecret"], got["SecretId"])
+	}
+	if !strings.HasSuffix(got["RefQueue"], "/000000000000/ref-queue") || got["QueueQueueUrl"] != got["RefQueue"] {
+		t.Errorf("the queue's Ref is %q and QueueUrl %q, want its URL", got["RefQueue"], got["QueueQueueUrl"])
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "refs"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []res{{Type: "AWS::IAM::Role", Physical: "ref-role"}, {Type: "AWS::Events::Rule", Physical: "ref-rule"}} {
+		if _, err := h.lookup(r); err == nil {
+			t.Errorf("DeleteStack left %s %s", r.Type, r.Physical)
+		}
+	}
+	if _, err := h.service("aws.lambda", "GetFunction", map[string]any{"FunctionName": "ref-function"}); err == nil {
+		t.Error("DeleteStack left the function")
+	}
+	if _, err := h.service("aws.events", "DescribeRule", map[string]any{"Name": "ref-busrule", "EventBusName": "ref-bus"}); err == nil {
+		t.Error("DeleteStack left the rule on ref-bus")
+	}
+}

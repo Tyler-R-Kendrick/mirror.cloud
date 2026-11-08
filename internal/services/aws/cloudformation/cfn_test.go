@@ -463,7 +463,9 @@ func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
 	if ref("AWS::AccountId") != "000000000000" || ref("AWS::Partition") != "aws" || ref("AWS::URLSuffix") != "amazonaws.com" || ref("missing") != "missing" {
 		t.Fatal("pseudo-parameter references")
 	}
-	if p.getAtt("Bucket.Arn", refs, req) != "arn:aws:s3:::bucket" || p.getAtt([]any{"Queue", "Arn"}, refs, req) != "arn:aws:sqs:us-east-1:000000000000:queue" || p.getAtt([]any{"Queue", "QueueName"}, refs, req) != "queue" {
+	attribute(refs, req, "AWS::S3::Bucket", "Bucket", refs["Bucket"])
+	attribute(refs, req, "AWS::SQS::Queue", "Queue", refs["Queue"])
+	if getAtt("Bucket.Arn", refs) != "arn:aws:s3:::bucket" || getAtt([]any{"Queue", "Arn"}, refs) != "arn:aws:sqs:us-east-1:000000000000:queue" || getAtt([]any{"Queue", "QueueName"}, refs) != "queue" {
 		t.Fatal("GetAtt resolution")
 	}
 	if got := p.fnJoin([]any{"-", []any{"a", map[string]any{"Ref": "AWS::Region"}}}, refs, req, "stack"); got != "a-us-east-1" {

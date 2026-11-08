@@ -234,8 +234,12 @@ The oracle is AWS's documentation as it ships in the vendored model
     evaluated once per operation however many name it (round 8 evaluated a
     named condition afresh wherever it was named, so a chain of 24
     conditions each naming the last twice took 19 s). A condition they do
-    not settle (one on a pseudo parameter, or one that names itself) orders
-    by both branches, a reading. A settled `Fn::If` also resolves to its branch,
+    not settle (one on a pseudo parameter) orders by both branches, a
+    reading. A cycle of conditions, one naming itself included, is
+    `ValidationError`, "Template format error: Circular dependency between
+    conditions: [A, B]" (the wording is a reading), on every operation that
+    reads a template; round 9 left each unsettled, so the template passed and
+    a `Fn::If` on it stored `""`. A settled `Fn::If` also resolves to its branch,
     and `AWS::NoValue` there "Removes the corresponding resource property"
     (an element of a list too, a `Fn::Join`'s list among them, which the
     Template Reference does not spell out: a reading). It is never a value:

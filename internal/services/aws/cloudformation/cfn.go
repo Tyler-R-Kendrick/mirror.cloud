@@ -488,20 +488,21 @@ func (p *Pack) order(tpl map[string]any, params map[string]string) ([]string, er
 		}
 	}
 	if len(order) < len(resources) { // the cycle is those that lead back to themselves, not those after it
-		cycle := p.cycles(resources, users)
+		cycle := cycles(resources, users, &p.walks)
 		return nil, invalid("Circular dependency between resources: [" + strings.Join(cycle, ", ") + "]")
 	}
 	return order, nil
 }
 
-// cycles are the resources in a cycle of users' references, sorted: each strongly connected set of more
-// than one, and each that names itself, found in one pass (Tarjan's algorithm).
-func (p *Pack) cycles(resources map[string]any, users map[string][]string) []string {
+// cycles are the nodes (resources, or conditions) in a cycle of users' references, sorted: each strongly
+// connected set of more than one, and each that names itself, found in one pass (Tarjan's algorithm), each
+// visit counted in walks.
+func cycles(nodes map[string]any, users map[string][]string, walks *int) []string {
 	index, low, on := map[string]int{}, map[string]int{}, map[string]bool{}
 	var stack, cycle []string
 	var visit func(string)
 	visit = func(v string) {
-		p.walks++
+		*walks++
 		n := len(index) + 1
 		index[v], low[v], on[v], stack = n, n, true, append(stack, v)
 		for _, w := range users[v] {
@@ -526,7 +527,7 @@ func (p *Pack) cycles(resources map[string]any, users map[string][]string) []str
 			stack = stack[:i]
 		}
 	}
-	for _, l := range slices.Sorted(maps.Keys(resources)) {
+	for _, l := range slices.Sorted(maps.Keys(nodes)) {
 		if index[l] == 0 {
 			visit(l)
 		}
@@ -575,8 +576,8 @@ func names(v any, named map[string]bool, refs map[string]string) {
 
 // truth is a condition's value when the parameters settle it, and whether they do: Fn::Equals of two
 // literals or Refs to parameters, and Fn::Not, Fn::And, Fn::Or and Condition over such conditions (Template
-// Reference, condition functions). Anything else, a pseudo parameter included, settles nothing, nor does a
-// condition that names itself. memo holds each named condition once evaluated, so each is evaluated once.
+// Reference, condition functions). Anything else, a pseudo parameter included, settles nothing (a cycle of
+// conditions parseTemplate refuses). memo holds each named condition once evaluated, so each is evaluated once.
 func truth(c any, conds map[string]any, params map[string]string, memo map[string][2]bool) (bool, bool) {
 	m, text := asMap(c), [2]string{}
 	if name, ok := m["Condition"]; ok {
@@ -1126,7 +1127,31 @@ func parseTemplate(body string) (map[string]any, error) {
 	} else if n := len(asMap(m["Resources"])); n > 500 { // "The maximum number of resources that you can declare ... 500 resources" (quotas)
 		return nil, invalid("Template format error: Number of resources, " + strconv.Itoa(n) + ", is greater than maximum allowed, 500")
 	}
+	conds, users := asMap(m["Conditions"]), map[string][]string{} // conditions "based on ... Other conditions" (User Guide)
+	for name, c := range conds {
+		each(c, func(x map[string]any) {
+			if n, ok := x["Condition"]; ok {
+				users[str(n)] = append(users[str(n)], name)
+			}
+		})
+	}
+	if cycle := cycles(conds, users, new(int)); len(cycle) > 0 { // none of them can be evaluated
+		return nil, invalid("Template format error: Circular dependency between conditions: [" + strings.Join(cycle, ", ") + "]")
+	}
 	return m, nil
+}
+
+// each calls fn with every map v holds, v itself included.
+func each(v any, fn func(map[string]any)) {
+	if m, ok := v.(map[string]any); ok {
+		fn(m)
+		for _, x := range m {
+			each(x, fn)
+		}
+	}
+	for _, x := range spi.Slice(v) {
+		each(x, fn)
+	}
 }
 
 // parameters are the request's parameter values, and each Default of a parameter it does not give.

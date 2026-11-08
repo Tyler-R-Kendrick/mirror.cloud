@@ -503,9 +503,10 @@ func TestCloudFormationReadsYAMLAsVersion11(t *testing.T) {
 // prod and names B otherwise, and B, which names A only when Env is not
 // prod, are no cycle; E, which names ZZ only in prod, is made after it, and
 // F, which names ZZ only outside prod, before it, by its logical id.
-// A condition the parameters do not settle (one on AWS::Region, or one that
-// names itself) orders by both branches, a reading, so C and D, each naming
-// the other under it, are a cycle. Before, every Fn::If ordered by both
+// A condition the parameters do not settle (one on AWS::Region) orders by
+// both branches, a reading, so C and D, each naming the other under it, are a
+// cycle (one that names itself is refused, TestCloudFormationRefusesACycleOf
+// Conditions). Before, every Fn::If ordered by both
 // branches, and A and B were "Circular dependency between resources: [A, B]".
 func TestCloudFormationOrdersAnIfByTheBranchItTakes(t *testing.T) {
 	h := newStacks(t)
@@ -523,7 +524,6 @@ func TestCloudFormationOrdersAnIfByTheBranchItTakes(t *testing.T) {
 			"IsDev":    map[string]any{"Fn::Not": []any{map[string]any{"Condition": "IsProd"}}},
 			"Both":     map[string]any{"Fn::And": []any{map[string]any{"Condition": "IsProd"}, map[string]any{"Fn::Or": []any{map[string]any{"Condition": "IsDev"}, map[string]any{"Condition": "IsProd"}}}}},
 			"InRegion": map[string]any{"Fn::Equals": []any{ref("AWS::Region"), "us-east-1"}},
-			"Loop":     map[string]any{"Condition": "Loop"},
 		},
 		"Resources": map[string]any{
 			"A": param(when("IsProd", "fixed", ref("B"))), "B": param(when("IsDev", ref("A"), "fixed")),
@@ -537,7 +537,7 @@ func TestCloudFormationOrdersAnIfByTheBranchItTakes(t *testing.T) {
 	if order, err := h.pack.order(tpl, map[string]string{"Env": "prod"}); err != nil || slices.Index(order, "E") < slices.Index(order, "ZZ") || slices.Index(order, "F") > slices.Index(order, "ZZ") {
 		t.Errorf("the order is %v (%v), want E after ZZ and F, which names ZZ only outside prod, before it", order, err)
 	}
-	for _, cond := range []string{"InRegion", "Loop"} {
+	for _, cond := range []string{"InRegion"} {
 		tpl["Resources"] = map[string]any{"C": param(when(cond, ref("D"), "x")), "D": param(when(cond, ref("C"), "x"))}
 		body, _ := json.Marshal(tpl)
 		if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": string(body)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "[C, D]") {
@@ -763,6 +763,34 @@ func TestCloudFormationNoValueIsNeverAValue(t *testing.T) {
 		}
 		if strings.Contains(spi.JSONText(h.record("nv-"+name)), noValue) || len(h.params("nv-"+name)) != 0 {
 			t.Errorf("AWS::NoValue as part of a value (%s) left %v", name, h.record("nv-"+name))
+		}
+	}
+}
+
+// A condition may name others ("The conditions can be based on: Input or
+// pseudo parameter values[,] Other conditions", User Guide, Conditions
+// syntax), but none can be evaluated through a cycle of them, so a cycle is
+// ValidationError, "Template format error: Circular dependency between
+// conditions: [A, B]" (the wording is a reading, after the one for
+// resources), on ValidateTemplate and CreateStack alike, and nothing is made.
+// A condition naming itself is a cycle of one. Before, each such condition was
+// left unsettled, so the template passed and an Fn::If on it stored "".
+func TestCloudFormationRefusesACycleOfConditions(t *testing.T) {
+	h := newStacks(t)
+	for want, conds := range map[string]map[string]any{
+		"[A, B]": {"A": map[string]any{"Condition": "B"}, "B": map[string]any{"Fn::Not": []any{map[string]any{"Condition": "A"}}}, "C": map[string]any{"Condition": "A"}},
+		"[A]":    {"A": map[string]any{"Fn::Or": []any{map[string]any{"Condition": "A"}, map[string]any{"Fn::Equals": []any{"x", "x"}}}}},
+	} {
+		body, _ := json.Marshal(map[string]any{"Conditions": conds, "Resources": map[string]any{
+			"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "cc-p", "Type": "String", "Value": map[string]any{"Fn::If": []any{"A", "a", "b"}}}}}})
+		for _, op := range []string{"ValidateTemplate", "CreateStack"} {
+			_, err := h.invoke(op, map[string]any{"StackName": "cc", "TemplateBody": string(body)})
+			if code(err) != "ValidationError" || !strings.Contains(err.Error(), "Circular dependency between conditions: "+want) {
+				t.Errorf("%s of the conditions %v answered %v, want ValidationError: Circular dependency between conditions: %s", op, conds, err, want)
+			}
+		}
+		if _, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": "cc-p"}); err == nil {
+			t.Errorf("the conditions %v made the parameter", conds)
 		}
 	}
 }

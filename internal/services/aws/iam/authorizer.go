@@ -129,10 +129,6 @@ func principal(ctx context.Context, scope spi.Scope, id spi.Identity) (kind, nam
 	return "user", userFromARN(id.ARN), true
 }
 
-func decide(docs []map[string]any, action, resource string) string {
-	return decideWithContext(docs, action, resource, nil)
-}
-
 func decideWithContext(docs []map[string]any, action, resource string, values map[string]string) string {
 	if effectMatch(docs, "Deny", action, resource, values) {
 		return "explicitDeny"
@@ -300,14 +296,6 @@ func parseDoc(v any) map[string]any {
 		return m
 	}
 	return map[string]any{}
-}
-
-func denyMatch(docs []map[string]any, action, resource string) bool {
-	return effectMatch(docs, "Deny", action, resource, nil)
-}
-
-func allowMatch(docs []map[string]any, action, resource string) bool {
-	return effectMatch(docs, "Allow", action, resource, nil)
 }
 
 func effectMatch(docs []map[string]any, effect, action, resource string, values map[string]string) bool {

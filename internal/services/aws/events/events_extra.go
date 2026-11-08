@@ -191,14 +191,6 @@ func (p *Pack) updateAPIDestination(ctx context.Context, req *spi.Request) (*spi
 	return &spi.Response{Output: apiDestinationResult(record)}, nil
 }
 
-func (p *Pack) describeAPIDestination(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	record, exists := p.load(ctx, req, "apidest", spi.First(req.Input, "Name"))
-	if !exists {
-		return nil, resourceMissing("API destination")
-	}
-	return &spi.Response{Output: record}, nil
-}
-
 func (p *Pack) validateDestinationConnection(ctx context.Context, req *spi.Request, arn string) error {
 	connection, exists := p.load(ctx, req, "connections", arnResourceName(arn, "connection/"))
 	if !exists {

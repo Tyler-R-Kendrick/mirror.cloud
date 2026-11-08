@@ -4338,11 +4338,6 @@ func taskIdentity(st map[string]any, data any, context map[string]any, variables
 	return identity, true
 }
 
-func applyParams(params map[string]any, data any, context map[string]any, random spi.Rand, variables ...map[string]any) map[string]any {
-	out, _ := applyParamsValidated(params, data, context, random, variables...)
-	return out
-}
-
 func applyParamsValidated(params map[string]any, data any, context map[string]any, random spi.Rand, variables ...map[string]any) (map[string]any, bool) {
 	out := map[string]any{}
 	for k, v := range params {

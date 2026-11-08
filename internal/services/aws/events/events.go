@@ -312,13 +312,6 @@ func eventBusName(bus string) string {
 
 func eventKey(bus, name string) string { return bus + "\x00" + name }
 
-func eventName(key string) string {
-	if _, name, ok := strings.Cut(key, "\x00"); ok {
-		return name
-	}
-	return key
-}
-
 func (p *Pack) putEvents(ctx context.Context, req *spi.Request, entries []any) *spi.Response {
 	results := make([]any, 0, len(entries))
 	failed := 0

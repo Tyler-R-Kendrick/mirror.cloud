@@ -196,23 +196,3 @@ func parseCopyRows(data [][]byte, columns []string, options string) ([]map[strin
 	}
 	return rows, nil
 }
-
-func listOrGet(ctx context.Context, c spi.Collection, id, listKey string) (*spi.Response, error) {
-	if id != "" {
-		b, ok, _ := c.Get(ctx, id)
-		if !ok {
-			return nil, &spi.Fault{Code: "ClusterNotFound", HTTPStatus: 404, Fault: "client"}
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		return &spi.Response{Output: map[string]any{listKey: []any{rec}}}, nil
-	}
-	kvs, _, _ := c.List(ctx, "", "", 0)
-	var items []any
-	for _, kv := range kvs {
-		var rec map[string]any
-		_ = json.Unmarshal(kv.Value, &rec)
-		items = append(items, rec)
-	}
-	return &spi.Response{Output: map[string]any{listKey: items}}, nil
-}

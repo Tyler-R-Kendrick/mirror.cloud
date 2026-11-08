@@ -169,7 +169,8 @@ The oracle is AWS's documentation as it ships in the vendored model
     500 chained parameters and 250,500 to make them.
     A cycle is `ValidationError` ("Circular dependency between resources:
     [A, B]") on `CreateStack`, `UpdateStack`, `ValidateTemplate` and
-    `GetTemplateSummary`, and makes no stack. Before, a `Ref` to a resource
+    `GetTemplateSummary`, and makes no stack. It names the resources in a
+    cycle (one naming itself is a cycle of one), not those that wait on one. Before, a `Ref` to a resource
     not yet made answered its logical id: beside an SSM parameter named
     `ABucket`, a parameter named for an unnamed bucket `ABucket` was refused
     as taken, and a resource that sorted before the one it named was made

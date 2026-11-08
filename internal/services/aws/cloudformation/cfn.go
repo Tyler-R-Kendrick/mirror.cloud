@@ -420,9 +420,18 @@ func (p *Pack) order(tpl map[string]any) ([]string, error) {
 			}
 		}
 	}
-	if len(order) < len(resources) {
-		left := slices.DeleteFunc(slices.Sorted(maps.Keys(resources)), func(l string) bool { return waiting[l] == 0 })
-		return nil, invalid("Circular dependency between resources: [" + strings.Join(left, ", ") + "]")
+	if len(order) < len(resources) { // the cycle is those that lead back to themselves, not those after it
+		cycle := slices.DeleteFunc(slices.Sorted(maps.Keys(resources)), func(l string) bool {
+			seen := map[string]bool{}
+			for next := slices.Clone(users[l]); len(next) > 0 && !seen[l]; {
+				u := next[len(next)-1]
+				if next = next[:len(next)-1]; !seen[u] {
+					seen[u], next = true, append(next, users[u]...)
+				}
+			}
+			return !seen[l]
+		})
+		return nil, invalid("Circular dependency between resources: [" + strings.Join(cycle, ", ") + "]")
 	}
 	return order, nil
 }

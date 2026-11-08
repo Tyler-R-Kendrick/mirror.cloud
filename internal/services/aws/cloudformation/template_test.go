@@ -172,3 +172,38 @@ func TestCloudFormationOrdersInLinearTime(t *testing.T) {
 		t.Errorf("the chain was made %d resources long, from %v", len(made), made[:min(len(made), 2)])
 	}
 }
+
+// A cycle's error names the resources in it, and no others: "Circular
+// dependency between resources: [A, B]" for A and B naming each other, beside
+// C, which names A and so cannot be made either, and D, which can. A
+// resource naming itself is a cycle of one, and two cycles are listed
+// together. Before, the error listed every resource left unordered, C
+// included.
+func TestCloudFormationACycleNamesOnlyItsMembers(t *testing.T) {
+	h := newStacks(t)
+	ref := func(names ...string) map[string]any {
+		props := map[string]any{"Type": "String", "Value": "v"}
+		if len(names) > 0 {
+			var parts []any
+			for _, n := range names {
+				parts = append(parts, map[string]any{"Ref": n})
+			}
+			props["Value"] = map[string]any{"Fn::Join": []any{",", parts}}
+		}
+		return map[string]any{"Type": "AWS::SSM::Parameter", "Properties": props}
+	}
+	for _, c := range []struct {
+		resources map[string]any
+		want      string
+	}{
+		{map[string]any{"A": ref("B"), "B": ref("A"), "C": ref("A"), "D": ref()}, "[A, B]"},
+		{map[string]any{"A": ref("A"), "C": ref("A")}, "[A]"},
+		{map[string]any{"A": ref("B"), "B": ref("A"), "C": ref("D"), "D": ref("C"), "E": ref("A", "C"), "F": ref("E")}, "[A, B, C, D]"},
+	} {
+		body, _ := json.Marshal(map[string]any{"Resources": c.resources})
+		_, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": string(body)})
+		if want := "Circular dependency between resources: " + c.want; code(err) != "ValidationError" || err.Error() != "ValidationError: "+want {
+			t.Errorf("%v answered %v, want ValidationError: %s", c.resources, err, want)
+		}
+	}
+}

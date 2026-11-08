@@ -447,8 +447,10 @@ func TestCloudFormationRefusesTheUnsupportedTags(t *testing.T) {
 
 // "CloudFormation supports the YAML Version 1.1 specification" (User Guide,
 // Template formats), so a plain scalar is read as YAML 1.1's type repository
-// reads it, where yaml.v3 reads YAML 1.2: yes, no, on, off, y and n are
-// booleans (yaml.org/type/bool.html); an integer may be binary, octal as
+// reads it, where yaml.v3 reads YAML 1.2: yes, no, on and off are booleans
+// (yaml.org/type/bool.html), and y and n are left strings, as PyYAML and
+// SnakeYAML, the 1.1 parsers in use, leave them (round 8 read them as
+// booleans); an integer may be binary, octal as
 // 0777, hexadecimal, sexagesimal as 1:20, with underscores, but 0o17 is not
 // one (int.html); a float has a point, so 1e3 is a string (float.html).
 // FifoQueue is a Boolean (Template Reference, AWS::SQS::Queue): yes makes a
@@ -459,7 +461,7 @@ func TestCloudFormationRefusesTheUnsupportedTags(t *testing.T) {
 // standard queue.
 func TestCloudFormationReadsYAMLAsVersion11(t *testing.T) {
 	h := newStacks(t)
-	values := map[string]string{"y": "true", "No": "false", "0b101": "5", "0777": "511", "0x1F": "31", "1_000": "1000",
+	values := map[string]string{"y": "y", "N": "N", "yes": "true", "No": "false", "0b101": "5", "0777": "511", "0x1F": "31", "1_000": "1000",
 		"1:20": "80", "-1:30": "-90", "1e3": "1e3", "0o17": "0o17", "1.5": "1.5", "'yes'": "yes", "08": "08"}
 	queues := "Resources:\n  F:\n    Type: AWS::SQS::Queue\n    Properties:\n      QueueName: v11-fifo.fifo\n      FifoQueue: yes\n" +
 		"  S:\n    Type: AWS::SQS::Queue\n    Properties:\n      QueueName: v11-standard\n      FifoQueue: off\n"

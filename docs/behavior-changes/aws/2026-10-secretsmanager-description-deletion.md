@@ -125,8 +125,10 @@ The oracle is AWS's documentation as it ships in the vendored model
   - "CloudFormation supports the YAML Version 1.1 specification" (User Guide,
     Template formats), so a plain scalar is read as YAML 1.1's type
     repository reads it (yaml.org/type/bool.html, int.html, float.html),
-    where the library reads YAML 1.2: `yes`, `no`, `on`, `off`, `y` and `n`
-    in their listed spellings are booleans; an integer may be binary, octal
+    where the library reads YAML 1.2: `yes`, `no`, `on` and `off` in their
+    listed spellings are booleans, and `y` and `n` stay strings, as PyYAML
+    and SnakeYAML leave them though the type page lists them (a reading;
+    round 8 read them as booleans); an integer may be binary, octal
     as `0777`, hexadecimal or sexagesimal (`1:20` is 80), with underscores,
     but `0o17` and `08` are strings; a float has a point, so `1e3` is the
     string `1e3`. `.inf` and `.nan` stay text, which a template's JSON form

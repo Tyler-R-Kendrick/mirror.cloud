@@ -543,3 +543,34 @@ func TestCloudFormationOrdersAnIfByTheBranchItTakes(t *testing.T) {
 		}
 	}
 }
+
+// A condition is evaluated once per operation, however many conditions name
+// it: C0 is Fn::Equals [a, a] and each Ci is Fn::And of Condition Ci-1 twice,
+// so read without a memo C30 asks for C0 2^30 times. With one, ValidateTemplate
+// and GetTemplateSummary of a template whose one Fn::If names C30 answer at
+// once (a 30 s timer catches only a hang), the Fn::If settled true, so A and
+// B, which name each other only through its false branch, are no cycle.
+// Before, each Condition was evaluated afresh wherever it was named: 24
+// conditions took 19 s, and 30 did not answer.
+func TestCloudFormationEvaluatesEachConditionOnce(t *testing.T) {
+	h := newStacks(t)
+	conds := map[string]any{"C0": map[string]any{"Fn::Equals": []any{"a", "a"}}}
+	for i := 1; i <= 30; i++ {
+		prev := map[string]any{"Condition": fmt.Sprintf("C%d", i-1)}
+		conds[fmt.Sprintf("C%d", i)] = map[string]any{"Fn::And": []any{prev, prev}}
+	}
+	body, _ := json.Marshal(map[string]any{"Conditions": conds, "Resources": map[string]any{
+		"A": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "once", "Type": "String",
+			"Value": map[string]any{"Fn::If": []any{"C30", "taken", map[string]any{"Ref": "B"}}}}},
+		"B": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": map[string]any{"Ref": "A"}}}}})
+	for _, op := range []string{"ValidateTemplate", "GetTemplateSummary"} {
+		done := make(chan error, 1)
+		go func() {
+			_, err := h.invoke(op, map[string]any{"TemplateBody": string(body)})
+			done <- err
+		}()
+		if err := within(t, done, op); err != nil {
+			t.Errorf("%s answered %v", op, err)
+		}
+	}
+}

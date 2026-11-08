@@ -218,7 +218,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     A `Fn::If` whose condition the parameters settle orders by the branch it
     takes and only that one: `Fn::Equals` of literals and `Ref`s to
     parameters, and `Fn::Not`, `Fn::And`, `Fn::Or` and `Condition` over such
-    conditions (Template Reference, condition functions). A condition they do
+    conditions (Template Reference, condition functions), each condition
+    evaluated once per operation however many name it (round 8 evaluated a
+    named condition afresh wherever it was named, so a chain of 24
+    conditions each naming the last twice took 19 s). A condition they do
     not settle (one on a pseudo parameter, or one that names itself) orders
     by both branches, a reading. `Fn::If` is not otherwise resolved here; its
     value reaches the service as written. Before, every `Fn::If` ordered by

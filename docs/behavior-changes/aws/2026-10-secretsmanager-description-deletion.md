@@ -161,7 +161,13 @@ The oracle is AWS's documentation as it ships in the vendored model
     just before its create instead. Resources are made in dependency order,
     each after those its properties name by `Ref`, `Fn::GetAtt` or `Fn::Sub`
     ("Resource B is created before resource A", Template Reference, DependsOn
-    attribute), and otherwise by logical id; `DependsOn` itself is not read.
+    attribute), and after the resources its `DependsOn` names ("that
+    resource is created only after the creation of the resource specified in
+    the DependsOn attribute", which "can take a single string or list of
+    strings"), and otherwise by logical id. A `DependsOn` naming no resource
+    the template declares is "Template format error: Unresolved resource
+    dependencies [Nope] in the Resources block of the template", and a cycle
+    through it is the cycle's error (below). Before, `DependsOn` was not read.
     A cycle is `ValidationError` ("Circular dependency between resources:
     [A, B]") on `CreateStack`, `UpdateStack`, `ValidateTemplate` and
     `GetTemplateSummary`, and makes no stack. Before, a `Ref` to a resource

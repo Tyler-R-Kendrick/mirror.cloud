@@ -1949,3 +1949,49 @@ func TestCloudFormationRefusesAnUnresolvedDependency(t *testing.T) {
 		t.Error("a parameter was named for the unresolved Ref")
 	}
 }
+
+// "The DependsOn attribute can take a single string or list of strings", and
+// "When you add a DependsOn attribute to a resource, that resource is created
+// only after the creation of the resource specified in the DependsOn
+// attribute" (Template Reference, DependsOn attribute). So DependsOn orders
+// creation as a Ref does, a cycle through it is "Circular dependency between
+// resources", and a DependsOn naming no resource the template declares is
+// "Template format error: Unresolved resource dependencies [Nope] in the
+// Resources block of the template". This completes the dependency order of
+// #441's planned ids, which read Ref, Fn::GetAtt and Fn::Sub alone. Before,
+// DependsOn was not read: resources were made by logical id, and a DependsOn
+// on a missing resource or in a cycle was accepted.
+func TestCloudFormationReadsDependsOn(t *testing.T) {
+	h := newStacks(t)
+	queue := func(dependsOn any) map[string]any {
+		r := map[string]any{"Type": "AWS::SQS::Queue"}
+		if dependsOn != nil {
+			r["DependsOn"] = dependsOn
+		}
+		return r
+	}
+	h.mustCreate("after", map[string]map[string]any{"A": queue("Z"), "B": queue([]any{"Y", "Z"}), "Y": queue(nil), "Z": queue(nil)})
+	var order []string
+	for _, r := range h.resources("after") {
+		order = append(order, r.Logical)
+	}
+	if !reflect.DeepEqual(order, []string{"Y", "Z", "A", "B"}) {
+		t.Errorf("after was made in the order %v, want Y and Z before the A and B that depend on them", order)
+	}
+	for name, resources := range map[string]map[string]map[string]any{
+		"cycle":   {"A": queue("B"), "B": queue([]any{"A"})},
+		"missing": {"A": queue("Nope")},
+	} {
+		want := map[string]string{"cycle": "Circular dependency between resources: [A, B]",
+			"missing": "Template format error: Unresolved resource dependencies [Nope] in the Resources block of the template"}[name]
+		tpl, _ := json.Marshal(map[string]any{"Resources": resources})
+		for _, op := range []string{"CreateStack", "ValidateTemplate"} {
+			if _, err := h.invoke(op, map[string]any{"StackName": name, "TemplateBody": string(tpl)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), want) {
+				t.Errorf("%s of %s answered %v, want ValidationError: %s", op, name, err, want)
+			}
+		}
+		if _, _, err := h.status(name); err == nil {
+			t.Errorf("%s made a stack", name)
+		}
+	}
+}

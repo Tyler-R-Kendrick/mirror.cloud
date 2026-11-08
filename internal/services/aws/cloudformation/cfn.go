@@ -448,7 +448,8 @@ func planID(req *spi.Request, typ, n string, props map[string]any) string {
 
 // order is the order a template's resources are made in: each after those its properties name, by Ref,
 // Fn::GetAtt or Fn::Sub ("Resource B is created before resource A", Template Reference, DependsOn
-// attribute), else by logical id. A cycle orders none, and is CloudFormation's error.
+// attribute), and those its DependsOn names, else by logical id. A cycle orders none, and is
+// CloudFormation's error.
 func (p *Pack) order(req *spi.Request, tpl map[string]any) ([]string, error) {
 	resources, marks, order := asMap(tpl["Resources"]), map[string]string{}, []string(nil)
 	todo := slices.Sorted(maps.Keys(resources))
@@ -457,7 +458,8 @@ func (p *Pack) order(req *spi.Request, tpl map[string]any) ([]string, error) {
 	}
 	for len(todo) > 0 {
 		i := slices.IndexFunc(todo, func(l string) bool {
-			return !strings.Contains(spi.JSONText(p.resolve(asMap(resources[l])["Properties"], marks, req, "")), unknown)
+			return !strings.Contains(spi.JSONText(p.resolve(asMap(resources[l])["Properties"], marks, req, "")), unknown) &&
+				!slices.ContainsFunc(dependsOn(resources[l]), func(d string) bool { return marks[d] == unknown })
 		})
 		if i < 0 {
 			return nil, invalid("Circular dependency between resources: [" + strings.Join(todo, ", ") + "]")
@@ -956,7 +958,15 @@ func parseTemplate(body string) (map[string]any, error) {
 	if len(asMap(m["Resources"])) == 0 { // "The Resources section is required in every CloudFormation template"
 		return nil, invalid("Template format error: At least one Resources member must be defined.")
 	}
-	if names := unresolved(m["Resources"], m, map[string]bool{}); len(names) > 0 {
+	names := unresolved(m["Resources"], m, map[string]bool{})
+	for _, r := range asMap(m["Resources"]) { // a DependsOn names resources too
+		for _, d := range dependsOn(r) {
+			if _, declared := asMap(m["Resources"])[d]; !declared {
+				names[d] = true
+			}
+		}
+	}
+	if len(names) > 0 {
 		return nil, invalid("Template format error: Unresolved resource dependencies [" + strings.Join(slices.Sorted(maps.Keys(names)), ", ") + "] in the Resources block of the template")
 	}
 	// DeletionPolicy's options and UpdateReplacePolicy's (Template Reference): DeletionPolicy's Snapshot is
@@ -969,6 +979,16 @@ func parseTemplate(body string) (map[string]any, error) {
 		}
 	}
 	return m, nil
+}
+
+// dependsOn is the resources a resource's DependsOn names: it "can take a single string or list of
+// strings" (Template Reference, DependsOn attribute).
+func dependsOn(r any) []string {
+	names := []string{str(asMap(r)["DependsOn"])}
+	for _, d := range spi.Slice(asMap(r)["DependsOn"]) {
+		names = append(names, str(d))
+	}
+	return slices.DeleteFunc(names, func(n string) bool { return n == "" })
 }
 
 // unresolved adds to names each logical id a Ref or Fn::GetAtt in v names that tpl declares as no resource

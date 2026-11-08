@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1037,20 +1038,8 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 			delete(endpoint, "AccessKey")
 			configuration["EndpointConfiguration"] = endpoint
 		}
-		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
-			describeS3Configuration(s3)
-			configuration["S3DestinationDescription"] = s3
-			delete(configuration, "S3Configuration")
-		}
-		if configuration["BufferingHints"] == nil {
-			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
-		}
-		if configuration["RetryOptions"] == nil {
-			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
-		}
-		if spi.First(configuration, "S3BackupMode") == "" {
-			configuration["S3BackupMode"] = "FailedDataOnly"
-		}
+		describeDestination(configuration, map[string]any{"BufferingHints": map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5},
+			"RetryOptions": map[string]any{"DurationInSeconds": 300}, "S3BackupMode": "FailedDataOnly"})
 		destination["HttpEndpointDestinationDescription"] = configuration
 		delete(description, "HttpEndpointDestinationConfiguration")
 	}
@@ -1062,97 +1051,43 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		if !ok {
 			continue
 		}
-		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
-			describeS3Configuration(s3)
-			configuration["S3DestinationDescription"] = s3
-			delete(configuration, "S3Configuration")
-		}
 		if vpc, ok := configuration["VpcConfiguration"].(map[string]any); ok {
 			configuration["VpcConfigurationDescription"] = vpc
 			delete(configuration, "VpcConfiguration")
 		}
-		if configuration["BufferingHints"] == nil {
-			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
-		}
-		if configuration["RetryOptions"] == nil {
-			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
-		}
-		if spi.First(configuration, "IndexRotationPeriod") == "" {
-			configuration["IndexRotationPeriod"] = "OneDay"
-		}
-		if spi.First(configuration, "S3BackupMode") == "" {
-			configuration["S3BackupMode"] = "FailedDocumentsOnly"
-		}
-		if configuration["DocumentIdOptions"] == nil {
-			configuration["DocumentIdOptions"] = map[string]any{"DefaultDocumentIdFormat": "FIREHOSE_DEFAULT"}
-		}
+		describeDestination(configuration, map[string]any{"BufferingHints": map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5},
+			"RetryOptions": map[string]any{"DurationInSeconds": 300}, "IndexRotationPeriod": "OneDay", "S3BackupMode": "FailedDocumentsOnly",
+			"DocumentIdOptions": map[string]any{"DefaultDocumentIdFormat": "FIREHOSE_DEFAULT"}})
 		destination[search.described] = configuration
 		delete(description, search.configuration)
 	}
 	if configuration, ok := description["AmazonOpenSearchServerlessDestinationConfiguration"].(map[string]any); ok {
-		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
-			describeS3Configuration(s3)
-			configuration["S3DestinationDescription"] = s3
-			delete(configuration, "S3Configuration")
-		}
 		if vpc, ok := configuration["VpcConfiguration"].(map[string]any); ok {
 			configuration["VpcConfigurationDescription"] = vpc
 			delete(configuration, "VpcConfiguration")
 		}
-		if configuration["BufferingHints"] == nil {
-			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
-		}
-		if configuration["RetryOptions"] == nil {
-			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
-		}
-		if spi.First(configuration, "S3BackupMode") == "" {
-			configuration["S3BackupMode"] = "FailedDocumentsOnly"
-		}
+		describeDestination(configuration, map[string]any{"BufferingHints": map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5},
+			"RetryOptions": map[string]any{"DurationInSeconds": 300}, "S3BackupMode": "FailedDocumentsOnly"})
 		destination["AmazonOpenSearchServerlessDestinationDescription"] = configuration
 		delete(description, "AmazonOpenSearchServerlessDestinationConfiguration")
 	}
 	if configuration, ok := description["RedshiftDestinationConfiguration"].(map[string]any); ok {
 		configuration = maps.Clone(configuration)
 		delete(configuration, "Password")
-		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
-			describeS3Configuration(s3)
-			configuration["S3DestinationDescription"] = s3
-			delete(configuration, "S3Configuration")
-		}
 		if backup, ok := configuration["S3BackupConfiguration"].(map[string]any); ok {
 			describeS3Configuration(backup)
 			configuration["S3BackupDescription"] = backup
 			delete(configuration, "S3BackupConfiguration")
 		}
-		if configuration["RetryOptions"] == nil {
-			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 3600}
-		}
-		if spi.First(configuration, "S3BackupMode") == "" {
-			configuration["S3BackupMode"] = "Disabled"
-		}
+		describeDestination(configuration, map[string]any{"RetryOptions": map[string]any{"DurationInSeconds": 3600}, "S3BackupMode": "Disabled"})
 		destination["RedshiftDestinationDescription"] = configuration
 		delete(description, "RedshiftDestinationConfiguration")
 	}
 	if configuration, ok := description["SplunkDestinationConfiguration"].(map[string]any); ok {
 		configuration = maps.Clone(configuration)
 		delete(configuration, "HECToken")
-		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
-			describeS3Configuration(s3)
-			configuration["S3DestinationDescription"] = s3
-			delete(configuration, "S3Configuration")
-		}
-		if configuration["BufferingHints"] == nil {
-			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 60, "SizeInMBs": 5}
-		}
-		if configuration["RetryOptions"] == nil {
-			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
-		}
-		if configuration["HECAcknowledgmentTimeoutInSeconds"] == nil {
-			configuration["HECAcknowledgmentTimeoutInSeconds"] = 300
-		}
-		if spi.First(configuration, "S3BackupMode") == "" {
-			configuration["S3BackupMode"] = "FailedEventsOnly"
-		}
+		describeDestination(configuration, map[string]any{"BufferingHints": map[string]any{"IntervalInSeconds": 60, "SizeInMBs": 5},
+			"RetryOptions": map[string]any{"DurationInSeconds": 300}, "HECAcknowledgmentTimeoutInSeconds": 300, "S3BackupMode": "FailedEventsOnly"})
 		destination["SplunkDestinationDescription"] = configuration
 		delete(description, "SplunkDestinationConfiguration")
 	}
@@ -1160,42 +1095,15 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		configuration = maps.Clone(configuration)
 		delete(configuration, "PrivateKey")
 		delete(configuration, "KeyPassphrase")
-		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
-			describeS3Configuration(s3)
-			configuration["S3DestinationDescription"] = s3
-			delete(configuration, "S3Configuration")
-		}
-		if configuration["BufferingHints"] == nil {
-			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 128}
-		}
-		if configuration["RetryOptions"] == nil {
-			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 60}
-		}
-		if spi.First(configuration, "DataLoadingOption") == "" {
-			configuration["DataLoadingOption"] = "JSON_MAPPING"
-		}
-		if spi.First(configuration, "S3BackupMode") == "" {
-			configuration["S3BackupMode"] = "FailedDataOnly"
-		}
+		describeDestination(configuration, map[string]any{"BufferingHints": map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 128},
+			"RetryOptions": map[string]any{"DurationInSeconds": 60}, "DataLoadingOption": "JSON_MAPPING", "S3BackupMode": "FailedDataOnly"})
 		destination["SnowflakeDestinationDescription"] = configuration
 		delete(description, "SnowflakeDestinationConfiguration")
 	}
 	if configuration, ok := description["IcebergDestinationConfiguration"].(map[string]any); ok {
 		configuration = maps.Clone(configuration)
-		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
-			describeS3Configuration(s3)
-			configuration["S3DestinationDescription"] = s3
-			delete(configuration, "S3Configuration")
-		}
-		if configuration["BufferingHints"] == nil {
-			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
-		}
-		if configuration["RetryOptions"] == nil {
-			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
-		}
-		if spi.First(configuration, "S3BackupMode") == "" {
-			configuration["S3BackupMode"] = "FailedDataOnly"
-		}
+		describeDestination(configuration, map[string]any{"BufferingHints": map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5},
+			"RetryOptions": map[string]any{"DurationInSeconds": 300}, "S3BackupMode": "FailedDataOnly"})
 		destination["IcebergDestinationDescription"] = configuration
 		delete(description, "IcebergDestinationConfiguration")
 	}
@@ -1206,6 +1114,21 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 	description["Destinations"] = destinations
 	description["HasMoreDestinations"] = false
 	return description
+}
+
+// describeDestination describes configuration's S3Configuration as its S3DestinationDescription, and gives it
+// each of defaults it leaves out: a string where it has none, anything else where it has nothing.
+func describeDestination(configuration, defaults map[string]any) {
+	if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
+		describeS3Configuration(s3)
+		configuration["S3DestinationDescription"] = s3
+		delete(configuration, "S3Configuration")
+	}
+	for k, v := range defaults {
+		if _, text := v.(string); configuration[k] == nil || text && spi.First(configuration, k) == "" {
+			configuration[k] = v
+		}
+	}
 }
 
 func describeS3Configuration(configuration map[string]any) {
@@ -2771,15 +2694,7 @@ func minTime(left, right time.Time) time.Time {
 }
 
 func (p *Pack) runRedshiftRetries(ctx context.Context) time.Time {
-	if p.deps.Store == nil || p.deps.Clock == nil {
-		return time.Time{}
-	}
-	now := p.deps.Clock.Now().UTC()
-	var earliest time.Time
-	scopes, _ := p.deps.Store.Scopes(ctx)
-	for _, identity := range scopes {
-		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-redshift-work")
-		items, _, _ := collection.List(ctx, "", "", 0)
+	return p.scan(ctx, "fh-redshift-work", func(identity spi.Identity, collection spi.Collection, items []spi.KV, now time.Time) (earliest time.Time) {
 		for _, item := range items {
 			var work redshiftWork
 			if json.Unmarshal(item.Value, &work) != nil {
@@ -2789,15 +2704,39 @@ func (p *Pack) runRedshiftRetries(ctx context.Context) time.Time {
 			if !next.After(now) {
 				next = p.runRedshiftRetry(ctx, identity, collection, item.Key, &work, now)
 			}
-			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
-				earliest = next
-			}
+			earliest = sooner(earliest, next)
 		}
+		return earliest
+	})
+}
+
+// scan lists the collection name in every scope, and answers the soonest of the times due answers for
+// each scope's entries (zero for none), given the time now.
+func (p *Pack) scan(ctx context.Context, name string, due func(spi.Identity, spi.Collection, []spi.KV, time.Time) time.Time) time.Time {
+	if p.deps.Store == nil || p.deps.Clock == nil {
+		return time.Time{}
+	}
+	now := p.deps.Clock.Now().UTC()
+	var earliest time.Time
+	scopes, _ := p.deps.Store.Scopes(ctx)
+	for _, identity := range scopes {
+		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection(name)
+		items, _, _ := collection.List(ctx, "", "", 0)
+		earliest = sooner(earliest, due(identity, collection, items, now))
 	}
 	return earliest
 }
 
-func (p *Pack) deleteRedshiftWork(ctx context.Context, collection spi.Collection, key, dataKey string) {
+// sooner is the earlier of a and b, a zero time being no time at all.
+func sooner(a, b time.Time) time.Time {
+	if a.IsZero() || !b.IsZero() && b.Before(a) {
+		return b
+	}
+	return a
+}
+
+// deleteWork deletes the work entry key and the blob dataKey that holds its records.
+func (p *Pack) deleteWork(ctx context.Context, collection spi.Collection, key, dataKey string) {
 	_ = collection.Delete(ctx, key)
 	if p.deps.Blobs != nil {
 		_ = p.deps.Blobs.Delete(ctx, dataKey)
@@ -2808,13 +2747,13 @@ func (p *Pack) runRedshiftRetry(ctx context.Context, identity spi.Identity, coll
 	req := &spi.Request{Identity: identity}
 	raw, ok, _ := p.col(req, "fh").Get(ctx, work.Stream)
 	if !ok {
-		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
 	stream := spi.JSONObject(raw)
 	destination, ok := stream["RedshiftDestinationConfiguration"].(map[string]any)
 	if !ok {
-		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
 	var data [][]byte
@@ -2836,7 +2775,7 @@ func (p *Pack) runRedshiftRetry(ctx context.Context, identity spi.Identity, coll
 		return work.Next
 	}
 	if !now.Before(work.Expires) {
-		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
 	username, password, err := p.redshiftCredentials(ctx, req, destination)
@@ -2849,7 +2788,7 @@ func (p *Pack) runRedshiftRetry(ctx context.Context, identity spi.Identity, coll
 		})
 	}
 	if err == nil {
-		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
 	p.logDeliveryError(ctx, req, destination, work.Stream, err.Error(), now)
@@ -3156,15 +3095,7 @@ func (p *Pack) writeSearchPayload(ctx context.Context, req *spi.Request, stream,
 func (p *Pack) runSearchWork(ctx context.Context) time.Time {
 	searchMu.Lock()
 	defer searchMu.Unlock()
-	if p.deps.Store == nil || p.deps.Clock == nil {
-		return time.Time{}
-	}
-	now := p.deps.Clock.Now().UTC()
-	var earliest time.Time
-	scopes, _ := p.deps.Store.Scopes(ctx)
-	for _, identity := range scopes {
-		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-search-work")
-		stored, _, _ := collection.List(ctx, "", "", 0)
+	return p.scan(ctx, "fh-search-work", func(identity spi.Identity, collection spi.Collection, stored []spi.KV, now time.Time) (earliest time.Time) {
 		buffers := map[string][]searchWorkItem{}
 		var retries []searchWorkItem
 		for _, item := range stored {
@@ -3181,42 +3112,26 @@ func (p *Pack) runSearchWork(ctx context.Context) time.Time {
 		}
 		for stream, items := range buffers {
 			sort.Slice(items, func(i, j int) bool { return items[i].Work.Order < items[j].Work.Order })
-			next := items[0].Work.Next
-			for _, item := range items[1:] {
-				if item.Work.Next.Before(next) {
-					next = item.Work.Next
-				}
-			}
+			next := slices.MinFunc(items, func(a, b searchWorkItem) int { return a.Work.Next.Compare(b.Work.Next) }).Work.Next
 			if !next.After(now) {
 				next = p.flushSearchBuffer(ctx, identity, collection, stream, items, now)
 			}
-			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
-				earliest = next
-			}
+			earliest = sooner(earliest, next)
 		}
 		for _, item := range retries {
 			next := item.Work.Next
 			if !next.After(now) {
 				next = p.runSearchRetry(ctx, identity, collection, item.Key, &item.Work, now)
 			}
-			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
-				earliest = next
-			}
+			earliest = sooner(earliest, next)
 		}
-	}
-	return earliest
-}
-
-func (p *Pack) deleteSearchWork(ctx context.Context, collection spi.Collection, key, dataKey string) {
-	_ = collection.Delete(ctx, key)
-	if p.deps.Blobs != nil {
-		_ = p.deps.Blobs.Delete(ctx, dataKey)
-	}
+		return earliest
+	})
 }
 
 func (p *Pack) deleteSearchItems(ctx context.Context, collection spi.Collection, items []searchWorkItem) {
 	for _, item := range items {
-		p.deleteSearchWork(ctx, collection, item.Key, item.Work.DataKey)
+		p.deleteWork(ctx, collection, item.Key, item.Work.DataKey)
 	}
 }
 
@@ -3318,13 +3233,13 @@ func (p *Pack) runSearchRetry(ctx context.Context, identity spi.Identity, collec
 	req := &spi.Request{Identity: identity}
 	raw, ok, _ := p.col(req, "fh").Get(ctx, work.Stream)
 	if !ok {
-		p.deleteSearchWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
 	stream := spi.JSONObject(raw)
 	destination, ok := stream[persistedSearchDestinationKey(work.Destination)].(map[string]any)
 	if !ok {
-		p.deleteSearchWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
 	payload, ok := p.loadSearchPayload(ctx, req, work.DataKey)
@@ -3336,14 +3251,14 @@ func (p *Pack) runSearchRetry(ctx context.Context, identity spi.Identity, collec
 	}
 	if !now.Before(work.Expires) {
 		p.backupSearchFailures(ctx, req, stream, destination, work.Stream, payload, work.Retries+1, work.ErrorCode, work.ErrorMessage, now)
-		p.deleteSearchWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
 	destinationKey := persistedSearchDestinationKey(work.Destination)
 	retryable, permanent, code, message := p.deliverSearch(ctx, req, destinationKey, destination, payload)
 	p.backupSearchFailures(ctx, req, stream, destination, work.Stream, permanent, work.Retries+2, "400", "record is not a JSON object", now)
 	if !validSearchPayload(retryable) {
-		p.deleteSearchWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
 	work.Retries++
@@ -3524,15 +3439,9 @@ func (p *Pack) httpRetryLoop() {
 	defer close(p.done)
 	for {
 		next := p.runHTTPBuffers(context.Background())
-		if retryNext := p.runHTTPRetries(context.Background()); !retryNext.IsZero() && (next.IsZero() || retryNext.Before(next)) {
-			next = retryNext
-		}
-		if searchNext := p.runSearchWork(context.Background()); !searchNext.IsZero() && (next.IsZero() || searchNext.Before(next)) {
-			next = searchNext
-		}
-		if redshiftNext := p.runRedshiftRetries(context.Background()); !redshiftNext.IsZero() && (next.IsZero() || redshiftNext.Before(next)) {
-			next = redshiftNext
-		}
+		next = sooner(next, p.runHTTPRetries(context.Background()))
+		next = sooner(next, p.runSearchWork(context.Background()))
+		next = sooner(next, p.runRedshiftRetries(context.Background()))
 		if next.IsZero() {
 			select {
 			case <-p.wake:
@@ -3551,15 +3460,7 @@ func (p *Pack) httpRetryLoop() {
 }
 
 func (p *Pack) runHTTPBuffers(ctx context.Context) time.Time {
-	if p.deps.Store == nil || p.deps.Clock == nil {
-		return time.Time{}
-	}
-	now := p.deps.Clock.Now().UTC()
-	var earliest time.Time
-	scopes, _ := p.deps.Store.Scopes(ctx)
-	for _, identity := range scopes {
-		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-http-buffers")
-		buffers, _, _ := collection.List(ctx, "", "", 0)
+	return p.scan(ctx, "fh-http-buffers", func(identity spi.Identity, collection spi.Collection, buffers []spi.KV, now time.Time) (earliest time.Time) {
 		streams := map[string][]httpBufferItem{}
 		for _, item := range buffers {
 			var buffer httpBuffer
@@ -3570,21 +3471,14 @@ func (p *Pack) runHTTPBuffers(ctx context.Context) time.Time {
 		}
 		for stream, items := range streams {
 			sort.Slice(items, func(i, j int) bool { return items[i].Buffer.Order < items[j].Buffer.Order })
-			next := items[0].Buffer.Next
-			for _, item := range items[1:] {
-				if item.Buffer.Next.Before(next) {
-					next = item.Buffer.Next
-				}
-			}
+			next := slices.MinFunc(items, func(a, b httpBufferItem) int { return a.Buffer.Next.Compare(b.Buffer.Next) }).Buffer.Next
 			if !next.After(now) {
 				next = p.flushHTTPBuffer(ctx, identity, collection, stream, items, now)
 			}
-			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
-				earliest = next
-			}
+			earliest = sooner(earliest, next)
 		}
-	}
-	return earliest
+		return earliest
+	})
 }
 
 func (p *Pack) deleteHTTPBuffer(ctx context.Context, collection spi.Collection, items []httpBufferItem) {
@@ -3611,7 +3505,7 @@ func (p *Pack) deleteHTTPStreamWork(ctx context.Context, req *spi.Request, strea
 	for _, item := range items {
 		var retry httpRetry
 		if json.Unmarshal(item.Value, &retry) == nil && retry.Stream == stream {
-			p.deleteHTTPRetry(ctx, retries, item.Key, retry.DataKey)
+			p.deleteWork(ctx, retries, item.Key, retry.DataKey)
 		}
 	}
 	search := p.col(req, "fh-search-work")
@@ -3619,14 +3513,14 @@ func (p *Pack) deleteHTTPStreamWork(ctx context.Context, req *spi.Request, strea
 	for _, item := range items {
 		var work searchWork
 		_ = json.Unmarshal(item.Value, &work)
-		p.deleteSearchWork(ctx, search, item.Key, work.DataKey)
+		p.deleteWork(ctx, search, item.Key, work.DataKey)
 	}
 	redshift := p.col(req, "fh-redshift-work")
 	items, _, _ = redshift.List(ctx, stream+"/", "", 0)
 	for _, item := range items {
 		var work redshiftWork
 		_ = json.Unmarshal(item.Value, &work)
-		p.deleteRedshiftWork(ctx, redshift, item.Key, work.DataKey)
+		p.deleteWork(ctx, redshift, item.Key, work.DataKey)
 	}
 }
 
@@ -3749,15 +3643,7 @@ func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, colle
 }
 
 func (p *Pack) runHTTPRetries(ctx context.Context) time.Time {
-	if p.deps.Store == nil || p.deps.Clock == nil {
-		return time.Time{}
-	}
-	now := p.deps.Clock.Now().UTC()
-	var earliest time.Time
-	scopes, _ := p.deps.Store.Scopes(ctx)
-	for _, identity := range scopes {
-		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-http-retries")
-		retries, _, _ := collection.List(ctx, "", "", 0)
+	return p.scan(ctx, "fh-http-retries", func(identity spi.Identity, collection spi.Collection, retries []spi.KV, now time.Time) (earliest time.Time) {
 		for _, item := range retries {
 			var retry httpRetry
 			if json.Unmarshal(item.Value, &retry) != nil {
@@ -3767,33 +3653,24 @@ func (p *Pack) runHTTPRetries(ctx context.Context) time.Time {
 			if !next.After(now) {
 				next = p.runHTTPRetry(ctx, identity, collection, item.Key, &retry, now)
 			}
-			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
-				earliest = next
-			}
+			earliest = sooner(earliest, next)
 		}
-	}
-	return earliest
-}
-
-func (p *Pack) deleteHTTPRetry(ctx context.Context, collection spi.Collection, key, dataKey string) {
-	_ = collection.Delete(ctx, key)
-	if p.deps.Blobs != nil {
-		_ = p.deps.Blobs.Delete(ctx, dataKey)
-	}
+		return earliest
+	})
 }
 
 func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collection spi.Collection, key string, retry *httpRetry, now time.Time) time.Time {
 	req := &spi.Request{Identity: identity}
 	raw, ok, _ := p.col(req, "fh").Get(ctx, retry.Stream)
 	if !ok {
-		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
+		p.deleteWork(ctx, collection, key, retry.DataKey)
 		return time.Time{}
 	}
 	stream := spi.JSONObject(raw)
 	destinationKey := endpointDestinationKey(retry.Destination)
 	destination, ok := stream[destinationKey].(map[string]any)
 	if !ok {
-		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
+		p.deleteWork(ctx, collection, key, retry.DataKey)
 		return time.Time{}
 	}
 	var payload httpRetryPayload
@@ -3816,7 +3693,7 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 	}
 	if !now.Before(retry.Expires) {
 		p.backupEndpointPayload(ctx, req, stream, destination, destinationKey, retry.Stream, payload, retry.Retries, retry.ErrorCode, retry.ErrorMessage, now)
-		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
+		p.deleteWork(ctx, collection, key, retry.DataKey)
 		return time.Time{}
 	}
 	delivered, permanent, code, message := p.deliverEndpoint(ctx, req, stream, destination, destinationKey, retry.RequestID, payload.ProcessedData, now)
@@ -3826,7 +3703,7 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 		retry.Expires = retry.Expires.Add(attemptEnded.Sub(now))
 	}
 	if delivered || permanent {
-		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
+		p.deleteWork(ctx, collection, key, retry.DataKey)
 		return time.Time{}
 	}
 	p.logDeliveryError(ctx, req, destination, retry.Stream, message, attemptEnded)

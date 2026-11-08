@@ -102,11 +102,11 @@ func TestTableCRUDDescriptionCharacterization(t *testing.T) {
 	created := spi.Object(call("CreateTable", input).Output["TableDescription"])
 	described := spi.Object(call("DescribeTable", map[string]any{"TableName": "crud-detail"}).Output["Table"])
 	deleted := spi.Object(call("DeleteTable", map[string]any{"TableName": "crud-detail"}).Output["TableDescription"])
-	if created["TableStatus"] != "CREATING" || asInt(spi.Object(created["ProvisionedThroughput"])["NumberOfDecreasesToday"]) != 0 {
+	if created["TableStatus"] != "CREATING" || spi.Integer(spi.Object(created["ProvisionedThroughput"])["NumberOfDecreasesToday"]) != 0 {
 		t.Fatalf("create description %#v", created)
 	}
 	warm := spi.Object(described["WarmThroughput"])
-	if described["TableStatus"] != "ACTIVE" || asInt(warm["ReadUnitsPerSecond"]) != 5 || asInt(warm["WriteUnitsPerSecond"]) != 5 || warm["Status"] != "ACTIVE" {
+	if described["TableStatus"] != "ACTIVE" || spi.Integer(warm["ReadUnitsPerSecond"]) != 5 || spi.Integer(warm["WriteUnitsPerSecond"]) != 5 || warm["Status"] != "ACTIVE" {
 		t.Fatalf("describe warm throughput %#v", described)
 	}
 	for _, key := range []string{"DeletionProtectionEnabled", "ItemCount", "ProvisionedThroughput", "TableArn", "TableId", "TableName", "TableStatus"} {
@@ -735,7 +735,7 @@ func TestDynamoDBTableMetadata(t *testing.T) {
 	}
 	createdTable := spi.Object(created.Output["TableDescription"])
 	createdIndex := spi.Object(spi.Slice(createdTable["GlobalSecondaryIndexes"])[0])
-	if spi.Str(spi.Object(createdTable["BillingModeSummary"])["BillingMode"]) != "PAY_PER_REQUEST" || createdTable["TableStatus"] != "CREATING" || asInt(spi.Object(createdTable["ProvisionedThroughput"])["ReadCapacityUnits"]) != 0 || createdIndex["IndexStatus"] != "CREATING" || asInt(spi.Object(createdIndex["ProvisionedThroughput"])["WriteCapacityUnits"]) != 0 || spi.Object(createdTable["WarmThroughput"])["Status"] != "UPDATING" {
+	if spi.Str(spi.Object(createdTable["BillingModeSummary"])["BillingMode"]) != "PAY_PER_REQUEST" || createdTable["TableStatus"] != "CREATING" || spi.Integer(spi.Object(createdTable["ProvisionedThroughput"])["ReadCapacityUnits"]) != 0 || createdIndex["IndexStatus"] != "CREATING" || spi.Integer(spi.Object(createdIndex["ProvisionedThroughput"])["WriteCapacityUnits"]) != 0 || spi.Object(createdTable["WarmThroughput"])["Status"] != "UPDATING" {
 		t.Fatalf("create metadata %#v", createdTable)
 	}
 	described, err := call("DescribeTable", map[string]any{"TableName": "Metadata"})
@@ -747,7 +747,7 @@ func TestDynamoDBTableMetadata(t *testing.T) {
 		t.Fatalf("describe metadata %#v", describedTable)
 	}
 	provisioned, err := call("CreateTable", map[string]any{"TableName": "Provisioned", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}, "GlobalSecondaryIndexes": []any{map[string]any{"IndexName": "by-value", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 1, "WriteCapacityUnits": 1}}}})
-	if err != nil || asInt(spi.Object(spi.Slice(spi.Object(provisioned.Output["TableDescription"])["GlobalSecondaryIndexes"])[0])["ProvisionedThroughput"].(map[string]any)["ReadCapacityUnits"]) != 1 {
+	if err != nil || spi.Integer(spi.Object(spi.Slice(spi.Object(provisioned.Output["TableDescription"])["GlobalSecondaryIndexes"])[0])["ProvisionedThroughput"].(map[string]any)["ReadCapacityUnits"]) != 1 {
 		t.Fatalf("provisioned GSI %#v %v", provisioned, err)
 	}
 }
@@ -841,19 +841,19 @@ func TestDynamoDBBackupsAndContributorInsights(t *testing.T) {
 		t.Fatalf("default continuous backups %#v", disabled)
 	}
 	enabled := spi.Object(spi.Object(must("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": true}})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
-	earliest := asInt(enabled["EarliestRestorableDateTime"])
-	if enabled["PointInTimeRecoveryStatus"] != "ENABLED" || asInt(enabled["LatestRestorableDateTime"]) != earliest || asInt(enabled["RecoveryPeriodInDays"]) != 35 {
+	earliest := spi.Integer(enabled["EarliestRestorableDateTime"])
+	if enabled["PointInTimeRecoveryStatus"] != "ENABLED" || spi.Integer(enabled["LatestRestorableDateTime"]) != earliest || spi.Integer(enabled["RecoveryPeriodInDays"]) != 35 {
 		t.Fatalf("enabled continuous backups %#v", enabled)
 	}
 	if err := deps.Clock.Advance(time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	reenabled := spi.Object(spi.Object(must("UpdateContinuousBackups", map[string]any{"TableName": "T", "PointInTimeRecoverySpecification": map[string]any{"PointInTimeRecoveryEnabled": true}})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
-	if asInt(reenabled["EarliestRestorableDateTime"]) != earliest || asInt(reenabled["LatestRestorableDateTime"]) <= earliest {
+	if spi.Integer(reenabled["EarliestRestorableDateTime"]) != earliest || spi.Integer(reenabled["LatestRestorableDateTime"]) <= earliest {
 		t.Fatalf("continuous backup window %#v", reenabled)
 	}
 	described := spi.Object(spi.Object(must("DescribeContinuousBackups", map[string]any{"TableName": "T"})["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
-	if described["PointInTimeRecoveryStatus"] != "ENABLED" || asInt(described["EarliestRestorableDateTime"]) != earliest || asInt(described["RecoveryPeriodInDays"]) != 35 {
+	if described["PointInTimeRecoveryStatus"] != "ENABLED" || spi.Integer(described["EarliestRestorableDateTime"]) != earliest || spi.Integer(described["RecoveryPeriodInDays"]) != 35 {
 		t.Fatalf("described continuous backups %#v", described)
 	}
 	insights := must("DescribeContributorInsights", map[string]any{"TableName": "T"})

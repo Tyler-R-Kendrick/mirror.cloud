@@ -59,7 +59,7 @@ func (p *Pack) transactWriteItems(ctx context.Context, req *spi.Request) (*spi.R
 				return err
 			} else if ok {
 				record := spi.JSONObject(stored)
-				if int64(asInt(record["Expires"])) > p.deps.Clock.Now().Unix() {
+				if int64(spi.Integer(record["Expires"])) > p.deps.Clock.Now().Unix() {
 					if spi.Str(record["Payload"]) != string(payload) {
 						return &spi.Fault{Code: "IdempotentParameterMismatchException", Message: "A client request token was reused with different parameters", HTTPStatus: 400, Fault: "client"}
 					}

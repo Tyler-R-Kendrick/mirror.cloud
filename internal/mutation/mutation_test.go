@@ -465,7 +465,7 @@ var mutants = []mutant{
 	{
 		name: "s3-accept-zero-default-retention",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  ` || days && asInt(retention["Days"]) < 1 || years && asInt(retention["Years"]) < 1`,
+		old:  ` || days && spi.Integer(retention["Days"]) < 1 || years && spi.Integer(retention["Years"]) < 1`,
 		new:  ``,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestObjectLockBucketGuards",
@@ -1753,7 +1753,7 @@ var mutants = []mutant{
 	{
 		name: "s3-archive-ignore-nested-days",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `days = asInt(spi.Object(req.Input["RestoreRequest"])["Days"])`,
+		old:  `days = spi.Integer(spi.Object(req.Input["RestoreRequest"])["Days"])`,
 		new:  `days = 0`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestArchiveRestoreCharacterization",
@@ -2865,7 +2865,7 @@ var mutants = []mutant{
 	{
 		name: "s3-ignore-completed-part-number",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `number := asInt(item["PartNumber"])`,
+		old:  `number := spi.Integer(item["PartNumber"])`,
 		new:  `number := index + 1`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestCompleteMultipartUploadManifest",
@@ -3025,11 +3025,11 @@ var mutants = []mutant{
 	{
 		name: "s3-read-wrong-multipart-part",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old: `		partSize := int64(asInt(part["size"]))
-		if asInt(part["number"]) == number {
+		old: `		partSize := int64(spi.Integer(part["size"]))
+		if spi.Integer(part["number"]) == number {
 			return start, partSize, len(parts), true, nil`,
-		new: `		partSize := int64(asInt(part["size"]))
-		if asInt(part["number"]) == number-1 {
+		new: `		partSize := int64(spi.Integer(part["size"]))
+		if spi.Integer(part["number"]) == number-1 {
 			return start, partSize, len(parts), true, nil`,
 		pkg: "./internal/services/aws/s3",
 		run: "TestMultipartPartReads",
@@ -3037,8 +3037,8 @@ var mutants = []mutant{
 	{
 		name: "s3-grow-multipart-part-read",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `partSize := int64(asInt(part["size"]))`,
-		new:  `partSize := int64(asInt(part["size"])) + 1`,
+		old:  `partSize := int64(spi.Integer(part["size"]))`,
+		new:  `partSize := int64(spi.Integer(part["size"])) + 1`,
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestMultipartPartReads",
 	},
@@ -18422,8 +18422,8 @@ var mutants = []mutant{
 	{
 		name: "dynamodb-transaction-expire-active-token",
 		file: filepath.Join("internal", "services", "aws", "dynamodb", "ddb_transaction.go"),
-		old:  `if int64(asInt(record["Expires"])) > p.deps.Clock.Now().Unix() {`,
-		new:  `if int64(asInt(record["Expires"])) < p.deps.Clock.Now().Unix() {`,
+		old:  `if int64(spi.Integer(record["Expires"])) > p.deps.Clock.Now().Unix() {`,
+		new:  `if int64(spi.Integer(record["Expires"])) < p.deps.Clock.Now().Unix() {`,
 		pkg:  "./internal/services/aws/dynamodb",
 		run:  "TestDynamoDBTransactionCharacterization",
 	},
@@ -18678,7 +18678,7 @@ var mutants = []mutant{
 	},
 	{
 		name: "dynamodb-numeric-drop-int64",
-		file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+		file: filepath.Join("internal", "spi", "values.go"),
 		old:  "case int64:\n\t\treturn int(n)",
 		new:  "case uint64:\n\t\treturn int(n)",
 		pkg:  "./internal/services/aws/dynamodb",
@@ -18919,8 +18919,8 @@ var mutants = []mutant{
 	{
 		name: "s3-list-versions-keep-zero-max-keys",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "if value, ok := req.Input[\"MaxKeys\"]; ok {\n\t\tif value := asInt(value); value != 0 {\n\t\t\tmaxKeys = max(0, value)\n\t\t}\n\t}\n\n\trecords := map[string][]map[string]any{}",
-		new:  "if value, ok := req.Input[\"MaxKeys\"]; ok {\n\t\tif value := asInt(value); value == 0 {\n\t\t\tmaxKeys = max(0, value)\n\t\t}\n\t}\n\n\trecords := map[string][]map[string]any{}",
+		old:  "if value, ok := req.Input[\"MaxKeys\"]; ok {\n\t\tif value := spi.Integer(value); value != 0 {\n\t\t\tmaxKeys = max(0, value)\n\t\t}\n\t}\n\n\trecords := map[string][]map[string]any{}",
+		new:  "if value, ok := req.Input[\"MaxKeys\"]; ok {\n\t\tif value := spi.Integer(value); value == 0 {\n\t\t\tmaxKeys = max(0, value)\n\t\t}\n\t}\n\n\trecords := map[string][]map[string]any{}",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestListZeroMaxKeysUsesDefault",
 	},
@@ -19039,8 +19039,8 @@ var mutants = []mutant{
 	{
 		name: "s3-list-objects-keep-zero-max-keys",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  "if value, ok := req.Input[\"MaxKeys\"]; ok {\n\t\tif value := asInt(value); value != 0 {\n\t\t\tmaxKeys = max(0, value)\n\t\t}\n\t} else if value, ok := req.Input[\"max-keys\"]; ok {",
-		new:  "if value, ok := req.Input[\"MaxKeys\"]; ok {\n\t\tif value := asInt(value); value == 0 {\n\t\t\tmaxKeys = max(0, value)\n\t\t}\n\t} else if value, ok := req.Input[\"max-keys\"]; ok {",
+		old:  "if value, ok := req.Input[\"MaxKeys\"]; ok {\n\t\tif value := spi.Integer(value); value != 0 {\n\t\t\tmaxKeys = max(0, value)\n\t\t}\n\t} else if value, ok := req.Input[\"max-keys\"]; ok {",
+		new:  "if value, ok := req.Input[\"MaxKeys\"]; ok {\n\t\tif value := spi.Integer(value); value == 0 {\n\t\t\tmaxKeys = max(0, value)\n\t\t}\n\t} else if value, ok := req.Input[\"max-keys\"]; ok {",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestListZeroMaxKeysUsesDefault",
 	},

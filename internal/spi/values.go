@@ -2,6 +2,7 @@ package spi
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 )
 
@@ -79,4 +80,21 @@ func JSONObject(raw []byte) map[string]any {
 	var m map[string]any
 	_ = json.Unmarshal(raw, &m)
 	return m
+}
+
+// Integer answers v as an int: an int, int64 or float64 (truncated), or a
+// string's decimal digits; 0 for anything else.
+func Integer(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case string:
+		i, _ := strconv.Atoi(n)
+		return i
+	}
+	return 0
 }

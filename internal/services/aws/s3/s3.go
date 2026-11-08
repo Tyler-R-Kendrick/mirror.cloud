@@ -1042,7 +1042,7 @@ func (p *Pack) listBuckets(ctx context.Context, req *spi.Request) (*spi.Response
 	_, maxSet := req.Input["MaxBuckets"]
 	maxBuckets := 0
 	if maxSet {
-		maxBuckets = asInt(req.Input["MaxBuckets"])
+		maxBuckets = spi.Integer(req.Input["MaxBuckets"])
 		if maxBuckets < 1 || maxBuckets > 10000 {
 			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid max-buckets value", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
@@ -2143,11 +2143,11 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 	})
 	maxKeys := 1000
 	if value, ok := req.Input["MaxKeys"]; ok {
-		if value := asInt(value); value != 0 {
+		if value := spi.Integer(value); value != 0 {
 			maxKeys = max(0, value)
 		}
 	} else if value, ok := req.Input["max-keys"]; ok {
-		if value := asInt(value); value != 0 {
+		if value := spi.Integer(value); value != 0 {
 			maxKeys = max(0, value)
 		}
 	}
@@ -2565,7 +2565,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	for index, completed := range parts {
 		item := spi.Object(completed)
-		number := asInt(item["PartNumber"])
+		number := spi.Integer(item["PartNumber"])
 		etag := strings.Trim(strings.TrimSpace(spi.Str(item["ETag"])), `"`)
 		if number < 1 || number > 10000 {
 			return nil, invalidMultipartPart(id, etag, number)
@@ -2694,9 +2694,9 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	id := mpuID(req)
 	b, key := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"])
-	marker := asInt(req.Input["PartNumberMarker"])
+	marker := spi.Integer(req.Input["PartNumberMarker"])
 	maxParts := 1000
-	if value := asInt(req.Input["MaxParts"]); value != 0 {
+	if value := spi.Integer(req.Input["MaxParts"]); value != 0 {
 		maxParts = value
 	}
 	if req.HTTP != nil {
@@ -2809,7 +2809,7 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 				maxUploads = parsed
 			}
 		} else {
-			maxUploads = asInt(raw)
+			maxUploads = spi.Integer(raw)
 		}
 	}
 	// Zero is deliberately still folded to the default rather than refused or
@@ -2975,7 +2975,7 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 	}
 	maxKeys := 1000
 	if value, ok := req.Input["MaxKeys"]; ok {
-		if value := asInt(value); value != 0 {
+		if value := spi.Integer(value); value != 0 {
 			maxKeys = max(0, value)
 		}
 	}
@@ -3394,7 +3394,7 @@ func (p *Pack) setLifecycleExpirationHeader(ctx context.Context, req *spi.Reques
 			continue
 		}
 		var expires time.Time
-		if days := asInt(expiration["Days"]); days != 0 {
+		if days := spi.Integer(expiration["Days"]); days != 0 {
 			lastModified, err := http.ParseTime(modified)
 			if err != nil {
 				return
@@ -3777,7 +3777,7 @@ func validateObjectLockConfiguration(value any) error {
 	mode := spi.Str(retention["Mode"])
 	_, days := retention["Days"]
 	_, years := retention["Years"]
-	if (mode != "GOVERNANCE" && mode != "COMPLIANCE") || days == years || days && asInt(retention["Days"]) < 1 || years && asInt(retention["Years"]) < 1 {
+	if (mode != "GOVERNANCE" && mode != "COMPLIANCE") || days == years || days && spi.Integer(retention["Days"]) < 1 || years && spi.Integer(retention["Years"]) < 1 {
 		return malformed()
 	}
 	return nil
@@ -3842,7 +3842,7 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 		out["ETag"] = meta["etag"]
 	}
 	if requested["OBJECTSIZE"] {
-		out["ObjectSize"] = asInt(meta["size"])
+		out["ObjectSize"] = spi.Integer(meta["size"])
 	}
 	if requested["STORAGECLASS"] {
 		out["StorageClass"] = meta["storageClass"]
@@ -3884,16 +3884,16 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 				maxParts = 1000
 			}
 			sort.Slice(parts, func(i, j int) bool {
-				return asInt(spi.Object(parts[i])["number"]) < asInt(spi.Object(parts[j])["number"])
+				return spi.Integer(spi.Object(parts[i])["number"]) < spi.Integer(spi.Object(parts[j])["number"])
 			})
 			var listed []any
 			for _, raw := range parts {
 				part := spi.Object(raw)
-				number := asInt(part["number"])
+				number := spi.Integer(part["number"])
 				if number <= marker {
 					continue
 				}
-				item := map[string]any{"PartNumber": number, "Size": asInt(part["size"])}
+				item := map[string]any{"PartNumber": number, "Size": spi.Integer(part["size"])}
 				for _, checksum := range checksums {
 					if value := spi.Str(spi.Object(part["checksums"])[checksum.header]); value != "" {
 						item[checksum.input] = value
@@ -3908,7 +3908,7 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 			objectParts["IsTruncated"], objectParts["MaxParts"], objectParts["PartNumberMarker"], objectParts["NextPartNumberMarker"] = truncated, maxParts, strconv.Itoa(marker), "0"
 			if len(listed) > 0 {
 				objectParts["Parts"] = listed
-				objectParts["NextPartNumberMarker"] = strconv.Itoa(asInt(spi.Object(listed[len(listed)-1])["PartNumber"]))
+				objectParts["NextPartNumberMarker"] = strconv.Itoa(spi.Integer(spi.Object(listed[len(listed)-1])["PartNumber"]))
 			}
 		}
 		out["ObjectParts"] = objectParts
@@ -4722,9 +4722,9 @@ func (p *Pack) objectLockForWrite(ctx context.Context, req *spi.Request, bucket 
 			mode = spi.Str(retention["Mode"])
 			if mode != "" {
 				now := p.deps.Clock.Now().UTC()
-				if days := asInt(retention["Days"]); days != 0 {
+				if days := spi.Integer(retention["Days"]); days != 0 {
 					until = now.AddDate(0, 0, days).Format(time.RFC3339)
-				} else if years := asInt(retention["Years"]); years != 0 {
+				} else if years := spi.Integer(retention["Years"]); years != 0 {
 					until = now.AddDate(years, 0, 0).Format(time.RFC3339)
 				}
 			}
@@ -4827,9 +4827,9 @@ func (p *Pack) restoreObject(ctx context.Context, req *spi.Request) (*spi.Respon
 	if storageClass == "" {
 		return nil, &spi.Fault{Code: "InvalidObjectState", HTTPStatus: http.StatusForbidden, Fault: "client", Fields: map[string]any{"StorageClass": spi.Str(meta["storageClass"])}}
 	}
-	days := asInt(req.Input["Days"])
+	days := spi.Integer(req.Input["Days"])
 	if days == 0 {
-		days = asInt(spi.Object(req.Input["RestoreRequest"])["Days"])
+		days = spi.Integer(spi.Object(req.Input["RestoreRequest"])["Days"])
 	}
 	if days == 0 {
 		return &spi.Response{Status: http.StatusOK, Output: map[string]any{}}, nil
@@ -5003,7 +5003,7 @@ func (p *Pack) notificationPayload(req *spi.Request, bucket, key, event, configu
 	}
 	if strings.Contains(event, "ObjectCreated") || strings.Contains(event, "ObjectRestore") {
 		object["eTag"] = strings.Trim(spi.Str(meta["etag"]), `"`)
-		object["size"] = asInt(meta["size"])
+		object["size"] = spi.Integer(meta["size"])
 	}
 	eventVersion := "2.1"
 	if strings.Contains(event, "ObjectTagging") || strings.Contains(event, "ObjectAcl") {
@@ -5038,7 +5038,7 @@ func (p *Pack) notificationPayload(req *spi.Request, bucket, key, event, configu
 
 func (p *Pack) eventBridgeEntry(req *spi.Request, bucket, key, event string, meta map[string]any) map[string]any {
 	object := map[string]any{
-		"key": notificationKey(key), "size": asInt(meta["size"]),
+		"key": notificationKey(key), "size": spi.Integer(meta["size"]),
 		"etag": strings.Trim(spi.Str(meta["etag"]), `"`), "sequencer": "0062E99A88DC407460",
 	}
 	if version := spi.Str(meta["versionId"]); version != "" && version != "null" {
@@ -5686,10 +5686,10 @@ func mpuID(req *spi.Request) string {
 
 func partNumber(req *spi.Request) int {
 	if value, ok := req.Input["PartNumber"]; ok {
-		return asInt(value)
+		return spi.Integer(value)
 	}
 	if value, ok := req.Input["partNumber"]; ok {
-		return asInt(value)
+		return spi.Integer(value)
 	}
 	if req.HTTP != nil {
 		n, _ := strconv.Atoi(req.HTTP.URL.Query().Get("partNumber"))
@@ -5721,8 +5721,8 @@ func objectPartRange(req *spi.Request, meta map[string]any, size int64) (start, 
 	}
 	for _, raw := range parts {
 		part := spi.Object(raw)
-		partSize := int64(asInt(part["size"]))
-		if asInt(part["number"]) == number {
+		partSize := int64(spi.Integer(part["size"]))
+		if spi.Integer(part["number"]) == number {
 			return start, partSize, len(parts), true, nil
 		}
 		start += partSize
@@ -5733,7 +5733,7 @@ func objectPartRange(req *spi.Request, meta map[string]any, size int64) (start, 
 func partMetadata(meta map[string]any, number int) map[string]any {
 	for _, raw := range spi.Slice(meta["parts"]) {
 		part := spi.Object(raw)
-		if asInt(part["number"]) == number {
+		if spi.Integer(part["number"]) == number {
 			return part
 		}
 	}
@@ -5754,21 +5754,6 @@ func setPartChecksumHeaders(headers http.Header, meta, part map[string]any, whol
 		}
 		headers.Set("x-amz-checksum-type", "COMPOSITE")
 	}
-}
-
-func asInt(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
-	case string:
-		i, _ := strconv.Atoi(n)
-		return i
-	}
-	return 0
 }
 
 func objectByteRange(value string, size int64) (start, length int64, requested bool, err error) {

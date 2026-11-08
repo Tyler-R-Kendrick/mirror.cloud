@@ -226,7 +226,7 @@ func (p *Pack) emitKinesisDestinations(ctx context.Context, req *spi.Request, de
 				return err
 			}
 			stream := spi.JSONObject(b)
-			sequence := asInt(stream["Seq"])
+			sequence := spi.Integer(stream["Seq"])
 			stream["Seq"] = sequence + 1
 			b, _ = json.Marshal(stream)
 			if err := streams.Put(streamName, b); err != nil {
@@ -345,7 +345,7 @@ func (p *Pack) getStreamRecords(ctx context.Context, req *spi.Request) (*spi.Res
 	arn := parts[0]
 	table := tableFromStreamARN(arn)
 	start, _ := strconv.Atoi(parts[1])
-	limit := asInt(req.Input["Limit"])
+	limit := spi.Integer(req.Input["Limit"])
 	if limit <= 0 {
 		limit = 1000
 	}

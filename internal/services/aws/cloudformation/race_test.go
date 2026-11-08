@@ -379,6 +379,30 @@ func TestCloudFormationTheRollbackFamilyNeverSucceedsSilently(t *testing.T) {
 	}
 }
 
+// UpdateTerminationProtection's EnableTerminationProtection is required and a
+// Boolean (the model: UpdateTerminationProtectionInput's member, smithy.api#
+// required, targets the Boolean EnableTerminationProtection): a request
+// without it is ValidationError naming it, as the bundle answered before the
+// operation was native, and one that is no Boolean, "maybe", is
+// ValidationError too. Neither changes the protection. Before, the native
+// operation read a missing member as false, so {"StackName": "tp"} turned the
+// protection off, and "maybe" did the same.
+func TestCloudFormationTerminationProtectionNeedsItsBoolean(t *testing.T) {
+	h := newStacks(t)
+	h.mustCreate("tp", map[string]map[string]any{"Q": nameable()["Queue"]})
+	if _, err := h.invoke("UpdateTerminationProtection", map[string]any{"StackName": "tp", "EnableTerminationProtection": true}); err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range []map[string]any{{"StackName": "tp"}, {"StackName": "tp", "EnableTerminationProtection": "maybe"}, {"StackName": "tp", "EnableTerminationProtection": nil}} {
+		if _, err := h.invoke("UpdateTerminationProtection", in); code(err) != "ValidationError" || !strings.Contains(err.Error(), "EnableTerminationProtection") {
+			t.Errorf("UpdateTerminationProtection %v answered %v, want ValidationError naming EnableTerminationProtection", in, err)
+		}
+		if h.record("tp")["Protect"] != true {
+			t.Errorf("after UpdateTerminationProtection %v the stack is unprotected", in)
+		}
+	}
+}
+
 // UpdateTerminationProtection writes the stack record in the same store
 // transaction as the engine's writes, so a create that settles while it runs
 // keeps its CREATE_COMPLETE and the protection both: here the protection is

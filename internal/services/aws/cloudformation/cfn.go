@@ -66,7 +66,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
 	case "UpdateTerminationProtection": // in one transaction, as every write of the record is (settle)
-		protect, _ := coerce(req.Input["EnableTerminationProtection"], "Boolean") // a Boolean in any case
+		v := req.Input["EnableTerminationProtection"] // required, a Boolean (the model), in any case
+		protect, isBoolean := coerce(v, "Boolean")
+		if v == nil { // the bundle's missing_input_error, which the operation answered before it was native
+			return nil, invalid("EnableTerminationProtection")
+		} else if !isBoolean {
+			return nil, invalid("EnableTerminationProtection must be a Boolean, not " + spi.JSONText(v))
+		}
 		st, found, err := p.settle(ctx, req, name, func(cur stack) (stack, bool) { cur.Protect = protect == true; return cur, cur.ID != "" })
 		if err == nil && !found {
 			err = invalid("Stack [" + name + "] does not exist")

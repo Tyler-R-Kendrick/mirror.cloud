@@ -320,7 +320,10 @@ The oracle is AWS's documentation as it ships in the vendored model
   - The stack record has no writer but the engine, each write one store
     transaction: `UpdateTerminationProtection` is native and sets the
     protection in a transaction over the record it reads (its Boolean in any
-    case, so `TRUE` protects), and `ContinueUpdateRollback`, whose one
+    case, so `TRUE` protects; it is required, so a request without it is
+    `ValidationError` naming it, as the bundle answered, and one that is no
+    Boolean, `maybe`, is `ValidationError` too, where round 9 read either as
+    false and turned the protection off), and `ContinueUpdateRollback`, whose one
     accepted state, `UPDATE_ROLLBACK_FAILED`, no stack here rests in (a
     failed update is not rolled back), refuses every stack and writes
     nothing. Before, the bundle's `UpdateTerminationProtection` read the

@@ -688,3 +688,14 @@ func TestCloudFormationRefusesAnUnresolvedSubVariable(t *testing.T) {
 		}
 	}
 }
+
+// An Integer may be negative: "-5" is -5, as a Number parameter's text can
+// be, and "-", "+5", "- 5" and "5-" are still none. Before, "-5" was refused.
+func TestCloudFormationReadsANegativeInteger(t *testing.T) {
+	for text, want := range map[string]any{"-5": -5, "016": 16, "-": nil, "+5": nil, "- 5": nil, "5-": nil} {
+		got, ok := coerce(text, "Integer")
+		if want == nil && ok || want != nil && (!ok || got != want) {
+			t.Errorf("coerce(%q, Integer) is %v, %t, want %v", text, got, ok, want)
+		}
+	}
+}

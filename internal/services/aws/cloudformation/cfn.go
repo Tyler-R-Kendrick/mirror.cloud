@@ -922,7 +922,7 @@ func given(in, props map[string]any, members ...string) map[string]any {
 // Integer or String), itself or its text as a Ref to a parameter gives it ("the parameter value
 // becomes a string", User Guide, Parameters), and answers whether it is one. A Boolean is true or
 // false in any case, as YAML 1.1, the templates' YAML, spells it true, True or TRUE; an Integer is
-// decimal digits, as a Number parameter's text is ("016" is 16; "16.0", "1e1", "+16" and " 16" are
+// decimal digits after an optional minus, as a Number parameter's text is ("016" is 16, "-5" is -5; "16.0", "1e1", "+16" and " 16" are
 // none); a String is a scalar's text (123 is "123"). Anything else is answered as it was given.
 func coerce(v any, want string) (any, bool) {
 	switch v.(type) {
@@ -933,7 +933,7 @@ func coerce(v any, want string) (any, bool) {
 	if text, yes := spi.JSONText(v), strings.EqualFold(spi.JSONText(v), "true"); want == "Boolean" {
 		return yes, yes || strings.EqualFold(text, "false")
 	} else if n, err := strconv.Atoi(text); want == "Integer" {
-		return n, err == nil && strings.TrimLeft(text, "0123456789") == ""
+		return n, err == nil && strings.TrimLeft(strings.TrimPrefix(text, "-"), "0123456789") == ""
 	} else {
 		return text, true
 	}

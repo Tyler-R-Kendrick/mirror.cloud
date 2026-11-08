@@ -397,7 +397,8 @@ The oracle is AWS's documentation as it ships in the vendored model
     `FifoQueue` that is no Boolean (`maybe`, `1`, a list) is
     `ValidationError` naming it, before anything is made (round 7 made a
     standard queue); an Integer
-    is decimal digits, as a Number parameter's text is, so `"016"` is 16 and
+    is decimal digits after an optional minus, as a Number parameter's text
+    is, so `"-5"` is -5 (round 8 refused it), `"016"` is 16 and
     `"16.0"`, `"1e1"`, `"+16"` and `" 16"` are refused; a String is a
     scalar's text, so `ExcludeCharacters: 123` is `"123"` and an SSM
     Parameter's `Value: 123` is `"123"`. Before, `"True"` made a standard

@@ -495,3 +495,53 @@ func TestCloudFormationReadsYAMLAsVersion11(t *testing.T) {
 		_, _ = h.invoke("DeleteStack", map[string]any{"StackName": "v11-bad"})
 	}
 }
+
+// A Fn::If whose condition the parameters settle orders by the branch it
+// takes, and only that one: Fn::Equals of literals and Refs to parameters,
+// and Fn::Not, Fn::And, Fn::Or and Condition over such conditions (Template
+// Reference, condition functions). So A, which takes "fixed" when Env is
+// prod and names B otherwise, and B, which names A only when Env is not
+// prod, are no cycle; E, which names ZZ only in prod, is made after it, and
+// F, which names ZZ only outside prod, before it, by its logical id.
+// A condition the parameters do not settle (one on AWS::Region, or one that
+// names itself) orders by both branches, a reading, so C and D, each naming
+// the other under it, are a cycle. Before, every Fn::If ordered by both
+// branches, and A and B were "Circular dependency between resources: [A, B]".
+func TestCloudFormationOrdersAnIfByTheBranchItTakes(t *testing.T) {
+	h := newStacks(t)
+	param := func(value any) map[string]any {
+		return map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": value}}
+	}
+	when := func(cond string, then, otherwise any) any {
+		return map[string]any{"Fn::If": []any{cond, then, otherwise}}
+	}
+	ref := func(n string) any { return map[string]any{"Ref": n} }
+	tpl := map[string]any{
+		"Parameters": map[string]any{"Env": map[string]any{"Type": "String", "Default": "prod"}},
+		"Conditions": map[string]any{
+			"IsProd":   map[string]any{"Fn::Equals": []any{ref("Env"), "prod"}},
+			"IsDev":    map[string]any{"Fn::Not": []any{map[string]any{"Condition": "IsProd"}}},
+			"Both":     map[string]any{"Fn::And": []any{map[string]any{"Condition": "IsProd"}, map[string]any{"Fn::Or": []any{map[string]any{"Condition": "IsDev"}, map[string]any{"Condition": "IsProd"}}}}},
+			"InRegion": map[string]any{"Fn::Equals": []any{ref("AWS::Region"), "us-east-1"}},
+			"Loop":     map[string]any{"Condition": "Loop"},
+		},
+		"Resources": map[string]any{
+			"A": param(when("IsProd", "fixed", ref("B"))), "B": param(when("IsDev", ref("A"), "fixed")),
+			"E": param(when("Both", ref("ZZ"), "x")), "F": param(when("IsDev", ref("ZZ"), "x")), "ZZ": param("z"),
+		},
+	}
+	body, _ := json.Marshal(tpl)
+	if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": string(body)}); err != nil {
+		t.Errorf("A and B, settled by Env, answered %v", err)
+	}
+	if order, err := h.pack.order(tpl, map[string]string{"Env": "prod"}); err != nil || slices.Index(order, "E") < slices.Index(order, "ZZ") || slices.Index(order, "F") > slices.Index(order, "ZZ") {
+		t.Errorf("the order is %v (%v), want E after ZZ and F, which names ZZ only outside prod, before it", order, err)
+	}
+	for _, cond := range []string{"InRegion", "Loop"} {
+		tpl["Resources"] = map[string]any{"C": param(when(cond, ref("D"), "x")), "D": param(when(cond, ref("C"), "x"))}
+		body, _ := json.Marshal(tpl)
+		if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": string(body)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "[C, D]") {
+			t.Errorf("C and D under %s answered %v, want the cycle [C, D]", cond, err)
+		}
+	}
+}

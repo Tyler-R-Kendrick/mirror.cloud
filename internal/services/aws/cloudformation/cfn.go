@@ -255,7 +255,7 @@ func (p *Pack) template(ctx context.Context, req *spi.Request) (string, map[stri
 	tpl, err := parseTemplate(body)
 	var order []string
 	if err == nil {
-		order, err = p.order(tpl)
+		order, err = p.order(tpl, parameters(req.Input, tpl))
 	}
 	return body, tpl, order, err
 }
@@ -430,14 +430,14 @@ func planID(req *spi.Request, typ, n string, props map[string]any) string {
 // Fn::GetAtt or Fn::Sub ("Resource B is created before resource A", Template Reference, DependsOn
 // attribute), else by logical id. One walk of each resource's properties finds the names, and Kahn's
 // algorithm orders them, the earliest logical id first of those ready. A cycle orders none, and is
-// CloudFormation's error.
-func (p *Pack) order(tpl map[string]any) ([]string, error) {
+// CloudFormation's error. A Fn::If whose condition params settle names only what its branch taken does.
+func (p *Pack) order(tpl map[string]any, params map[string]string) ([]string, error) {
 	resources, waiting, users := asMap(tpl["Resources"]), map[string]int{}, map[string][]string{}
 	var ready, order []string
 	for logical, r := range resources {
 		p.walks++
 		named := map[string]bool{}
-		names(asMap(r)["Properties"], named)
+		names(asMap(r)["Properties"], named, asMap(tpl["Conditions"]), params)
 		for n := range named {
 			if _, ok := resources[n]; ok {
 				waiting[logical], users[n] = waiting[logical]+1, append(users[n], logical)
@@ -475,7 +475,7 @@ func (p *Pack) order(tpl map[string]any) ([]string, error) {
 // names adds to named every name v refers to: a Ref's, a Fn::GetAtt's resource, and each Name of a
 // ${Name} or ${Name.Attribute} in a Fn::Sub string, but for a variable its map defines, whose value is
 // walked instead, and a ${!Literal}, which names nothing.
-func names(v any, named map[string]bool) {
+func names(v any, named map[string]bool, conds map[string]any, params map[string]string) {
 	switch t := v.(type) {
 	case map[string]any:
 		for k, x := range t {
@@ -492,16 +492,58 @@ func names(v any, named map[string]bool) {
 						named[n] = true
 					}
 				}
-				names(parts[1], named)
+				names(parts[1], named, conds, params)
+			case "Fn::If": // [condition, then, else]
+				branches := append(spi.Slice(x), nil, nil, nil)
+				if yes, settled := truth(map[string]any{"Condition": branches[0]}, conds, params, 0); settled {
+					x = branches[map[bool]int{true: 1, false: 2}[yes]]
+				}
+				names(x, named, conds, params)
 			default:
-				names(x, named)
+				names(x, named, conds, params)
 			}
 		}
 	case []any:
 		for _, x := range t {
-			names(x, named)
+			names(x, named, conds, params)
 		}
 	}
+}
+
+// truth is a condition's value when the parameters settle it, and whether they do: Fn::Equals of two
+// literals or Refs to parameters, and Fn::Not, Fn::And, Fn::Or and Condition over such conditions (Template
+// Reference, condition functions). Anything else, a pseudo parameter included, settles nothing, nor does a
+// condition that names itself.
+func truth(c any, conds map[string]any, params map[string]string, hops int) (bool, bool) {
+	m, text := asMap(c), [2]string{}
+	if name, ok := m["Condition"]; ok && hops <= len(conds) {
+		return truth(conds[str(name)], conds, params, hops+1)
+	} else if args := spi.Slice(m["Fn::Equals"]); len(args) == 2 {
+		for i, x := range args {
+			v, ok := coerce(x, "String")
+			if r, isRef := asMap(x)["Ref"]; isRef {
+				v, ok = params[str(r)]
+			}
+			if text[i] = str(v); !ok {
+				return false, false
+			}
+		}
+		return text[0] == text[1], true
+	}
+	for op, a := range m {
+		args, trues := spi.Slice(a), 0
+		for _, x := range args {
+			yes, ok := truth(x, conds, params, hops)
+			if trues += map[bool]int{true: 1}[yes]; !ok {
+				return false, false
+			}
+		}
+		if rule, ok := map[string][2]bool{"Fn::Not": {trues == 0, len(args) == 1}, "Fn::And": {trues == len(args), len(args) > 0},
+			"Fn::Or": {trues > 0, len(args) > 0}}[op]; ok {
+			return rule[0], rule[1]
+		}
+	}
+	return false, false
 }
 
 // subVariable is a ${...} in a Fn::Sub string.

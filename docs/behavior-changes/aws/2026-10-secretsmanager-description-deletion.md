@@ -581,7 +581,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     sets ... to UPDATE_COMPLETE" and which may name only "resources that are
     in the UPDATE_FAILED state because a rollback failed" (any other is
     `ValidationError`). Success is `UPDATE_ROLLBACK_COMPLETE`, and the stack
-    can then be updated; a retry that fails leaves it
+    can then be updated, a skipped resource kept as any other the stack
+    holds (round 8 took only a resource with no status for one the stack
+    holds, so the next update made a skipped one again and failed, the
+    service's error for a name taken); a retry that fails leaves it
     `UPDATE_ROLLBACK_FAILED` with the error as its reason. Before, each operation marked any stack complete,
     orphans and all, and made a stack out of a name that had none. The
     CloudFormation trace's steps 9 to 22 are re-cut accordingly: s1 and s2

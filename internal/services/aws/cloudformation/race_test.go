@@ -467,3 +467,55 @@ func TestCloudFormationSummarisesNoStoredTemplateForAnOversizeBody(t *testing.T)
 		t.Errorf("GetTemplateSummary of the stored template answered %v", err)
 	}
 }
+
+// A resource ContinueUpdateRollback skips, which "CloudFormation sets ... to
+// UPDATE_COMPLETE" (API Reference, ContinueUpdateRollback), is the stack's as
+// before: the next update keeps it as it keeps any other. Here the rollback
+// cannot restore a table an update changed in place, because the table was
+// deleted while the update ran; it is made again by hand and skipped. Before,
+// an update took only a resource with no status for one the stack holds, so it
+// made the skipped table again and failed, ResourceInUseException.
+func TestCloudFormationASkippedResourceIsStillTheStacks(t *testing.T) {
+	h, g := gated(t)
+	table := func(class string) map[string]any {
+		return map[string]any{"Type": "AWS::DynamoDB::Table", "Properties": map[string]any{"TableName": "skip-a", "BillingMode": "PAY_PER_REQUEST", "TableClass": class,
+			"KeySchema":            []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}},
+			"AttributeDefinitions": []any{map[string]any{"AttributeName": "id", "AttributeType": "S"}}}}
+	}
+	h.mustCreate("skip", map[string]map[string]any{"A": table("STANDARD")})
+	failing := paused(0) // A changes in place, then the gate holds the bucket P150b, then Z fails
+	failing["A"], failing["Z"] = table("STANDARD_INFREQUENT_ACCESS"), map[string]any{"Type": "AWS::Nothing::Here"}
+	body, _ := json.Marshal(map[string]any{"Resources": failing})
+	updated := make(chan error, 1)
+	go func() {
+		_, err := h.invoke("UpdateStack", map[string]any{"StackName": "skip", "TemplateBody": string(body)})
+		updated <- err
+	}()
+	within(t, g.reached, "the update reaching its bucket")
+	if _, err := h.service("aws.dynamodb", "DeleteTable", map[string]any{"TableName": "skip-a"}); err != nil {
+		t.Fatal(err)
+	}
+	close(g.release)
+	if err := within(t, updated, "the update"); err == nil {
+		t.Fatal("the failing update succeeded")
+	}
+	if status, _, _ := h.status("skip"); status != "UPDATE_ROLLBACK_FAILED" || h.statuses("skip")["A"] != "UPDATE_FAILED" {
+		t.Fatalf("skip is %s, A %s, want UPDATE_ROLLBACK_FAILED, UPDATE_FAILED", status, h.statuses("skip")["A"])
+	}
+	if _, err := h.service("aws.dynamodb", "CreateTable", asMap(table("STANDARD")["Properties"])); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("ContinueUpdateRollback", map[string]any{"StackName": "skip", "ResourcesToSkip": []any{"A"}}); err != nil {
+		t.Fatalf("ContinueUpdateRollback skipping A: %v", err)
+	}
+	if status, _, _ := h.status("skip"); status != "UPDATE_ROLLBACK_COMPLETE" || h.statuses("skip")["A"] != "UPDATE_COMPLETE" {
+		t.Fatalf("skip is %s, A %s, want UPDATE_ROLLBACK_COMPLETE, UPDATE_COMPLETE", status, h.statuses("skip")["A"])
+	}
+	next, _ := json.Marshal(map[string]any{"Resources": map[string]any{"A": table("STANDARD"), "Q": map[string]any{"Type": "AWS::SQS::Queue"}}})
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "skip", "TemplateBody": string(next)}); err != nil {
+		t.Errorf("an update keeping the skipped table: %v", err)
+	}
+	if status, _, _ := h.status("skip"); status != "UPDATE_COMPLETE" || len(h.statuses("skip")) != 2 {
+		t.Errorf("skip is %s holding %v, want UPDATE_COMPLETE with A and Q", status, h.statuses("skip"))
+	}
+}

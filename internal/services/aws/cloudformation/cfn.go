@@ -765,9 +765,10 @@ var subVariable = regexp.MustCompile(`\$\{([^}]*)\}`)
 
 // change is what an update does to the resource of logical the stack holds: "" keeps it as it is,
 // "update" updates it in place, and "replace" makes a new one, when a property whose change "requires
-// replacement" (the type's Template Reference page) changed. A resource the stack does not hold is a "create".
+// replacement" (the type's Template Reference page) changed. A resource the stack does not hold is a "create";
+// it holds every one it lists, whatever its status (a skipped one is UPDATE_COMPLETE), but one DELETE_FAILED.
 func (p *Pack) change(req *spi.Request, old stack, logical, typ string, props map[string]any) (res, string) {
-	i := slices.IndexFunc(old.Resources, func(r res) bool { return r.Logical == logical && r.Type == typ && r.Status == "" })
+	i := slices.IndexFunc(old.Resources, func(r res) bool { return r.Logical == logical && r.Type == typ && r.Status != "DELETE_FAILED" })
 	if i < 0 {
 		return res{}, "create"
 	}

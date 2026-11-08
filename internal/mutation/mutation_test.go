@@ -8262,15 +8262,13 @@ var mutants = []mutant{
 		name: "states-stop-express-execution",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
 		old: `		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		if spi.First(rec, "type") == "EXPRESS" {
 			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
 		}
 		if value, exists := inputValue(req.Input, "error", "Error"); exists {`,
 		new: `		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		if false {
 			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
 		}
@@ -18561,8 +18559,8 @@ var mutants = []mutant{
 	{
 		name: "dynamodb-default-sse-create-key-per-table",
 		file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
-		old:  "} else if ok {\n\t\t\tvar record map[string]any",
-		new:  "} else if false {\n\t\t\tvar record map[string]any",
+		old:  "} else if ok {\n\t\t\trecord := spi.JSONObject(raw)",
+		new:  "} else if false {\n\t\t\trecord := spi.JSONObject(raw)",
 		pkg:  "./internal/services/aws/dynamodb",
 		run:  "TestDynamoDBDefaultSSECharacterization",
 	},

@@ -2126,8 +2126,7 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 				continue
 			}
 		}
-		var meta map[string]any
-		_ = json.Unmarshal(kv.Value, &meta)
+		meta := spi.JSONObject(kv.Value)
 		modified := spi.Str(meta["mtime"])
 		if parsed, err := http.ParseTime(modified); err == nil {
 			modified = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
@@ -2390,8 +2389,7 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	id := p.deps.Rand.Hex(16)
 	raw, precondition, _ := p.col(req, "objects").Get(ctx, b+"/"+key)
-	var current map[string]any
-	_ = json.Unmarshal(raw, &current)
+	current := spi.JSONObject(raw)
 	precondition = precondition && !truthy(current["deleteMarker"])
 	p.mu.Lock()
 	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, serverSideEncryption: serverSideEncryption, sseKMSKeyID: sseKMSKeyID, sseCustomerKeyMD5: sseCustomerKeyMD5, bucketKeyEnabled: bucketKeyEnabled, precondition: precondition, objectMetadata: requestObjectMetadata(req), websiteRedirectLocation: requestCondition(req, "WebsiteRedirectLocation", "x-amz-website-redirect-location"), initiator: map[string]any{"ID": req.Identity.Account, "DisplayName": "webfile"}, acl: acl, lockDocs: lockDocs, parts: map[int]multipartPart{}}
@@ -2535,8 +2533,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	if noneMatch == "*" || match != "" {
 		raw, exists, _ := p.col(req, "objects").Get(ctx, bucket+"/"+key)
-		var current map[string]any
-		_ = json.Unmarshal(raw, &current)
+		current := spi.JSONObject(raw)
 		exists = exists && !truthy(current["deleteMarker"])
 		if noneMatch == "*" && exists {
 			return nil, &spi.Fault{Code: "PreconditionFailed", Message: "At least one of the pre-conditions you specified did not hold", HTTPStatus: http.StatusPreconditionFailed, Fault: "client", Fields: map[string]any{"Condition": "If-None-Match"}}
@@ -2986,8 +2983,7 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 	records := map[string][]map[string]any{}
 	kvs, _, _ := p.col(req, "versions").List(ctx, b+"/", "", 0)
 	for _, kv := range kvs {
-		var meta map[string]any
-		_ = json.Unmarshal(kv.Value, &meta)
+		meta := spi.JSONObject(kv.Value)
 		key := spi.Str(meta["key"])
 		if key == "" {
 			parts := strings.Split(strings.TrimPrefix(kv.Key, b+"/"), "/")
@@ -3005,8 +3001,7 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 		if _, versioned := records[key]; versioned {
 			continue
 		}
-		var meta map[string]any
-		_ = json.Unmarshal(kv.Value, &meta)
+		meta := spi.JSONObject(kv.Value)
 		if !truthy(meta["deleteMarker"]) {
 			meta["key"], meta["versionId"] = key, "null"
 			records[key] = []map[string]any{meta}
@@ -3213,8 +3208,7 @@ func (p *Pack) versioning(ctx context.Context, req *spi.Request) (*spi.Response,
 			objects, _, _ := p.col(req, "objects").List(ctx, b+"/", "", 0)
 			for _, object := range objects {
 				key := strings.TrimPrefix(object.Key, b+"/")
-				var meta map[string]any
-				_ = json.Unmarshal(object.Value, &meta)
+				meta := spi.JSONObject(object.Value)
 				if spi.Str(meta["versionId"]) != "" || truthy(meta["deleteMarker"]) {
 					continue
 				}
@@ -3302,8 +3296,7 @@ func (p *Pack) bucketLifecycle(ctx context.Context, req *spi.Request) (*spi.Resp
 	if !exists {
 		return nil, &spi.Fault{Code: "NoSuchLifecycleConfiguration", Message: "The lifecycle configuration does not exist", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": bucket}}
 	}
-	var document map[string]any
-	_ = json.Unmarshal(raw, &document)
+	document := spi.JSONObject(raw)
 	minimum := spi.Str(document["TransitionDefaultMinimumObjectSize"])
 	headers := http.Header{}
 	headers.Set("x-amz-transition-default-minimum-object-size", minimum)
@@ -3393,8 +3386,7 @@ func (p *Pack) setLifecycleExpirationHeader(ctx context.Context, req *spi.Reques
 	if !exists {
 		return
 	}
-	var configuration map[string]any
-	_ = json.Unmarshal(raw, &configuration)
+	configuration := spi.JSONObject(raw)
 	for _, value := range spi.Slice(configuration["Rules"]) {
 		rule := spi.Object(value)
 		expiration, configured := rule["Expiration"].(map[string]any)
@@ -3596,8 +3588,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
-	var doc map[string]any
-	_ = json.Unmarshal(raw, &doc)
+	doc := spi.JSONObject(raw)
 	if req.Operation == "GetBucketAcl" || req.Operation == "GetObjectAcl" {
 		return &spi.Response{Status: http.StatusOK, Output: doc}, nil
 	}
@@ -4077,8 +4068,7 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 		if !ok {
 			return &spi.Response{Status: 200, Output: map[string]any{}}, nil
 		}
-		var m map[string]any
-		_ = json.Unmarshal(raw, &m)
+		m := spi.JSONObject(raw)
 		return &spi.Response{Status: 200, Output: m}, nil
 	}
 	// Terraform refresh reads: empty document is the documented "not configured" response.
@@ -4345,8 +4335,7 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 	defaultBucketKey := false
 	raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/encryption")
 	if ok {
-		var document map[string]any
-		_ = json.Unmarshal(raw, &document)
+		document := spi.JSONObject(raw)
 		configuration := spi.Object(document["ServerSideEncryptionConfiguration"])
 		if len(configuration) == 0 {
 			configuration = document
@@ -4395,8 +4384,7 @@ func (p *Pack) ensureAWSManagedS3Key(ctx context.Context, req *spi.Request) (str
 	scope := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region)
 	aliases := scope.Collection("kmsalias")
 	if raw, ok, _ := aliases.Get(ctx, "alias/aws/s3"); ok {
-		var alias map[string]any
-		_ = json.Unmarshal(raw, &alias)
+		alias := spi.JSONObject(raw)
 		return p.validateKMSKey(ctx, req, spi.Str(alias["TargetKeyId"]))
 	}
 	id := p.deps.Rand.Hex(16)
@@ -4432,8 +4420,7 @@ func (p *Pack) validateKMSKey(ctx context.Context, req *spi.Request, keyID strin
 	if strings.HasPrefix(keyID, "alias/") || strings.Contains(keyID, ":alias/") {
 		name := keyID[strings.Index(keyID, "alias/"):]
 		if raw, ok, _ := scope.Collection("kmsalias").Get(ctx, name); ok {
-			var alias map[string]any
-			_ = json.Unmarshal(raw, &alias)
+			alias := spi.JSONObject(raw)
 			keyID = spi.Str(alias["TargetKeyId"])
 		}
 	}
@@ -4444,8 +4431,7 @@ func (p *Pack) validateKMSKey(ctx context.Context, req *spi.Request, keyID strin
 	if !ok {
 		return "", &spi.Fault{Code: "KMS.NotFoundException", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
-	var key map[string]any
-	_ = json.Unmarshal(raw, &key)
+	key := spi.JSONObject(raw)
 	arn := spi.Str(key["Arn"])
 	switch spi.Str(key["KeyState"]) {
 	case "Enabled":
@@ -4692,8 +4678,7 @@ func (p *Pack) objectLockExtras(ctx context.Context, req *spi.Request) (*spi.Res
 	if !ok {
 		return &spi.Response{Status: 200, Output: map[string]any{}}, nil
 	}
-	var doc map[string]any
-	_ = json.Unmarshal(raw, &doc)
+	doc := spi.JSONObject(raw)
 	return &spi.Response{Status: 200, Output: doc}, nil
 }
 
@@ -4732,8 +4717,7 @@ func (p *Pack) objectLockForWrite(ctx context.Context, req *spi.Request, bucket 
 	if mode == "" {
 		raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/objectlock")
 		if ok {
-			var configuration map[string]any
-			_ = json.Unmarshal(raw, &configuration)
+			configuration := spi.JSONObject(raw)
 			retention := spi.Object(spi.Object(spi.Object(configuration["ObjectLockConfiguration"])["Rule"])["DefaultRetention"])
 			mode = spi.Str(retention["Mode"])
 			if mode != "" {
@@ -4808,8 +4792,7 @@ func (p *Pack) bucketObjectLockEnabled(ctx context.Context, req *spi.Request, bu
 	if !ok {
 		return false
 	}
-	var meta map[string]any
-	_ = json.Unmarshal(raw, &meta)
+	meta := spi.JSONObject(raw)
 	return truthy(meta["objectLockEnabled"])
 }
 
@@ -4818,8 +4801,7 @@ func (p *Pack) setBucketObjectLockEnabled(ctx context.Context, req *spi.Request,
 	if !ok {
 		return
 	}
-	var meta map[string]any
-	_ = json.Unmarshal(raw, &meta)
+	meta := spi.JSONObject(raw)
 	meta["objectLockEnabled"] = true
 	raw, _ = json.Marshal(meta)
 	_ = p.col(req, "buckets").Put(ctx, bucket, raw)
@@ -4945,8 +4927,7 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 	if !ok {
 		return
 	}
-	var cfg map[string]any
-	_ = json.Unmarshal(raw, &cfg)
+	cfg := spi.JSONObject(raw)
 	for _, dest := range append(spi.Slice(cfg["QueueConfigurations"]), spi.Slice(cfg["TopicConfigurations"])...) {
 		m := spi.Object(dest)
 		if !notificationMatches(m, key, event) {
@@ -5293,8 +5274,7 @@ func (p *Pack) objectMetadata(ctx context.Context, req *spi.Request, bucket, key
 		collection, metaKey = "versions", metaKey+"/"+version
 	}
 	raw, exists, _ := p.col(req, collection).Get(ctx, metaKey)
-	var meta map[string]any
-	_ = json.Unmarshal(raw, &meta)
+	meta := spi.JSONObject(raw)
 	return meta, exists
 }
 
@@ -5310,8 +5290,7 @@ func (p *Pack) objectVersionOrder(ctx context.Context, req *spi.Request, bucket,
 	kvs, _, _ := p.col(req, "versions").List(ctx, bucket+"/"+key+"/", "", 0)
 	currentID := spi.Str(current["versionId"])
 	for _, kv := range kvs {
-		var meta map[string]any
-		_ = json.Unmarshal(kv.Value, &meta)
+		meta := spi.JSONObject(kv.Value)
 		if versionID := spi.Str(meta["versionId"]); versionID != "" && versionID != currentID {
 			order = append(order, versionID)
 		}
@@ -5333,8 +5312,7 @@ func (p *Pack) restoreCurrentVersion(ctx context.Context, req *spi.Request, buck
 	if !exists {
 		return &spi.Fault{Code: "InternalError", HTTPStatus: http.StatusInternalServerError, Fault: "server"}
 	}
-	var meta map[string]any
-	_ = json.Unmarshal(raw, &meta)
+	meta := spi.JSONObject(raw)
 	meta["versionOrder"] = order
 	meta["deletedVersionNext"] = deletedVersionNext
 	current, _ := json.Marshal(meta)
@@ -5615,8 +5593,7 @@ func (p *Pack) checkWritePreconditions(ctx context.Context, req *spi.Request, bu
 		return nil
 	}
 	raw, exists, _ := p.col(req, "objects").Get(ctx, bucket+"/"+key)
-	var meta map[string]any
-	_ = json.Unmarshal(raw, &meta)
+	meta := spi.JSONObject(raw)
 	exists = exists && !truthy(meta["deleteMarker"])
 	etag := spi.Str(meta["etag"])
 	if !exists && match != "" {

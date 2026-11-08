@@ -41,8 +41,7 @@ func (p reader) invoke(ctx context.Context, req *spi.Request) (*spi.Response, er
 		id := spi.First(req.Input, "Identifier")
 		b, ok, _ := p.col(req, "ccres").Get(ctx, id)
 		if ok {
-			var rec map[string]any
-			_ = json.Unmarshal(b, &rec)
+			rec := spi.JSONObject(b)
 			return &spi.Response{Output: map[string]any{"ResourceDescription": rec}}, nil
 		}
 		if spi.First(req.Input, "TypeName") == "AWS::S3::Bucket" {
@@ -100,8 +99,7 @@ func (p reader) s3Resource(ctx context.Context, req *spi.Request, bucket string)
 	}
 	for kind, property := range configs {
 		if raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/"+kind); ok {
-			var doc map[string]any
-			_ = json.Unmarshal(raw, &doc)
+			doc := spi.JSONObject(raw)
 			if value, found := doc[property]; found {
 				props[property] = value
 			} else {
@@ -143,8 +141,7 @@ func listRecords(ctx context.Context, c spi.Collection, typeName string) []any {
 	kvs, _, _ := c.List(ctx, "", "", 0)
 	var items []any
 	for _, kv := range kvs {
-		var rec map[string]any
-		_ = json.Unmarshal(kv.Value, &rec)
+		rec := spi.JSONObject(kv.Value)
 		if typeName != "" && rec["TypeName"] != typeName {
 			continue
 		}

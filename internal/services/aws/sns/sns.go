@@ -92,8 +92,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		arn := fmt.Sprintf("arn:%s:sns:%s:%s:%s", snsPartition(req.Identity.Region), req.Identity.Region, req.Identity.Account, name)
 		if existing, ok, _ := p.col(req, "topics").Get(ctx, name); ok {
-			var current map[string]any
-			_ = json.Unmarshal(existing, &current)
+			current := spi.JSONObject(existing)
 			for key, value := range attrs {
 				if key == "FifoTopic" && strings.EqualFold(str(value), "false") && spi.Object(current["attrs"])[key] == nil {
 					continue
@@ -123,8 +122,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		kvs, _, _ := p.col(req, "topics").List(ctx, "", "", 0)
 		var topics []any
 		for _, kv := range kvs {
-			var m map[string]any
-			_ = json.Unmarshal(kv.Value, &m)
+			m := spi.JSONObject(kv.Value)
 			topics = append(topics, map[string]any{"TopicArn": m["arn"]})
 		}
 		page, next, fault := snsPage(req.Input, topics)
@@ -170,8 +168,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, clientFault("NotFound", "", 404)
 		}
-		var m map[string]any
-		_ = json.Unmarshal(b, &m)
+		m := spi.JSONObject(b)
 		attrs := map[string]any{
 			"TopicArn": m["arn"], "DisplayName": m["name"], "Owner": req.Identity.Account,
 			"EffectiveDeliveryPolicy": effectiveDeliveryPolicy(str(spi.Object(m["attrs"])["DeliveryPolicy"])),
@@ -529,8 +526,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
 		var subs []any
 		for _, kv := range kvs {
-			var m map[string]any
-			_ = json.Unmarshal(kv.Value, &m)
+			m := spi.JSONObject(kv.Value)
 			if want != "" && str(m["TopicArn"]) != want {
 				continue
 			}
@@ -566,8 +562,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			return &spi.Response{Output: map[string]any{"SubscriptionArn": tok}}, nil
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		if topicArn := str(req.Input["TopicArn"]); topicArn != "" && str(rec["TopicArn"]) != topicArn {
 			return nil, topicNotFoundFault()
 		}
@@ -701,8 +696,7 @@ func (p *Pack) validateSQSSubscription(ctx context.Context, req *spi.Request, to
 		// when the queue is not locally discoverable.
 		return nil
 	}
-	var queueMeta map[string]any
-	_ = json.Unmarshal(queue, &queueMeta)
+	queueMeta := spi.JSONObject(queue)
 	queueFIFO := str(spi.Object(queueMeta["attrs"])["FifoQueue"]) == "true" || strings.HasSuffix(name, ".fifo")
 	if !strings.HasSuffix(topicName(topicArn), ".fifo") && queueFIFO {
 		return clientFault("InvalidParameter", "Invalid parameter: FIFO queue requires a FIFO topic", 400)
@@ -725,8 +719,7 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		dedupMu.Lock()
 		defer dedupMu.Unlock()
 		if b, found, _ := p.col(req, "snsdedup").Get(ctx, arn+"\x1f"+dedupKey); found {
-			var prior map[string]any
-			_ = json.Unmarshal(b, &prior)
+			prior := spi.JSONObject(b)
 			if until, _ := prior["until"].(float64); float64(p.deps.Clock.Now().UnixNano()) < until {
 				return &spi.Response{Output: map[string]any{"MessageId": prior["id"], "SequenceNumber": prior["seq"]}}, nil
 			}
@@ -745,8 +738,7 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 	_ = p.deps.Bus.Publish(ctx, "sns:"+arn, []byte(body))
 	kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
 	for _, kv := range kvs {
-		var sub map[string]any
-		_ = json.Unmarshal(kv.Value, &sub)
+		sub := spi.JSONObject(kv.Value)
 		if str(sub["TopicArn"]) != arn {
 			continue
 		}
@@ -830,8 +822,7 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 					contentType = value
 				}
 			} else if b, found, _ := p.col(req, "topics").Get(ctx, topicName(arn)); found {
-				var topic map[string]any
-				_ = json.Unmarshal(b, &topic)
+				topic := spi.JSONObject(b)
 				if value, ok := deliveryContentType(str(spi.Object(topic["attrs"])["DeliveryPolicy"]), "http", "defaultRequestPolicy"); ok {
 					contentType = value
 				}
@@ -910,8 +901,7 @@ func (p *Pack) validatePublishTarget(ctx context.Context, req *spi.Request, arn 
 	if !ok {
 		return topicNotFoundFault()
 	}
-	var topic map[string]any
-	_ = json.Unmarshal(b, &topic)
+	topic := spi.JSONObject(b)
 	attrs := spi.Object(topic["attrs"])
 	fifo := str(attrs["FifoTopic"]) == "true"
 	if req.Operation == "PublishBatch" {

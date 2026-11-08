@@ -39,8 +39,7 @@ func Execute(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Respons
 	if !ok {
 		return nil, &spi.Fault{Code: "NotFoundException", Message: "no integration", HTTPStatus: 404, Fault: "client"}
 	}
-	var integ map[string]any
-	_ = json.Unmarshal(ib, &integ)
+	integ := spi.JSONObject(ib)
 	fn := lambdaName(spi.Str(integ["uri"]))
 	if fn == "" {
 		return nil, &spi.Fault{Code: "NotFoundException", Message: "integration uri is not Lambda", HTTPStatus: 404, Fault: "client"}
@@ -125,8 +124,7 @@ func resourceForPath(ctx context.Context, deps spi.Deps, req *spi.Request, api, 
 	}
 	kvs, _, _ := col(deps, req, "apigwres:"+api).List(ctx, "", "", 0)
 	for _, kv := range kvs {
-		var rec map[string]any
-		_ = json.Unmarshal(kv.Value, &rec)
+		rec := spi.JSONObject(kv.Value)
 		if spi.Str(rec["path"]) == path {
 			return spi.Str(rec["id"])
 		}

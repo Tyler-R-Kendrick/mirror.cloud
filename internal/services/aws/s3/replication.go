@@ -103,8 +103,7 @@ func (p *Pack) replicateDeleteMarker(ctx context.Context, req *spi.Request, buck
 		if _, ok, _ := scope.Collection("buckets").Get(ctx, ref.Bucket); !ok {
 			continue
 		}
-		var meta map[string]any
-		_ = json.Unmarshal(sourceMeta, &meta)
+		meta := spi.JSONObject(sourceMeta)
 		meta["replicationStatus"] = "REPLICA"
 		raw, _ := json.Marshal(meta)
 		_ = scope.Collection("objects").Put(ctx, ref.Bucket+"/"+key, raw)
@@ -150,8 +149,7 @@ func (p *Pack) replicationRules(ctx context.Context, req *spi.Request, bucket st
 	if !ok {
 		return nil
 	}
-	var doc map[string]any
-	_ = json.Unmarshal(raw, &doc)
+	doc := spi.JSONObject(raw)
 	values := replicationConfigurationRules(doc)
 	rules := make([]map[string]any, 0, len(values))
 	for _, rule := range values {
@@ -286,8 +284,7 @@ func (p *Pack) replicationDestination(ctx context.Context, req *spi.Request, rul
 		region = req.Identity.Region
 	}
 	if raw, ok, _ := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Get(ctx, bucket); ok {
-		var location map[string]any
-		_ = json.Unmarshal(raw, &location)
+		location := spi.JSONObject(raw)
 		if spi.Str(dst["Account"]) == "" {
 			account = spi.Str(location["account"])
 		}

@@ -100,8 +100,7 @@ func (p *runner) scanS3Table(ctx context.Context, req *spi.Request, bucket strin
 	if !ok {
 		return nil, nil, fmt.Errorf("table %s.%s not found", selection.db, selection.table)
 	}
-	var table map[string]any
-	_ = json.Unmarshal(raw, &table)
+	table := spi.JSONObject(raw)
 	columns := stringValues(table["columns"])
 	raw, _, _ = p.col(req, "s3trows").Get(ctx, key)
 	var doc s3Rows

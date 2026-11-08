@@ -33,8 +33,7 @@ func (p *Pack) transactGetItems(ctx context.Context, req *spi.Request) (*spi.Res
 			}
 			response := map[string]any{}
 			if ok {
-				var item map[string]any
-				_ = json.Unmarshal(stored, &item)
+				item := spi.JSONObject(stored)
 				response["Item"] = expr.Project(spi.Str(get["ProjectionExpression"]), item, spi.Object(get["ExpressionAttributeNames"]))
 			}
 			responses[i] = response
@@ -59,8 +58,7 @@ func (p *Pack) transactWriteItems(ctx context.Context, req *spi.Request) (*spi.R
 			if stored, ok, err := tx.Collection("ddbtx-tokens").Get(token); err != nil {
 				return err
 			} else if ok {
-				var record map[string]any
-				_ = json.Unmarshal(stored, &record)
+				record := spi.JSONObject(stored)
 				if int64(asInt(record["Expires"])) > p.deps.Clock.Now().Unix() {
 					if spi.Str(record["Payload"]) != string(payload) {
 						return &spi.Fault{Code: "IdempotentParameterMismatchException", Message: "A client request token was reused with different parameters", HTTPStatus: 400, Fault: "client"}
@@ -205,7 +203,6 @@ func transactionTable(tx spi.ScopeTx, table string) (map[string]any, error) {
 	if !ok {
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Requested resource not found", HTTPStatus: 400, Fault: "client"}
 	}
-	var definition map[string]any
-	_ = json.Unmarshal(stored, &definition)
+	definition := spi.JSONObject(stored)
 	return definition, nil
 }

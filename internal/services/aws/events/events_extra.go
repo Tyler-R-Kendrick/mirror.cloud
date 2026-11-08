@@ -122,8 +122,7 @@ func (p *Pack) listConnections(ctx context.Context, req *spi.Request) (*spi.Resp
 	kvs, _, _ := p.col(req, "connections").List(ctx, "", "", 0)
 	connections := make([]any, 0, len(kvs))
 	for _, kv := range kvs {
-		var record map[string]any
-		_ = json.Unmarshal(kv.Value, &record)
+		record := spi.JSONObject(kv.Value)
 		public := publicConnection(record)
 		delete(public, "AuthParameters")
 		connections = append(connections, public)
@@ -290,8 +289,7 @@ func mergeEventRecord(destination, source map[string]any) {
 
 func publicConnection(record map[string]any) map[string]any {
 	body, _ := json.Marshal(record)
-	var public map[string]any
-	_ = json.Unmarshal(body, &public)
+	public := spi.JSONObject(body)
 	redactConnectionSecrets(public)
 	return public
 }
@@ -370,8 +368,7 @@ func (p *Pack) load(ctx context.Context, req *spi.Request, col, id string) (map[
 	if !ok {
 		return nil, false
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	return rec, true
 }
 

@@ -131,8 +131,7 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 	if !ok {
 		return nil, clientFault("NotFound", "Subscription does not exist", 404)
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	if req.Operation == "SetSubscriptionAttributes" {
 		k := str(req.Input["AttributeName"])
 		value := str(req.Input["AttributeValue"])
@@ -451,8 +450,7 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		kvs, _, _ := col.List(ctx, "", "", 0)
 		var out []any
 		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
+			rec := spi.JSONObject(kv.Value)
 			out = append(out, map[string]any{"PlatformApplicationArn": rec["PlatformApplicationArn"], "Attributes": rec["Attributes"]})
 		}
 		return &spi.Response{Output: map[string]any{"PlatformApplications": out}}, nil
@@ -509,8 +507,7 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		if !ok {
 			return nil, clientFault("NotFound", "", 404)
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		return &spi.Response{Output: map[string]any{"Attributes": rec["Attributes"]}}, nil
 	}
 }
@@ -634,8 +631,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		kvs, _, _ := col.List(ctx, "", "", 0)
 		var out []any
 		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
+			rec := spi.JSONObject(kv.Value)
 			if str(rec["PlatformApplicationArn"]) != app {
 				continue
 			}
@@ -648,8 +644,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		if !ok {
 			return nil, clientFault("NotFound", "", 404)
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		return &spi.Response{Output: map[string]any{"Attributes": endpointAttributes(rec)}}, nil
 	}
 }

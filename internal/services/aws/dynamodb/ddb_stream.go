@@ -169,8 +169,7 @@ func (p *Pack) kinesisDestination(ctx context.Context, req *spi.Request) (*spi.R
 	if !exists {
 		return nil, &spi.Fault{Code: "ValidationException", Message: "Table is not in a valid state to enable Kinesis Streaming Destination: No streaming destination with streamArn: " + streamARN + " found for table with tableName: " + table, HTTPStatus: 400, Fault: "client"}
 	}
-	var record map[string]any
-	_ = json.Unmarshal(stored, &record)
+	record := spi.JSONObject(stored)
 	if req.Operation == "DisableKinesisStreamingDestination" {
 		record["DestinationStatus"] = "DISABLED"
 		b, _ := json.Marshal(record)
@@ -226,8 +225,7 @@ func (p *Pack) emitKinesisDestinations(ctx context.Context, req *spi.Request, de
 			if err != nil || !ok {
 				return err
 			}
-			var stream map[string]any
-			_ = json.Unmarshal(b, &stream)
+			stream := spi.JSONObject(b)
 			sequence := asInt(stream["Seq"])
 			stream["Seq"] = sequence + 1
 			b, _ = json.Marshal(stream)
@@ -265,8 +263,7 @@ func (p *Pack) listStreams(ctx context.Context, req *spi.Request) (*spi.Response
 		if want != "" && kv.Key != want {
 			continue
 		}
-		var td map[string]any
-		_ = json.Unmarshal(kv.Value, &td)
+		td := spi.JSONObject(kv.Value)
 		if !truthy(spi.Object(td["StreamSpecification"])["StreamEnabled"]) {
 			continue
 		}
@@ -360,8 +357,7 @@ func (p *Pack) getStreamRecords(ctx context.Context, req *spi.Request) (*spi.Res
 		if n < start {
 			continue
 		}
-		var m map[string]any
-		_ = json.Unmarshal(kv.Value, &m)
+		m := spi.JSONObject(kv.Value)
 		recs = append(recs, m)
 		next = n + 1
 		if len(recs) >= limit {

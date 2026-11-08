@@ -491,9 +491,10 @@ var kinds = map[string]kind{
 
 // do makes a call a kind spells "service Operation member=value ...", and answers the answer over the
 // request. A value is {n} the resource's name, {id} its physical id ({id/} and {id:}, its last segment),
-// {rule} and {bus} a rule's name and event bus, {r} and {a} the region and account; $Prop is the template's property Prop as
-// text, %Prop as JSON text, @Prop as given, each set only when given; else the value itself, true, false
-// and digits typed. A member alone is @member, and * is every property. An empty spec calls nothing.
+// {rule} and {bus} a rule's name and event bus, {r} and {a} the region and account; $Prop is the template's
+// property Prop as text, %Prop as JSON text, @Prop as given, each set only when given; else the value
+// itself, which call types by the member's model. A member alone is @member, and * is every property. An
+// empty spec calls nothing.
 func (p *Pack) do(ctx context.Context, req *spi.Request, spec, n, id string, props map[string]any) (map[string]any, error) {
 	f, in := strings.Fields(spec), map[string]any{}
 	if len(f) < 2 {
@@ -512,10 +513,6 @@ func (p *Pack) do(ctx context.Context, req *spi.Request, spec, n, id string, pro
 			if given {
 				in[k] = []any{pv, str(pv), spi.JSONText(pv)}[sigil]
 			}
-		} else if b, isBool := coerce(v, "Boolean"); isBool {
-			in[k] = b
-		} else if i, isInt := coerce(v, "Integer"); isInt {
-			in[k] = i
 		} else {
 			in[k] = sub.Replace(v)
 		}
@@ -805,7 +802,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		if err = p.dropTargets(ctx, req, phys, keep); set && err == nil { // the rule's targets are the template's, no others
 			// "each entry in FailedEntries provides the ID of the failed target and the error code":
 			// a target not added fails the rule, as its error does.
-			put, putErr := p.call(ctx, req, "aws.events", "PutTargets", given(map[string]any{"Rule": n, "Targets": targets}, props, "EventBusName"))
+			put, putErr := p.do(ctx, req, "aws.events PutTargets Rule={n} Targets EventBusName=$EventBusName", n, "", props)
 			if failed, _ := put["FailedEntries"].([]any); putErr == nil && len(failed) > 0 {
 				putErr = fault(cmp.Or(str(asMap(failed[0])["ErrorCode"]), "ValidationError"), "PutTargets failed to add targets: "+spi.JSONText(failed))
 			}
@@ -1024,16 +1021,6 @@ func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket str
 		}
 	}
 	return nil
-}
-
-// given sets on in each of members, all Strings, the template's props carry, and answers in.
-func given(in, props map[string]any, members ...string) map[string]any {
-	for _, member := range members {
-		if v, ok := props[member]; ok {
-			in[member], _ = coerce(v, "String")
-		}
-	}
-	return in
 }
 
 // coerce reads a template's value as a property of type want (the template reference's Boolean,

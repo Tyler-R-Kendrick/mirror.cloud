@@ -125,11 +125,44 @@ The oracle is AWS's documentation as it ships in the vendored model
     read a flow sequence such as `Tags: [{Key: env, Value: dev}]` as a string
     and refused a block scalar. CloudFormation "doesn't support the following
     features: ... Aliases[,] Hash merges" (User Guide, Template formats), so
-    an anchor, an alias or a merge key is `ValidationError`, and a template
-    nesting deeper than 100 levels or holding more than 100,000 nodes is
-    refused too. Without that, the library's aliases let a template refer to
-    itself (`a: &a [*a]`, which overflowed the stack) or multiply (a billion
-    laughs, which ran without end).
+    an alias or a merge key is `ValidationError`. An anchor no alias refers
+    to is read as if it were not there, as the sentence names aliases and
+    hash merges and no anchor (a reading; round 7 refused every anchor).
+    The same sentence's "binary, omap, pairs, set, and timestamp tags",
+    written on a node, are each `ValidationError` naming the tag; a date
+    written plainly is not a tag and stays a string
+    (`AWSTemplateFormatVersion: 2010-09-09`). Before, each tag was read.
+    Without that, the
+    library's aliases let a template refer to itself (`a: &a [*a]`, which
+    overflowed the stack) or multiply (a billion laughs, which ran without
+    end).
+  - "CloudFormation supports the YAML Version 1.1 specification" (User Guide,
+    Template formats), so a plain scalar is read as YAML 1.1's type
+    repository reads it (yaml.org/type/bool.html, int.html, float.html),
+    where the library reads YAML 1.2: `yes`, `no`, `on`, `off`, `y` and `n`
+    in their listed spellings are booleans; an integer may be binary, octal
+    as `0777`, hexadecimal or sexagesimal (`1:20` is 80), with underscores,
+    but `0o17` and `08` are strings; a float has a point, so `1e3` is the
+    string `1e3`. `.inf` and `.nan` stay text, which a template's JSON form
+    could not hold (a reading). A quoted scalar is a string, and an explicit
+    tag (`!!str yes`) is read as tagged. Before, `yes` was the string
+    `"yes"` and made `FifoQueue: yes` a standard queue, `1:20` was a string,
+    `1e3` was 1000 and `0o17` was 15.
+  - A template is bounded by its size, CloudFormation's own limits:
+    `TemplateBody` is "a maximum length of 51,200 bytes", and the template
+    `TemplateURL` names "max size: 1 MB" (API reference, `CreateStack`;
+    "Template body size in a request" and "... in an Amazon S3 object", User
+    Guide, Understand CloudFormation quotas). A longer body, YAML or JSON, is
+    `ValidationError`, the member's constraint error ("Member must have length
+    less than or equal to 51200"), on `CreateStack`, `UpdateStack`,
+    `ValidateTemplate`, `GetTemplateSummary` and `CreateChangeSet`; an S3
+    object over 1,000,000 bytes is `ValidationError` too. That the quotas'
+    1 MB is 1,000,000 bytes is a reading: the page writes 204,800 bytes as
+    "204.8 KB". Neither page gives the error's wording. Depth is bounded by
+    the parsers, which refuse nesting past 10,000 levels (`exceeded max
+    depth`), as `ValidationError`. A round-7 bound of 100 levels and 100,000
+    nodes refused real templates (200 mappings of 100 keys of two attributes,
+    642 KB, within the quotas) and is gone.
   - A resource the template does not name, of any type, is made under
     `<stack>-<logical id>-<suffix>`, the modelled form: the suffix is twelve
     hex digits of a hash of the stack id and logical id, so no two stacks, and
@@ -154,9 +187,36 @@ The oracle is AWS's documentation as it ships in the vendored model
     exists."). The resource is left as it was. A name built on another
     resource's id is checked by the id that resource will be made with: before
     anything is made, each resource's id is planned in the order resources are
-    made, so a `Ref` answers what the type's `Ref` will answer (a bucket's
-    name, a topic's, role's, rule's, function's or secret's ARN), never the
-    logical id. A queue's URL (its endpoint's business), a KMS key's id and a
+    made, so a `Ref` answers what the type's `Ref` will answer, never the
+    logical id.
+  - A `Ref` answers what each type's Template Reference page says its `Ref`
+    returns, and `Fn::GetAtt` each attribute the page lists, derived from it:
+
+    | Type | `Ref` | `Fn::GetAtt` |
+    | --- | --- | --- |
+    | `AWS::S3::Bucket` | bucket name | `Arn`, `DomainName` |
+    | `AWS::SQS::Queue` | queue URL | `Arn`, `QueueName`, `QueueUrl` |
+    | `AWS::SNS::Topic` | topic ARN | `TopicArn`, `TopicName` |
+    | `AWS::DynamoDB::Table` | table name | `Arn` |
+    | `AWS::IAM::Role` | role name (was its ARN) | `Arn` |
+    | `AWS::SSM::Parameter` | parameter name | `Arn` |
+    | `AWS::SecretsManager::Secret` | secret ARN | `Id` |
+    | `AWS::KMS::Key` | key id | `Arn`, `KeyId` |
+    | `AWS::Logs::LogGroup` | log group name | `Arn` |
+    | `AWS::Events::Rule` | "event rule ID": the name, `<bus>\|<name>` on another bus (was its ARN) | `Arn`, `RuleName` |
+    | `AWS::Lambda::Function` | function name (was its ARN) | `Arn` |
+    | `AWS::Kinesis::Stream` | stream name | `Arn` |
+    | `AWS::ApiGateway::RestApi` | REST API id | `RestApiId` |
+    | `AWS::Kinesis::ResourcePolicy` | the stream ARN it attaches to (its page lists no `Ref`; a reading) | none |
+
+    `<bus>|<name>` for a rule on another bus is a reading: the page's example
+    is a default-bus rule. `PhysicalResourceId` is the `Ref`'s id, and
+    `DeleteStack` deletes each resource by it, and by the ARN a stack
+    recorded before this change holds. An attribute the table does not list
+    answers the `Ref`'s value, as before (a REST API's `RootResourceId`, a
+    role's `RoleId`, a table's `StreamArn`). Before, `GetAtt` of `Arn`
+    guessed from the id's shape, so a table's, parameter's, log group's,
+    stream's and key's `Arn` was `arn:aws:s3:::<id>`. A queue's URL (its endpoint's business), a KMS key's id and a
     REST API's id are known only once made, so a name built on one is checked
     just before its create instead. Resources are made in dependency order,
     each after those its properties name by `Ref`, `Fn::GetAtt` or `Fn::Sub`
@@ -168,9 +228,31 @@ The oracle is AWS's documentation as it ships in the vendored model
     the template declares is "Template format error: Unresolved resource
     dependencies [Nope] in the Resources block of the template", and a cycle
     through it is the cycle's error (below). Before, `DependsOn` was not read.
+    `Fn::Sub` substitutes every form its Template Reference gives:
+    `${Name.Attribute}` is that resource's `Fn::GetAtt`, a name its variable
+    map defines is the variable's value, and `${!Literal}` is the literal
+    `${Literal}`; each orders by what it names (a resource named by
+    `${Name.Attribute}` or by a variable's value is made first, one a variable
+    or `${!...}` merely spells is not). Before, `${Name.Attribute}` and the
+    variable map were left as written and ordered nothing.
+    A `Fn::If` whose condition the parameters settle orders by the branch it
+    takes and only that one: `Fn::Equals` of literals and `Ref`s to
+    parameters, and `Fn::Not`, `Fn::And`, `Fn::Or` and `Condition` over such
+    conditions (Template Reference, condition functions). A condition they do
+    not settle (one on a pseudo parameter, or one that names itself) orders
+    by both branches, a reading. `Fn::If` is not otherwise resolved here; its
+    value reaches the service as written. Before, every `Fn::If` ordered by
+    both branches, so two resources naming each other only in branches never
+    both taken were refused as a cycle.
+    The order is found once per operation, by one walk of each resource's
+    properties for the names they refer to and Kahn's algorithm over them,
+    so it costs time linear in the template; round 7's resolved every
+    unordered resource each time it placed one, 125,250 walks to validate
+    500 chained parameters and 250,500 to make them.
     A cycle is `ValidationError` ("Circular dependency between resources:
     [A, B]") on `CreateStack`, `UpdateStack`, `ValidateTemplate` and
-    `GetTemplateSummary`, and makes no stack. Before, a `Ref` to a resource
+    `GetTemplateSummary`, and makes no stack. It names the resources in a
+    cycle (one naming itself is a cycle of one), not those that wait on one. Before, a `Ref` to a resource
     not yet made answered its logical id: beside an SSM parameter named
     `ABucket`, a parameter named for an unnamed bucket `ABucket` was refused
     as taken, and a resource that sorted before the one it named was made
@@ -183,7 +265,7 @@ The oracle is AWS's documentation as it ships in the vendored model
     rule, role, stream, log group or bucket here) took the resource over, and
     the stack's rollback or `DeleteStack` deleted it.
   - EventBridge keys a rule by its event bus and its name, and the rule's
-    ARN carries the bus (`rule/<bus>/<name>`), so the check of a rule's name,
+    id carries the bus (`<bus>|<name>`, its ARN `rule/<bus>/<name>`), so the check of a rule's name,
     its `PutTargets` and its delete all carry the bus: the `EventBusName`
     property, or the bus in the ARN. A named rule already on bus `b` fails
     the stack and is left as it was, a rule of that name on the default bus
@@ -199,6 +281,36 @@ The oracle is AWS's documentation as it ships in the vendored model
     Before, it made a second set of resources and wrote its record over the
     first, which then belonged to no stack, and creates racing on one name
     each made a set.
+  - A stack in any `_IN_PROGRESS` state takes no update: `UpdateStack`,
+    `CreateChangeSet` and `ExecuteChangeSet` are `ValidationError`,
+    "Stack:<id> is in CREATE_IN_PROGRESS state and can not be updated.", the
+    words used for a `ROLLBACK_COMPLETE` stack. `DeleteStack` follows its API
+    reference, "Once the call completes successfully, stack deletion starts":
+    of a stack being created it answers at once and leaves the stack
+    `DELETE_IN_PROGRESS` ("Ongoing removal of one or more stacks", User Guide,
+    stack status codes), its name still taken; the create, whose last write is
+    a compare-and-set on its reservation (the stack's id, still
+    `CREATE_IN_PROGRESS`), finds the reservation changed, deletes everything it
+    made, and then the stack. A `DeleteStack` of a stack already
+    `DELETE_IN_PROGRESS` is answered and changes nothing; that it is not
+    refused is a reading. Every write of the record after the reservation, a
+    rollback's and a delete's included, is a compare-and-set on what its
+    writer read, so a create that finds its stack deleted under it writes
+    nothing back. An update reserves nothing, as here an update has no
+    `UPDATE_IN_PROGRESS` state for `CancelUpdateStack` to act on, but writes
+    only over the record it read (termination protection aside, which it
+    keeps: an `UpdateStack` or `ExecuteChangeSet` of a protected stack leaves
+    it protected, where round 7's wrote a record without it); one that finds the stack changed by another update or a
+    `DeleteStack` deletes what it made that the stack does not now hold (all
+    of it when the stack is being deleted) and is `ValidationError`, "...is in
+    UPDATE_IN_PROGRESS state..." or "...DELETE_IN_PROGRESS...", naming the
+    change that came first as in progress throughout, a reading. Before, a
+    `DeleteStack` during a create removed the empty reservation, a second
+    `CreateStack` of the name made a second set of resources, the first
+    create's last write brought its stack back over the second's record, and
+    a final delete left the second set behind (300 parameters in the round-8
+    repro); and the later of two updates wrote over the earlier's record,
+    whose resources then belonged to no stack.
   - A `CreateStack` that fails rolls back what it had created, as
     CloudFormation's default `OnFailure` (`ROLLBACK`) does, deleting a secret
     without a recovery window so its name is free again. A resource is
@@ -295,7 +407,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     has deleted everything it made, with the create's error as its
     `StackStatusReason` (which `ListStacks` answers too, as the model's
     `StackSummary` has it), and every read of it answers it with no
-    resources (the record never holds a null list). The name stays taken (`CreateStack` is
+    resources. No record holds a null list: the reservation a create writes
+    first, a stack with no outputs and a rolled-back stack each list
+    `Resources` and `Outputs` as `[]` (round 7 claimed this, and the
+    reservation and a stack with no outputs held null). The name stays taken (`CreateStack` is
     `AlreadyExistsException`; `UpdateStack` is `ValidationError`, "Stack:...
     is in ROLLBACK_COMPLETE state and can not be updated.") until
     `DeleteStack` removes the stack ("Deleted stacks don't show up in the
@@ -413,9 +528,12 @@ The oracle is AWS's documentation as it ships in the vendored model
     UPDATE_FAILED stack statuses", `ContinueUpdateRollback` "from
     UPDATE_ROLLBACK_FAILED to UPDATE_ROLLBACK_COMPLETE state", and
     `CancelUpdateStack` "only stacks that are in the UPDATE_IN_PROGRESS
-    state". Nothing here runs asynchronously and a failed create rolls back at
-    once, so no stack rests in the first, second or last of those states:
-    every call on another stack, a `ROLLBACK_FAILED` one with its
+    state". A failed create rolls back at once and an update reserves no
+    record, so no stack rests in `CREATE_FAILED`, `UPDATE_FAILED` or
+    `UPDATE_IN_PROGRESS`, and neither `RollbackStack` nor `CancelUpdateStack`
+    could carry out what it says: each refuses every stack, a record in a
+    state it accepts included (round 7 answered those with a success that
+    changed nothing). Every call on another stack, a `ROLLBACK_FAILED` one with its
     `DELETE_FAILED` orphan included (its way forward is `DeleteStack`), is
     `ValidationError` ("RollbackStack cannot be called from current stack
     status", in the words `CancelUpdateStack` uses) and changes nothing, and
@@ -438,13 +556,27 @@ The oracle is AWS's documentation as it ships in the vendored model
     type the template reference gives them, the value itself or its text,
     which is how a `Ref` to a parameter gives one. A Boolean is `true` or
     `false` in any case (YAML 1.1, the templates' YAML, spells it `true`,
-    `True` or `TRUE`), so `FifoQueue: "True"` makes a FIFO queue; an Integer
+    `True` or `TRUE`), so `FifoQueue: "True"` makes a FIFO queue, and a
+    `FifoQueue` that is no Boolean (`maybe`, `1`, a list) is
+    `ValidationError` naming it, before anything is made (round 7 made a
+    standard queue); an Integer
     is decimal digits, as a Number parameter's text is, so `"016"` is 16 and
     `"16.0"`, `"1e1"`, `"+16"` and `" 16"` are refused; a String is a
     scalar's text, so `ExcludeCharacters: 123` is `"123"` and an SSM
     Parameter's `Value: 123` is `"123"`. Before, `"True"` made a standard
     queue, `"16.0"`, `"1e1"` and `"+16"` were read as numbers, a number was
-    refused as `ExcludeCharacters` and an SSM `Value: 123` was empty. A
+    refused as `ExcludeCharacters` and an SSM `Value: 123` was empty.
+    Every property the engine passes to a service, the ones it passes whole
+    included (a function's, a table's), is read by the same rule, keyed by
+    the type the operation's model declares for the member, through
+    structures, lists and maps. So `MemorySize: !Ref Memory` is
+    256, `ReadCapacityUnits` from a parameter is 5, and a bucket's tag
+    values written `true` and `123` are `"true"` and `"123"`. Before, a
+    function got `MemorySize` `"256"`, a table `"5"`, and the tags were
+    `MalformedXML`. A member the model does not declare, and a value that is
+    not its member's type, is passed as given, for the service to refuse.
+    Round 7 said every property was read as its type; only the ones the
+    engine named were. A
     parameter is a string ("the parameter value becomes a string", User
     Guide, Parameters), so a numeric `Default`, `Default: 16` in JSON or
     YAML, is its text `"16"`; before, it became `""`. Each
@@ -532,6 +664,18 @@ The oracle is AWS's documentation as it ships in the vendored model
   - A listing page that keeps nothing while more secrets follow now moves
     `NextToken` past what it read; before, `ListSecrets` with a scheduled
     secret between two listed ones lost the second (an engine fix).
+  - A `NextToken` is only one a listing answered: `ListSecrets` and
+    `BatchGetSecretValue`'s `Filters` form answer an opaque token (base64 of
+    `secret:` and the last name listed), and a token neither answered is
+    `InvalidNextTokenException`, "The NextToken value is invalid.". An empty
+    one breaks `NextTokenType`'s "Minimum length of 1" and is
+    `ValidationException`, the framework's constraint error, on those two
+    and `ListSecretVersionIds`. `ListSecretVersionIds`' `MaxResults` is a
+    `MaxResultsType`, a whole number from 1 to 100, with `ListSecrets`'
+    checks. The token's form is this bundle's; the model says only that
+    callers pass back what they were given. Before, a garbage token was read
+    as a name to list after, an empty one as none, and
+    `ListSecretVersionIds` took any `MaxResults`.
 - **CreateSecret keeps its Tags** ("A list of tags to attach to the
   secret"), as `TagResource` keeps them, so `DescribeSecret` answers them, the
   `tag-key` and `tag-value` filters find the secret and a later `TagResource`

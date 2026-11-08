@@ -458,10 +458,13 @@ func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
 	p := New(spitest.Deps(t))
 	req := &spi.Request{Identity: spi.Identity{Account: "000000000000", Region: "us-east-1"}}
 	refs := map[string]string{"Bucket": "bucket", "Queue": "http://localhost/000000000000/queue"}
-	if p.ref("AWS::AccountId", refs, req, "stack") != "000000000000" || p.ref("AWS::Partition", refs, req, "stack") != "aws" || p.ref("AWS::URLSuffix", refs, req, "stack") != "amazonaws.com" || p.ref("missing", refs, req, "stack") != "missing" {
+	ref := func(name string) string { v, _ := p.ref(name, refs, req, "stack"); return v }
+	if ref("AWS::AccountId") != "000000000000" || ref("AWS::Partition") != "aws" || ref("AWS::URLSuffix") != "amazonaws.com" || ref("missing") != "missing" {
 		t.Fatal("pseudo-parameter references")
 	}
-	if p.getAtt("Bucket.Arn", refs, req) != "arn:aws:s3:::bucket" || p.getAtt([]any{"Queue", "Arn"}, refs, req) != "arn:aws:sqs:us-east-1:000000000000:queue" || p.getAtt([]any{"Queue", "QueueName"}, refs, req) != "queue" {
+	attribute(refs, req, "AWS::S3::Bucket", "Bucket", refs["Bucket"])
+	attribute(refs, req, "AWS::SQS::Queue", "Queue", refs["Queue"])
+	if getAtt("Bucket.Arn", refs) != "arn:aws:s3:::bucket" || getAtt([]any{"Queue", "Arn"}, refs) != "arn:aws:sqs:us-east-1:000000000000:queue" || getAtt([]any{"Queue", "QueueName"}, refs) != "queue" {
 		t.Fatal("GetAtt resolution")
 	}
 	if got := p.fnJoin([]any{"-", []any{"a", map[string]any{"Ref": "AWS::Region"}}}, refs, req, "stack"); got != "a-us-east-1" {
@@ -489,13 +492,12 @@ func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
 			t.Fatalf("invalid template accepted %q", body)
 		}
 	}
-	params := formParams(map[string]any{
-		"Parameters.member.1.ParameterKey": "Explicit", "Parameters.member.1.ParameterValue": "set", "ignored": "value",
-	})
 	tpl := map[string]any{"Parameters": map[string]any{
 		"Defaulted": map[string]any{"Default": "fallback"}, "Explicit": map[string]any{"Default": "wrong"}, "Required": map[string]any{},
 	}}
-	mergeParamDefaults(tpl, params)
+	params := parameters(map[string]any{
+		"Parameters.member.1.ParameterKey": "Explicit", "Parameters.member.1.ParameterValue": "set", "ignored": "value",
+	}, tpl)
 	if params["Explicit"] != "set" || params["Defaulted"] != "fallback" || len(paramDecls(tpl)) != 3 {
 		t.Fatalf("parameters %#v %#v", params, tpl)
 	}

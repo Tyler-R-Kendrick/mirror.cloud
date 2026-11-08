@@ -393,12 +393,24 @@ operations:
         error: Serialization
         message: "MaxResults must be a whole number."
       # MaxResultsType's range is 1 to 100.
-      - cond: "!('MaxResults' in input && input.MaxResults != null) || (int(input.MaxResults) >= 1 && int(input.MaxResults) <= 100)"
+      - &maxIn100
+        cond: "!('MaxResults' in input && input.MaxResults != null) || (int(input.MaxResults) >= 1 && int(input.MaxResults) <= 100)"
         error: Validation
         message_expr: >-
           "1 validation error detected: Value '" + string(int(input.MaxResults))
           + "' at 'maxResults' failed to satisfy constraint: Member must have value "
           + (int(input.MaxResults) < 1 ? "greater than or equal to 1" : "less than or equal to 100")
+      # NextTokenType is "Minimum length of 1", and a token is only one a
+      # listing answered: b64 of "secret:" and the last name listed, so any
+      # other is "The NextToken value is invalid." (InvalidNextTokenException).
+      - &tokenNotEmpty
+        cond: "!('NextToken' in input && input.NextToken != null) || string(input.NextToken) != ''"
+        error: Validation
+        message: "1 validation error detected: Value '' at 'nextToken' failed to satisfy constraint: Member must have length greater than or equal to 1"
+      - &tokenAnswered
+        cond: "!('NextToken' in input && input.NextToken != null) || b64decode(string(input.NextToken)).startsWith('secret:')"
+        error: InvalidNextToken
+        message: "The NextToken value is invalid."
       - &filterKeys
         cond: >-
           !('Filters' in input && input.Filters != null) || input.Filters.all(f, !('Key' in f) || f.Key == null
@@ -414,6 +426,8 @@ operations:
       resource: secret
       member: SecretList
       paginate: model
+      token: &token "b64('secret:' + string(item.Name))"
+      after: &after "lastSegment(b64decode(string(input.NextToken)), 'secret:')"
       let:
         matched: &filtersMatch >-
           !('Filters' in input && input.Filters != null) || input.Filters.all(f,
@@ -569,10 +583,14 @@ operations:
   #
   # A version with no staging label is deprecated and listed only with
   # IncludeDeprecated: "By default, versions without staging labels aren't
-  # included."
+  # included." MaxResults is a MaxResultsType, 1 to 100, as ListSecrets' is.
   ListSecretVersionIds:
     reads:
       s: { resource: secret }
+    require:
+      - *maxIsInteger
+      - *maxIn100
+      - *tokenNotEmpty
     let:
       deprecated: "'IncludeDeprecated' in input && (input.IncludeDeprecated == true || input.IncludeDeprecated == 'true')"
     output:
@@ -692,13 +710,17 @@ operations:
         message: "To use MaxResults, you must also use the Filters parameter."
       # Of a NextToken beside SecretIdList the API reference says nothing
       # specific: no listing of that form answers one, so it is invalid.
+      - *tokenNotEmpty
       - cond: "('Filters' in input && input.Filters != null) || !('NextToken' in input && input.NextToken != null && input.NextToken != '')"
         error: InvalidNextToken
         message: "The NextToken value is invalid: only the Filters form answers one."
+      - *tokenAnswered
     list:
       resource: secret
       member: SecretValues
       paginate: model
+      token: *token
+      after: *after
       key: "'Filters' in input && input.Filters != null ? '' : 'SecretIdList'"
       let:
         matched: *filtersMatch

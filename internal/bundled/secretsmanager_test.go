@@ -1377,3 +1377,62 @@ func TestSecretsManagerRotateNeedsAnAWSCURRENTVersion(t *testing.T) {
 		}
 	}
 }
+
+// A NextToken is only one a listing answered. A token no listing answered
+// ("garbage") is InvalidNextTokenException, "The NextToken value is
+// invalid.", on ListSecrets and BatchGetSecretValue's Filters form, and an
+// empty one breaks NextTokenType's "Minimum length of 1" on every operation
+// that takes one (ValidationException, the framework's constraint error).
+// ListSecretVersionIds' MaxResults is a MaxResultsType, as ListSecrets' is:
+// a whole number from 1 to 100, the same checks. Each answered token still
+// pages through every secret. Before, a garbage token was read as a name to
+// list after, "" as no token, and ListSecretVersionIds took any MaxResults.
+func TestSecretsManagerTakesOnlyTokensItAnswered(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	for _, name := range []string{"app/a", "app/b", "app/c"} {
+		ok(t, "CreateSecret", map[string]any{"Name": name, "SecretString": "v"})
+	}
+	filters := []any{map[string]any{"Key": "name", "Values": []any{"app/"}}}
+	codeOf := func(err error) string {
+		if f, isFault := err.(*spi.Fault); isFault {
+			return f.Code
+		}
+		return ""
+	}
+	for _, c := range []struct {
+		op   string
+		in   map[string]any
+		want string
+	}{
+		{"ListSecrets", map[string]any{"NextToken": "garbage"}, "InvalidNextTokenException"},
+		{"BatchGetSecretValue", map[string]any{"Filters": filters, "NextToken": "garbage"}, "InvalidNextTokenException"},
+		{"ListSecrets", map[string]any{"NextToken": ""}, "ValidationException"},
+		{"BatchGetSecretValue", map[string]any{"Filters": filters, "NextToken": ""}, "ValidationException"},
+		{"ListSecretVersionIds", map[string]any{"SecretId": "app/a", "NextToken": ""}, "ValidationException"},
+		{"ListSecretVersionIds", map[string]any{"SecretId": "app/a", "MaxResults": 0}, "ValidationException"},
+		{"ListSecretVersionIds", map[string]any{"SecretId": "app/a", "MaxResults": 101}, "ValidationException"},
+		{"ListSecretVersionIds", map[string]any{"SecretId": "app/a", "MaxResults": 1.5}, "SerializationException"},
+		{"ListSecretVersionIds", map[string]any{"SecretId": "app/a", "MaxResults": "7"}, "SerializationException"},
+	} {
+		if _, err := call(c.op, c.in); codeOf(err) != c.want {
+			t.Errorf("%s %v answered %v, want %s", c.op, c.in, err, c.want)
+		}
+	}
+	ok(t, "ListSecretVersionIds", map[string]any{"SecretId": "app/a", "MaxResults": 100})
+	for _, op := range []string{"ListSecrets", "BatchGetSecretValue"} {
+		var seen []string
+		in := map[string]any{"Filters": filters, "MaxResults": 1}
+		for pages := 0; pages < 10; pages++ {
+			page := ok(t, op, in)
+			for _, s := range append(spi.Slice(page["SecretList"]), spi.Slice(page["SecretValues"])...) {
+				seen = append(seen, spi.Str(s.(map[string]any)["Name"]))
+			}
+			if in["NextToken"] = page["NextToken"]; spi.Str(in["NextToken"]) == "" {
+				break
+			}
+		}
+		if strings.Join(seen, ",") != "app/a,app/b,app/c" {
+			t.Errorf("%s paged through %v, want every secret once", op, seen)
+		}
+	}
+}

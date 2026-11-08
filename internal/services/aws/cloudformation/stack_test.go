@@ -148,9 +148,10 @@ func (h *stacks) lookup(r res) (name string, err error) {
 			err = &spi.Fault{Code: "ResourceNotFoundException"}
 		}
 		return r.Physical, err
-	case "AWS::Events::Rule":
-		_, err = h.service("aws.events", "DescribeRule", in("Name", spi.LastSlash(r.Physical)))
-		return spi.LastSlash(r.Physical), err
+	case "AWS::Events::Rule": // its id, <bus>|<name> on any bus but the default
+		name := r.Physical[strings.Index(r.Physical, "|")+1:]
+		_, err = h.service("aws.events", "DescribeRule", map[string]any{"Name": name, "EventBusName": cmp.Or(ruleBus(r.Physical), "default")})
+		return name, err
 	case "AWS::Lambda::Function":
 		_, err = h.service("aws.lambda", "GetFunction", in("FunctionName", lastColon(r.Physical)))
 		return lastColon(r.Physical), err
@@ -879,13 +880,13 @@ func TestCloudFormationAnUpdateDeletesWhatItReplaced(t *testing.T) {
 
 // "CloudFormation supports the YAML Version 1.1 specification with a few
 // exceptions. CloudFormation doesn't support the following features: ...
-// Aliases[,] Hash merges" (User Guide, Template formats). An anchor, an alias
-// or a merge key is ValidationError, so no alias can recurse (a: &a [*a]),
-// multiply (a billion laughs) or carry a tag away from its node; and a
-// template nesting deeper than 100 levels or holding more than 100,000 nodes
-// is ValidationError too, whatever its shape. Before, the self-alias
-// overflowed the stack and killed the process, the billion laughs ran without
-// end, and a !Ref behind an alias became a plain string.
+// Aliases[,] Hash merges" (User Guide, Template formats). An alias or a merge
+// key is ValidationError, so no alias can recurse (a: &a [*a]),
+// multiply (a billion laughs) or carry a tag away from its node; a template's
+// size and depth are bounded where it is read (TestCloudFormationBoundsATemplateBySize,
+// TestCloudFormationReadsADeepTemplate). Before, the self-alias overflowed the
+// stack and killed the process, the billion laughs ran without end, and a !Ref
+// behind an alias became a plain string.
 func TestCloudFormationRefusesYAMLAliases(t *testing.T) {
 	h := newStacks(t)
 	queue := "Resources:\n  Q:\n    Type: AWS::SQS::Queue\n    Properties:\n      Tags: "
@@ -898,8 +899,6 @@ func TestCloudFormationRefusesYAMLAliases(t *testing.T) {
 		{"billion laughs", laughs + queue + "*a9\n", "aliases"},
 		{"tag behind an alias", "Resources:\n  Q:\n    Type: AWS::SQS::Queue\n    Properties:\n      QueueName: &x !Ref AWS::StackName\n      RedrivePolicy: *x\n", "aliases"},
 		{"merge key", "Resources:\n  Q:\n    <<: {Type: AWS::SQS::Queue}\n", "merge"},
-		{"101 levels", queue + strings.Repeat("[", 101) + strings.Repeat("]", 101) + "\n", "levels"},
-		{"100,001 nodes", queue + "[" + strings.Repeat("1, ", 100_000) + "1]\n", "nodes"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			for _, op := range []string{"ValidateTemplate", "CreateStack", "GetTemplateSummary"} {
@@ -913,15 +912,11 @@ func TestCloudFormationRefusesYAMLAliases(t *testing.T) {
 					if code(err) != "ValidationError" || !strings.Contains(err.Error(), c.says) {
 						t.Errorf("%s answered %v, want a ValidationError about %s", op, err, c.says)
 					}
-				case <-time.After(2 * time.Second):
-					t.Errorf("%s did not answer within 2s", op)
+				case <-time.After(30 * time.Second): // only a hang: a tight bound fails a slow machine
+					t.Errorf("%s did not answer within 30s", op)
 				}
 			}
 		})
-	}
-	within := queue + strings.Repeat("[", 90) + strings.Repeat("]", 90) + "\n  W:\n    Type: AWS::SQS::Queue\n    Properties:\n      Tags: [" + strings.Repeat("1, ", 90_000) + "1]\n"
-	if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": within}); err != nil {
-		t.Errorf("a template of 90 levels and 90,000 nodes was refused: %v", err)
 	}
 }
 
@@ -1196,7 +1191,10 @@ func TestCloudFormationARuleLivesOnItsBus(t *testing.T) {
 		t.Errorf("the bus-b rule y has targets %v (%v), want the template's one", targets["Targets"], err)
 	}
 	h.mustCreate("unnamed", rule("", false))
-	unnamed := spi.LastSlash(h.resources("unnamed")[0].Physical)
+	unnamed, ok := strings.CutPrefix(h.resources("unnamed")[0].Physical, "b|") // the rule's id on bus b
+	if !ok {
+		t.Errorf("the unnamed rule's id is %s, want b|<name>", h.resources("unnamed")[0].Physical)
+	}
 	for _, stack := range []string{"ony", "unnamed"} {
 		if _, err := h.invoke("DeleteStack", map[string]any{"StackName": stack}); err != nil {
 			t.Fatalf("DeleteStack %s: %v", stack, err)

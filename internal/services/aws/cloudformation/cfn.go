@@ -785,7 +785,8 @@ func (p *Pack) change(req *spi.Request, old stack, logical, typ string, props ma
 
 // next is what an update does to one resource (change) and the name it is kept or made under: its own,
 // claim's, or for a replacement one of its own, made from the old id. A replacement may not keep a name
-// the template gives: "CloudFormation cannot update a stack when a custom-named resource requires replacing".
+// the template gives: "CloudFormation cannot update a stack when a custom-named resource requires replacing";
+// one the template does not name, a KMS key's or a resource policy's none, is replaced as any other.
 func (p *Pack) next(ctx context.Context, req *spi.Request, st, old stack, logical, typ string, props map[string]any) (res, string, string, error) {
 	prev, how := p.change(req, old, logical, typ, props)
 	if how == "" || how == "update" && prev.Name != "" {
@@ -794,7 +795,7 @@ func (p *Pack) next(ctx context.Context, req *spi.Request, st, old stack, logica
 		st.ID += "/" + prev.Physical
 	}
 	n, err := p.claim(ctx, req, st, old, logical, typ, props)
-	if err == nil && how == "replace" && n == prev.Name {
+	if err == nil && how == "replace" && n == prev.Name && str(props[kinds[typ].member]) != "" {
 		err = invalid("CloudFormation cannot update a stack when a custom-named resource requires replacing. Rename " + n + " and update the stack again.")
 	}
 	return prev, how, n, err

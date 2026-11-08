@@ -501,7 +501,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     template gives and keeps is `ValidationError`, CloudFormation's
     "CloudFormation cannot update a stack when a custom-named resource
     requires replacing. Rename <name> and update the stack again.", and the
-    stack rolls back. A `Ref` to a kept resource answers its id. Before, every
+    stack rolls back. One no template can name, a KMS key or a Kinesis
+    resource policy, is replaced as any other (round 8 compared its two
+    empty names and refused it, "Rename  and update the stack again."). A
+    `Ref` to a kept resource answers its id. Before, every
     update made every resource again: a new KMS key and REST API, whose old
     ones the cleanup then deleted, and a failure on any parameter, table, log
     group, function, role or stream, which could only be created. A stream

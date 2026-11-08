@@ -1636,6 +1636,48 @@ func TestCloudFormationAnUpdateTouchesOnlyWhatChanged(t *testing.T) {
 	}
 }
 
+// A resource no template can name, a KMS key or a Kinesis resource policy, is
+// replaced as any other: "creating a new one and deleting the old one" (User
+// Guide, Update behaviors of stack resources). "CloudFormation cannot update a
+// stack when a custom-named resource requires replacing" is for a name the
+// template gives. Before, the guard compared the names of both, "" and "", and
+// refused, "Rename  and update the stack again."
+func TestCloudFormationReplacesAResourceWithNoName(t *testing.T) {
+	h := newStacks(t)
+	policy := func(stream string) map[string]any {
+		return map[string]any{"Type": "AWS::Kinesis::ResourcePolicy", "Properties": map[string]any{
+			"ResourceArn": "arn:aws:kinesis:us-east-1:000000000000:stream/" + stream, "ResourcePolicy": map[string]any{"Version": "2012-10-17", "Statement": []any{}}}}
+	}
+	key := func(spec string) map[string]any {
+		return map[string]any{"Type": "AWS::KMS::Key", "Properties": map[string]any{"KeySpec": spec}}
+	}
+	h.mustCreate("unnamed", map[string]map[string]any{"Key": key("SYMMETRIC_DEFAULT"), "Policy": policy("one")})
+	before := map[string]string{}
+	for _, r := range h.resources("unnamed") {
+		before[r.Logical] = r.Physical
+	}
+	tpl, _ := json.Marshal(map[string]any{"Resources": map[string]any{"Key": key("HMAC_256"), "Policy": policy("two")}}) // KeySpec, ResourceArn: "Replacement"
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "unnamed", "TemplateBody": string(tpl)}); err != nil {
+		t.Fatalf("replacing a key and a resource policy, neither named: %v", err)
+	}
+	after := map[string]string{}
+	for _, r := range h.resources("unnamed") {
+		after[r.Logical] = r.Physical
+	}
+	if after["Key"] == before["Key"] || after["Policy"] != "arn:aws:kinesis:us-east-1:000000000000:stream/two" {
+		t.Errorf("after the replacement the stack holds %v, was %v: want a new key and the policy on stream two", after, before)
+	}
+	if out, _ := h.service("aws.kms", "DescribeKey", map[string]any{"KeyId": before["Key"]}); asMap(out["KeyMetadata"])["KeyState"] != "PendingDeletion" {
+		t.Errorf("the replaced key is %v, want PendingDeletion", asMap(out["KeyMetadata"])["KeyState"])
+	}
+	for stream, want := range map[string]bool{"one": false, "two": true} {
+		out, _ := h.service("aws.kinesis", "GetResourcePolicy", map[string]any{"ResourceARN": "arn:aws:kinesis:us-east-1:000000000000:stream/" + stream})
+		if held := str(out["Policy"]) != ""; held != want {
+			t.Errorf("stream %s holds a policy: %v, want %v", stream, held, want)
+		}
+	}
+}
+
 // A failed update's rollback puts back exactly the properties the stack had,
 // through the same in-place update an update uses, given the previous
 // properties: a property the failed update added is taken away again, a

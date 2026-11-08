@@ -342,3 +342,61 @@ func TestCloudFormationARefAnswersWhatItsTypeDocuments(t *testing.T) {
 		t.Error("DeleteStack left the rule on ref-bus")
 	}
 }
+
+// Every property the engine passes to a service is read as the type the
+// operation's model declares, by one helper keyed by that type, and given
+// in the form the service's own codec would decode it: a JSON protocol's
+// number is a float64, restXml's integer an int and a query string's
+// scalar its text. So a function's MemorySize from a Number parameter (a
+// Ref's value "becomes a string", User Guide, Parameters) is 256, and its
+// Timeout 30; a table's ReadCapacityUnits from a parameter is 5; a bucket's
+// tag values, which are strings, written true and 123 unquoted, are "true"
+// and "123". Before, the function was made with MemorySize "256" and Timeout
+// a Go int, the table refused "5", and PutBucketTagging was MalformedXML.
+func TestCloudFormationPassesEveryPropertyAsItsModelType(t *testing.T) {
+	h := newStacks(t)
+	parameters := "Parameters:\n  Memory: {Type: Number, Default: 256}\n  Read: {Type: Number, Default: 5}\nResources:\n"
+	for name, resource := range map[string]string{
+		"fn": `  Fn:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: typed-fn
+      Runtime: provided.al2
+      Handler: bootstrap
+      Role: arn:aws:iam::000000000000:role/fn
+      Code: {ZipFile: UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==}
+      MemorySize: !Ref Memory
+      Timeout: 30
+`,
+		"table": `  Table:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: typed-table
+      KeySchema: [{AttributeName: id, KeyType: HASH}]
+      AttributeDefinitions: [{AttributeName: id, AttributeType: S}]
+      ProvisionedThroughput: {ReadCapacityUnits: !Ref Read, WriteCapacityUnits: 1}
+`,
+		"bucket": `  Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: typed-bucket
+      Tags: [{Key: flag, Value: true}, {Key: count, Value: 123}]
+`,
+	} {
+		if _, err := h.invoke("CreateStack", map[string]any{"StackName": "typed-" + name, "TemplateBody": parameters + resource}); err != nil {
+			t.Errorf("the %s stack answered %v", name, err)
+		}
+	}
+	fn, err := h.service("aws.lambda", "GetFunction", map[string]any{"FunctionName": "typed-fn"})
+	if config := asMap(fn["Configuration"]); err != nil || config["MemorySize"] != 256.0 || config["Timeout"] != 30.0 {
+		t.Errorf("the function's MemorySize is %#v and Timeout %#v (%v), want 256 and 30", config["MemorySize"], config["Timeout"], err)
+	}
+	table, err := h.service("aws.dynamodb", "DescribeTable", map[string]any{"TableName": "typed-table"})
+	if read := asMap(asMap(table["Table"])["ProvisionedThroughput"])["ReadCapacityUnits"]; err != nil || read != 5.0 {
+		t.Errorf("the table's ReadCapacityUnits is %#v (%v), want 5", read, err)
+	}
+	tags, err := h.service("aws.s3", "GetBucketTagging", map[string]any{"Bucket": "typed-bucket"})
+	if text := spi.JSONText(tags); err != nil || !strings.Contains(text, `"Value":"true"`) || !strings.Contains(text, `"Value":"123"`) {
+		t.Errorf("the bucket's tags are %s (%v), want the values \"true\" and \"123\"", text, err)
+	}
+}

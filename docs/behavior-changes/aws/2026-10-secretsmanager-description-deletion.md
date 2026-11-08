@@ -336,7 +336,20 @@ The oracle is AWS's documentation as it ships in the vendored model
     scalar's text, so `ExcludeCharacters: 123` is `"123"` and an SSM
     Parameter's `Value: 123` is `"123"`. Before, `"True"` made a standard
     queue, `"16.0"`, `"1e1"` and `"+16"` were read as numbers, a number was
-    refused as `ExcludeCharacters` and an SSM `Value: 123` was empty. A
+    refused as `ExcludeCharacters` and an SSM `Value: 123` was empty.
+    Every property the engine passes to a service, the ones it passes whole
+    included (a function's, a table's), is read by the same rule, keyed by
+    the type the operation's model declares for the member, through
+    structures, lists and maps, and given in the form that service's codec
+    decodes it in (a JSON protocol's number a float64, restXml's integer an
+    int, a query string's scalar its text). So `MemorySize: !Ref Memory` is
+    256, `ReadCapacityUnits` from a parameter is 5, and a bucket's tag
+    values written `true` and `123` are `"true"` and `"123"`. Before, a
+    function got `MemorySize` `"256"`, a table `"5"`, and the tags were
+    `MalformedXML`. A member the model does not declare, and a value that is
+    not its member's type, is passed as given, for the service to refuse.
+    Round 7 said every property was read as its type; only the ones the
+    engine named were. A
     parameter is a string ("the parameter value becomes a string", User
     Guide, Parameters), so a numeric `Default`, `Default: 16` in JSON or
     YAML, is its text `"16"`; before, it became `""`. Each

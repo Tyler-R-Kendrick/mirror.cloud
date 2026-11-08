@@ -18,8 +18,10 @@ import (
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/prim"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
@@ -711,13 +713,59 @@ func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map
 		if closer, ok := pack.(interface{ Close() error }); ok {
 			defer closer.Close()
 		}
-		resp, err := pack.Invoke(ctx, &spi.Request{Identity: req.Identity, AdvertiseURL: advertise(req), Operation: op, Input: in})
+		resp, err := pack.Invoke(ctx, &spi.Request{Identity: req.Identity, AdvertiseURL: advertise(req), Operation: op, Input: input(id, op, in)})
 		if err != nil {
 			return nil, err
 		}
 		return resp.Output, nil
 	}
 	return nil, spi.NotImplemented(id, op, "emulate")
+}
+
+// input is in with each member read as the type the operation's model declares for it (typed).
+func input(id, op string, in map[string]any) map[string]any {
+	svc := specboot.Bundle().ServiceByID(id)
+	if o := svc.OperationByName(op); o != nil {
+		in, _ = typed(svc, o.Input, in).(map[string]any)
+	}
+	return in
+}
+
+// typed is v read as the shape it is given for declares (coerce), through structures, lists and maps:
+// a template's 256 or "256" for an integer member, "true" or "123" for a string, true for a boolean. It is
+// in the form the service's own codec decodes it in: a JSON protocol's number is a float64, restXml's
+// integer an int and its long an int64, a query string's scalar its text. A value that is not its type is
+// left as it was given, for the service to refuse.
+func typed(svc *model.Service, shapeID string, v any) any {
+	sh := svc.Shapes[shapeID]
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, x := range t {
+			out[k] = typed(svc, map[bool]string{true: sh.Member, false: sh.Members[k].Shape}[sh.Kind == model.KindMap], x)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, x := range t {
+			out[i] = typed(svc, sh.Member, x)
+		}
+		return out
+	}
+	want := map[model.ShapeKind]string{model.KindString: "String", model.KindEnum: "String", model.KindInteger: "Integer",
+		model.KindLong: "Integer", model.KindBoolean: "Boolean"}[sh.Kind]
+	c, ok := coerce(v, want)
+	switch n, isInt := c.(int); {
+	case want == "" || !ok:
+		return v
+	case svc.Protocol == model.ProtoAWSQuery || svc.Protocol == model.ProtoEC2Query:
+		return spi.JSONText(c)
+	case isInt && svc.Protocol != model.ProtoRESTXML:
+		return float64(n)
+	case isInt && sh.Kind == model.KindLong:
+		return int64(n)
+	}
+	return c
 }
 
 // configureBucket applies the bucket properties that map one to one onto an S3 operation, and stores the
@@ -729,8 +777,9 @@ func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket str
 			in := map[string]any{"Bucket": bucket, property: v}
 			if property == "VersioningConfiguration" { // S3 reads Status and TagSet lifted to the top, as restXml hands them over (its liftedMembers debt)
 				in["Status"] = asMap(v)["Status"]
-			} else if property == "Tags" {
-				in = map[string]any{"Bucket": bucket, "Tagging": map[string]any{"TagSet": v}, "TagSet": v}
+			} else if property == "Tags" { // typed before it is lifted, as call types only the model's members
+				tagging := asMap(input("aws.s3", op, map[string]any{"Tagging": map[string]any{"TagSet": v}})["Tagging"])
+				in = map[string]any{"Bucket": bucket, "Tagging": tagging, "TagSet": tagging["TagSet"]}
 			}
 			if _, err := p.call(ctx, req, "aws.s3", op, in); err != nil {
 				return err

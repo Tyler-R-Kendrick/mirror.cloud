@@ -4411,6 +4411,22 @@ var mutants = []mutant{
 		run:  "TestCloudFormationPassesEveryPropertyAsItsModelType",
 	},
 	{
+		name: "cloudformation-change-ignores-a-skipped-resource",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `r.Logical == logical && r.Type == typ && r.Status != "DELETE_FAILED"`,
+		new:  `r.Logical == logical && r.Type == typ && r.Status == ""`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationASkippedResourceIsStillTheStacks",
+	},
+	{
+		name: "cloudformation-refuse-replacing-an-unnamed-resource",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `n == prev.Name && str(props[kinds[typ].member]) != ""`,
+		new:  `n == prev.Name`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationReplacesAResourceWithNoName",
+	},
+	{
 		name: "cloudformation-forget-each-condition",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
 		old:  `memo[str(name)] = [2]bool{yes, settled}`,

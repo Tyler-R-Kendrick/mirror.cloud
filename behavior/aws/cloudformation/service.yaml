@@ -23,11 +23,12 @@ missing_input_error: Validation
 # deprovisions them in reverse, keeping any it cannot delete; ValidateTemplate and GetTemplateSummary parse
 # without provisioning; ListExports flattens every stack's outputs. The stack
 # record below is the one the engine writes.
-native: [CreateStack, UpdateStack, DeleteStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports, ContinueUpdateRollback, CreateChangeSet]
+native: [CreateStack, UpdateStack, DeleteStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports, ContinueUpdateRollback, CreateChangeSet, UpdateTerminationProtection]
 
 resources:
-  # The stack record, written by the native template engine and patched by
-  # the rollback family and UpdateTerminationProtection.
+  # The stack record, written only by the native template engine, in one
+  # store transaction per write: UpdateTerminationProtection is native so
+  # that its write cannot fall between another's read and write.
   stack:
     collection: cfn
     # StackName is "The name or unique stack ID". A stack id,
@@ -252,29 +253,6 @@ operations:
           'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE',
           'StackName': s.Name, 'StackId': s.ID}, 'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))[0]
 
-  UpdateTerminationProtection:
-    reads:
-      s: { resource: stack }
-    require:
-      - &stackNameOrId
-        cond: "!('StackName' in input) || string(input.StackName) != ''"
-        error: Validation
-        message_expr: >-
-          "1 validation error detected: Value '" + ('StackName' in input ? string(input.StackName) : '')
-          + "' at 'stackName' failed to satisfy constraint: Member must have length greater than or equal to 1"
-      - *stackPattern
-      - *stackExists
-    effects:
-      - put:
-          resource: stack
-          record:
-            Protect: >-
-              input.EnableTerminationProtection == true
-              || input.EnableTerminationProtection == 'true'
-              || input.EnableTerminationProtection == 'True'
-    output:
-      StackId: s.ID
-
   # The pack also deprovisions every stack resource into the sibling
   # services' collections before deleting the record; that loop is the shadow
   # reason and is not transcribed.
@@ -299,7 +277,8 @@ operations:
   # operation: RollbackStack rolls back "from CREATE_FAILED or UPDATE_FAILED
   # stack statuses", ContinueUpdateRollback "from UPDATE_ROLLBACK_FAILED to
   # UPDATE_ROLLBACK_COMPLETE state", and CancelUpdateStack only "stacks that
-  # are in the UPDATE_IN_PROGRESS state". Nothing here runs asynchronously and
+  # are in the UPDATE_IN_PROGRESS state". Nothing here runs asynchronously,
+  # no update is rolled back (so no stack is UPDATE_ROLLBACK_FAILED), and
   # a failed create rolls back at once and an update reserves no record, so
   # no stack rests in CREATE_FAILED, UPDATE_FAILED or UPDATE_IN_PROGRESS, and
   # neither operation could carry out what it says: RollbackStack and
@@ -314,7 +293,12 @@ operations:
     reads:
       s: { resource: stack }
     require:
-      - *stackNameOrId
+      - &stackNameOrId
+        cond: "!('StackName' in input) || string(input.StackName) != ''"
+        error: Validation
+        message_expr: >-
+          "1 validation error detected: Value '" + ('StackName' in input ? string(input.StackName) : '')
+          + "' at 'stackName' failed to satisfy constraint: Member must have length greater than or equal to 1"
       - *stackPattern
       - *stackExists
       - cond: "false" # it accepts CREATE_FAILED and UPDATE_FAILED, which no stack here rests in
@@ -1049,11 +1033,6 @@ quirks:
       region. The pack's record carries the provisioned Resources, Outputs,
       Refs and Template, which only the shadowed CreateStack path can
       produce, so here they are always empty.
-  - operation: UpdateTerminationProtection
-    note: >
-      The pack's truthy() accepts a boolean true or the strings "true" and
-      "True"; anything else, including the model-required member arriving
-      empty, stores false.
   - operation: DescribeStackSet
     note: >
       Never faults: an absent stack set answers an empty StackSet record with

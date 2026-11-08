@@ -447,8 +447,10 @@ func TestCloudFormationRefusesTheUnsupportedTags(t *testing.T) {
 
 // "CloudFormation supports the YAML Version 1.1 specification" (User Guide,
 // Template formats), so a plain scalar is read as YAML 1.1's type repository
-// reads it, where yaml.v3 reads YAML 1.2: yes, no, on, off, y and n are
-// booleans (yaml.org/type/bool.html); an integer may be binary, octal as
+// reads it, where yaml.v3 reads YAML 1.2: yes, no, on and off are booleans
+// (yaml.org/type/bool.html), and y and n are left strings, as PyYAML and
+// SnakeYAML, the 1.1 parsers in use, leave them (round 8 read them as
+// booleans); an integer may be binary, octal as
 // 0777, hexadecimal, sexagesimal as 1:20, with underscores, but 0o17 is not
 // one (int.html); a float has a point, so 1e3 is a string (float.html).
 // FifoQueue is a Boolean (Template Reference, AWS::SQS::Queue): yes makes a
@@ -459,7 +461,7 @@ func TestCloudFormationRefusesTheUnsupportedTags(t *testing.T) {
 // standard queue.
 func TestCloudFormationReadsYAMLAsVersion11(t *testing.T) {
 	h := newStacks(t)
-	values := map[string]string{"y": "true", "No": "false", "0b101": "5", "0777": "511", "0x1F": "31", "1_000": "1000",
+	values := map[string]string{"y": "y", "N": "N", "yes": "true", "No": "false", "0b101": "5", "0777": "511", "0x1F": "31", "1_000": "1000",
 		"1:20": "80", "-1:30": "-90", "1e3": "1e3", "0o17": "0o17", "1.5": "1.5", "'yes'": "yes", "08": "08"}
 	queues := "Resources:\n  F:\n    Type: AWS::SQS::Queue\n    Properties:\n      QueueName: v11-fifo.fifo\n      FifoQueue: yes\n" +
 		"  S:\n    Type: AWS::SQS::Queue\n    Properties:\n      QueueName: v11-standard\n      FifoQueue: off\n"
@@ -540,6 +542,160 @@ func TestCloudFormationOrdersAnIfByTheBranchItTakes(t *testing.T) {
 		body, _ := json.Marshal(tpl)
 		if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": string(body)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "[C, D]") {
 			t.Errorf("C and D under %s answered %v, want the cycle [C, D]", cond, err)
+		}
+	}
+}
+
+// A condition is evaluated once per operation, however many conditions name
+// it: C0 is Fn::Equals [a, a] and each Ci is Fn::And of Condition Ci-1 twice,
+// so read without a memo C30 asks for C0 2^30 times. With one, ValidateTemplate
+// and GetTemplateSummary of a template whose one Fn::If names C30 answer at
+// once (a 30 s timer catches only a hang), the Fn::If settled true, so A and
+// B, which name each other only through its false branch, are no cycle.
+// Before, each Condition was evaluated afresh wherever it was named: 24
+// conditions took 19 s, and 30 did not answer.
+func TestCloudFormationEvaluatesEachConditionOnce(t *testing.T) {
+	h := newStacks(t)
+	conds := map[string]any{"C0": map[string]any{"Fn::Equals": []any{"a", "a"}}}
+	for i := 1; i <= 30; i++ {
+		prev := map[string]any{"Condition": fmt.Sprintf("C%d", i-1)}
+		conds[fmt.Sprintf("C%d", i)] = map[string]any{"Fn::And": []any{prev, prev}}
+	}
+	body, _ := json.Marshal(map[string]any{"Conditions": conds, "Resources": map[string]any{
+		"A": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "once", "Type": "String",
+			"Value": map[string]any{"Fn::If": []any{"C30", "taken", map[string]any{"Ref": "B"}}}}},
+		"B": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": map[string]any{"Ref": "A"}}}}})
+	for _, op := range []string{"ValidateTemplate", "GetTemplateSummary"} {
+		done := make(chan error, 1)
+		go func() {
+			_, err := h.invoke(op, map[string]any{"TemplateBody": string(body)})
+			done <- err
+		}()
+		if err := within(t, done, op); err != nil {
+			t.Errorf("%s answered %v", op, err)
+		}
+	}
+}
+
+// A cycle's members are found in one pass over the template's references
+// (Tarjan's strongly connected components), so the error costs time linear in
+// the template: 498 chained parameters waiting on X and Y, which name each
+// other, walk each resource once to order and once to find the cycle, 1,000
+// walks in all, and the error names X and Y alone. Before, the search ran
+// once per resource left unordered, each over everything after it: 125,250
+// walks here, and 8,000 chained resources took 5.9 s.
+func TestCloudFormationFindsACycleInLinearTime(t *testing.T) {
+	param := func(ref string) map[string]any {
+		return map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": map[string]any{"Ref": ref}}}
+	}
+	resources := map[string]any{"X": param("Y"), "Y": param("X"), "P000": param("X")}
+	for i := 1; i < 498; i++ {
+		resources[fmt.Sprintf("P%03d", i)] = param(fmt.Sprintf("P%03d", i-1))
+	}
+	body, _ := json.Marshal(map[string]any{"Resources": resources})
+	h := newStacks(t)
+	pack := New(h.deps)
+	_, err := pack.Invoke(h.ctx, &spi.Request{Identity: h.id, Operation: "ValidateTemplate", Input: map[string]any{"TemplateBody": string(body)}})
+	if code(err) != "ValidationError" || err.Error() != "ValidationError: Circular dependency between resources: [X, Y]" {
+		t.Errorf("the template answered %v, want the cycle [X, Y]", err)
+	}
+	if pack.walks > 1000 {
+		t.Errorf("finding the cycle walked %d resources, want at most 1000", pack.walks)
+	}
+}
+
+// "Resources: The maximum number of resources that you can declare in your
+// CloudFormation template. 500 resources" (User Guide, Understand
+// CloudFormation quotas): 500 are a template, 501 are ValidationError on every
+// operation that reads one. Before, any number was read.
+func TestCloudFormationHoldsATemplateTo500Resources(t *testing.T) {
+	h := newStacks(t)
+	for n, ok := range map[int]bool{500: true, 501: false} {
+		resources := map[string]any{}
+		for i := range n {
+			resources[fmt.Sprintf("R%03d", i)] = map[string]any{"Type": "AWS::SQS::Queue"}
+		}
+		body, _ := json.Marshal(map[string]any{"Resources": resources})
+		for _, op := range []string{"ValidateTemplate", "GetTemplateSummary", "CreateStack"} {
+			_, err := h.invoke(op, map[string]any{"StackName": fmt.Sprintf("quota%d", n), "TemplateBody": string(body)})
+			if ok && err != nil && op != "CreateStack" {
+				t.Errorf("%s of %d resources answered %v", op, n, err)
+			} else if !ok && (code(err) != "ValidationError" || !strings.Contains(err.Error(), "maximum allowed, 500")) {
+				t.Errorf("%s of %d resources answered %v, want ValidationError: maximum allowed, 500", op, n, err)
+			}
+		}
+	}
+}
+
+// Fn::If resolves to the branch its condition takes, the conditions read
+// from the parameters once; AWS::NoValue "Removes the corresponding resource
+// property when specified as a return value in the Fn::If intrinsic function"
+// and AWS::StackId "Returns the ID (ARN) of the stack" (User Guide, pseudo
+// parameters). So in prod the parameter's Value is "p", the secret has no
+// Description, its value is the stack's id, and an output takes its branch.
+// Before, the Fn::If map itself reached the service (SSM refused it), and
+// AWS::StackId was left as written.
+func TestCloudFormationResolvesFnIf(t *testing.T) {
+	h := newStacks(t)
+	when := func(c string, a, b any) any { return map[string]any{"Fn::If": []any{c, a, b}} }
+	body, _ := json.Marshal(map[string]any{
+		"Parameters": map[string]any{"Env": map[string]any{"Type": "String", "Default": "prod"}},
+		"Conditions": map[string]any{"IsProd": map[string]any{"Fn::Equals": []any{map[string]any{"Ref": "Env"}, "prod"}}},
+		"Resources": map[string]any{
+			"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "if-p", "Type": "String", "Value": when("IsProd", "p", "d")}},
+			"S": map[string]any{"Type": "AWS::SecretsManager::Secret", "Properties": map[string]any{"Name": "if-s",
+				"Description":  when("IsProd", map[string]any{"Ref": "AWS::NoValue"}, "dev"),
+				"SecretString": map[string]any{"Fn::Sub": "${AWS::StackId}"}}}},
+		"Outputs": map[string]any{"O": map[string]any{"Value": when("IsProd", "out-p", "out-d")}},
+	})
+	out, err := h.invoke("CreateStack", map[string]any{"StackName": "ifs", "TemplateBody": string(body)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": "if-p"}); err != nil || str(asMap(got["Parameter"])["Value"]) != "p" {
+		t.Errorf("the parameter is %v (%v), want p", got, err)
+	}
+	if got, err := h.service("aws.secretsmanager", "DescribeSecret", map[string]any{"SecretId": "if-s"}); err != nil || got["Description"] != nil {
+		t.Errorf("the secret is %v (%v), want no Description", got, err)
+	}
+	if got, err := h.service("aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": "if-s"}); err != nil || got["SecretString"] != out["StackId"] {
+		t.Errorf("the secret's value is %v (%v), want the stack id %v", got["SecretString"], err, out["StackId"])
+	}
+	if !strings.Contains(spi.JSONText(h.record("ifs")["Outputs"]), `"OutputValue":"out-p"`) {
+		t.Errorf("the outputs are %v, want O out-p", h.record("ifs")["Outputs"])
+	}
+}
+
+// A Fn::Sub variable "can be template parameter names, resource logical IDs,
+// resource attributes, or a variable in a key-value map" (Template Reference,
+// Fn::Sub), and pseudo parameters, which its examples use; ${Nope}, which is
+// none, is "Template format error: Unresolved resource dependencies [Nope] in
+// the Resources block of the template", ValidationError. Before, it was left
+// in the string as written.
+func TestCloudFormationRefusesAnUnresolvedSubVariable(t *testing.T) {
+	h := newStacks(t)
+	sub := func(s any) map[string]any {
+		return map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": map[string]any{"Fn::Sub": s}}}
+	}
+	for text, ok := range map[string]bool{"${Nope}": false, "${Nope.Arn}": false, "${Env}-${AWS::Region}-${Q}-${Q.Arn}-${!Lit}": true} {
+		body, _ := json.Marshal(map[string]any{"Parameters": map[string]any{"Env": map[string]any{"Type": "String", "Default": "e"}},
+			"Resources": map[string]any{"Q": map[string]any{"Type": "AWS::SQS::Queue"}, "P": sub(text), "V": sub([]any{"${X}", map[string]any{"X": "x"}})}})
+		_, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": string(body)})
+		if ok && err != nil {
+			t.Errorf("%s answered %v", text, err)
+		} else if !ok && (code(err) != "ValidationError" || !strings.Contains(err.Error(), "Unresolved resource dependencies [Nope]")) {
+			t.Errorf("%s answered %v, want ValidationError: Unresolved resource dependencies [Nope]", text, err)
+		}
+	}
+}
+
+// An Integer may be negative: "-5" is -5, as a Number parameter's text can
+// be, and "-", "+5", "- 5" and "5-" are still none. Before, "-5" was refused.
+func TestCloudFormationReadsANegativeInteger(t *testing.T) {
+	for text, want := range map[string]any{"-5": -5, "016": 16, "-": nil, "+5": nil, "- 5": nil, "5-": nil} {
+		got, ok := coerce(text, "Integer")
+		if want == nil && ok || want != nil && (!ok || got != want) {
+			t.Errorf("coerce(%q, Integer) is %v, %t, want %v", text, got, ok, want)
 		}
 	}
 }

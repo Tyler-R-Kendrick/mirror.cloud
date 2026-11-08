@@ -139,8 +139,10 @@ The oracle is AWS's documentation as it ships in the vendored model
   - "CloudFormation supports the YAML Version 1.1 specification" (User Guide,
     Template formats), so a plain scalar is read as YAML 1.1's type
     repository reads it (yaml.org/type/bool.html, int.html, float.html),
-    where the library reads YAML 1.2: `yes`, `no`, `on`, `off`, `y` and `n`
-    in their listed spellings are booleans; an integer may be binary, octal
+    where the library reads YAML 1.2: `yes`, `no`, `on` and `off` in their
+    listed spellings are booleans, and `y` and `n` stay strings, as PyYAML
+    and SnakeYAML leave them though the type page lists them (a reading;
+    round 8 read them as booleans); an integer may be binary, octal
     as `0777`, hexadecimal or sexagesimal (`1:20` is 80), with underscores,
     but `0o17` and `08` are strings; a float has a point, so `1e3` is the
     string `1e3`. `.inf` and `.nan` stay text, which a template's JSON form
@@ -148,6 +150,11 @@ The oracle is AWS's documentation as it ships in the vendored model
     tag (`!!str yes`) is read as tagged. Before, `yes` was the string
     `"yes"` and made `FifoQueue: yes` a standard queue, `1:20` was a string,
     `1e3` was 1000 and `0o17` was 15.
+  - "Resources: The maximum number of resources that you can declare in your
+    CloudFormation template. 500 resources" (User Guide, quotas): a template
+    of 501 is `ValidationError`, "Template format error: Number of
+    resources, 501, is greater than maximum allowed, 500" (the wording is a
+    reading). Before, any number was read.
   - A template is bounded by its size, CloudFormation's own limits:
     `TemplateBody` is "a maximum length of 51,200 bytes", and the template
     `TemplateURL` names "max size: 1 MB" (API reference, `CreateStack`;
@@ -234,14 +241,26 @@ The oracle is AWS's documentation as it ships in the vendored model
     `${Literal}`; each orders by what it names (a resource named by
     `${Name.Attribute}` or by a variable's value is made first, one a variable
     or `${!...}` merely spells is not). Before, `${Name.Attribute}` and the
-    variable map were left as written and ordered nothing.
+    variable map were left as written and ordered nothing. A variable "can be template
+    parameter names, resource logical IDs, resource attributes, or a variable
+    in a key-value map", and a pseudo parameter; any other, `${Nope}`, is
+    `ValidationError`, "Template format error: Unresolved resource
+    dependencies [Nope] in the Resources block of the template" (round 8 left
+    it in the string).
     A `Fn::If` whose condition the parameters settle orders by the branch it
     takes and only that one: `Fn::Equals` of literals and `Ref`s to
     parameters, and `Fn::Not`, `Fn::And`, `Fn::Or` and `Condition` over such
-    conditions (Template Reference, condition functions). A condition they do
+    conditions (Template Reference, condition functions), each condition
+    evaluated once per operation however many name it (round 8 evaluated a
+    named condition afresh wherever it was named, so a chain of 24
+    conditions each naming the last twice took 19 s). A condition they do
     not settle (one on a pseudo parameter, or one that names itself) orders
-    by both branches, a reading. `Fn::If` is not otherwise resolved here; its
-    value reaches the service as written. Before, every `Fn::If` ordered by
+    by both branches, a reading. A settled `Fn::If` also resolves to its branch,
+    and `AWS::NoValue` there "Removes the corresponding resource property"
+    (an element of a list too); an unsettled one reaches the service as
+    written, a reading. `AWS::StackId` "Returns the ID (ARN) of the stack"
+    (User Guide, pseudo parameters). Round 8 resolved no `Fn::If`, so its
+    map reached the service, and left `AWS::StackId` as written. Before, every `Fn::If` ordered by
     both branches, so two resources naming each other only in branches never
     both taken were refused as a cycle.
     The order is found once per operation, by one walk of each resource's
@@ -252,7 +271,9 @@ The oracle is AWS's documentation as it ships in the vendored model
     A cycle is `ValidationError` ("Circular dependency between resources:
     [A, B]") on `CreateStack`, `UpdateStack`, `ValidateTemplate` and
     `GetTemplateSummary`, and makes no stack. It names the resources in a
-    cycle (one naming itself is a cycle of one), not those that wait on one. Before, a `Ref` to a resource
+    cycle (one naming itself is a cycle of one), not those that wait on one,
+    found in one pass of Tarjan's strongly connected components; round 8
+    searched once per resource left, quadratic in the template. Before, a `Ref` to a resource
     not yet made answered its logical id: beside an SSM parameter named
     `ABucket`, a parameter named for an unnamed bucket `ABucket` was refused
     as taken, and a resource that sorted before the one it named was made
@@ -281,6 +302,11 @@ The oracle is AWS's documentation as it ships in the vendored model
     Before, it made a second set of resources and wrote its record over the
     first, which then belonged to no stack, and creates racing on one name
     each made a set.
+  - `CreateChangeSet` refuses the stacks `UpdateStack` refuses, a
+    `ROLLBACK_*` or `*_FAILED` one too (round 8 refused only one in
+    progress), and `GetTemplateSummary` reads the stored template only when
+    the request gives none, so an oversize `TemplateBody` beside a
+    `StackName` is the member's constraint error.
   - A stack in any `_IN_PROGRESS` state takes no update: `UpdateStack`,
     `CreateChangeSet` and `ExecuteChangeSet` are `ValidationError`,
     "Stack:<id> is in CREATE_IN_PROGRESS state and can not be updated.", the
@@ -311,6 +337,14 @@ The oracle is AWS's documentation as it ships in the vendored model
     a final delete left the second set behind (300 parameters in the round-8
     repro); and the later of two updates wrote over the earlier's record,
     whose resources then belonged to no stack.
+  - The stack record has no writer but the engine, each write one store
+    transaction: `UpdateTerminationProtection` is native and sets the
+    protection in a transaction over the record it reads (its Boolean in any
+    case, so `TRUE` protects), as `ContinueUpdateRollback` and every other
+    native write already did. Before, the bundle's `UpdateTerminationProtection` read the
+    record and wrote it back separately, so a create that finished between
+    the two was written back `CREATE_IN_PROGRESS`, and a `DeleteStack` then
+    left it `DELETE_IN_PROGRESS` for good; `TRUE` left a stack unprotected.
   - A `CreateStack` that fails rolls back what it had created, as
     CloudFormation's default `OnFailure` (`ROLLBACK`) does, deleting a secret
     without a recovery window so its name is free again. A resource is
@@ -560,7 +594,8 @@ The oracle is AWS's documentation as it ships in the vendored model
     `FifoQueue` that is no Boolean (`maybe`, `1`, a list) is
     `ValidationError` naming it, before anything is made (round 7 made a
     standard queue); an Integer
-    is decimal digits, as a Number parameter's text is, so `"016"` is 16 and
+    is decimal digits after an optional minus, as a Number parameter's text
+    is, so `"-5"` is -5 (round 8 refused it), `"016"` is 16 and
     `"16.0"`, `"1e1"`, `"+16"` and `" 16"` are refused; a String is a
     scalar's text, so `ExcludeCharacters: 123` is `"123"` and an SSM
     Parameter's `Value: 123` is `"123"`. Before, `"True"` made a standard

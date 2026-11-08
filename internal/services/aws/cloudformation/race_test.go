@@ -14,12 +14,13 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
-// gate is a store that holds the first write of a bucket's CORS
-// configuration, which configureBucket stores itself (S3 holds a lock across
-// its own "bktcfg" writes), until the test lets it go, so a test can act while
-// a stack operation is in flight, at a point it chose.
+// gate is a store that holds the first write match picks, until the test lets
+// it go, so a test can act while an operation is in flight, at a point it
+// chose. gated's picks a bucket's CORS configuration, which configureBucket
+// stores itself (S3 holds a lock across its own "bktcfg" writes).
 type gate struct {
 	spi.Store
+	match            func(collection, key string, val []byte) bool
 	held             atomic.Bool
 	reached, release chan struct{}
 }
@@ -31,7 +32,8 @@ type gateScope struct {
 
 type gateCollection struct {
 	spi.Collection
-	g *gate
+	g    *gate
+	name string
 }
 
 func (g *gate) Scope(account, region string) spi.Scope {
@@ -39,14 +41,11 @@ func (g *gate) Scope(account, region string) spi.Scope {
 }
 
 func (s gateScope) Collection(name string) spi.Collection {
-	if name != "bktcfg" {
-		return s.Scope.Collection(name)
-	}
-	return gateCollection{s.Scope.Collection(name), s.g}
+	return gateCollection{s.Scope.Collection(name), s.g, name}
 }
 
 func (c gateCollection) Put(ctx context.Context, key string, val []byte) error {
-	if strings.HasSuffix(key, "/cors") && c.g.held.CompareAndSwap(false, true) { // only the first: every later write goes through
+	if c.g.match(c.name, key, val) && c.g.held.CompareAndSwap(false, true) { // only the first: every later write goes through
 		close(c.g.reached)
 		<-c.g.release
 	}
@@ -56,11 +55,18 @@ func (c gateCollection) Put(ctx context.Context, key string, val []byte) error {
 // gated is stacks whose store holds the first CORS configuration written.
 func gated(t *testing.T) (*stacks, *gate) {
 	h := newStacks(t)
-	g := &gate{Store: h.deps.Store, reached: make(chan struct{}), release: make(chan struct{})}
+	return h, h.gateOn(func(collection, key string, _ []byte) bool {
+		return collection == "bktcfg" && strings.HasSuffix(key, "/cors")
+	})
+}
+
+// gateOn puts a gate holding the first write match picks over h's store.
+func (h *stacks) gateOn(match func(collection, key string, val []byte) bool) *gate {
+	g := &gate{Store: h.deps.Store, match: match, reached: make(chan struct{}), release: make(chan struct{})}
 	h.deps.Store = g
 	h.pack = New(h.deps)
 	h.cfn = bundled.Handler("aws.cloudformation", h.deps)
-	return h, g
+	return g
 }
 
 // within waits for c, failing the test only on a hang.
@@ -370,5 +376,94 @@ func TestCloudFormationTheRollbackFamilyNeverSucceedsSilently(t *testing.T) {
 				t.Errorf("%s left the %s stack %s", op, status, got)
 			}
 		}
+	}
+}
+
+// UpdateTerminationProtection writes the stack record in the same store
+// transaction as the engine's writes, so a create that settles while it runs
+// keeps its CREATE_COMPLETE and the protection both: here the protection is
+// asked for mid-create, its write held (when it is the engine's Get then Put)
+// while the create finishes, then let go. The stack ends CREATE_COMPLETE and
+// protected, so DeleteStack is refused; EnableTerminationProtection's
+// Boolean reads TRUE as coerce does. ContinueUpdateRollback writes nothing.
+// Before, the held Put wrote the CREATE_IN_PROGRESS record it had read back
+// over the finished stack, which then stayed CREATE_IN_PROGRESS.
+func TestCloudFormationTerminationProtectionWritesWithTheEngine(t *testing.T) {
+	h, create := gated(t)
+	protect := h.gateOn(func(collection, key string, val []byte) bool {
+		return collection == "cfn" && strings.Contains(string(val), `"Protect":true`)
+	})
+	created, protected := make(chan error, 1), make(chan error, 1)
+	go func() { created <- h.create("tp", paused(1)) }()
+	within(t, create.reached, "the create reaching its bucket")
+	go func() {
+		_, err := h.invoke("UpdateTerminationProtection", map[string]any{"StackName": "tp", "EnableTerminationProtection": true})
+		protected <- err
+	}()
+	select {
+	case <-protect.reached: // the bundle's write, held
+	case err := <-protected:
+		protected <- err
+	case <-time.After(30 * time.Second):
+		t.Fatal("UpdateTerminationProtection did not answer or write within 30s")
+	}
+	close(create.release)
+	if err := within(t, created, "the create"); err != nil {
+		t.Fatal(err)
+	}
+	close(protect.release)
+	if err := within(t, protected, "UpdateTerminationProtection"); err != nil {
+		t.Fatal(err)
+	}
+	if status, _, _ := h.status("tp"); status != "CREATE_COMPLETE" {
+		t.Errorf("tp is %s, want CREATE_COMPLETE", status)
+	}
+	if protect, _ := h.record("tp")["Protect"].(bool); !protect {
+		t.Errorf("tp is not protected: %v", h.record("tp"))
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "tp"}); code(err) != "ValidationError" {
+		t.Errorf("DeleteStack of the protected stack answered %v", err)
+	}
+	for _, text := range []string{"False", "TRUE"} { // a Boolean in any case
+		if _, err := h.invoke("UpdateTerminationProtection", map[string]any{"StackName": "tp", "EnableTerminationProtection": text}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if protect, _ := h.record("tp")["Protect"].(bool); !protect {
+		t.Error("EnableTerminationProtection TRUE left tp unprotected")
+	}
+}
+
+// A change set is refused for the stacks UpdateStack and ExecuteChangeSet
+// refuse: one ROLLBACK_* or DELETE_FAILED, as well as one in progress, each
+// "Stack:<id> is in <status> state and can not be updated.". Before,
+// CreateChangeSet refused only a stack in progress.
+func TestCloudFormationNoChangeSetForAStackThatTakesNoUpdate(t *testing.T) {
+	h := newStacks(t)
+	if err := h.create("rolled", map[string]map[string]any{"Q": nameable()["Queue"], "ZZZ": {"Type": "AWS::Nope::Thing"}}); err == nil {
+		t.Fatal("a template with an unsupported resource type was created")
+	}
+	tpl, _ := json.Marshal(map[string]any{"Resources": map[string]any{"Q": nameable()["Queue"]}})
+	for _, op := range []string{"UpdateStack", "CreateChangeSet"} {
+		_, err := h.invoke(op, map[string]any{"StackName": "rolled", "ChangeSetName": "cs", "TemplateBody": string(tpl)})
+		if code(err) != "ValidationError" || !strings.Contains(err.Error(), "is in ROLLBACK_COMPLETE state and can not be updated.") {
+			t.Errorf("%s of a ROLLBACK_COMPLETE stack answered %v, want ValidationError: ROLLBACK_COMPLETE", op, err)
+		}
+	}
+}
+
+// GetTemplateSummary reads the stored template only when the request gives
+// none: a TemplateBody over 51,200 bytes beside a StackName is the member's
+// constraint error, as on every operation. Before, the stored template was
+// summarised instead.
+func TestCloudFormationSummarisesNoStoredTemplateForAnOversizeBody(t *testing.T) {
+	h := newStacks(t)
+	h.mustCreate("sum", map[string]map[string]any{"Q": nameable()["Queue"]})
+	_, err := h.invoke("GetTemplateSummary", map[string]any{"StackName": "sum", "TemplateBody": padded(51_201, false)})
+	if code(err) != "ValidationError" || !strings.Contains(err.Error(), "51200") {
+		t.Errorf("GetTemplateSummary of an oversize body answered %v, want the 51200 constraint", err)
+	}
+	if _, err := h.invoke("GetTemplateSummary", map[string]any{"StackName": "sum"}); err != nil {
+		t.Errorf("GetTemplateSummary of the stored template answered %v", err)
 	}
 }

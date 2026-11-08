@@ -90,9 +90,10 @@ func yamlValue(n *yaml.Node) (any, error) {
 
 // The YAML 1.1 type repository's plain scalars (yaml.org/type/bool.html, int.html, float.html): CloudFormation
 // "supports the YAML Version 1.1 specification" (User Guide, Template formats), where yaml.v3 reads 1.2. Its
-// .inf and .nan are left as text, which a template's JSON form could not hold.
+// .inf and .nan are left as text, which a template's JSON form could not hold, and so are y and n, which
+// PyYAML and SnakeYAML, the 1.1 parsers in use, leave strings though bool.html lists them.
 var (
-	yaml11Bool  = regexp.MustCompile(`^(y|Y|yes|Yes|YES|n|N|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF)$`)
+	yaml11Bool  = regexp.MustCompile(`^(yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF)$`)
 	yaml11Int   = regexp.MustCompile(`^[-+]?(0b[01_]+|0[0-7_]+|0|[1-9][0-9_]*|0x[0-9a-fA-F_]+|[1-9][0-9_]*(:[0-5]?[0-9])+)$`)
 	yaml11Float = regexp.MustCompile(`^[-+]?(([0-9][0-9_]*)?\.[0-9.]*([eE][-+][0-9]+)?|[0-9][0-9_]*(:[0-5]?[0-9])+\.[0-9_]*)$`)
 )

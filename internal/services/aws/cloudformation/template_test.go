@@ -576,3 +576,30 @@ func TestCloudFormationEvaluatesEachConditionOnce(t *testing.T) {
 		}
 	}
 }
+
+// A cycle's members are found in one pass over the template's references
+// (Tarjan's strongly connected components), so the error costs time linear in
+// the template: 498 chained parameters waiting on X and Y, which name each
+// other, walk each resource once to order and once to find the cycle, 1,000
+// walks in all, and the error names X and Y alone. Before, the search ran
+// once per resource left unordered, each over everything after it: 125,250
+// walks here, and 8,000 chained resources took 5.9 s.
+func TestCloudFormationFindsACycleInLinearTime(t *testing.T) {
+	param := func(ref string) map[string]any {
+		return map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": map[string]any{"Ref": ref}}}
+	}
+	resources := map[string]any{"X": param("Y"), "Y": param("X"), "P000": param("X")}
+	for i := 1; i < 498; i++ {
+		resources[fmt.Sprintf("P%03d", i)] = param(fmt.Sprintf("P%03d", i-1))
+	}
+	body, _ := json.Marshal(map[string]any{"Resources": resources})
+	h := newStacks(t)
+	pack := New(h.deps)
+	_, err := pack.Invoke(h.ctx, &spi.Request{Identity: h.id, Operation: "ValidateTemplate", Input: map[string]any{"TemplateBody": string(body)}})
+	if code(err) != "ValidationError" || err.Error() != "ValidationError: Circular dependency between resources: [X, Y]" {
+		t.Errorf("the template answered %v, want the cycle [X, Y]", err)
+	}
+	if pack.walks > 1000 {
+		t.Errorf("finding the cycle walked %d resources, want at most 1000", pack.walks)
+	}
+}

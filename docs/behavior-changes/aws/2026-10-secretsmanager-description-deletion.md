@@ -237,7 +237,9 @@ The oracle is AWS's documentation as it ships in the vendored model
     A cycle is `ValidationError` ("Circular dependency between resources:
     [A, B]") on `CreateStack`, `UpdateStack`, `ValidateTemplate` and
     `GetTemplateSummary`, and makes no stack. It names the resources in a
-    cycle (one naming itself is a cycle of one), not those that wait on one. Before, a `Ref` to a resource
+    cycle (one naming itself is a cycle of one), not those that wait on one,
+    found in one pass of Tarjan's strongly connected components; round 8
+    searched once per resource left, quadratic in the template. Before, a `Ref` to a resource
     not yet made answered its logical id: beside an SSM parameter named
     `ABucket`, a parameter named for an unnamed bucket `ABucket` was refused
     as taken, and a resource that sorted before the one it named was made

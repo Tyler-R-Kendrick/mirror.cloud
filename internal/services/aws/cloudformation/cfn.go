@@ -468,19 +468,51 @@ func (p *Pack) order(tpl map[string]any, params map[string]string) ([]string, er
 		}
 	}
 	if len(order) < len(resources) { // the cycle is those that lead back to themselves, not those after it
-		cycle := slices.DeleteFunc(slices.Sorted(maps.Keys(resources)), func(l string) bool {
-			seen := map[string]bool{}
-			for next := slices.Clone(users[l]); len(next) > 0 && !seen[l]; {
-				u := next[len(next)-1]
-				if next = next[:len(next)-1]; !seen[u] {
-					seen[u], next = true, append(next, users[u]...)
-				}
-			}
-			return !seen[l]
-		})
+		cycle := p.cycles(resources, users)
 		return nil, invalid("Circular dependency between resources: [" + strings.Join(cycle, ", ") + "]")
 	}
 	return order, nil
+}
+
+// cycles are the resources in a cycle of users' references, sorted: each strongly connected set of more
+// than one, and each that names itself, found in one pass (Tarjan's algorithm).
+func (p *Pack) cycles(resources map[string]any, users map[string][]string) []string {
+	index, low, on := map[string]int{}, map[string]int{}, map[string]bool{}
+	var stack, cycle []string
+	var visit func(string)
+	visit = func(v string) {
+		p.walks++
+		n := len(index) + 1
+		index[v], low[v], on[v], stack = n, n, true, append(stack, v)
+		for _, w := range users[v] {
+			if index[w] == 0 {
+				visit(w)
+				low[v] = min(low[v], low[w])
+			} else if on[w] {
+				low[v] = min(low[v], index[w])
+			}
+		}
+		if low[v] == index[v] { // v roots a strongly connected set: what the stack holds from v up
+			i := len(stack) - 1
+			for stack[i] != v {
+				i--
+			}
+			for _, w := range stack[i:] {
+				on[w] = false
+			}
+			if len(stack[i:]) > 1 || slices.Contains(users[v], v) {
+				cycle = append(cycle, stack[i:]...)
+			}
+			stack = stack[:i]
+		}
+	}
+	for _, l := range slices.Sorted(maps.Keys(resources)) {
+		if index[l] == 0 {
+			visit(l)
+		}
+	}
+	slices.Sort(cycle)
+	return cycle
 }
 
 // names adds to named every name v refers to: a Ref's, a Fn::GetAtt's resource, and each Name of a

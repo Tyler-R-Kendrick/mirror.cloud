@@ -513,6 +513,9 @@ var subVariable = regexp.MustCompile(`\$\{([^}]*)\}`)
 // services answer such a create with what they hold, which a rollback or DeleteStack would then delete.
 func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logical, typ string, props map[string]any) (string, error) {
 	k, n := kinds[typ], str(props[kinds[typ].member])
+	if v, set := props["FifoQueue"]; typ == "AWS::SQS::Queue" && set && !isBoolean(v) { // FifoQueue is a Boolean (Template Reference)
+		return "", invalid("Properties validation failed for resource " + logical + ": FifoQueue must be a Boolean, not " + spi.JSONText(v))
+	}
 	if n == "" || strings.Contains(n, unknown) { // one built on an id known only once made is checked as it is made
 		return cmp.Or(n, physicalName(st.Name, logical, st.ID, typ, props)), nil
 	}
@@ -533,7 +536,9 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 
 var unnameable = regexp.MustCompile(`[^A-Za-z0-9-]+`)
 
-func fifo(p map[string]any) bool { b, _ := coerce(p["FifoQueue"], "Boolean"); return b == true }
+func fifo(p map[string]any) bool { b, ok := coerce(p["FifoQueue"], "Boolean"); return ok && b == true }
+
+func isBoolean(v any) bool { _, ok := coerce(v, "Boolean"); return ok }
 
 // physicalName is the name of a resource the template leaves unnamed, in the modelled form
 // <stack>-<logical id>-<suffix>. The suffix is twelve hex digits of a hash of the stack id and logical

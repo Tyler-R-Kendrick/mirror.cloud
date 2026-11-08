@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -442,5 +444,54 @@ func TestCloudFormationRefusesTheUnsupportedTags(t *testing.T) {
 	}
 	if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": "AWSTemplateFormatVersion: 2010-09-09\n" + queue}); err != nil {
 		t.Errorf("a plain date answered %v", err)
+	}
+}
+
+// "CloudFormation supports the YAML Version 1.1 specification" (User Guide,
+// Template formats), so a plain scalar is read as YAML 1.1's type repository
+// reads it, where yaml.v3 reads YAML 1.2: yes, no, on, off, y and n are
+// booleans (yaml.org/type/bool.html); an integer may be binary, octal as
+// 0777, hexadecimal, sexagesimal as 1:20, with underscores, but 0o17 is not
+// one (int.html); a float has a point, so 1e3 is a string (float.html).
+// FifoQueue is a Boolean (Template Reference, AWS::SQS::Queue): yes makes a
+// FIFO queue, and a value that is no boolean is ValidationError before
+// anything is made. Quoted, a scalar is a string, as in both versions.
+// Before, yes was the string "yes" and made a standard queue, 1:20 was the
+// string "1:20", 1e3 was 1000 and 0o17 was 15, and FifoQueue "maybe" made a
+// standard queue.
+func TestCloudFormationReadsYAMLAsVersion11(t *testing.T) {
+	h := newStacks(t)
+	values := map[string]string{"y": "true", "No": "false", "0b101": "5", "0777": "511", "0x1F": "31", "1_000": "1000",
+		"1:20": "80", "-1:30": "-90", "1e3": "1e3", "0o17": "0o17", "1.5": "1.5", "'yes'": "yes", "08": "08"}
+	queues := "Resources:\n  F:\n    Type: AWS::SQS::Queue\n    Properties:\n      QueueName: v11-fifo.fifo\n      FifoQueue: yes\n" +
+		"  S:\n    Type: AWS::SQS::Queue\n    Properties:\n      QueueName: v11-standard\n      FifoQueue: off\n"
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "v11-queues", "TemplateBody": queues}); err != nil {
+		t.Errorf("FifoQueue: yes and off answered %v", err)
+	} else if attrs, err := h.service("aws.sqs", "GetQueueAttributes", map[string]any{"QueueUrl": h.resources("v11-queues")[0].Physical, "AttributeNames": []any{"All"}}); !strings.Contains(spi.JSONText(attrs), `"FifoQueue":"true"`) || err != nil {
+		t.Errorf("FifoQueue: yes made a queue with %v (%v), want a FIFO queue", attrs, err)
+	}
+	body, texts := "Resources:\n", slices.Sorted(maps.Keys(values))
+	for i, text := range texts {
+		body += fmt.Sprintf("  P%d:\n    Type: AWS::SSM::Parameter\n    Properties:\n      Name: v11-%d\n      Type: String\n      Value: %s\n", i, i, text)
+	}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "v11", "TemplateBody": body}); err != nil {
+		t.Fatal(err)
+	}
+	for i, text := range texts {
+		out, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": fmt.Sprintf("v11-%d", i)})
+		if got := str(asMap(out["Parameter"])["Value"]); err != nil || got != values[text] {
+			t.Errorf("Value: %s is %q (%v), want %q", text, got, err, values[text])
+		}
+	}
+	for _, bad := range []string{"maybe", "1", "[true]"} {
+		tpl := "Resources:\n  A:\n    Type: AWS::SSM::Parameter\n    Properties:\n      Name: v11-before\n      Type: String\n      Value: v\n" +
+			"  Q:\n    Type: AWS::SQS::Queue\n    Properties:\n      FifoQueue: " + bad + "\n"
+		if _, err := h.invoke("CreateStack", map[string]any{"StackName": "v11-bad", "TemplateBody": tpl}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "FifoQueue") {
+			t.Errorf("FifoQueue: %s answered %v, want ValidationError naming FifoQueue", bad, err)
+		}
+		if _, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": "v11-before"}); err == nil {
+			t.Errorf("FifoQueue: %s made the parameter before it", bad)
+		}
+		_, _ = h.invoke("DeleteStack", map[string]any{"StackName": "v11-bad"})
 	}
 }

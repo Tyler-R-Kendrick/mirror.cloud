@@ -122,6 +122,18 @@ The oracle is AWS's documentation as it ships in the vendored model
     library's aliases let a template refer to itself (`a: &a [*a]`, which
     overflowed the stack) or multiply (a billion laughs, which ran without
     end).
+  - "CloudFormation supports the YAML Version 1.1 specification" (User Guide,
+    Template formats), so a plain scalar is read as YAML 1.1's type
+    repository reads it (yaml.org/type/bool.html, int.html, float.html),
+    where the library reads YAML 1.2: `yes`, `no`, `on`, `off`, `y` and `n`
+    in their listed spellings are booleans; an integer may be binary, octal
+    as `0777`, hexadecimal or sexagesimal (`1:20` is 80), with underscores,
+    but `0o17` and `08` are strings; a float has a point, so `1e3` is the
+    string `1e3`. `.inf` and `.nan` stay text, which a template's JSON form
+    could not hold (a reading). A quoted scalar is a string, and an explicit
+    tag (`!!str yes`) is read as tagged. Before, `yes` was the string
+    `"yes"` and made `FifoQueue: yes` a standard queue, `1:20` was a string,
+    `1e3` was 1000 and `0o17` was 15.
   - A template is bounded by its size, CloudFormation's own limits:
     `TemplateBody` is "a maximum length of 51,200 bytes", and the template
     `TemplateURL` names "max size: 1 MB" (API reference, `CreateStack`;
@@ -337,7 +349,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     type the template reference gives them, the value itself or its text,
     which is how a `Ref` to a parameter gives one. A Boolean is `true` or
     `false` in any case (YAML 1.1, the templates' YAML, spells it `true`,
-    `True` or `TRUE`), so `FifoQueue: "True"` makes a FIFO queue; an Integer
+    `True` or `TRUE`), so `FifoQueue: "True"` makes a FIFO queue, and a
+    `FifoQueue` that is no Boolean (`maybe`, `1`, a list) is
+    `ValidationError` naming it, before anything is made (round 7 made a
+    standard queue); an Integer
     is decimal digits, as a Number parameter's text is, so `"016"` is 16 and
     `"16.0"`, `"1e1"`, `"+16"` and `" 16"` are refused; a String is a
     scalar's text, so `ExcludeCharacters: 123` is `"123"` and an SSM

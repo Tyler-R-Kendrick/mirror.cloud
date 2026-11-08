@@ -3,6 +3,8 @@ package cloudformation
 import (
 	"cmp"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -66,7 +68,9 @@ func yamlValue(n *yaml.Node) (any, error) {
 		}
 		v = out
 	default:
-		if err := n.Decode(&v); err != nil {
+		if quoted := yaml.DoubleQuotedStyle | yaml.SingleQuotedStyle | yaml.LiteralStyle | yaml.FoldedStyle; n.Style&quoted == 0 && n.Tag == "" || n.Style&(quoted|yaml.TaggedStyle) == 0 {
+			v = yaml11(n.Value) // a plain scalar, untagged or under an intrinsic's tag
+		} else if err := n.Decode(&v); err != nil {
 			return nil, err
 		}
 	}
@@ -82,4 +86,41 @@ func yamlValue(n *yaml.Node) (any, error) {
 		}
 	}
 	return map[string]any{"Fn::" + tag: v}, nil
+}
+
+// The YAML 1.1 type repository's plain scalars (yaml.org/type/bool.html, int.html, float.html): CloudFormation
+// "supports the YAML Version 1.1 specification" (User Guide, Template formats), where yaml.v3 reads 1.2. Its
+// .inf and .nan are left as text, which a template's JSON form could not hold.
+var (
+	yaml11Bool  = regexp.MustCompile(`^(y|Y|yes|Yes|YES|n|N|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF)$`)
+	yaml11Int   = regexp.MustCompile(`^[-+]?(0b[01_]+|0[0-7_]+|0|[1-9][0-9_]*|0x[0-9a-fA-F_]+|[1-9][0-9_]*(:[0-5]?[0-9])+)$`)
+	yaml11Float = regexp.MustCompile(`^[-+]?(([0-9][0-9_]*)?\.[0-9.]*([eE][-+][0-9]+)?|[0-9][0-9_]*(:[0-5]?[0-9])+\.[0-9_]*)$`)
+)
+
+// yaml11 is a plain scalar as YAML 1.1 reads it: null, a bool, an int (binary, octal, decimal, hexadecimal
+// or sexagesimal) or a float, else the string it is.
+func yaml11(text string) any {
+	plain, sexagesimal := strings.ReplaceAll(text, "_", ""), 0.0
+	for _, part := range strings.Split(strings.TrimLeft(plain, "+-"), ":") {
+		n, _ := strconv.ParseFloat(part, 64)
+		sexagesimal = sexagesimal*60 + n
+	}
+	if strings.HasPrefix(text, "-") {
+		sexagesimal = -sexagesimal
+	}
+	n, intErr := strconv.ParseInt(plain, 0, 64) // base 0 reads 0b, 0x and a leading 0's octal, as 1.1 does
+	f, floatErr := strconv.ParseFloat(plain, 64)
+	switch isInt, isFloat := yaml11Int.MatchString(text), yaml11Float.MatchString(text); {
+	case text == "" || strings.Contains(" ~ null Null NULL ", " "+text+" "):
+		return nil
+	case yaml11Bool.MatchString(text):
+		return strings.ContainsAny(text[:1], "yYtT") || strings.EqualFold(text, "on")
+	case strings.Contains(text, ":") && (isInt || isFloat):
+		return map[bool]any{true: int(sexagesimal), false: sexagesimal}[isInt]
+	case isInt && intErr == nil:
+		return int(n)
+	case isFloat && floatErr == nil:
+		return f
+	}
+	return text
 }

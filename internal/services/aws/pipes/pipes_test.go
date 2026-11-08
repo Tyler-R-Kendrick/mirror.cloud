@@ -404,7 +404,7 @@ func TestPipesDynamoDBStreamDeliveryAndCheckpoint(t *testing.T) {
 		"TableName": "Events", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}},
 		"StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_AND_OLD_IMAGES"},
 	})
-	streamARN := stringValue(created.Output["TableDescription"].(map[string]any)["LatestStreamArn"])
+	streamARN := spi.Str(created.Output["TableDescription"].(map[string]any)["LatestStreamArn"])
 	invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "ddb-target"})
 	invoke(t, database, id, "PutItem", map[string]any{"TableName": "Events", "Item": map[string]any{"id": map[string]any{"S": "old"}}})
 
@@ -520,7 +520,7 @@ func TestPipesStepFunctionsTarget(t *testing.T) {
 	invoke(t, p, id, "StartPipe", map[string]any{"Name": "states"})
 	eventually(t, func() bool { return len(storedMessages(t, deps, id, "states-source")) == 0 })
 	executions := storedStateExecutions(t, deps, id)
-	if len(executions) != 1 || !strings.Contains(stringValue(executions[0]["input"]), `"value":1`) {
+	if len(executions) != 1 || !strings.Contains(spi.Str(executions[0]["input"]), `"value":1`) {
 		t.Fatalf("state executions %#v", executions)
 	}
 	standard := invoke(t, machine, id, "CreateStateMachine", map[string]any{
@@ -588,7 +588,7 @@ func TestPipesStepFunctionsEnrichment(t *testing.T) {
 		t.Fatalf("enriched output %#v", enriched)
 	}
 	executions := storedStateExecutions(t, deps, id)
-	if len(executions) != 1 || !strings.Contains(stringValue(executions[0]["input"]), `"value":3`) {
+	if len(executions) != 1 || !strings.Contains(spi.Str(executions[0]["input"]), `"value":3`) {
 		t.Fatalf("enrichment input %#v", executions)
 	}
 
@@ -626,7 +626,7 @@ func TestPipesAPIGatewayEnrichment(t *testing.T) {
 		"FunctionName": "api-enrichment", "Runtime": "python3.12", "Handler": "lambda_function.lambda_handler", "Code": lambdaCode(source),
 	})
 	api := invoke(t, gateway, id, "CreateRestApi", map[string]any{"name": "pipe-enrichment"}).Output
-	apiID, root := stringValue(api["id"]), stringValue(api["rootResourceId"])
+	apiID, root := spi.Str(api["id"]), spi.Str(api["rootResourceId"])
 	invoke(t, gateway, id, "PutMethod", map[string]any{"restApiId": apiID, "resourceId": root, "httpMethod": "POST", "authorizationType": "NONE"})
 	invoke(t, gateway, id, "PutIntegration", map[string]any{
 		"restApiId": apiID, "resourceId": root, "httpMethod": "POST", "type": "AWS_PROXY", "integrationHttpMethod": "POST",
@@ -658,7 +658,7 @@ func TestPipesAPIGatewayEnrichment(t *testing.T) {
 
 	failure := "def lambda_handler(event, context):\n    return {'statusCode': 500, 'body': 'failed'}\n"
 	invoke(t, function, id, "UpdateFunctionCode", map[string]any{"FunctionName": "api-enrichment", "ZipFile": lambdaCode(failure)["ZipFile"]})
-	if _, err := p.invokeAPIGateway(context.Background(), id, input, stringValue(input["Enrichment"]), []byte(`[{"value":3}]`), map[string]any{"body": map[string]any{"kind": "retry", "value": 3}}); err == nil {
+	if _, err := p.invokeAPIGateway(context.Background(), id, input, spi.Str(input["Enrichment"]), []byte(`[{"value":3}]`), map[string]any{"body": map[string]any{"kind": "retry", "value": 3}}); err == nil {
 		t.Fatal("API Gateway enrichment accepted a 5xx response")
 	}
 	invoke(t, queue, id, "SendMessage", map[string]any{"QueueName": "api-source", "MessageBody": `{"value":3,"kind":"retry"}`})

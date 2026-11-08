@@ -75,7 +75,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	switch req.Operation {
 	case "CreateTopic":
 		name := str(req.Input["Name"])
-		attrs := asMap(req.Input["Attributes"])
+		attrs := spi.Object(req.Input["Attributes"])
 		tags := req.Input["Tags"]
 		if tags == nil {
 			tags = flattenMembers(req.Input, "Tags")
@@ -95,14 +95,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			var current map[string]any
 			_ = json.Unmarshal(existing, &current)
 			for key, value := range attrs {
-				if key == "FifoTopic" && strings.EqualFold(str(value), "false") && asMap(current["attrs"])[key] == nil {
+				if key == "FifoTopic" && strings.EqualFold(str(value), "false") && spi.Object(current["attrs"])[key] == nil {
 					continue
 				}
-				if str(asMap(current["attrs"])[key]) != str(value) {
+				if str(spi.Object(current["attrs"])[key]) != str(value) {
 					return nil, clientFault("TopicAlreadyExists", "Topic already exists with a different attribute value.", 400)
 				}
 			}
-			if len(asSlice(tags)) > 0 {
+			if len(spi.Slice(tags)) > 0 {
 				existingTags, found, _ := p.col(req, "tags").Get(ctx, str(current["arn"]))
 				var decodedTags []any
 				_ = json.Unmarshal(existingTags, &decodedTags)
@@ -114,7 +114,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		b, _ := json.Marshal(map[string]any{"arn": arn, "name": name, "attrs": attrs})
 		_ = p.col(req, "topics").Put(ctx, name, b)
-		if len(asSlice(tags)) > 0 {
+		if len(spi.Slice(tags)) > 0 {
 			tb, _ := json.Marshal(tags)
 			_ = p.col(req, "tags").Put(ctx, arn, tb)
 		}
@@ -174,7 +174,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = json.Unmarshal(b, &m)
 		attrs := map[string]any{
 			"TopicArn": m["arn"], "DisplayName": m["name"], "Owner": req.Identity.Account,
-			"EffectiveDeliveryPolicy": effectiveDeliveryPolicy(str(asMap(m["attrs"])["DeliveryPolicy"])),
+			"EffectiveDeliveryPolicy": effectiveDeliveryPolicy(str(spi.Object(m["attrs"])["DeliveryPolicy"])),
 			"SubscriptionsConfirmed":  "0", "SubscriptionsDeleted": "0", "SubscriptionsPending": "0",
 		}
 		confirmedCount, pendingCount := 0, 0
@@ -284,7 +284,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if fault := validatePublishMessage(req); fault != nil {
 				return nil, fault
 			}
-			return p.publishOne(ctx, req, str(req.Input["Message"]), asMap(req.Input["MessageAttributes"]))
+			return p.publishOne(ctx, req, str(req.Input["Message"]), spi.Object(req.Input["MessageAttributes"]))
 		}
 		if len(entries) == 0 {
 			return nil, clientFault("EmptyBatchRequest", "There should be at least one PublishBatchRequestEntry in the request.", 400)
@@ -297,7 +297,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		seenIDs := map[string]bool{}
 		totalBytes := 0
 		for _, e := range entries {
-			m := asMap(e)
+			m := spi.Object(e)
 			entryID := str(m["Id"])
 			if !validBatchEntryID(entryID) {
 				return nil, clientFault("InvalidBatchEntryId", "The Id of a batch entry in a batch request doesn't abide by the specification.", 400)
@@ -306,7 +306,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				return nil, clientFault("BatchEntryIdsNotDistinct", "Two or more batch entries in the request have the same Id.", 400)
 			}
 			seenIDs[entryID] = true
-			attrs := asMap(m["MessageAttributes"])
+			attrs := spi.Object(m["MessageAttributes"])
 			if len(attrs) == 0 {
 				attrs = messageAttrs(m)
 			}
@@ -338,7 +338,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		ok := []any{} // every entry was checked before any is published: a batch answered with a fault delivered nothing
 		for i, entryReq := range batch {
-			resp, err := p.publishOne(ctx, entryReq, str(entryReq.Input["Message"]), asMap(entryReq.Input["MessageAttributes"]))
+			resp, err := p.publishOne(ctx, entryReq, str(entryReq.Input["Message"]), spi.Object(entryReq.Input["MessageAttributes"]))
 			if err != nil {
 				return nil, err
 			}
@@ -588,8 +588,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			tags = flattenMembers(req.Input, "Tags")
 		}
 		seen := map[string]bool{}
-		for _, tag := range asSlice(tags) {
-			key := str(asMap(tag)["Key"])
+		for _, tag := range spi.Slice(tags) {
+			key := str(spi.Object(tag)["Key"])
 			if key != "" && seen[key] {
 				return nil, clientFault("InvalidParameter", "Duplicate tag key", 400)
 			}
@@ -601,13 +601,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		byKey := map[string]any{}
 		for _, tag := range current {
-			m := asMap(tag)
+			m := spi.Object(tag)
 			if key := str(m["Key"]); key != "" {
 				byKey[key] = tag
 			}
 		}
-		for _, tag := range asSlice(tags) {
-			m := asMap(tag)
+		for _, tag := range spi.Slice(tags) {
+			m := spi.Object(tag)
 			if key := str(m["Key"]); key != "" {
 				byKey[key] = tag
 			}
@@ -616,7 +616,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		for _, tag := range byKey {
 			merged = append(merged, tag)
 		}
-		sort.Slice(merged, func(i, j int) bool { return str(asMap(merged[i])["Key"]) < str(asMap(merged[j])["Key"]) })
+		sort.Slice(merged, func(i, j int) bool { return str(spi.Object(merged[i])["Key"]) < str(spi.Object(merged[j])["Key"]) })
 		b, _ := json.Marshal(merged)
 		_ = p.col(req, "tags").Put(ctx, arn, b)
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -625,12 +625,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		keys := req.Input["TagKeys"]
 		if keys == nil {
 			keys = flattenValues(req.Input, "TagKeys")
-			if len(asSlice(keys)) == 0 {
+			if len(spi.Slice(keys)) == 0 {
 				_ = p.col(req, "tags").Delete(ctx, arn)
 				return &spi.Response{Output: map[string]any{}}, nil
 			}
 		}
-		if len(asSlice(keys)) == 0 {
+		if len(spi.Slice(keys)) == 0 {
 			return &spi.Response{Output: map[string]any{}}, nil
 		}
 		b, found, _ := p.col(req, "tags").Get(ctx, arn)
@@ -638,12 +638,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			var current []any
 			_ = json.Unmarshal(b, &current)
 			remove := map[string]bool{}
-			for _, key := range asSlice(keys) {
+			for _, key := range spi.Slice(keys) {
 				remove[str(key)] = true
 			}
 			kept := make([]any, 0, len(current))
 			for _, tag := range current {
-				if !remove[str(asMap(tag)["Key"])] {
+				if !remove[str(spi.Object(tag)["Key"])] {
 					kept = append(kept, tag)
 				}
 			}
@@ -703,7 +703,7 @@ func (p *Pack) validateSQSSubscription(ctx context.Context, req *spi.Request, to
 	}
 	var queueMeta map[string]any
 	_ = json.Unmarshal(queue, &queueMeta)
-	queueFIFO := str(asMap(queueMeta["attrs"])["FifoQueue"]) == "true" || strings.HasSuffix(name, ".fifo")
+	queueFIFO := str(spi.Object(queueMeta["attrs"])["FifoQueue"]) == "true" || strings.HasSuffix(name, ".fifo")
 	if !strings.HasSuffix(topicName(topicArn), ".fifo") && queueFIFO {
 		return clientFault("InvalidParameter", "Invalid parameter: FIFO queue requires a FIFO topic", 400)
 	}
@@ -825,14 +825,14 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 			p.sendSES(ctx, req, str(sub["Endpoint"]), "SNS Notification", payload)
 		case "http", "https":
 			contentType := "application/json"
-			if policy := str(asMap(sub["attrs"])["DeliveryPolicy"]); policy != "" {
+			if policy := str(spi.Object(sub["attrs"])["DeliveryPolicy"]); policy != "" {
 				if value, ok := deliveryContentType(policy, "requestPolicy"); ok {
 					contentType = value
 				}
 			} else if b, found, _ := p.col(req, "topics").Get(ctx, topicName(arn)); found {
 				var topic map[string]any
 				_ = json.Unmarshal(b, &topic)
-				if value, ok := deliveryContentType(str(asMap(topic["attrs"])["DeliveryPolicy"]), "http", "defaultRequestPolicy"); ok {
+				if value, ok := deliveryContentType(str(spi.Object(topic["attrs"])["DeliveryPolicy"]), "http", "defaultRequestPolicy"); ok {
 					contentType = value
 				}
 			}
@@ -912,7 +912,7 @@ func (p *Pack) validatePublishTarget(ctx context.Context, req *spi.Request, arn 
 	}
 	var topic map[string]any
 	_ = json.Unmarshal(b, &topic)
-	attrs := asMap(topic["attrs"])
+	attrs := spi.Object(topic["attrs"])
 	fifo := str(attrs["FifoTopic"]) == "true"
 	if req.Operation == "PublishBatch" {
 		return nil
@@ -989,7 +989,7 @@ func validBatchEntryID(value string) bool {
 func publishMessageSize(body string, attrs map[string]any) int {
 	size := len([]byte(body))
 	for name, raw := range attrs {
-		attribute := asMap(raw)
+		attribute := spi.Object(raw)
 		size += len(name) + len(str(attribute["DataType"])) + len(str(attribute["StringValue"])) + len(str(attribute["BinaryValue"]))
 	}
 	return size
@@ -1046,7 +1046,7 @@ func validateMessageAttributes(attrs map[string]any) *spi.Fault {
 				return clientFault("InvalidParameter", "Invalid parameter: MessageAttributes", 400)
 			}
 		}
-		attribute := asMap(raw)
+		attribute := spi.Object(raw)
 		dataType := str(attribute["DataType"])
 		if dataType == "" {
 			dataType = str(attribute["Type"])
@@ -1228,7 +1228,7 @@ func (p *Pack) topicAttr(ctx context.Context, req *spi.Request, topicARN, name s
 	if b, found, _ := p.col(req, "topics").Get(ctx, topicName(topicARN)); found {
 		_ = json.Unmarshal(b, &topic)
 	}
-	return str(asMap(topic["attrs"])[name])
+	return str(spi.Object(topic["attrs"])[name])
 }
 
 func sqsMessageAttributes(attrs map[string]any) map[string]any {
@@ -1237,7 +1237,7 @@ func sqsMessageAttributes(attrs map[string]any) map[string]any {
 	}
 	out := make(map[string]any, len(attrs))
 	for name, raw := range attrs {
-		value := asMap(raw)
+		value := spi.Object(raw)
 		dataType := str(value["DataType"])
 		if dataType == "" {
 			dataType = str(value["Type"])
@@ -1310,7 +1310,7 @@ func deliveryContentType(raw string, path ...string) (string, bool) {
 }
 
 func subscriptionDLQ(sub map[string]any) string {
-	raw := str(asMap(sub["attrs"])["RedrivePolicy"])
+	raw := str(spi.Object(sub["attrs"])["RedrivePolicy"])
 	if raw == "" {
 		raw = str(sub["RedrivePolicy"])
 	}
@@ -1377,7 +1377,7 @@ func matchPolicy(pol map[string]any, attrs map[string]any) bool {
 }
 
 func attrValue(v any) string {
-	m := asMap(v)
+	m := spi.Object(v)
 	if s := str(m["Value"]); s != "" {
 		return s
 	}
@@ -1393,7 +1393,7 @@ func clauseMatch(want any, got string, present bool) bool {
 		return fmt.Sprint(want) == got
 	}
 	for _, w := range arr {
-		if op := asMap(w); len(op) > 0 {
+		if op := spi.Object(w); len(op) > 0 {
 			if exists, ok := op["exists"].(bool); ok {
 				if exists == present {
 					return true
@@ -1404,7 +1404,7 @@ func clauseMatch(want any, got string, present bool) bool {
 		if s := str(w); s != "" && s == got {
 			return true
 		}
-		m := asMap(w)
+		m := spi.Object(w)
 		if p := str(m["prefix"]); p != "" && strings.HasPrefix(got, p) {
 			return true
 		}
@@ -1482,7 +1482,7 @@ func numericMatch(rule []any, got string) bool {
 }
 
 func messageAttrs(in map[string]any) map[string]any {
-	if m := asMap(in["MessageAttributes"]); len(m) > 0 && m["entry"] == nil {
+	if m := spi.Object(in["MessageAttributes"]); len(m) > 0 && m["entry"] == nil {
 		return m
 	}
 	by := map[int]map[string]any{}
@@ -1570,19 +1570,6 @@ func flattenValues(in map[string]any, prefix string) []any {
 			values = append(values, value)
 		}
 	}
-	return values
-}
-
-func asMap(v any) map[string]any {
-	m, _ := v.(map[string]any)
-	if m == nil {
-		return map[string]any{}
-	}
-	return m
-}
-
-func asSlice(v any) []any {
-	values, _ := v.([]any)
 	return values
 }
 

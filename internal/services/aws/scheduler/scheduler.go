@@ -91,7 +91,7 @@ func (p *worker) runDue(ctx context.Context) time.Time {
 			}
 			for _, kv := range kvs {
 				var rec map[string]any
-				if json.Unmarshal(kv.Value, &rec) != nil || stringValue(rec["State"]) == "DISABLED" {
+				if json.Unmarshal(kv.Value, &rec) != nil || spi.Str(rec["State"]) == "DISABLED" {
 					continue
 				}
 				scheduled, next := p.recordNext(rec, now)
@@ -105,7 +105,7 @@ func (p *worker) runDue(ctx context.Context) time.Time {
 				target, _ := rec["Target"].(map[string]any)
 				attempt, _ := integer(rec[retryAttempts])
 				payload := p.targetPayload(rec, target, scheduled, attempt+1)
-				if err := events.DeliverTarget(ctx, p.deps, identity, first(target, "Arn", "arn"), target, payload); err != nil {
+				if err := events.DeliverTarget(ctx, p.deps, identity, spi.First(target, "Arn", "arn"), target, payload); err != nil {
 					if !events.TargetErrorRetryable(err) {
 						p.deadLetter(ctx, rec, target, payload, attempt, scheduled, "", err)
 					} else if retryAt, retrying := p.retry(ctx, collection, kv.Key, kv.Value, rec, target, payload, scheduled, now, err); retrying {
@@ -115,7 +115,7 @@ func (p *worker) runDue(ctx context.Context) time.Time {
 				}
 				delete(rec, retryAttempts)
 				delete(rec, retryStarted)
-				expr, err := parseScheduleExpression(stringValue(rec["ScheduleExpression"]), stringValue(rec["ScheduleExpressionTimezone"]))
+				expr, err := parseScheduleExpression(spi.Str(rec["ScheduleExpression"]), spi.Str(rec["ScheduleExpressionTimezone"]))
 				if err != nil {
 					continue
 				}
@@ -123,9 +123,9 @@ func (p *worker) runDue(ctx context.Context) time.Time {
 				if end, ok := inputTime(rec["EndDate"]); !expr.OneTime() && ok && scheduled.After(end) {
 					scheduled = time.Time{}
 				}
-				next = p.withWindow(rec, stringValue(rec["Arn"]), scheduled)
+				next = p.withWindow(rec, spi.Str(rec["Arn"]), scheduled)
 				rec[scheduledTime] = formatTime(scheduled)
-				if next.IsZero() && stringValue(rec["ActionAfterCompletion"]) == "DELETE" {
+				if next.IsZero() && spi.Str(rec["ActionAfterCompletion"]) == "DELETE" {
 					_ = changeRecordIfUnchanged(ctx, collection, kv.Key, kv.Value, nil)
 					continue
 				}
@@ -150,7 +150,7 @@ func (p *worker) recordNext(rec map[string]any, now time.Time) (scheduled, next 
 		}
 		return next, next
 	}
-	expr, err := parseScheduleExpression(stringValue(rec["ScheduleExpression"]), stringValue(rec["ScheduleExpressionTimezone"]))
+	expr, err := parseScheduleExpression(spi.Str(rec["ScheduleExpression"]), spi.Str(rec["ScheduleExpressionTimezone"]))
 	if err != nil {
 		return time.Time{}, time.Time{}
 	}
@@ -165,7 +165,7 @@ func (p *worker) recordNext(rec map[string]any, now time.Time) (scheduled, next 
 	if end, ok := inputTime(rec["EndDate"]); !expr.OneTime() && ok && scheduled.After(end) {
 		scheduled = time.Time{}
 	}
-	return scheduled, p.withWindow(rec, stringValue(rec["Arn"]), scheduled)
+	return scheduled, p.withWindow(rec, spi.Str(rec["Arn"]), scheduled)
 }
 
 func (p *worker) withWindow(rec map[string]any, arn string, scheduled time.Time) time.Time {
@@ -173,7 +173,7 @@ func (p *worker) withWindow(rec map[string]any, arn string, scheduled time.Time)
 		return scheduled
 	}
 	window, _ := rec["FlexibleTimeWindow"].(map[string]any)
-	if stringValue(window["Mode"]) != "FLEXIBLE" {
+	if spi.Str(window["Mode"]) != "FLEXIBLE" {
 		return scheduled
 	}
 	minutes, _ := integer(window["MaximumWindowInMinutes"])
@@ -182,13 +182,13 @@ func (p *worker) withWindow(rec map[string]any, arn string, scheduled time.Time)
 }
 
 func (p *worker) targetPayload(rec, target map[string]any, scheduled time.Time, attempt int) []byte {
-	payload := first(target, "Input", "input")
+	payload := spi.First(target, "Input", "input")
 	if payload == "" {
 		payload = "{}"
 	}
-	executionID := p.deps.Rand.Derive(stringValue(rec["Arn"]) + "|" + scheduled.String() + "|" + strconv.Itoa(attempt)).Hex(16)
+	executionID := p.deps.Rand.Derive(spi.Str(rec["Arn"]) + "|" + scheduled.String() + "|" + strconv.Itoa(attempt)).Hex(16)
 	for from, to := range map[string]string{
-		"<aws.scheduler.schedule-arn>":   stringValue(rec["Arn"]),
+		"<aws.scheduler.schedule-arn>":   spi.Str(rec["Arn"]),
 		"<aws.scheduler.scheduled-time>": scheduled.UTC().Format(time.RFC3339),
 		"<aws.scheduler.execution-id>":   executionID,
 		"<aws.scheduler.attempt-number>": strconv.Itoa(attempt),
@@ -225,7 +225,7 @@ func (p *worker) retry(ctx context.Context, collection spi.Collection, key strin
 	}
 	attempts++
 	delay := time.Second << min(attempts-1, 8)
-	jitter := p.deps.Rand.Derive(stringValue(rec["Arn"]) + "|retry|" + strconv.Itoa(attempts)).Intn(int(delay/time.Second) + 1)
+	jitter := p.deps.Rand.Derive(spi.Str(rec["Arn"]) + "|retry|" + strconv.Itoa(attempts)).Intn(int(delay/time.Second) + 1)
 	if jitter == 0 {
 		jitter = 1
 	}
@@ -237,7 +237,7 @@ func (p *worker) retry(ctx context.Context, collection spi.Collection, key strin
 
 func (p *worker) deadLetter(ctx context.Context, rec, target map[string]any, payload []byte, attempts int, scheduled time.Time, exhausted string, deliveryErr error) {
 	config, _ := target["DeadLetterConfig"].(map[string]any)
-	arn := first(config, "Arn", "arn")
+	arn := spi.First(config, "Arn", "arn")
 	if arn == "" {
 		return
 	}
@@ -249,8 +249,8 @@ func (p *worker) deadLetter(ctx context.Context, rec, target map[string]any, pay
 	values := map[string]string{
 		"ERROR_CODE": code, "ERROR_MESSAGE": message, "EXHAUSTED_RETRY_CONDITION": exhausted,
 		"IS_PAYLOAD_TRUNCATED": "false", "RETRY_ATTEMPTS": strconv.Itoa(attempts),
-		"SCHEDULED_TIME": scheduled.UTC().Format(time.RFC3339), "SCHEDULE_ARN": stringValue(rec["Arn"]),
-		"TARGET_ARN": first(target, "Arn", "arn"),
+		"SCHEDULED_TIME": scheduled.UTC().Format(time.RFC3339), "SCHEDULE_ARN": spi.Str(rec["Arn"]),
+		"TARGET_ARN": spi.First(target, "Arn", "arn"),
 	}
 	if exhausted == "" {
 		delete(values, "EXHAUSTED_RETRY_CONDITION")
@@ -283,17 +283,6 @@ func changeRecordIfUnchanged(ctx context.Context, collection spi.Collection, key
 		return tx.Put(key, next)
 	})
 }
-
-func first(input map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if value, ok := input[key].(string); ok && value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func stringValue(value any) string { valueString, _ := value.(string); return valueString }
 
 func integer(value any) (int, bool) {
 	switch value := value.(type) {

@@ -15,7 +15,7 @@ import (
 )
 
 func (p *Pack) createSession(req *spi.Request) (*spi.Response, error) {
-	ak := p.deps.Rand.Derive("s3sess/" + str(req.Input["Bucket"])).Hex(20)
+	ak := p.deps.Rand.Derive("s3sess/" + spi.Str(req.Input["Bucket"])).Hex(20)
 	credential := map[string]any{
 		"AccessKeyId":     ak,
 		"SecretAccessKey": p.deps.Rand.Derive(ak).Hex(40),
@@ -29,9 +29,9 @@ func (p *Pack) createSession(req *spi.Request) (*spi.Response, error) {
 }
 
 func (p *Pack) renameObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b := str(req.Input["Bucket"])
-	dest := str(req.Input["Key"])
-	src := str(req.Input["RenameSourceKey"])
+	b := spi.Str(req.Input["Bucket"])
+	dest := spi.Str(req.Input["Key"])
+	src := spi.Str(req.Input["RenameSourceKey"])
 	if src == "" && req.HTTP != nil {
 		src = req.HTTP.Header.Get("x-amz-rename-source")
 	}
@@ -56,7 +56,7 @@ func (p *Pack) renameObject(ctx context.Context, req *spi.Request) (*spi.Respons
 }
 
 func (p *Pack) selectObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	b, key := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func (p *Pack) selectObject(ctx context.Context, req *spi.Request) (*spi.Respons
 	if err != nil {
 		return nil, err
 	}
-	expr := str(req.Input["Expression"])
+	expr := spi.Str(req.Input["Expression"])
 	if expr == "" && req.HTTP != nil {
 		_ = req.HTTP.ParseForm()
 		expr = req.HTTP.Form.Get("Expression")
@@ -77,7 +77,7 @@ func (p *Pack) selectObject(ctx context.Context, req *spi.Request) (*spi.Respons
 	header := false
 	if ser, ok := req.Input["InputSerialization"].(map[string]any); ok {
 		if csvm, ok := ser["CSV"].(map[string]any); ok {
-			header = strings.EqualFold(str(csvm["FileHeaderInfo"]), "USE")
+			header = strings.EqualFold(spi.Str(csvm["FileHeaderInfo"]), "USE")
 		}
 	}
 	out := runSelect(raw, expr, header)
@@ -242,8 +242,8 @@ func recGet(rec map[string]string, col string) string {
 }
 
 func (p *Pack) writeGetObjectResponse(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	route := str(req.Input["RequestRoute"])
-	tok := str(req.Input["RequestToken"])
+	route := spi.Str(req.Input["RequestRoute"])
+	tok := spi.Str(req.Input["RequestToken"])
 	if req.HTTP != nil {
 		if route == "" {
 			route = req.HTTP.Header.Get("x-amz-request-route")
@@ -265,11 +265,11 @@ func (p *Pack) writeGetObjectResponse(ctx context.Context, req *spi.Request) (*s
 }
 
 func (p *Pack) updateObjectEncryption(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	b, key := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
-	algo := str(req.Input["SSEAlgorithm"])
+	algo := spi.Str(req.Input["SSEAlgorithm"])
 	if algo == "" {
 		algo = "AES256"
 	}
@@ -279,11 +279,11 @@ func (p *Pack) updateObjectEncryption(ctx context.Context, req *spi.Request) (*s
 }
 
 func (p *Pack) objectAnnotation(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	b, key := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
-	id := str(req.Input["AnnotationId"])
+	id := spi.Str(req.Input["AnnotationId"])
 	if id == "" {
 		id = "default"
 	}
@@ -323,7 +323,7 @@ func (p *Pack) objectAnnotation(ctx context.Context, req *spi.Request) (*spi.Res
 }
 
 func (p *Pack) metadataCfg(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b := str(req.Input["Bucket"])
+	b := spi.Str(req.Input["Bucket"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}

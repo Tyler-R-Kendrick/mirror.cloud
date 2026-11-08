@@ -66,7 +66,7 @@ func (w *Warehouse) Copy(ctx context.Context, identity spi.Identity, input CopyI
 	}
 	var cluster map[string]any
 	_ = json.Unmarshal(clusterBody, &cluster)
-	if first(cluster, "ClusterStatus") != "available" || first(cluster, "DBName") != input.Database {
+	if spi.First(cluster, "ClusterStatus") != "available" || spi.First(cluster, "DBName") != input.Database {
 		return errors.New("Redshift cluster is unavailable or database does not exist")
 	}
 	credentialBody, ok, _ := w.col(identity, "rscredential").Get(ctx, input.Cluster)
@@ -75,7 +75,7 @@ func (w *Warehouse) Copy(ctx context.Context, identity spi.Identity, input CopyI
 	}
 	var credential map[string]any
 	_ = json.Unmarshal(credentialBody, &credential)
-	if first(credential, "Username") != input.Username || first(credential, "PasswordHash") != fmt.Sprintf("%x", sha256.Sum256([]byte(input.Password))) {
+	if spi.First(credential, "Username") != input.Username || spi.First(credential, "PasswordHash") != fmt.Sprintf("%x", sha256.Sum256([]byte(input.Password))) {
 		return errors.New("Redshift credentials are invalid")
 	}
 	key := redshiftTableKey(input.Cluster, input.Database, input.Table)
@@ -215,13 +215,4 @@ func listOrGet(ctx context.Context, c spi.Collection, id, listKey string) (*spi.
 		items = append(items, rec)
 	}
 	return &spi.Response{Output: map[string]any{listKey: items}}, nil
-}
-
-func first(in map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if s, ok := in[k].(string); ok && s != "" {
-			return s
-		}
-	}
-	return ""
 }

@@ -74,7 +74,7 @@ type objectRec struct {
 
 func (p *objects) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	p.hydrate(req)
-	if strings.Contains(str(req.Input["_path"]), "/batch") {
+	if strings.Contains(spi.Str(req.Input["_path"]), "/batch") {
 		return nil, spi.NotImplemented("gcp.storage", req.Operation, "emulate")
 	}
 	switch req.Operation {
@@ -101,7 +101,7 @@ func (p *objects) hydrate(req *spi.Request) {
 	if req.Input == nil {
 		req.Input = map[string]any{}
 	}
-	path := str(req.Input["_path"])
+	path := spi.Str(req.Input["_path"])
 	if path == "" && req.HTTP != nil && req.HTTP.URL != nil {
 		path = req.HTTP.URL.Path
 		req.Input["_path"] = path
@@ -113,26 +113,26 @@ func (p *objects) hydrate(req *spi.Request) {
 			"alt", "generation", "ifGenerationMatch", "ifMetagenerationMatch",
 			"destinationBucket", "destinationObject", "rewriteToken", "maxResults",
 		} {
-			if str(req.Input[k]) == "" && q.Get(k) != "" {
+			if spi.Str(req.Input[k]) == "" && q.Get(k) != "" {
 				req.Input[k] = q.Get(k)
 			}
 		}
 	}
 	bkt, obj := parsePath(path)
-	if bkt != "" && str(req.Input["bucket"]) == "" {
+	if bkt != "" && spi.Str(req.Input["bucket"]) == "" {
 		req.Input["bucket"] = bkt
 	}
-	if obj != "" && str(req.Input["object"]) == "" {
+	if obj != "" && spi.Str(req.Input["object"]) == "" {
 		req.Input["object"] = obj
 	}
-	if obj != "" && str(req.Input["name"]) == "" && req.Operation != "storage.buckets.insert" {
+	if obj != "" && spi.Str(req.Input["name"]) == "" && req.Operation != "storage.buckets.insert" {
 		req.Input["name"] = obj
 	}
 	if db, dn := destFromPath(path); db != "" || dn != "" {
-		if str(req.Input["destinationBucket"]) == "" {
+		if spi.Str(req.Input["destinationBucket"]) == "" {
 			req.Input["destinationBucket"] = db
 		}
-		if str(req.Input["destinationObject"]) == "" {
+		if spi.Str(req.Input["destinationObject"]) == "" {
 			req.Input["destinationObject"] = dn
 		}
 	}
@@ -204,18 +204,18 @@ func (p *objects) objectInsert(ctx context.Context, req *spi.Request) (*spi.Resp
 	if _, err := p.loadBucket(ctx, req, bucket); err != nil {
 		return nil, err
 	}
-	uploadType := str(req.Input["uploadType"])
-	uploadID := str(req.Input["upload_id"])
+	uploadType := spi.Str(req.Input["uploadType"])
+	uploadID := spi.Str(req.Input["upload_id"])
 	if uploadID != "" {
 		return p.resumablePut(ctx, req, uploadID)
 	}
-	name := str(req.Input["name"])
+	name := spi.Str(req.Input["name"])
 	if name == "" {
-		name = str(req.Input["object"])
+		name = spi.Str(req.Input["object"])
 	}
 	if uploadType == "resumable" && (req.HTTP == nil || req.HTTP.Method == http.MethodPost) {
 		id := p.deps.Rand.Hex(16)
-		sessions.Store(id, &session{bucket: bucket, name: name, contentType: str(req.Input["contentType"])})
+		sessions.Store(id, &session{bucket: bucket, name: name, contentType: spi.Str(req.Input["contentType"])})
 		h := http.Header{}
 		loc := p.base(req) + "/upload/storage/v1/b/" + url.PathEscape(bucket) + "/o?uploadType=resumable&upload_id=" + id
 		if name != "" {
@@ -228,13 +228,13 @@ func (p *objects) objectInsert(ctx context.Context, req *spi.Request) (*spi.Resp
 	if err != nil {
 		return nil, err
 	}
-	if uploadType == "" && !strings.Contains(str(req.Input["_path"]), "/upload/") {
+	if uploadType == "" && !strings.Contains(spi.Str(req.Input["_path"]), "/upload/") {
 		var meta map[string]any
 		if json.Unmarshal(body, &meta) == nil && len(meta) > 0 {
-			if n := str(meta["name"]); n != "" {
+			if n := spi.Str(meta["name"]); n != "" {
 				name = n
 			}
-			if c := str(meta["contentType"]); c != "" {
+			if c := spi.Str(meta["contentType"]); c != "" {
 				ctype = c
 			}
 			body = nil
@@ -263,7 +263,7 @@ func (p *objects) resumablePut(ctx context.Context, req *spi.Request, id string)
 	if !ok {
 		s.buf = append(s.buf, chunk...)
 		if s.name == "" {
-			s.name = str(req.Input["name"])
+			s.name = spi.Str(req.Input["name"])
 		}
 		return p.storeObject(ctx, req, s.bucket, s.name, s.contentType, s.buf)
 	}
@@ -279,7 +279,7 @@ func (p *objects) resumablePut(ctx context.Context, req *spi.Request, id string)
 	}
 	s.total = total
 	if s.name == "" {
-		s.name = str(req.Input["name"])
+		s.name = spi.Str(req.Input["name"])
 	}
 	if total >= 0 && end+1 >= total {
 		return p.storeObject(ctx, req, s.bucket, s.name, s.contentType, s.buf[:total])
@@ -299,7 +299,7 @@ func (p *objects) objectGet(ctx context.Context, req *spi.Request) (*spi.Respons
 	if err := p.checkPreconditions(req, rec); err != nil {
 		return nil, err
 	}
-	alt := str(req.Input["alt"])
+	alt := spi.Str(req.Input["alt"])
 	if alt == "media" || (req.HTTP != nil && req.HTTP.URL.Query().Get("alt") == "media") {
 		rc, info, err := p.deps.Blobs.Get(ctx, blobKey(req, bucket, name))
 		if err != nil {
@@ -342,11 +342,11 @@ func (p *objects) objectList(ctx context.Context, req *spi.Request) (*spi.Respon
 	if _, err := p.loadBucket(ctx, req, bucket); err != nil {
 		return nil, err
 	}
-	prefix := str(req.Input["prefix"])
-	delim := str(req.Input["delimiter"])
-	pageTok := str(req.Input["pageToken"])
+	prefix := spi.Str(req.Input["prefix"])
+	delim := spi.Str(req.Input["delimiter"])
+	pageTok := spi.Str(req.Input["pageToken"])
 	max := 1000
-	if n := str(req.Input["maxResults"]); n != "" {
+	if n := spi.Str(req.Input["maxResults"]); n != "" {
 		if v, err := strconv.Atoi(n); err == nil && v > 0 {
 			max = v
 		}
@@ -439,7 +439,7 @@ func (p *objects) objectCompose(ctx context.Context, req *spi.Request) (*spi.Res
 	bucket := p.bucketName(req)
 	name := p.objectName(req)
 	if name == "" {
-		name = str(req.Input["destination"])
+		name = spi.Str(req.Input["destination"])
 	}
 	var srcs []any
 	switch v := req.Input["sourceObjects"].(type) {
@@ -449,7 +449,7 @@ func (p *objects) objectCompose(ctx context.Context, req *spi.Request) (*spi.Res
 	var buf []byte
 	for _, s := range srcs {
 		m, _ := s.(map[string]any)
-		n := str(m["name"])
+		n := spi.Str(m["name"])
 		rc, _, err := p.deps.Blobs.Get(ctx, blobKey(req, bucket, n))
 		if err != nil {
 			return nil, fault("notFound", "source "+n, 404)
@@ -470,7 +470,7 @@ func (p *objects) objectPatch(ctx context.Context, req *spi.Request) (*spi.Respo
 	if err := p.checkPreconditions(req, rec); err != nil {
 		return nil, err
 	}
-	if ct := str(req.Input["contentType"]); ct != "" {
+	if ct := spi.Str(req.Input["contentType"]); ct != "" {
 		rec.ContentType = ct
 	}
 	n, _ := strconv.ParseInt(rec.Metageneration, 10, 64)
@@ -513,7 +513,7 @@ func (p *objects) storeObject(ctx context.Context, req *spi.Request, bucket, nam
 }
 
 func (p *objects) readInsertBody(req *spi.Request, name string) ([]byte, string, string, error) {
-	ctype := str(req.Input["contentType"])
+	ctype := spi.Str(req.Input["contentType"])
 	r := readerOf(req)
 	if req.HTTP != nil {
 		ct := req.HTTP.Header.Get("Content-Type")
@@ -541,10 +541,10 @@ func (p *objects) readInsertBody(req *spi.Request, name string) ([]byte, string,
 				}
 			}
 			if meta != nil {
-				if n := str(meta["name"]); n != "" {
+				if n := spi.Str(meta["name"]); n != "" {
 					name = n
 				}
-				if c := str(meta["contentType"]); c != "" {
+				if c := spi.Str(meta["contentType"]); c != "" {
 					ctype = c
 				}
 			}
@@ -582,10 +582,10 @@ func (p *objects) loadObject(ctx context.Context, req *spi.Request, bucket, name
 }
 
 func (p *objects) checkPreconditions(req *spi.Request, rec objectRec) error {
-	if v := str(req.Input["ifGenerationMatch"]); v != "" && v != rec.Generation {
+	if v := spi.Str(req.Input["ifGenerationMatch"]); v != "" && v != rec.Generation {
 		return fault("conditionNotMet", "ifGenerationMatch", 412)
 	}
-	if v := str(req.Input["ifMetagenerationMatch"]); v != "" && v != rec.Metageneration {
+	if v := spi.Str(req.Input["ifMetagenerationMatch"]); v != "" && v != rec.Metageneration {
 		return fault("conditionNotMet", "ifMetagenerationMatch", 412)
 	}
 	if req.HTTP != nil {
@@ -601,7 +601,7 @@ func (p *objects) checkPreconditions(req *spi.Request, rec objectRec) error {
 }
 
 func (p *objects) checkCreatePreconditions(ctx context.Context, req *spi.Request, bucket, name string) error {
-	v := str(req.Input["ifGenerationMatch"])
+	v := spi.Str(req.Input["ifGenerationMatch"])
 	if req.HTTP != nil && v == "" {
 		v = req.HTTP.URL.Query().Get("ifGenerationMatch")
 	}
@@ -623,17 +623,17 @@ func (p *objects) checkCreatePreconditions(ctx context.Context, req *spi.Request
 }
 
 func (p *objects) bucketName(req *spi.Request) string {
-	if v := str(req.Input["bucket"]); v != "" {
+	if v := spi.Str(req.Input["bucket"]); v != "" {
 		return v
 	}
-	return str(req.Input["name"])
+	return spi.Str(req.Input["name"])
 }
 
 func (p *objects) objectName(req *spi.Request) string {
-	if v := str(req.Input["object"]); v != "" {
+	if v := spi.Str(req.Input["object"]); v != "" {
 		return v
 	}
-	return str(req.Input["name"])
+	return spi.Str(req.Input["name"])
 }
 
 func (p *objects) base(req *spi.Request) string {
@@ -662,9 +662,9 @@ func (p *objects) objectResource(req *spi.Request, rec objectRec) map[string]any
 }
 
 func dest(req *spi.Request) (bucket, name string) {
-	bucket = str(req.Input["destinationBucket"])
-	name = str(req.Input["destinationObject"])
-	path := str(req.Input["_path"])
+	bucket = spi.Str(req.Input["destinationBucket"])
+	name = spi.Str(req.Input["destinationObject"])
+	path := spi.Str(req.Input["_path"])
 	if req.HTTP != nil && req.HTTP.URL != nil {
 		path = req.HTTP.URL.Path
 	}
@@ -691,11 +691,6 @@ func readerOf(req *spi.Request) io.Reader {
 
 func blobKey(req *spi.Request, b, k string) string {
 	return req.Identity.Account + "/" + req.Identity.Region + "/gcs/" + b + "/" + k
-}
-
-func str(v any) string {
-	s, _ := v.(string)
-	return s
 }
 
 func fault(code, msg string, status int) *spi.Fault {

@@ -303,7 +303,7 @@ const unknown = "\uffff"
 // service gives it back. A queue's URL (its endpoint's business), a KMS key's id and a REST API's are
 // known only once made, as is an id built on one: unknown. A Kinesis resource policy's is its ARN.
 func planID(req *spi.Request, typ, n string, props map[string]any) string {
-	if bus := lastSlash(str(props["EventBusName"])); typ == "AWS::Events::Rule" && bus != "" && bus != "default" {
+	if bus := spi.LastSlash(str(props["EventBusName"])); typ == "AWS::Events::Rule" && bus != "" && bus != "default" {
 		n = bus + "/" + n
 	}
 	if f := kinds[typ].ref; f != "" && !strings.Contains(n, unknown) {
@@ -323,7 +323,7 @@ func (p *Pack) order(req *spi.Request, tpl map[string]any) ([]string, error) {
 	}
 	for len(todo) > 0 {
 		i := slices.IndexFunc(todo, func(l string) bool {
-			return !strings.Contains(jsonText(p.resolve(asMap(resources[l])["Properties"], marks, req, "")), unknown)
+			return !strings.Contains(spi.JSONText(p.resolve(asMap(resources[l])["Properties"], marks, req, "")), unknown)
 		})
 		if i < 0 {
 			return nil, invalid("Circular dependency between resources: [" + strings.Join(todo, ", ") + "]")
@@ -409,7 +409,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		_, err := p.call(ctx, req, "aws.dynamodb", "CreateTable", in)
 		return made(n, err)
 	case "AWS::IAM::Role":
-		out, err := p.call(ctx, req, "aws.iam", "CreateRole", map[string]any{"RoleName": n, "AssumeRolePolicyDocument": jsonText(props["AssumeRolePolicyDocument"])})
+		out, err := p.call(ctx, req, "aws.iam", "CreateRole", map[string]any{"RoleName": n, "AssumeRolePolicyDocument": spi.JSONText(props["AssumeRolePolicyDocument"])})
 		return str(asMap(out["Role"])["Arn"]), err
 	case "AWS::SSM::Parameter":
 		_, err := p.call(ctx, req, "aws.ssm", "PutParameter", map[string]any{"Name": n, "Value": str(props["Value"]), "Type": cmp.Or(str(props["Type"]), "String")})
@@ -438,7 +438,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	case "AWS::Events::Rule":
 		in := given(map[string]any{"Name": n}, props, "ScheduleExpression", "State", "Description", "EventBusName")
 		if pattern, ok := props["EventPattern"]; ok {
-			in["EventPattern"] = jsonText(pattern)
+			in["EventPattern"] = spi.JSONText(pattern)
 		}
 		out, err := p.call(ctx, req, "aws.events", "PutRule", in)
 		if targets, ok := props["Targets"]; ok && err == nil {
@@ -459,7 +459,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		if policy == nil {
 			policy = props["Policy"]
 		}
-		_, err := p.call(ctx, req, "aws.kinesis", "PutResourcePolicy", map[string]any{"ResourceARN": arn, "Policy": jsonText(policy)})
+		_, err := p.call(ctx, req, "aws.kinesis", "PutResourcePolicy", map[string]any{"ResourceARN": arn, "Policy": spi.JSONText(policy)})
 		return made(arn, err)
 	case "AWS::ApiGateway::RestApi":
 		out, err := p.call(ctx, req, "aws.apigateway", "CreateRestApi", map[string]any{"name": n})
@@ -495,12 +495,12 @@ func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) error {
 		"AWS::SQS::Queue":              {"aws.sqs", "DeleteQueue", map[string]any{"QueueUrl": id}},
 		"AWS::SNS::Topic":              {"aws.sns", "DeleteTopic", map[string]any{"TopicArn": id}},
 		"AWS::DynamoDB::Table":         {"aws.dynamodb", "DeleteTable", map[string]any{"TableName": id}},
-		"AWS::IAM::Role":               {"aws.iam", "DeleteRole", map[string]any{"RoleName": lastSlash(id)}},
+		"AWS::IAM::Role":               {"aws.iam", "DeleteRole", map[string]any{"RoleName": spi.LastSlash(id)}},
 		"AWS::SSM::Parameter":          {"aws.ssm", "DeleteParameter", map[string]any{"Name": id}},
 		"AWS::SecretsManager::Secret":  {"aws.secretsmanager", "DeleteSecret", map[string]any{"SecretId": id, "ForceDeleteWithoutRecovery": true}},
 		"AWS::KMS::Key":                {"aws.kms", "ScheduleKeyDeletion", map[string]any{"KeyId": id, "PendingWindowInDays": 7}},
 		"AWS::Logs::LogGroup":          {"aws.logs", "DeleteLogGroup", map[string]any{"logGroupName": id}},
-		"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": lastSlash(id), "Force": true, "EventBusName": ruleBus(id)}},
+		"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": spi.LastSlash(id), "Force": true, "EventBusName": ruleBus(id)}},
 		"AWS::Lambda::Function":        {"aws.lambda", "DeleteFunction", map[string]any{"FunctionName": lastColon(id)}},
 		"AWS::Kinesis::Stream":         {"aws.kinesis", "DeleteStream", map[string]any{"StreamName": id}},
 		"AWS::Kinesis::ResourcePolicy": {"aws.kinesis", "DeleteResourcePolicy", map[string]any{"ResourceARN": id}},
@@ -594,7 +594,7 @@ func coerce(v any, want string) (any, bool) {
 	default:
 		return v, false
 	}
-	if text, yes := jsonText(v), strings.EqualFold(jsonText(v), "true"); want == "Boolean" {
+	if text, yes := spi.JSONText(v), strings.EqualFold(spi.JSONText(v), "true"); want == "Boolean" {
 		return yes, yes || strings.EqualFold(text, "false")
 	} else if n, err := strconv.Atoi(text); want == "Integer" {
 		return n, err == nil && strings.TrimLeft(text, "0123456789") == ""
@@ -613,7 +613,7 @@ func generated(props map[string]any, seed string) (string, error) {
 	var doc any
 	switch {
 	case !isMap:
-		return "", invalid("GenerateSecretString must be an object, not " + jsonText(props["GenerateSecretString"]))
+		return "", invalid("GenerateSecretString must be an object, not " + spi.JSONText(props["GenerateSecretString"]))
 	case both:
 		return "", invalid("SecretString and GenerateSecretString can't both be given")
 	case tpl == "" && key != "":
@@ -631,7 +631,7 @@ func generated(props map[string]any, seed string) (string, error) {
 		if generateTypes[member] == "" {
 			return "", invalid("GenerateSecretString has no property " + member)
 		} else if !ok {
-			return "", invalid("GenerateSecretString." + member + " must be " + generateTypes[member] + ", not " + jsonText(v))
+			return "", invalid("GenerateSecretString." + member + " must be " + generateTypes[member] + ", not " + spi.JSONText(v))
 		}
 		params[member] = typed
 	}
@@ -658,15 +658,6 @@ func fault(code, message string) *spi.Fault {
 }
 
 func asMap(v any) map[string]any { m, _ := v.(map[string]any); return m }
-
-// jsonText is a policy-like property as the JSON text an API takes: an object's, or a string as given.
-func jsonText(v any) string {
-	if text, ok := v.(string); ok {
-		return text
-	}
-	raw, _ := json.Marshal(v)
-	return string(raw)
-}
 
 func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack string) any {
 	switch t := v.(type) {
@@ -724,11 +715,11 @@ func (p *Pack) getAtt(g any, refs map[string]string, req *spi.Request) string {
 			return phys
 		}
 		if strings.Contains(phys, "/") && strings.Contains(phys, "://") { // a queue URL
-			return "arn:aws:sqs:" + req.Identity.Region + ":" + req.Identity.Account + ":" + lastSlash(phys)
+			return "arn:aws:sqs:" + req.Identity.Region + ":" + req.Identity.Account + ":" + spi.LastSlash(phys)
 		}
 		return "arn:aws:s3:::" + phys
 	case "QueueName":
-		return lastSlash(phys)
+		return spi.LastSlash(phys)
 	default:
 		return phys
 	}
@@ -794,7 +785,7 @@ func formParams(in map[string]any) map[string]string {
 func mergeParamDefaults(tpl map[string]any, params map[string]string) {
 	for k, v := range asMap(tpl["Parameters"]) {
 		if _, given := params[k]; !given && asMap(v)["Default"] != nil {
-			params[k] = jsonText(asMap(v)["Default"]) // a parameter "becomes a string": Default 16 is "16"
+			params[k] = spi.JSONText(asMap(v)["Default"]) // a parameter "becomes a string": Default 16 is "16"
 		}
 	}
 }
@@ -816,7 +807,5 @@ func advertise(req *spi.Request) string {
 
 // str is a String property's value: a scalar's text (coerce), nothing for anything else.
 func str(v any) string { s, _ := coerce(v, "String"); t, _ := s.(string); return t }
-
-func lastSlash(s string) string { return s[strings.LastIndex(s, "/")+1:] }
 
 func lastColon(s string) string { return s[strings.LastIndex(s, ":")+1:] }

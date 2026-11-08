@@ -425,8 +425,8 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 		svc, op string
 		in      map[string]any
 	}{
-		{"aws.iam", "GetRole", map[string]any{"RoleName": lastSlash(physical["Role"])}},
-		{"aws.sqs", "GetQueueUrl", map[string]any{"QueueName": lastSlash(physical["Queue"])}},
+		{"aws.iam", "GetRole", map[string]any{"RoleName": spi.LastSlash(physical["Role"])}},
+		{"aws.sqs", "GetQueueUrl", map[string]any{"QueueName": spi.LastSlash(physical["Queue"])}},
 		{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": physical["Table"]}},
 		{"aws.logs", "DescribeLogGroups", map[string]any{"logGroupNamePrefix": physical["Log"]}},
 	} {
@@ -441,8 +441,8 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 		svc, op string
 		in      map[string]any
 	}{
-		{"aws.iam", "GetRole", map[string]any{"RoleName": lastSlash(physical["Role"])}},
-		{"aws.sqs", "GetQueueUrl", map[string]any{"QueueName": lastSlash(physical["Queue"])}},
+		{"aws.iam", "GetRole", map[string]any{"RoleName": spi.LastSlash(physical["Role"])}},
+		{"aws.sqs", "GetQueueUrl", map[string]any{"QueueName": spi.LastSlash(physical["Queue"])}},
 		{"aws.dynamodb", "DescribeTable", map[string]any{"TableName": physical["Table"]}},
 	} {
 		if err := owned(check.svc, check.op, check.in); err == nil {
@@ -500,7 +500,7 @@ func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
 	if params["Explicit"] != "set" || params["Defaulted"] != "fallback" || len(paramDecls(tpl)) != 3 {
 		t.Fatalf("parameters %#v %#v", params, tpl)
 	}
-	if lastSlash("plain") != "plain" || lastColon("plain") != "plain" {
+	if spi.LastSlash("plain") != "plain" || lastColon("plain") != "plain" {
 		t.Fatal("scalar helpers")
 	}
 }

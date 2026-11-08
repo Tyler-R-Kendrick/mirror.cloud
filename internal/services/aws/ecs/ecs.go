@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
-	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -32,18 +31,18 @@ func (p tasks) col(req *spi.Request, n string) spi.Collection {
 
 func (p tasks) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	acct, region := req.Identity.Account, req.Identity.Region
-	cluster := lastSlash(first(req.Input, "cluster"))
+	cluster := spi.LastSlash(spi.First(req.Input, "cluster"))
 	if cluster == "" {
 		cluster = "default"
 	}
 	switch req.Operation {
 	case "CreateService":
-		name := first(req.Input, "serviceName")
+		name := spi.First(req.Input, "serviceName")
 		rec := map[string]any{"serviceName": name, "serviceArn": "arn:aws:ecs:" + region + ":" + acct + ":service/" + cluster + "/" + name,
 			"clusterArn": "arn:aws:ecs:" + region + ":" + acct + ":cluster/" + cluster, "desiredCount": req.Input["desiredCount"],
 			"taskDefinition": req.Input["taskDefinition"], "loadBalancers": req.Input["loadBalancers"], "status": "ACTIVE"}
 		p.put(ctx, req, "ecssvc", cluster+"/"+name, rec)
-		for i := 0; i < intValue(req.Input["desiredCount"]); i++ {
+		for i := 0; i < spi.Int(req.Input["desiredCount"]); i++ {
 			p.createTask(ctx, req, cluster, req.Input["taskDefinition"], "PENDING", name, req.Input["loadBalancers"])
 		}
 		return &spi.Response{Output: map[string]any{"service": rec}}, nil
@@ -51,7 +50,7 @@ func (p tasks) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		rec := p.createTask(ctx, req, cluster, req.Input["taskDefinition"], "RUNNING", "", nil)
 		return &spi.Response{Output: map[string]any{"tasks": []any{rec}, "failures": []any{}}}, nil
 	case "StopTask":
-		id := lastSlash(first(req.Input, "task"))
+		id := spi.LastSlash(spi.First(req.Input, "task"))
 		b, ok, _ := p.col(req, "ecstask").Get(ctx, cluster+"/"+id)
 		rec := map[string]any{"taskArn": id, "lastStatus": "STOPPED"}
 		if ok {
@@ -63,9 +62,9 @@ func (p tasks) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"task": rec}}, nil
 	default: // Submit*StateChange: the agent reports where a task got to
-		id := lastSlash(first(req.Input, "task"))
+		id := spi.LastSlash(spi.First(req.Input, "task"))
 		if id == "" {
-			id = lastSlash(first(req.Input, "containerInstance"))
+			id = spi.LastSlash(spi.First(req.Input, "containerInstance"))
 		}
 		key := cluster + "/" + id
 		b, ok, _ := p.col(req, "ecstask").Get(ctx, key)
@@ -73,7 +72,7 @@ func (p tasks) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if ok {
 			_ = json.Unmarshal(b, &rec)
 		}
-		if st := first(req.Input, "status"); st != "" {
+		if st := spi.First(req.Input, "status"); st != "" {
 			if st == "RUNNING" {
 				p.syncTargets(ctx, req, rec, true)
 			} else if st == "STOPPED" || st == "FAILED" {
@@ -121,11 +120,11 @@ func (p tasks) syncTargets(ctx context.Context, req *spi.Request, task map[strin
 	items, _ := task["loadBalancers"].([]any)
 	for _, raw := range items {
 		lb, _ := raw.(map[string]any)
-		arn := first(lb, "targetGroupArn", "TargetGroupArn")
+		arn := spi.First(lb, "targetGroupArn", "TargetGroupArn")
 		if arn == "" {
 			continue
 		}
-		target := map[string]any{"Id": first(task, "privateIPv4Address")}
+		target := map[string]any{"Id": spi.First(task, "privateIPv4Address")}
 		if port := lb["containerPort"]; port != nil {
 			target["Port"] = port
 		}
@@ -133,16 +132,6 @@ func (p tasks) syncTargets(ctx context.Context, req *spi.Request, task map[strin
 		_, _ = bundled.Handler("aws.elasticloadbalancing", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: operation,
 			Input: map[string]any{"TargetGroupArn": arn, "Targets": []any{target}}})
 	}
-}
-
-func intValue(value any) int {
-	switch n := value.(type) {
-	case int:
-		return n
-	case float64:
-		return int(n)
-	}
-	return 0
 }
 
 func (p tasks) next(ctx context.Context, req *spi.Request, key string) int {
@@ -154,20 +143,4 @@ func (p tasks) next(ctx context.Context, req *spi.Request, key string) int {
 	}
 	_ = p.col(req, "seq").Put(ctx, key, []byte(strconv.Itoa(n)))
 	return n
-}
-
-func first(in map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if s, ok := in[k].(string); ok && s != "" {
-			return s
-		}
-	}
-	return ""
-}
-
-func lastSlash(s string) string {
-	if i := strings.LastIndex(s, "/"); i >= 0 {
-		return s[i+1:]
-	}
-	return s
 }

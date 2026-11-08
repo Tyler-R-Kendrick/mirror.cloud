@@ -11,17 +11,17 @@ import (
 
 func (p *Pack) partiql(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	if req.Operation == "BatchExecuteStatement" {
-		stmts := asSlice(req.Input["Statements"])
+		stmts := spi.Slice(req.Input["Statements"])
 		var resps []any
 		for _, s := range stmts {
-			sm := asMap(s)
+			sm := spi.Object(s)
 			input := map[string]any{"Statement": sm["Statement"]}
 			if parameters, ok := sm["Parameters"]; ok {
 				input["Parameters"] = parameters
 			}
 			sub := &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "ExecuteStatement", Input: input}
 			out, err := p.partiql(ctx, sub)
-			response := map[string]any{"TableName": partiqlTable(str(sm["Statement"]))}
+			response := map[string]any{"TableName": partiqlTable(spi.Str(sm["Statement"]))}
 			if err != nil {
 				response["Error"] = map[string]any{"Code": "ValidationException", "Message": err.Error()}
 				resps = append(resps, response)
@@ -35,13 +35,13 @@ func (p *Pack) partiql(ctx context.Context, req *spi.Request) (*spi.Response, er
 		return &spi.Response{Output: map[string]any{"Responses": resps}}, nil
 	}
 	if req.Operation == "ExecuteTransaction" {
-		stmts := asSlice(req.Input["TransactStatements"])
+		stmts := spi.Slice(req.Input["TransactStatements"])
 		if len(stmts) == 0 {
-			stmts = asSlice(req.Input["Statements"])
+			stmts = spi.Slice(req.Input["Statements"])
 		}
 		responses := []any{}
 		for _, statement := range stmts {
-			sm := asMap(statement)
+			sm := spi.Object(statement)
 			input := map[string]any{"Statement": sm["Statement"]}
 			if parameters, ok := sm["Parameters"]; ok {
 				input["Parameters"] = parameters
@@ -50,16 +50,16 @@ func (p *Pack) partiql(ctx context.Context, req *spi.Request) (*spi.Response, er
 			if err != nil {
 				return nil, err
 			}
-			if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(str(sm["Statement"]))), "SELECT") {
+			if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(spi.Str(sm["Statement"]))), "SELECT") {
 				responses = append(responses, out.Output)
 			}
 		}
 		return &spi.Response{Output: map[string]any{"Responses": responses}}, nil
 	}
-	if parameters, ok := req.Input["Parameters"]; ok && len(asSlice(parameters)) == 0 {
+	if parameters, ok := req.Input["Parameters"]; ok && len(spi.Slice(parameters)) == 0 {
 		return nil, &spi.Fault{Code: "ValidationException", Message: "1 validation error detected: Value '[]' at 'parameters' failed to satisfy constraint: Member must have length greater than or equal to 1", HTTPStatus: 400, Fault: "client"}
 	}
-	st := strings.TrimSpace(str(req.Input["Statement"]))
+	st := strings.TrimSpace(spi.Str(req.Input["Statement"]))
 	up := strings.ToUpper(st)
 	switch {
 	case strings.HasPrefix(up, "INSERT"):
@@ -83,7 +83,7 @@ func (p *Pack) partiql(ctx context.Context, req *spi.Request) (*spi.Response, er
 	default:
 		table, key := parseWhereKey(st)
 		if table == "" {
-			table = str(req.Input["TableName"])
+			table = spi.Str(req.Input["TableName"])
 		}
 		if len(key) > 0 {
 			return p.Invoke(ctx, &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "GetItem", Input: map[string]any{"TableName": table, "Key": key}})
@@ -214,7 +214,7 @@ func parsePartiqlMap(raw string) map[string]any {
 }
 
 func (p *Pack) globalTable(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := str(req.Input["GlobalTableName"])
+	name := spi.Str(req.Input["GlobalTableName"])
 	col := p.col(req, "gtables")
 	switch req.Operation {
 	case "CreateGlobalTable":
@@ -255,19 +255,19 @@ func (p *Pack) globalTable(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 		rec := map[string]any{}
 		_ = json.Unmarshal(b, &rec)
-		reps := asSlice(rec["ReplicationGroup"])
-		for _, a := range asSlice(req.Input["ReplicaUpdates"]) {
-			um := asMap(a)
-			if cr := asMap(um["Create"]); str(cr["RegionName"]) != "" {
-				if !hasReplica(reps, str(cr["RegionName"])) {
+		reps := spi.Slice(rec["ReplicationGroup"])
+		for _, a := range spi.Slice(req.Input["ReplicaUpdates"]) {
+			um := spi.Object(a)
+			if cr := spi.Object(um["Create"]); spi.Str(cr["RegionName"]) != "" {
+				if !hasReplica(reps, spi.Str(cr["RegionName"])) {
 					reps = append(reps, map[string]any{"RegionName": cr["RegionName"]})
 				}
 			}
-			if del := asMap(um["Delete"]); str(del["RegionName"]) != "" {
-				region := str(del["RegionName"])
+			if del := spi.Object(um["Delete"]); spi.Str(del["RegionName"]) != "" {
+				region := spi.Str(del["RegionName"])
 				kept := make([]any, 0, len(reps))
 				for _, replica := range reps {
-					if str(asMap(replica)["RegionName"]) != region {
+					if spi.Str(spi.Object(replica)["RegionName"]) != region {
 						kept = append(kept, replica)
 					}
 				}
@@ -299,13 +299,13 @@ func (p *Pack) updateTableReplicas(ctx context.Context, req *spi.Request, table 
 	if encoded, ok, _ := p.col(req, "ddbglobal").Get(ctx, table); ok {
 		_ = json.Unmarshal(encoded, &state)
 	}
-	replicas := asSlice(state["ReplicationGroup"])
+	replicas := spi.Slice(state["ReplicationGroup"])
 	deletedCurrent := false
-	for _, raw := range asSlice(req.Input["ReplicaUpdates"]) {
-		update := asMap(raw)
-		if create := asMap(update["Create"]); str(create["RegionName"]) != "" {
-			region := str(create["RegionName"])
-			if region == str(state["SourceRegion"]) || hasReplica(replicas, region) {
+	for _, raw := range spi.Slice(req.Input["ReplicaUpdates"]) {
+		update := spi.Object(raw)
+		if create := spi.Object(update["Create"]); spi.Str(create["RegionName"]) != "" {
+			region := spi.Str(create["RegionName"])
+			if region == spi.Str(state["SourceRegion"]) || hasReplica(replicas, region) {
 				return false, &spi.Fault{Code: "ValidationException", Message: "Update global table operation failed because one or more replicas already existed", HTTPStatus: 400, Fault: "client"}
 			}
 			target := regionalRequest(req, region)
@@ -335,8 +335,8 @@ func (p *Pack) updateTableReplicas(ctx context.Context, req *spi.Request, table 
 			replica["ReplicaStatus"] = "ACTIVE"
 			replicas = append(replicas, replica)
 		}
-		if remove := asMap(update["Delete"]); str(remove["RegionName"]) != "" {
-			region := str(remove["RegionName"])
+		if remove := spi.Object(update["Delete"]); spi.Str(remove["RegionName"]) != "" {
+			region := spi.Str(remove["RegionName"])
 			if !hasReplica(replicas, region) {
 				return false, &spi.Fault{Code: "ValidationException", Message: "Update global table operation failed because one or more replicas were not part of the global table", HTTPStatus: 400, Fault: "client"}
 			}
@@ -350,9 +350,9 @@ func (p *Pack) updateTableReplicas(ctx context.Context, req *spi.Request, table 
 		}
 	}
 	state["ReplicationGroup"] = replicas
-	regions := []string{str(state["SourceRegion"])}
+	regions := []string{spi.Str(state["SourceRegion"])}
 	for _, replica := range replicas {
-		regions = append(regions, str(asMap(replica)["RegionName"]))
+		regions = append(regions, spi.Str(spi.Object(replica)["RegionName"]))
 	}
 	for _, region := range regions {
 		target := regionalRequest(req, region)
@@ -389,9 +389,9 @@ func (p *Pack) globalTableIdentities(ctx context.Context, req *spi.Request, tabl
 	}
 	var state map[string]any
 	_ = json.Unmarshal(encoded, &state)
-	regions := []string{str(state["SourceRegion"])}
-	for _, replica := range asSlice(state["ReplicationGroup"]) {
-		regions = append(regions, str(asMap(replica)["RegionName"]))
+	regions := []string{spi.Str(state["SourceRegion"])}
+	for _, replica := range spi.Slice(state["ReplicationGroup"]) {
+		regions = append(regions, spi.Str(spi.Object(replica)["RegionName"]))
 	}
 	identities := make([]spi.Identity, 0, len(regions))
 	seen := map[string]bool{}
@@ -414,7 +414,7 @@ func regionalRequest(req *spi.Request, region string) *spi.Request {
 
 func hasReplica(replicas []any, region string) bool {
 	for _, replica := range replicas {
-		if str(asMap(replica)["RegionName"]) == region {
+		if spi.Str(spi.Object(replica)["RegionName"]) == region {
 			return true
 		}
 	}
@@ -424,7 +424,7 @@ func hasReplica(replicas []any, region string) bool {
 func withoutReplica(replicas []any, region string) []any {
 	kept := make([]any, 0, len(replicas))
 	for _, replica := range replicas {
-		if str(asMap(replica)["RegionName"]) != region {
+		if spi.Str(spi.Object(replica)["RegionName"]) != region {
 			kept = append(kept, replica)
 		}
 	}
@@ -441,7 +441,7 @@ func clearCollection(ctx context.Context, collection spi.Collection) {
 func (p *Pack) export(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	col := p.col(req, "exports")
 	{
-		table := str(req.Input["TableName"])
+		table := spi.Str(req.Input["TableName"])
 		id := p.deps.Rand.Hex(12)
 		arn := "arn:aws:dynamodb:" + req.Identity.Region + ":" + req.Identity.Account + ":table/" + table + "/export/" + id
 		kvs, _, _ := p.col(req, "items:"+table).List(ctx, "", "", 0)
@@ -455,10 +455,10 @@ func (p *Pack) export(ctx context.Context, req *spi.Request) (*spi.Response, err
 func (p *Pack) importTable(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	col := p.col(req, "imports")
 	{
-		tcp := asMap(req.Input["TableCreationParameters"])
-		name := str(tcp["TableName"])
+		tcp := spi.Object(req.Input["TableCreationParameters"])
+		name := spi.Str(tcp["TableName"])
 		if name == "" {
-			name = str(req.Input["TableName"])
+			name = spi.Str(req.Input["TableName"])
 		}
 		if name != "" {
 			_, _ = p.Invoke(ctx, &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "CreateTable", Input: tcp})
@@ -473,8 +473,8 @@ func (p *Pack) importTable(ctx context.Context, req *spi.Request) (*spi.Response
 }
 
 func (p *Pack) restorePITR(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	src := str(req.Input["SourceTableName"])
-	dst := str(req.Input["TargetTableName"])
+	src := spi.Str(req.Input["SourceTableName"])
+	dst := spi.Str(req.Input["TargetTableName"])
 	tb, ok, _ := p.col(req, "tables").Get(ctx, src)
 	if !ok {
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
@@ -488,10 +488,10 @@ func (p *Pack) restorePITR(ctx context.Context, req *spi.Request) (*spi.Response
 }
 
 func (p *Pack) searchVectors(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	table := str(req.Input["TableName"])
-	q := str(req.Input["Query"])
+	table := spi.Str(req.Input["TableName"])
+	q := spi.Str(req.Input["Query"])
 	if q == "" {
-		q = str(req.Input["VectorSearch"])
+		q = spi.Str(req.Input["VectorSearch"])
 	}
 	kvs, _, _ := p.col(req, "items:"+table).List(ctx, "", "", 0)
 	var hits []any

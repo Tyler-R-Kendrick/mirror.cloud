@@ -87,7 +87,7 @@ func TestAuthorizerUserAndGroupPolicies(t *testing.T) {
 	})
 	invoke("AddUserToGroup", map[string]any{"GroupName": "guardrails", "UserName": "alice"})
 	key := invoke("CreateAccessKey", map[string]any{"UserName": "alice"})
-	ak := str(key.Output["AccessKey"].(map[string]any)["AccessKeyId"])
+	ak := spi.Str(key.Output["AccessKey"].(map[string]any)["AccessKeyId"])
 	caller := spi.Identity{Account: id.Account, Region: id.Region, AccessKeyID: ak, ARN: "arn:aws:iam::000000000000:user/alice"}
 	az := NewAuthorizer(deps.Store)
 	if err := az.Authorize(ctx, caller, "aws.s3", "GetObject", "*"); err != nil {

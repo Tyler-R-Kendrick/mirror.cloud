@@ -123,8 +123,8 @@ func (h *stacks) lookup(r res) (name string, err error) {
 		_, err = h.service("aws.s3", "HeadBucket", in("Bucket", r.Physical))
 		return r.Physical, err
 	case "AWS::SQS::Queue":
-		_, err = h.service("aws.sqs", "GetQueueUrl", in("QueueName", lastSlash(r.Physical)))
-		return lastSlash(r.Physical), err
+		_, err = h.service("aws.sqs", "GetQueueUrl", in("QueueName", spi.LastSlash(r.Physical)))
+		return spi.LastSlash(r.Physical), err
 	case "AWS::SNS::Topic":
 		_, err = h.service("aws.sns", "GetTopicAttributes", in("TopicArn", r.Physical))
 		return lastColon(r.Physical), err
@@ -132,8 +132,8 @@ func (h *stacks) lookup(r res) (name string, err error) {
 		_, err = h.service("aws.dynamodb", "DescribeTable", in("TableName", r.Physical))
 		return r.Physical, err
 	case "AWS::IAM::Role":
-		_, err = h.service("aws.iam", "GetRole", in("RoleName", lastSlash(r.Physical)))
-		return lastSlash(r.Physical), err
+		_, err = h.service("aws.iam", "GetRole", in("RoleName", spi.LastSlash(r.Physical)))
+		return spi.LastSlash(r.Physical), err
 	case "AWS::SSM::Parameter":
 		_, err = h.service("aws.ssm", "GetParameter", in("Name", r.Physical))
 		return r.Physical, err
@@ -142,13 +142,13 @@ func (h *stacks) lookup(r res) (name string, err error) {
 		return lastColon(r.Physical), err
 	case "AWS::Logs::LogGroup":
 		out, err := h.service("aws.logs", "DescribeLogGroups", in("logGroupNamePrefix", r.Physical))
-		if err == nil && !strings.Contains(jsonText(out), `"logGroupName":"`+r.Physical+`"`) {
+		if err == nil && !strings.Contains(spi.JSONText(out), `"logGroupName":"`+r.Physical+`"`) {
 			err = &spi.Fault{Code: "ResourceNotFoundException"}
 		}
 		return r.Physical, err
 	case "AWS::Events::Rule":
-		_, err = h.service("aws.events", "DescribeRule", in("Name", lastSlash(r.Physical)))
-		return lastSlash(r.Physical), err
+		_, err = h.service("aws.events", "DescribeRule", in("Name", spi.LastSlash(r.Physical)))
+		return spi.LastSlash(r.Physical), err
 	case "AWS::Lambda::Function":
 		_, err = h.service("aws.lambda", "GetFunction", in("FunctionName", lastColon(r.Physical)))
 		return lastColon(r.Physical), err
@@ -955,7 +955,7 @@ func TestCloudFormationARuleLivesOnItsBus(t *testing.T) {
 		t.Errorf("the bus-b rule y has targets %v (%v), want the template's one", targets["Targets"], err)
 	}
 	h.mustCreate("unnamed", rule("", false))
-	unnamed := lastSlash(h.resources("unnamed")[0].Physical)
+	unnamed := spi.LastSlash(h.resources("unnamed")[0].Physical)
 	for _, stack := range []string{"ony", "unnamed"} {
 		if _, err := h.invoke("DeleteStack", map[string]any{"StackName": stack}); err != nil {
 			t.Fatalf("DeleteStack %s: %v", stack, err)

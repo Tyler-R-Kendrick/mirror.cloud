@@ -84,7 +84,7 @@ func TestDynamoDBStreamCharacterization(t *testing.T) {
 	created := must("CreateTable", map[string]any{
 		"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "Username", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "KEYS_ONLY"},
 	})
-	arn := str(asMap(created["TableDescription"])["LatestStreamArn"])
+	arn := spi.Str(spi.Object(created["TableDescription"])["LatestStreamArn"])
 	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"Username": map[string]any{"S": "Fred"}}})
 	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"Username": map[string]any{"S": "Fred"}}})
 	update := map[string]any{"TableName": "T", "Key": map[string]any{"Username": map[string]any{"S": "Fred"}}, "UpdateExpression": "SET S = :r", "ExpressionAttributeValues": map[string]any{":r": map[string]any{"S": "Fred_Modified"}}}
@@ -95,39 +95,39 @@ func TestDynamoDBStreamCharacterization(t *testing.T) {
 	must("ExecuteStatement", map[string]any{"Statement": "UPDATE T SET partiql=1 WHERE Username='Alice'"})
 	must("ExecuteStatement", map[string]any{"Statement": "DELETE FROM T WHERE Username='Alice'"})
 	described := must("DescribeStream", map[string]any{"StreamArn": arn})
-	shard := str(asMap(asSlice(asMap(described["StreamDescription"])["Shards"])[0])["ShardId"])
+	shard := spi.Str(spi.Object(spi.Slice(spi.Object(described["StreamDescription"])["Shards"])[0])["ShardId"])
 	excluded := must("DescribeStream", map[string]any{"StreamArn": arn, "ExclusiveStartShardId": shard})
-	latest := str(must("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": shard, "ShardIteratorType": "LATEST"})["ShardIterator"])
-	at := str(must("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": shard, "ShardIteratorType": "AT_SEQUENCE_NUMBER", "SequenceNumber": "1"})["ShardIterator"])
-	trim := str(must("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": shard, "ShardIteratorType": "TRIM_HORIZON"})["ShardIterator"])
-	records := asSlice(must("GetRecords", map[string]any{"ShardIterator": trim})["Records"])
+	latest := spi.Str(must("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": shard, "ShardIteratorType": "LATEST"})["ShardIterator"])
+	at := spi.Str(must("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": shard, "ShardIteratorType": "AT_SEQUENCE_NUMBER", "SequenceNumber": "1"})["ShardIterator"])
+	trim := spi.Str(must("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": shard, "ShardIteratorType": "TRIM_HORIZON"})["ShardIterator"])
+	records := spi.Slice(must("GetRecords", map[string]any{"ShardIterator": trim})["Records"])
 	summaries := make([]any, 0, len(records))
 	for _, raw := range records {
-		record := asMap(raw)
-		dynamodb := asMap(record["dynamodb"])
+		record := spi.Object(raw)
+		dynamodb := spi.Object(record["dynamodb"])
 		summaries = append(summaries, map[string]any{"eventName": record["eventName"], "keys": dynamodb["Keys"], "size": dynamodb["SizeBytes"], "view": dynamodb["StreamViewType"]})
 	}
 	updated := must("CreateTable", map[string]any{
 		"TableName": "U", "KeySchema": []any{map[string]any{"AttributeName": "pk", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_AND_OLD_IMAGES"},
 	})
-	updateARN := str(asMap(updated["TableDescription"])["LatestStreamArn"])
+	updateARN := spi.Str(spi.Object(updated["TableDescription"])["LatestStreamArn"])
 	values := map[string]any{":v1": map[string]any{"S": "value1"}, ":v2": map[string]any{"S": "value2"}}
 	updateInput := map[string]any{"TableName": "U", "Key": map[string]any{"pk": map[string]any{"S": "my-item-id"}}, "UpdateExpression": "SET attr1 = :v1, attr2 = :v2", "ExpressionAttributeValues": values}
 	must("UpdateItem", updateInput)
 	must("UpdateItem", updateInput)
 	updateInput["ExpressionAttributeValues"] = map[string]any{":v1": map[string]any{"S": "value2"}, ":v2": map[string]any{"S": "value3"}}
 	must("UpdateItem", updateInput)
-	updateIterator := str(must("GetShardIterator", map[string]any{"StreamArn": updateARN, "ShardId": "shardId-000000000000", "ShardIteratorType": "TRIM_HORIZON"})["ShardIterator"])
-	updateRecords := asSlice(must("GetRecords", map[string]any{"ShardIterator": updateIterator})["Records"])
+	updateIterator := spi.Str(must("GetShardIterator", map[string]any{"StreamArn": updateARN, "ShardId": "shardId-000000000000", "ShardIteratorType": "TRIM_HORIZON"})["ShardIterator"])
+	updateRecords := spi.Slice(must("GetRecords", map[string]any{"ShardIterator": updateIterator})["Records"])
 	updateSummaries := make([]any, 0, len(updateRecords))
 	for _, raw := range updateRecords {
-		record := asMap(raw)
-		dynamodb := asMap(record["dynamodb"])
+		record := spi.Object(raw)
+		dynamodb := spi.Object(record["dynamodb"])
 		updateSummaries = append(updateSummaries, map[string]any{"eventName": record["eventName"], "keys": dynamodb["Keys"], "newImage": dynamodb["NewImage"], "oldImage": dynamodb["OldImage"], "sequenceNumber": dynamodb["SequenceNumber"], "size": dynamodb["SizeBytes"]})
 	}
 	golden.AssertJSON(t, map[string]any{
-		"description":     map[string]any{"keySchema": asMap(described["StreamDescription"])["KeySchema"], "streamLabel": asMap(described["StreamDescription"])["StreamLabel"], "streamViewType": asMap(described["StreamDescription"])["StreamViewType"]},
-		"exclusiveShards": asMap(excluded["StreamDescription"])["Shards"],
+		"description":     map[string]any{"keySchema": spi.Object(described["StreamDescription"])["KeySchema"], "streamLabel": spi.Object(described["StreamDescription"])["StreamLabel"], "streamViewType": spi.Object(described["StreamDescription"])["StreamViewType"]},
+		"exclusiveShards": spi.Object(excluded["StreamDescription"])["Shards"],
 		"iteratorFormat":  strings.HasPrefix(latest, arn+"|") && strings.Count(latest, "|") == 2 && strings.HasPrefix(at, arn+"|1|") && strings.Count(at, "|") == 2,
 		"records":         summaries,
 		"updateRecords":   updateSummaries,
@@ -148,20 +148,20 @@ func TestDynamoDBDataEncodingCharacterization(t *testing.T) {
 	created := must("CreateTable", map[string]any{
 		"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}, "StreamSpecification": map[string]any{"StreamEnabled": true, "StreamViewType": "NEW_AND_OLD_IMAGES"},
 	})
-	arn := str(asMap(created["TableDescription"])["LatestStreamArn"])
+	arn := spi.Str(spi.Object(created["TableDescription"])["LatestStreamArn"])
 	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "id1"}, "version": map[string]any{"N": "1"}, "data": map[string]any{"B": "kA=="}}})
 	firstItem := must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "id1"}}})["Item"]
 	iterator := must("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": "shardId-000000000000", "ShardIteratorType": "AT_SEQUENCE_NUMBER", "SequenceNumber": "1"})["ShardIterator"]
-	firstRecords := asSlice(must("GetRecords", map[string]any{"ShardIterator": iterator})["Records"])
+	firstRecords := spi.Slice(must("GetRecords", map[string]any{"ShardIterator": iterator})["Records"])
 	must("UpdateItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "id1"}}, "UpdateExpression": "SET version=:v", "ExpressionAttributeValues": map[string]any{":v": map[string]any{"N": "2"}}})
 	updatedItem := must("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "id1"}}})["Item"]
-	updatedRecords := asSlice(must("GetRecords", map[string]any{"ShardIterator": iterator})["Records"])
+	updatedRecords := spi.Slice(must("GetRecords", map[string]any{"ShardIterator": iterator})["Records"])
 	golden.AssertJSON(t, map[string]any{
 		"firstItem":       firstItem,
-		"firstStream":     asMap(asMap(firstRecords[0])["dynamodb"])["NewImage"],
+		"firstStream":     spi.Object(spi.Object(firstRecords[0])["dynamodb"])["NewImage"],
 		"updatedItem":     updatedItem,
-		"updatedStream":   asMap(asMap(updatedRecords[1])["dynamodb"])["NewImage"],
-		"recordEventName": asMap(updatedRecords[1])["eventName"],
+		"updatedStream":   spi.Object(spi.Object(updatedRecords[1])["dynamodb"])["NewImage"],
+		"recordEventName": spi.Object(updatedRecords[1])["eventName"],
 	})
 }
 
@@ -194,14 +194,14 @@ func TestDynamoDBKinesisDestination(t *testing.T) {
 	}
 	streamARN := "arn:aws:kinesis:us-east-1:000000000000:stream/s"
 	created := must("CreateTable", map[string]any{"TableName": "T", "KeySchema": []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}})
-	tableID := str(asMap(created["TableDescription"])["TableId"])
+	tableID := spi.Str(spi.Object(created["TableDescription"])["TableId"])
 	mustFault("EnableKinesisStreamingDestination", map[string]any{"TableName": "missing", "StreamArn": streamARN}, "Requested resource not found: Table: missing not found")
 	enabled := must("EnableKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN})
-	if enabled["DestinationStatus"] != "ENABLING" || len(asMap(enabled["EnableKinesisStreamingConfiguration"])) != 0 {
+	if enabled["DestinationStatus"] != "ENABLING" || len(spi.Object(enabled["EnableKinesisStreamingConfiguration"])) != 0 {
 		t.Fatalf("enable destination %#v", enabled)
 	}
 	described := must("DescribeKinesisStreamingDestination", map[string]any{"TableName": "T"})
-	destination := asMap(asSlice(described["KinesisDataStreamDestinations"])[0])
+	destination := spi.Object(spi.Slice(described["KinesisDataStreamDestinations"])[0])
 	if destination["StreamArn"] != streamARN || destination["DestinationStatus"] != "ACTIVE" {
 		t.Fatalf("describe destination %#v", described)
 	}
@@ -216,18 +216,18 @@ func TestDynamoDBKinesisDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	records := asSlice(recordResponse.Output["Records"])
+	records := spi.Slice(recordResponse.Output["Records"])
 	if len(records) != 3 {
 		t.Fatalf("Kinesis destination records %#v", records)
 	}
 	for index, event := range []string{"INSERT", "MODIFY", "REMOVE"} {
-		encoded := str(asMap(records[index])["Data"])
+		encoded := spi.Str(spi.Object(records[index])["Data"])
 		payload, err := base64.StdEncoding.DecodeString(encoded)
 		var record map[string]any
 		if err != nil || json.Unmarshal(payload, &record) != nil || record["tableName"] != "T" || record["eventName"] != event || record["eventSourceARN"] != nil {
 			t.Fatalf("%s Kinesis record %s", event, payload)
 		}
-		dynamodb := asMap(record["dynamodb"])
+		dynamodb := spi.Object(record["dynamodb"])
 		if event == "INSERT" && (dynamodb["NewImage"] == nil || dynamodb["OldImage"] != nil) || event == "MODIFY" && (dynamodb["NewImage"] == nil || dynamodb["OldImage"] == nil) || event == "REMOVE" && (dynamodb["NewImage"] != nil || dynamodb["OldImage"] == nil) {
 			t.Fatalf("%s Kinesis images %#v", event, dynamodb)
 		}
@@ -238,7 +238,7 @@ func TestDynamoDBKinesisDestination(t *testing.T) {
 	mustFault("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": missingARN, "UpdateKinesisStreamingConfiguration": map[string]any{"ApproximateCreationDateTimePrecision": "MICROSECOND"}}, "Table is not in a valid state to enable Kinesis Streaming Destination: No streaming destination with streamArn: "+missingARN+" found for table with tableName: T")
 	configuration := map[string]any{"ApproximateCreationDateTimePrecision": "MICROSECOND"}
 	updated := must("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": configuration})
-	if updated["DestinationStatus"] != "UPDATING" || asMap(updated["UpdateKinesisStreamingConfiguration"])["ApproximateCreationDateTimePrecision"] != "MICROSECOND" {
+	if updated["DestinationStatus"] != "UPDATING" || spi.Object(updated["UpdateKinesisStreamingConfiguration"])["ApproximateCreationDateTimePrecision"] != "MICROSECOND" {
 		t.Fatalf("update destination %#v", updated)
 	}
 	mustFault("UpdateKinesisStreamingDestination", map[string]any{"TableName": "T", "StreamArn": streamARN, "UpdateKinesisStreamingConfiguration": configuration}, "Invalid Request: Precision is already set to the desired value of MICROSECOND for tableId: "+tableID+", kdsArn: "+streamARN)
@@ -248,12 +248,12 @@ func TestDynamoDBKinesisDestination(t *testing.T) {
 		t.Fatalf("disable destination %#v", disabled)
 	}
 	described = must("DescribeKinesisStreamingDestination", map[string]any{"TableName": "T"})
-	if asMap(asSlice(described["KinesisDataStreamDestinations"])[0])["DestinationStatus"] != "DISABLED" {
+	if spi.Object(spi.Slice(described["KinesisDataStreamDestinations"])[0])["DestinationStatus"] != "DISABLED" {
 		t.Fatalf("disabled destination %#v", described)
 	}
 	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "after-disable"}}})
 	recordResponse, err = kinesisPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetRecords", Input: map[string]any{"ShardIterator": iterator.Output["ShardIterator"]}})
-	if err != nil || len(asSlice(recordResponse.Output["Records"])) != 3 {
+	if err != nil || len(spi.Slice(recordResponse.Output["Records"])) != 3 {
 		t.Fatalf("disabled destination emitted records %#v %v", recordResponse, err)
 	}
 }
@@ -296,7 +296,7 @@ func TestDynamoDBKinesisDestinationCharacterization(t *testing.T) {
 	must("PutItem", map[string]any{"TableName": "T", "Item": map[string]any{"id": map[string]any{"S": "one"}, "data": map[string]any{"B": "kA=="}}})
 	iterator := kinesisMust("GetShardIterator", map[string]any{"StreamName": "s", "ShardIteratorType": "TRIM_HORIZON"})
 	records := kinesisMust("GetRecords", map[string]any{"ShardIterator": iterator["ShardIterator"]})
-	encoded := str(asMap(asSlice(records["Records"])[0])["Data"])
+	encoded := spi.Str(spi.Object(spi.Slice(records["Records"])[0])["Data"])
 	payload, _ := base64.StdEncoding.DecodeString(encoded)
 	var record map[string]any
 	_ = json.Unmarshal(payload, &record)

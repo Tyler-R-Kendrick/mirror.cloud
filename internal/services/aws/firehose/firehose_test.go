@@ -547,7 +547,7 @@ func TestFirehoseConsumesFutureKinesisRecords(t *testing.T) {
 		if json.Unmarshal(record.Value, &retained) != nil {
 			t.Fatalf("invalid retained record %q", record.Value)
 		}
-		decoded := first(retained, "Decoded")
+		decoded := spi.First(retained, "Decoded")
 		key := id.Account + "/" + id.Region + "/out/1970/01/01/00/from-kinesis-1-1970-01-01-00-00-00-" + record.Key
 		reader, _, err := deps.Blobs.Get(context.Background(), key)
 		if err != nil {
@@ -621,7 +621,7 @@ func TestFirehoseConsumesMSKMessages(t *testing.T) {
 		for _, record := range records {
 			var retained map[string]any
 			_ = json.Unmarshal(record.Value, &retained)
-			decoded := first(retained, "Decoded")
+			decoded := spi.First(retained, "Decoded")
 			key := id.Account + "/" + id.Region + "/out/1970/01/01/00/" + stream + "-1-1970-01-01-00-00-01-" + record.Key
 			reader, _, err := deps.Blobs.Get(ctx, key)
 			if err != nil {
@@ -665,11 +665,11 @@ func TestFirehoseOpenSearchDestination(t *testing.T) {
 	put := invoke(firehose, "PutRecord", map[string]any{
 		"DeliveryStreamName": "search", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"city":"Austin"}`))},
 	})
-	recordID := first(put.Output, "RecordId")
+	recordID := spi.First(put.Output, "RecordId")
 	result := invoke(search, "Search", map[string]any{"DomainName": "logs", "Index": "events-1970-01-01", "query": map[string]any{"match": map[string]any{"city": "austin"}}})
 	outer, _ := result.Output["hits"].(map[string]any)
 	hits, _ := outer["hits"].([]any)
-	if len(hits) != 1 || first(hits[0].(map[string]any), "_id") != recordID {
+	if len(hits) != 1 || spi.First(hits[0].(map[string]any), "_id") != recordID {
 		t.Fatalf("OpenSearch hits %#v", hits)
 	}
 	key := id.Account + "/" + id.Region + "/out/backup/1970/01/01/00/search-1-1970-01-01-00-00-00-" + recordID
@@ -684,7 +684,7 @@ func TestFirehoseOpenSearchDestination(t *testing.T) {
 	}
 	description := invoke(firehose, "DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "search"}).Output["DeliveryStreamDescription"].(map[string]any)
 	described := description["Destinations"].([]any)[0].(map[string]any)["ElasticsearchDestinationDescription"].(map[string]any)
-	if first(described, "IndexRotationPeriod") != "OneDay" || first(described, "S3BackupMode") != "AllDocuments" {
+	if spi.First(described, "IndexRotationPeriod") != "OneDay" || spi.First(described, "S3BackupMode") != "AllDocuments" {
 		t.Fatalf("OpenSearch description %#v", described)
 	}
 
@@ -704,7 +704,7 @@ func TestFirehoseOpenSearchDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failedID := first(failedPut.Output, "RecordId")
+	failedID := spi.First(failedPut.Output, "RecordId")
 	reader, _, err = deps.Blobs.Get(context.Background(), id.Account+"/"+id.Region+"/out/errors/decompression-failed/1970/01/01/00/search-failing-1-1970-01-01-00-00-00-"+failedID)
 	if err != nil {
 		t.Fatal(err)
@@ -712,7 +712,7 @@ func TestFirehoseOpenSearchDestination(t *testing.T) {
 	failureBody, _ := io.ReadAll(reader)
 	_ = reader.Close()
 	failure := map[string]any{}
-	if json.Unmarshal(failureBody, &failure) != nil || first(failure, "errorCode") != "Decompression.Failed" || first(failure, "rawData") != base64.StdEncoding.EncodeToString([]byte("not-gzip")) {
+	if json.Unmarshal(failureBody, &failure) != nil || spi.First(failure, "errorCode") != "Decompression.Failed" || spi.First(failure, "rawData") != base64.StdEncoding.EncodeToString([]byte("not-gzip")) {
 		t.Fatalf("OpenSearch processing failure %s", failureBody)
 	}
 }
@@ -764,7 +764,7 @@ func TestFirehoseAmazonOpenSearchServiceDestination(t *testing.T) {
 		"DeliveryStreamName": "modern-search", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"city":"Austin"}`))},
 	})
 	result := call(search, "GetDocument", map[string]any{
-		"DomainName": "modern", "Index": "events-v2-1970-01-01", "Id": first(put.Output, "RecordId"),
+		"DomainName": "modern", "Index": "events-v2-1970-01-01", "Id": spi.First(put.Output, "RecordId"),
 	})
 	if result.Output["found"] != true {
 		t.Fatalf("modern OpenSearch document %#v", result.Output)
@@ -818,8 +818,8 @@ func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 		map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`not-json`))},
 	}})
 	responses := batch.Output["RequestResponses"].([]any)
-	validID := first(responses[0].(map[string]any), "RecordId")
-	invalidID := first(responses[1].(map[string]any), "RecordId")
+	validID := spi.First(responses[0].(map[string]any), "RecordId")
+	invalidID := spi.First(responses[1].(map[string]any), "RecordId")
 	items, _, _ := work.List(context.Background(), "buffered/buffer/", "", 0)
 	if len(items) != 1 {
 		t.Fatalf("persisted OpenSearch buffer %#v", items)
@@ -870,7 +870,7 @@ func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 
 	create("retrying", destination("retrying", 0, 10))
 	retryPut := call(p, "PutRecord", map[string]any{"DeliveryStreamName": "retrying", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"retry":true}`))}})
-	retryID := first(retryPut.Output, "RecordId")
+	retryID := spi.First(retryPut.Output, "RecordId")
 	items, _, _ = work.List(context.Background(), "retrying/retry/", "", 0)
 	if len(items) != 1 {
 		t.Fatalf("persisted OpenSearch retry %#v", items)
@@ -908,7 +908,7 @@ func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 
 	create("expired", destination("expired", 0, 2))
 	expiredPut := call(p, "PutRecord", map[string]any{"DeliveryStreamName": "expired", "Record": map[string]any{"Data": base64.StdEncoding.EncodeToString([]byte(`{"expired":true}`))}})
-	expiredID := first(expiredPut.Output, "RecordId")
+	expiredID := spi.First(expiredPut.Output, "RecordId")
 	items, _, _ = work.List(context.Background(), "expired/retry/", "", 0)
 	if len(items) != 1 {
 		t.Fatalf("persisted expiring OpenSearch retry %#v", items)
@@ -931,7 +931,7 @@ func TestOpenSearchBufferRetryPersistence(t *testing.T) {
 	_ = reader.Close()
 	var failure map[string]any
 	_ = json.Unmarshal(body, &failure)
-	if first(failure, "errorCode") != "400" || first(failure, "esDocumentId") != expiredID || first(failure, "esIndexName") != "events-1970-01-01" || first(failure, "rawData") != base64.StdEncoding.EncodeToString([]byte(`{"expired":true}`)) || first(failure, "arrivalTimestamp") != "1970-01-01T00:00:15Z" {
+	if spi.First(failure, "errorCode") != "400" || spi.First(failure, "esDocumentId") != expiredID || spi.First(failure, "esIndexName") != "events-1970-01-01" || spi.First(failure, "rawData") != base64.StdEncoding.EncodeToString([]byte(`{"expired":true}`)) || spi.First(failure, "arrivalTimestamp") != "1970-01-01T00:00:15Z" {
 		t.Fatalf("OpenSearch failure envelope %#v", failure)
 	}
 	wait("expired OpenSearch retry remained persisted", func() bool {
@@ -1033,7 +1033,7 @@ func TestOpenSearchServerlessDestinationValidationAndDescription(t *testing.T) {
 		t.Fatal(err)
 	}
 	description := response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["AmazonOpenSearchServerlessDestinationDescription"].(map[string]any)
-	if description["S3Configuration"] != nil || description["S3DestinationDescription"] == nil || description["VpcConfiguration"] != nil || description["VpcConfigurationDescription"] == nil || first(description, "S3BackupMode") != "FailedDocumentsOnly" || !reflect.DeepEqual(description["BufferingHints"], map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}) {
+	if description["S3Configuration"] != nil || description["S3DestinationDescription"] == nil || description["VpcConfiguration"] != nil || description["VpcConfigurationDescription"] == nil || spi.First(description, "S3BackupMode") != "FailedDocumentsOnly" || !reflect.DeepEqual(description["BufferingHints"], map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}) {
 		t.Fatalf("OpenSearch Serverless description %#v", description)
 	}
 	if _, err := call("UpdateDestination", map[string]any{
@@ -1044,7 +1044,7 @@ func TestOpenSearchServerlessDestinationValidationAndDescription(t *testing.T) {
 	}
 	response, _ = call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "serverless"})
 	description = response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["AmazonOpenSearchServerlessDestinationDescription"].(map[string]any)
-	if first(description, "IndexName") != "events-v2" {
+	if spi.First(description, "IndexName") != "events-v2" {
 		t.Fatalf("updated OpenSearch Serverless description %#v", description)
 	}
 }
@@ -1089,7 +1089,7 @@ func TestFirehoseOpenSearchServerlessDestination(t *testing.T) {
 	}
 	responses := response.Output["RequestResponses"].([]any)
 	for index := range records {
-		recordID := first(responses[index].(map[string]any), "RecordId")
+		recordID := spi.First(responses[index].(map[string]any), "RecordId")
 		key := id.Account + "/" + id.Region + "/out/backup/1970/01/01/00/serverless-delivery-1-1970-01-01-00-00-00-" + recordID
 		reader, _, err := deps.Blobs.Get(ctx, key)
 		if err != nil {
@@ -1101,7 +1101,7 @@ func TestFirehoseOpenSearchServerlessDestination(t *testing.T) {
 			t.Fatalf("OpenSearch Serverless backup %q", body)
 		}
 	}
-	failedID := first(responses[1].(map[string]any), "RecordId")
+	failedID := spi.First(responses[1].(map[string]any), "RecordId")
 	failureKey := id.Account + "/" + id.Region + "/out/backup/AmazonOpenSearchService-failed/1970/01/01/00/serverless-delivery-1-1970-01-01-00-00-00-" + failedID
 	var failureBody []byte
 	for deadline := time.After(pollBudget); polling(deadline); {
@@ -1114,7 +1114,7 @@ func TestFirehoseOpenSearchServerlessDestination(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	failure := map[string]any{}
-	if json.Unmarshal(failureBody, &failure) != nil || first(failure, "esDocumentId") != failedID || first(failure, "esIndexName") != "events" || first(failure, "rawData") != base64.StdEncoding.EncodeToString([]byte(records[1])) {
+	if json.Unmarshal(failureBody, &failure) != nil || spi.First(failure, "esDocumentId") != failedID || spi.First(failure, "esIndexName") != "events" || spi.First(failure, "rawData") != base64.StdEncoding.EncodeToString([]byte(records[1])) {
 		t.Fatalf("OpenSearch Serverless failure envelope %s", failureBody)
 	}
 }
@@ -1244,7 +1244,7 @@ func TestRedshiftDestinationValidationAndDescription(t *testing.T) {
 		t.Fatal(err)
 	}
 	description := response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["RedshiftDestinationDescription"].(map[string]any)
-	if description["Password"] != nil || description["Username"] != "firehose" || description["RetryOptions"].(map[string]any)["DurationInSeconds"] != 3600 || first(description, "S3BackupMode") != "Disabled" || description["S3DestinationDescription"] == nil {
+	if description["Password"] != nil || description["Username"] != "firehose" || description["RetryOptions"].(map[string]any)["DurationInSeconds"] != 3600 || spi.First(description, "S3BackupMode") != "Disabled" || description["S3DestinationDescription"] == nil {
 		t.Fatalf("Redshift description %#v", description)
 	}
 	if _, err := call("UpdateDestination", map[string]any{
@@ -1302,7 +1302,7 @@ func TestFirehoseRedshiftDestination(t *testing.T) {
 		t.Fatalf("Firehose Redshift rows %#v, %v", rows, err)
 	}
 	for index, rawResponse := range response.Output["RequestResponses"].([]any) {
-		recordID := first(rawResponse.(map[string]any), "RecordId")
+		recordID := spi.First(rawResponse.(map[string]any), "RecordId")
 		for prefix, expected := range map[string]string{"staging": []string{"1|one\n", "2|two\n"}[index], "source": []string{"1|one", "2|two"}[index]} {
 			key := id.Account + "/" + id.Region + "/out/" + prefix + "/1970/01/01/00/redshift-delivery-1-1970-01-01-00-00-00-" + recordID
 			reader, _, err := deps.Blobs.Get(context.Background(), key)
@@ -1526,7 +1526,7 @@ func TestIcebergDestinationValidationAndDescription(t *testing.T) {
 		t.Fatal(err)
 	}
 	description := described.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["IcebergDestinationDescription"].(map[string]any)
-	if first(description, "S3BackupMode") != "FailedDataOnly" || !reflect.DeepEqual(description["BufferingHints"], map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}) || !reflect.DeepEqual(description["RetryOptions"], map[string]any{"DurationInSeconds": 300}) || description["S3DestinationDescription"] == nil {
+	if spi.First(description, "S3BackupMode") != "FailedDataOnly" || !reflect.DeepEqual(description["BufferingHints"], map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}) || !reflect.DeepEqual(description["RetryOptions"], map[string]any{"DurationInSeconds": 300}) || description["S3DestinationDescription"] == nil {
 		t.Fatalf("Iceberg destination description %#v", description)
 	}
 	if _, err := call("UpdateDestination", map[string]any{
@@ -1588,7 +1588,7 @@ func TestFirehoseIcebergDestination(t *testing.T) {
 		t.Fatalf("Iceberg rows %#v, %v", rows, err)
 	}
 	for index, raw := range response.Output["RequestResponses"].([]any) {
-		recordID := first(raw.(map[string]any), "RecordId")
+		recordID := spi.First(raw.(map[string]any), "RecordId")
 		key := id.Account + "/" + id.Region + "/out/source/1970/01/01/00/iceberg-delivery-1-1970-01-01-00-00-00-" + recordID
 		reader, _, err := deps.Blobs.Get(ctx, key)
 		if err != nil {
@@ -1612,7 +1612,7 @@ func TestFirehoseIcebergDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failedID := first(failed.Output, "RecordId")
+	failedID := spi.First(failed.Output, "RecordId")
 	failureKey := id.Account + "/" + id.Region + "/out/errors/iceberg-failed/1970/01/01/00/iceberg-append-1-1970-01-01-00-00-00-" + failedID
 	reader, _, err := deps.Blobs.Get(ctx, failureKey)
 	if err != nil {
@@ -1676,7 +1676,7 @@ func TestSnowflakeDestinationValidationAndDescription(t *testing.T) {
 		t.Fatal(err)
 	}
 	description := response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["SnowflakeDestinationDescription"].(map[string]any)
-	if description["PrivateKey"] != nil || description["KeyPassphrase"] != nil || description["S3Configuration"] != nil || description["S3DestinationDescription"] == nil || first(description, "DataLoadingOption") != "JSON_MAPPING" || first(description, "S3BackupMode") != "FailedDataOnly" || !reflect.DeepEqual(description["BufferingHints"], map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 128}) || !reflect.DeepEqual(description["RetryOptions"], map[string]any{"DurationInSeconds": 60}) {
+	if description["PrivateKey"] != nil || description["KeyPassphrase"] != nil || description["S3Configuration"] != nil || description["S3DestinationDescription"] == nil || spi.First(description, "DataLoadingOption") != "JSON_MAPPING" || spi.First(description, "S3BackupMode") != "FailedDataOnly" || !reflect.DeepEqual(description["BufferingHints"], map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 128}) || !reflect.DeepEqual(description["RetryOptions"], map[string]any{"DurationInSeconds": 60}) {
 		t.Fatalf("Snowflake description %#v", description)
 	}
 	if _, err := call("UpdateDestination", map[string]any{
@@ -1687,7 +1687,7 @@ func TestSnowflakeDestinationValidationAndDescription(t *testing.T) {
 	}
 	response, _ = call("DescribeDeliveryStream", map[string]any{"DeliveryStreamName": "snowflake"})
 	description = response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["SnowflakeDestinationDescription"].(map[string]any)
-	if first(description, "Table") != "EVENTS_V2" || description["RetryOptions"].(map[string]any)["DurationInSeconds"] != float64(30) {
+	if spi.First(description, "Table") != "EVENTS_V2" || description["RetryOptions"].(map[string]any)["DurationInSeconds"] != float64(30) {
 		t.Fatalf("updated Snowflake description %#v", description)
 	}
 }
@@ -1725,7 +1725,7 @@ func TestFirehoseSnowflakeDestination(t *testing.T) {
 	}
 	var rows []map[string]any
 	for deadline := time.After(pollBudget); polling(deadline); {
-		rows, err = p.SnowflakeRows(ctx, id, first(destination, "AccountUrl"), "ANALYTICS", "PUBLIC", "EVENTS")
+		rows, err = p.SnowflakeRows(ctx, id, spi.First(destination, "AccountUrl"), "ANALYTICS", "PUBLIC", "EVENTS")
 		if err == nil && len(rows) == 2 {
 			break
 		}
@@ -1740,7 +1740,7 @@ func TestFirehoseSnowflakeDestination(t *testing.T) {
 	}
 	responses := response.Output["RequestResponses"].([]any)
 	for index := range records {
-		recordID := first(responses[index].(map[string]any), "RecordId")
+		recordID := spi.First(responses[index].(map[string]any), "RecordId")
 		key := id.Account + "/" + id.Region + "/out/source/1970/01/01/00/snowflake-delivery-1-1970-01-01-00-00-00-" + recordID
 		reader, _, err := deps.Blobs.Get(ctx, key)
 		if err != nil {
@@ -1752,7 +1752,7 @@ func TestFirehoseSnowflakeDestination(t *testing.T) {
 			t.Fatalf("Snowflake source backup %q", body)
 		}
 	}
-	failedID := first(responses[2].(map[string]any), "RecordId")
+	failedID := spi.First(responses[2].(map[string]any), "RecordId")
 	failureKey := id.Account + "/" + id.Region + "/out/errors/snowflake-failed/1970/01/01/00/snowflake-delivery-1-1970-01-01-00-00-00-" + failedID
 	reader, _, err := deps.Blobs.Get(ctx, failureKey)
 	if err != nil {
@@ -1832,7 +1832,7 @@ func TestFirehoseSnowflakeSecretAndPersistentBuffer(t *testing.T) {
 	var rows []map[string]any
 	var remaining []spi.KV
 	for deadline := time.After(pollBudget); polling(deadline); {
-		rows, err = p.SnowflakeRows(ctx, id, first(destination, "AccountUrl"), "ANALYTICS", "PUBLIC", "EVENTS")
+		rows, err = p.SnowflakeRows(ctx, id, spi.First(destination, "AccountUrl"), "ANALYTICS", "PUBLIC", "EVENTS")
 		remaining, _, _ = buffers.List(ctx, "snowflake-buffer/", "", 0)
 		if err == nil && len(rows) == 1 && len(remaining) == 0 {
 			break
@@ -1861,7 +1861,7 @@ func TestFirehoseSnowflakeSecretAndPersistentBuffer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failureKey := id.Account + "/" + id.Region + "/out/errors/snowflake-failed/1970/01/01/00/snowflake-rotated-1-1970-01-01-00-00-05-" + first(failed.Output, "RecordId")
+	failureKey := id.Account + "/" + id.Region + "/out/errors/snowflake-failed/1970/01/01/00/snowflake-rotated-1-1970-01-01-00-00-05-" + spi.First(failed.Output, "RecordId")
 	for deadline := time.After(pollBudget); polling(deadline); {
 		reader, _, err = deps.Blobs.Get(ctx, failureKey)
 		if err == nil {
@@ -1935,7 +1935,7 @@ func TestSplunkDestinationValidationAndDescription(t *testing.T) {
 		t.Fatal(err)
 	}
 	description := response.Output["DeliveryStreamDescription"].(map[string]any)["Destinations"].([]any)[0].(map[string]any)["SplunkDestinationDescription"].(map[string]any)
-	if description["HECToken"] != nil || first(description, "S3BackupMode") != "FailedEventsOnly" || description["HECAcknowledgmentTimeoutInSeconds"] != 300 {
+	if description["HECToken"] != nil || spi.First(description, "S3BackupMode") != "FailedEventsOnly" || description["HECAcknowledgmentTimeoutInSeconds"] != 300 {
 		t.Fatalf("Splunk description %#v", description)
 	}
 	if _, err := call("UpdateDestination", map[string]any{
@@ -1994,7 +1994,7 @@ func TestFirehoseSplunkDestination(t *testing.T) {
 		t.Fatal(err)
 	}
 	recordIDs := response.Output["RequestResponses"].([]any)
-	firstID := first(recordIDs[0].(map[string]any), "RecordId")
+	firstID := spi.First(recordIDs[0].(map[string]any), "RecordId")
 	requests := make([]capturedRequest, 2)
 	for index := range requests {
 		select {
@@ -2010,7 +2010,7 @@ func TestFirehoseSplunkDestination(t *testing.T) {
 		t.Fatalf("Splunk HEC acknowledgment request %#v", requests[1])
 	}
 	for index, value := range []string{"one", "two"} {
-		recordID := first(recordIDs[index].(map[string]any), "RecordId")
+		recordID := spi.First(recordIDs[index].(map[string]any), "RecordId")
 		key := id.Account + "/" + id.Region + "/out/all/1970/01/01/00/splunk-delivery-1-1970-01-01-00-00-00-" + recordID
 		reader, _, err := deps.Blobs.Get(context.Background(), key)
 		if err != nil {
@@ -3969,7 +3969,7 @@ func TestFirehoseEncryptionState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keyARN := first(createdKey.Output["KeyMetadata"].(map[string]any), "Arn")
+	keyARN := spi.First(createdKey.Output["KeyMetadata"].(map[string]any), "Arn")
 	configuration := map[string]any{"KeyType": "CUSTOMER_MANAGED_CMK", "KeyARN": keyARN}
 	if _, err := call("StartDeliveryStreamEncryption", map[string]any{
 		"DeliveryStreamName": "plain", "DeliveryStreamEncryptionConfigurationInput": configuration,
@@ -4444,7 +4444,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 			writer.WriteHeader(http.StatusInternalServerError)
 			return
 		}
-		requestID := first(payload, "requestId")
+		requestID := spi.First(payload, "requestId")
 		if request.URL.Path == "/failure" {
 			requestID = "wrong-request"
 		}
@@ -4508,7 +4508,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	record, _ := records[0].(map[string]any)
 	common := map[string]any{}
 	_ = json.Unmarshal([]byte(request.header.Get("X-Amz-Firehose-Common-Attributes")), &common)
-	if request.path != "/ok?tenant=1" || request.header.Get("Content-Type") != "application/json" || request.header.Get("Content-Encoding") != "gzip" || request.header.Get("X-Amz-Firehose-Protocol-Version") != "1.0" || request.header.Get("X-Amz-Firehose-Request-Id") != first(request.payload, "requestId") || request.header.Get("X-Amz-Firehose-Source-Arn") != "arn:aws:firehose:us-east-1:123456789012:deliverystream/http-endpoint" || request.header.Get("X-Amz-Firehose-Access-Key") != "secret" || request.payload["timestamp"] != float64(0) || first(record, "data") != base64.StdEncoding.EncodeToString([]byte("hello")) || common["commonAttributes"].(map[string]any)["environment"] != "test" {
+	if request.path != "/ok?tenant=1" || request.header.Get("Content-Type") != "application/json" || request.header.Get("Content-Encoding") != "gzip" || request.header.Get("X-Amz-Firehose-Protocol-Version") != "1.0" || request.header.Get("X-Amz-Firehose-Request-Id") != spi.First(request.payload, "requestId") || request.header.Get("X-Amz-Firehose-Source-Arn") != "arn:aws:firehose:us-east-1:123456789012:deliverystream/http-endpoint" || request.header.Get("X-Amz-Firehose-Access-Key") != "secret" || request.payload["timestamp"] != float64(0) || spi.First(record, "data") != base64.StdEncoding.EncodeToString([]byte("hello")) || common["commonAttributes"].(map[string]any)["environment"] != "test" {
 		t.Fatalf("HTTP request %#v %#v", request, common)
 	}
 	recordID := put.Output["RecordId"].(string)
@@ -4585,7 +4585,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	}
 	firstBatchRecord := records[0].(map[string]any)
 	secondBatchRecord := records[1].(map[string]any)
-	if first(request.payload, "requestId") != responses[0].(map[string]any)["RecordId"] || first(firstBatchRecord, "data") != base64.StdEncoding.EncodeToString([]byte("batch-one")) || first(secondBatchRecord, "data") != base64.StdEncoding.EncodeToString([]byte("batch-two")) || len(captured) != 0 {
+	if spi.First(request.payload, "requestId") != responses[0].(map[string]any)["RecordId"] || spi.First(firstBatchRecord, "data") != base64.StdEncoding.EncodeToString([]byte("batch-one")) || spi.First(secondBatchRecord, "data") != base64.StdEncoding.EncodeToString([]byte("batch-two")) || len(captured) != 0 {
 		t.Fatalf("HTTP batch request %#v response %#v queued %d", request, batch.Output, len(captured))
 	}
 
@@ -4609,8 +4609,8 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	if len(records) != 2 {
 		t.Fatalf("processed HTTP records %#v", records)
 	}
-	processedOne, _ := base64.StdEncoding.DecodeString(first(records[0].(map[string]any), "data"))
-	processedTwo, _ := base64.StdEncoding.DecodeString(first(records[1].(map[string]any), "data"))
+	processedOne, _ := base64.StdEncoding.DecodeString(spi.First(records[0].(map[string]any), "data"))
+	processedTwo, _ := base64.StdEncoding.DecodeString(spi.First(records[1].(map[string]any), "data"))
 	if string(processedOne) != "processed-one\n" || string(processedTwo) != "processed-two\n" {
 		t.Fatalf("processed HTTP data %q %q", processedOne, processedTwo)
 	}
@@ -4816,7 +4816,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	case <-time.After(pollBudget):
 		t.Fatal("persisted HTTP retry did not run")
 	}
-	if first(retried.payload, "requestId") != first(initialRetry.payload, "requestId") || retried.header.Get("X-Amz-Firehose-Access-Key") != "retry-success" {
+	if spi.First(retried.payload, "requestId") != spi.First(initialRetry.payload, "requestId") || retried.header.Get("X-Amz-Firehose-Access-Key") != "retry-success" {
 		t.Fatalf("HTTP retry %#v initial %#v", retried, initialRetry)
 	}
 	for deadline := time.After(pollBudget); ; {
@@ -4857,7 +4857,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	case <-time.After(pollBudget):
 		t.Fatal("HTTP retry did not run before expiration")
 	}
-	if first(retriedExhausted.payload, "requestId") != first(initialExhausted.payload, "requestId") {
+	if spi.First(retriedExhausted.payload, "requestId") != spi.First(initialExhausted.payload, "requestId") {
 		t.Fatalf("HTTP retry request IDs %#v %#v", initialExhausted.payload, retriedExhausted.payload)
 	}
 	for deadline := time.After(pollBudget); ; {
@@ -4938,7 +4938,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		t.Fatal("persisted HTTP buffer did not flush")
 	}
 	bufferedRecords := bufferedRequest.payload["records"].([]any)
-	if first(bufferedRequest.payload, "requestId") != bufferedFirst.Output["RecordId"] || len(bufferedRecords) != 2 || first(bufferedRecords[0].(map[string]any), "data") != base64.StdEncoding.EncodeToString([]byte("buffer-one")) || first(bufferedRecords[1].(map[string]any), "data") != base64.StdEncoding.EncodeToString([]byte("buffer-two")) {
+	if spi.First(bufferedRequest.payload, "requestId") != bufferedFirst.Output["RecordId"] || len(bufferedRecords) != 2 || spi.First(bufferedRecords[0].(map[string]any), "data") != base64.StdEncoding.EncodeToString([]byte("buffer-one")) || spi.First(bufferedRecords[1].(map[string]any), "data") != base64.StdEncoding.EncodeToString([]byte("buffer-two")) {
 		t.Fatalf("buffered HTTP request %#v", bufferedRequest.payload)
 	}
 	for deadline := time.After(pollBudget); ; {
@@ -4979,7 +4979,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 		t.Fatal("size-threshold HTTP buffer did not flush")
 	}
 	bufferedRecords = bufferedRequest.payload["records"].([]any)
-	if first(bufferedRequest.payload, "requestId") != sizeFirst.Output["RecordId"] || len(bufferedRecords) != 2 || first(bufferedRecords[0].(map[string]any), "data") != base64.StdEncoding.EncodeToString(largeA) || first(bufferedRecords[1].(map[string]any), "data") != base64.StdEncoding.EncodeToString(largeB) {
+	if spi.First(bufferedRequest.payload, "requestId") != sizeFirst.Output["RecordId"] || len(bufferedRecords) != 2 || spi.First(bufferedRecords[0].(map[string]any), "data") != base64.StdEncoding.EncodeToString(largeA) || spi.First(bufferedRecords[1].(map[string]any), "data") != base64.StdEncoding.EncodeToString(largeB) {
 		t.Fatal("size-threshold HTTP buffer changed record order or data")
 	}
 
@@ -5008,7 +5008,7 @@ func TestFirehoseHTTPEndpointDestination(t *testing.T) {
 	releaseBlocked <- struct{}{}
 	firstData := firstInFlight.payload["records"].([]any)[0].(map[string]any)
 	secondData := secondInFlight.payload["records"].([]any)[0].(map[string]any)
-	if first(firstData, "data") != base64.StdEncoding.EncodeToString([]byte("in-flight")) || first(secondData, "data") != base64.StdEncoding.EncodeToString([]byte("queued")) {
+	if spi.First(firstData, "data") != base64.StdEncoding.EncodeToString([]byte("in-flight")) || spi.First(secondData, "data") != base64.StdEncoding.EncodeToString([]byte("queued")) {
 		t.Fatalf("concurrent HTTP requests %#v %#v", firstInFlight.payload, secondInFlight.payload)
 	}
 

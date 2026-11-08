@@ -77,17 +77,17 @@ func TestSNSPublishTargetAndSubscriptionTimingCharacterization(t *testing.T) {
 	queueARN := "arn:aws:sqs:us-east-1:1:publish-target"
 
 	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topic, "Message": "before"})
-	if messages := asSlice(invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": "publish-target"}).Output["Messages"]); len(messages) != 0 {
+	if messages := spi.Slice(invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": "publish-target"}).Output["Messages"]); len(messages) != 0 {
 		t.Fatalf("message published before subscription was delivered: %#v", messages)
 	}
 	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": queueARN})
 	for _, field := range []string{"TopicArn", "TargetArn"} {
 		invokeSNS(t, p, id, "Publish", map[string]any{field: topic, "Message": "after"})
-		messages := asSlice(invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": "publish-target"}).Output["Messages"])
-		if len(messages) != 1 || !strings.Contains(str(asMap(messages[0])["Body"]), "after") {
+		messages := spi.Slice(invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": "publish-target"}).Output["Messages"])
+		if len(messages) != 1 || !strings.Contains(str(spi.Object(messages[0])["Body"]), "after") {
 			t.Fatalf("target publish %#v", messages)
 		}
-		invokeSNSQueue(t, qp, id, "DeleteMessage", map[string]any{"QueueName": "publish-target", "ReceiptHandle": asMap(messages[0])["ReceiptHandle"]})
+		invokeSNSQueue(t, qp, id, "DeleteMessage", map[string]any{"QueueName": "publish-target", "ReceiptHandle": spi.Object(messages[0])["ReceiptHandle"]})
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Publish", Input: map[string]any{
 		"TargetArn": "arn:aws:sns:us-east-1:1:endpoint/APNS/app/missing", "Message": "missing-endpoint",
@@ -142,7 +142,7 @@ func TestSNSCrossAccountTopicAccess(t *testing.T) {
 		t.Fatalf("cross-account set attributes: %v", err)
 	}
 	got := invokeSNS(t, p, caller, "GetTopicAttributes", map[string]any{"TopicArn": arn})
-	if str(asMap(got.Output["Attributes"])["DisplayName"]) != "shared" {
+	if str(spi.Object(got.Output["Attributes"])["DisplayName"]) != "shared" {
 		t.Fatalf("cross-account attributes: %#v", got.Output)
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: caller, Operation: "Publish", Input: map[string]any{
@@ -188,12 +188,12 @@ func TestSNSCrossAccountAndRegionSQSDelivery(t *testing.T) {
 	invokeSNS(t, p, owner, "Subscribe", map[string]any{"TopicArn": arn, "Protocol": "sqs", "Endpoint": queueARN})
 	invokeSNS(t, p, owner, "Publish", map[string]any{"TopicArn": arn, "Message": "remote-delivery"})
 	sameReceived := invokeSNSQueue(t, qp, sameRegionQueueOwner, "ReceiveMessage", map[string]any{"QueueUrl": sameQueue, "WaitTimeSeconds": 1})
-	if len(asSlice(sameReceived.Output["Messages"])) != 1 || !strings.Contains(str(asMap(asSlice(sameReceived.Output["Messages"])[0])["Body"]), "remote-delivery") {
+	if len(spi.Slice(sameReceived.Output["Messages"])) != 1 || !strings.Contains(str(spi.Object(spi.Slice(sameReceived.Output["Messages"])[0])["Body"]), "remote-delivery") {
 		t.Fatalf("cross-account delivery: %#v", sameReceived.Output)
 	}
 	received := invokeSNSQueue(t, qp, queueOwner, "ReceiveMessage", map[string]any{"QueueUrl": queue, "WaitTimeSeconds": 1})
-	messages := asSlice(received.Output["Messages"])
-	if len(messages) != 1 || !strings.Contains(str(asMap(messages[0])["Body"]), "remote-delivery") {
+	messages := spi.Slice(received.Output["Messages"])
+	if len(messages) != 1 || !strings.Contains(str(spi.Object(messages[0])["Body"]), "remote-delivery") {
 		t.Fatalf("cross-account/region delivery: %#v", received.Output)
 	}
 }
@@ -283,15 +283,15 @@ func TestSNSSQSRawDeliveryPreservesMessageAttributes(t *testing.T) {
 	}
 	snsCall("Publish", map[string]any{"TopicArn": topic, "Message": "raw", "MessageAttributes": attrs})
 	received := sqsCall("ReceiveMessage", map[string]any{"QueueName": "raw-attrs", "MessageAttributeNames": []any{"All"}})
-	messages := asSlice(received.Output["Messages"])
+	messages := spi.Slice(received.Output["Messages"])
 	if len(messages) != 1 {
 		t.Fatalf("messages %#v", received.Output)
 	}
-	message := asMap(messages[0])
-	messageAttrs := asMap(message["MessageAttributes"])
+	message := spi.Object(messages[0])
+	messageAttrs := spi.Object(message["MessageAttributes"])
 	if message["Body"] != "raw" || len(messageAttrs) != 2 ||
-		str(asMap(messageAttrs["text"])["StringValue"]) != "value" ||
-		str(asMap(messageAttrs["binary"])["BinaryValue"]) != base64.StdEncoding.EncodeToString([]byte{2, 3, 4}) {
+		str(spi.Object(messageAttrs["text"])["StringValue"]) != "value" ||
+		str(spi.Object(messageAttrs["binary"])["BinaryValue"]) != base64.StdEncoding.EncodeToString([]byte{2, 3, 4}) {
 		t.Fatalf("raw delivery %#v", message)
 	}
 }
@@ -306,12 +306,12 @@ func TestSNSUnicodeMessageToSQS(t *testing.T) {
 	message := `ö§a1"_!?,. £$-`
 	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topic, "Message": message})
 	received := invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": "unicode-message", "VisibilityTimeout": 0})
-	messages := asSlice(received.Output["Messages"])
+	messages := spi.Slice(received.Output["Messages"])
 	if len(messages) != 1 {
 		t.Fatalf("unicode messages=%#v", received.Output)
 	}
 	var envelope map[string]any
-	if err := json.Unmarshal([]byte(str(asMap(messages[0])["Body"])), &envelope); err != nil || envelope["Message"] != message {
+	if err := json.Unmarshal([]byte(str(spi.Object(messages[0])["Body"])), &envelope); err != nil || envelope["Message"] != message {
 		t.Fatalf("unicode envelope=%#v err=%v", envelope, err)
 	}
 }
@@ -326,7 +326,7 @@ func TestSNSSMSSubscriptionAttributes(t *testing.T) {
 	if !validSubscriptionARN(arn) {
 		t.Fatalf("SMS subscription=%#v", sub.Output)
 	}
-	attrs := asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": arn}).Output["Attributes"])
+	attrs := spi.Object(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": arn}).Output["Attributes"])
 	if attrs["Protocol"] != "sms" || attrs["Endpoint"] != "+123123123" || attrs["PendingConfirmation"] != "false" {
 		t.Fatalf("SMS subscription attributes=%#v", attrs)
 	}
@@ -375,8 +375,8 @@ func TestSNSStandardMessageGroupIDDelivery(t *testing.T) {
 	received := invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{
 		"QueueName": "standard-group", "WaitTimeSeconds": 1, "AttributeNames": []any{"All"},
 	})
-	messages := asSlice(received.Output["Messages"])
-	if len(messages) != 1 || str(asMap(asMap(messages[0])["Attributes"])["MessageGroupId"]) != "my-group-id-1" {
+	messages := spi.Slice(received.Output["Messages"])
+	if len(messages) != 1 || str(spi.Object(spi.Object(messages[0])["Attributes"])["MessageGroupId"]) != "my-group-id-1" {
 		t.Fatalf("standard fair-queue delivery=%#v", received.Output)
 	}
 }
@@ -407,11 +407,11 @@ func TestSNSFlattenedBinaryMessageAttributeDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "flattened-binary", "MessageAttributeNames": []any{"All"}}})
-	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+	if err != nil || len(spi.Slice(received.Output["Messages"])) != 1 {
 		t.Fatalf("flattened binary delivery=%#v err=%v", received, err)
 	}
-	message := asMap(asSlice(received.Output["Messages"])[0])
-	if str(asMap(asMap(message["MessageAttributes"])["binary"])["BinaryValue"]) != binaryValue {
+	message := spi.Object(spi.Slice(received.Output["Messages"])[0])
+	if str(spi.Object(spi.Object(message["MessageAttributes"])["binary"])["BinaryValue"]) != binaryValue {
 		t.Fatalf("flattened binary attributes=%#v", message)
 	}
 }
@@ -441,10 +441,10 @@ func TestSNSSQSNotificationPreservesMessageAttributes(t *testing.T) {
 		t.Fatal(err)
 	}
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "envelope-attrs"}})
-	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+	if err != nil || len(spi.Slice(received.Output["Messages"])) != 1 {
 		t.Fatalf("envelope delivery=%#v err=%v", received, err)
 	}
-	message := asMap(asSlice(received.Output["Messages"])[0])
+	message := spi.Object(spi.Slice(received.Output["Messages"])[0])
 	var envelope map[string]any
 	if json.Unmarshal([]byte(str(message["Body"])), &envelope) != nil || envelope["Subject"] != "subject" || str(envelope["Timestamp"]) == "" || !validTestSNSNotificationSignature(envelope) || !strings.Contains(str(envelope["SigningCertURL"]), "SimpleNotificationService.pem") || !strings.Contains(str(envelope["UnsubscribeURL"]), "Action=Unsubscribe") {
 		t.Fatalf("notification envelope=%#v", envelope)
@@ -522,7 +522,7 @@ func TestPublishBatchPublishesNothingWhenAnEntryIsRefused(t *testing.T) {
 			t.Fatalf("%s: PublishBatch succeeded", name)
 		}
 		received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "refused-batch", "MaxNumberOfMessages": 10}})
-		if err != nil || len(asSlice(received.Output["Messages"])) != 0 {
+		if err != nil || len(spi.Slice(received.Output["Messages"])) != 0 {
 			t.Fatalf("%s: a refused batch delivered %#v (err %v)", name, received.Output["Messages"], err)
 		}
 	}
@@ -552,11 +552,11 @@ func TestSNSSQSNotificationSignatureVersionTwo(t *testing.T) {
 		t.Fatal(err)
 	}
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "signature-v2"}})
-	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+	if err != nil || len(spi.Slice(received.Output["Messages"])) != 1 {
 		t.Fatalf("signature v2 delivery=%#v err=%v", received, err)
 	}
 	var envelope map[string]any
-	if json.Unmarshal([]byte(str(asMap(asSlice(received.Output["Messages"])[0])["Body"])), &envelope) != nil || str(envelope["SignatureVersion"]) != "2" || !validTestSNSNotificationSignature(envelope) {
+	if json.Unmarshal([]byte(str(spi.Object(spi.Slice(received.Output["Messages"])[0])["Body"])), &envelope) != nil || str(envelope["SignatureVersion"]) != "2" || !validTestSNSNotificationSignature(envelope) {
 		t.Fatalf("signature v2 envelope=%#v", envelope)
 	}
 }
@@ -718,10 +718,10 @@ func TestSNSSQSDeliveryPropagatesTraceHeader(t *testing.T) {
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{
 		"QueueName": "trace-queue", "AttributeNames": []any{"AWSTraceHeader"},
 	}})
-	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+	if err != nil || len(spi.Slice(received.Output["Messages"])) != 1 {
 		t.Fatalf("trace delivery=%#v err=%v", received, err)
 	}
-	attrs := asMap(asMap(asSlice(received.Output["Messages"])[0])["Attributes"])
+	attrs := spi.Object(spi.Object(spi.Slice(received.Output["Messages"])[0])["Attributes"])
 	if attrs["AWSTraceHeader"] != trace {
 		t.Fatalf("trace attributes=%#v", attrs)
 	}
@@ -787,8 +787,8 @@ func TestSNSLambdaSuccessFeedbackDeliveryLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events := asSlice(response.Output["events"])
-	if len(events) != 1 || !strings.Contains(str(asMap(events[0])["message"]), `"messageId"`) || !strings.Contains(str(asMap(events[0])["message"]), `"statusCode":200`) {
+	events := spi.Slice(response.Output["events"])
+	if len(events) != 1 || !strings.Contains(str(spi.Object(events[0])["message"]), `"messageId"`) || !strings.Contains(str(spi.Object(events[0])["message"]), `"statusCode":200`) {
 		t.Fatalf("feedback log %#v", events)
 	}
 	if _, err := lp.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteFunction", Input: map[string]any{"FunctionName": "feedback"}}); err != nil {
@@ -797,7 +797,7 @@ func TestSNSLambdaSuccessFeedbackDeliveryLog(t *testing.T) {
 	invokeSNS(t, p, id, "SetTopicAttributes", map[string]any{"TopicArn": topic, "AttributeName": "LambdaFailureFeedbackRoleArn", "AttributeValue": "arn:aws:iam::1:role/sns"})
 	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topic, "Message": "failed"})
 	response, err = logsPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetLogEvents", Input: map[string]any{"logGroupName": group, "logStreamName": "delivery"}})
-	if err != nil || len(asSlice(response.Output["events"])) != 2 || !strings.Contains(str(asMap(asSlice(response.Output["events"])[1])["message"]), `"statusCode":500`) {
+	if err != nil || len(spi.Slice(response.Output["events"])) != 2 || !strings.Contains(str(spi.Object(spi.Slice(response.Output["events"])[1])["message"]), `"statusCode":500`) {
 		t.Fatalf("failure feedback log %#v err=%v", response, err)
 	}
 }
@@ -832,7 +832,7 @@ func TestSNSControlPlaneOperations(t *testing.T) {
 		t.Fatalf("topic attributes %#v", attributes)
 	}
 	must("SetTopicAttributes", map[string]any{"TopicArn": topic, "AttributeName": "DeliveryPolicy", "AttributeValue": `{"http":{"defaultHealthyRetryPolicy":{"numRetries":1}}}`})
-	if got := asMap(must("GetTopicAttributes", map[string]any{"TopicArn": topic}).Output["Attributes"].(map[string]any)["EffectiveDeliveryPolicy"])["http"]; got == nil {
+	if got := spi.Object(must("GetTopicAttributes", map[string]any{"TopicArn": topic}).Output["Attributes"].(map[string]any)["EffectiveDeliveryPolicy"])["http"]; got == nil {
 		t.Fatal("effective delivery policy was not projected")
 	}
 	must("SetTopicAttributes", map[string]any{"TopicArn": topic, "AttributeName": "DeliveryPolicy", "AttributeValue": ""})
@@ -994,7 +994,7 @@ func TestSNSControlPlaneOperations(t *testing.T) {
 	}
 	must("CreateSMSSandboxPhoneNumber", map[string]any{"PhoneNumber": phone})
 	must("VerifySMSSandboxPhoneNumber", map[string]any{"PhoneNumber": phone, "OneTimePassword": "123456"})
-	if phones := must("ListSMSSandboxPhoneNumbers", nil).Output["PhoneNumbers"].([]any); len(phones) != 1 || asMap(phones[0])["Status"] != "Verified" {
+	if phones := must("ListSMSSandboxPhoneNumbers", nil).Output["PhoneNumbers"].([]any); len(phones) != 1 || spi.Object(phones[0])["Status"] != "Verified" {
 		t.Fatalf("sandbox phones %#v", phones)
 	}
 	if status := must("GetSMSSandboxAccountStatus", nil).Output; status["IsInSandbox"] != true {
@@ -1085,7 +1085,7 @@ func TestSNSFIFOAttributesDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	attrs, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": created.Output["TopicArn"]}})
-	if err != nil || str(asMap(attrs.Output["Attributes"])["ContentBasedDeduplication"]) != "false" {
+	if err != nil || str(spi.Object(attrs.Output["Attributes"])["ContentBasedDeduplication"]) != "false" {
 		t.Fatalf("FIFO attributes %#v err=%v", attrs, err)
 	}
 }
@@ -1152,7 +1152,7 @@ func TestTopicValidationAndPublishTargetCharacterization(t *testing.T) {
 		t.Fatalf("duplicate=%#v/%v different=%#v target=%#v malformed=%#v missing=%#v missingPermission=%#v malformedPermissionARN=%#v crossScopePermissionARN=%#v missingAttribute=%#v malformedAttributeARN=%#v crossScopeAttributeARN=%#v malformedDeleteARN=%#v crossScopeDeleteARN=%#v missingSubscription=%#v malformedSubscriptionARN=%#v crossScopeSubscriptionARN=%#v malformedConfirmTopicARN=%#v crossScopeConfirmTopicARN=%#v missingTag=%#v moreTags=%#v", duplicate, duplicateFault, differentFault, targetFault, malformedFault, missingFault, missingPermissionFault, malformedPermissionARNFault, crossScopePermissionARNFault, missingAttributeFault, malformedAttributeARNFault, crossScopeAttributeARNFault, malformedDeleteARNFault, crossScopeDeleteARNFault, missingSubscriptionFault, malformedSubscriptionARNFault, crossScopeSubscriptionARNFault, malformedConfirmTopicARNFault, crossScopeConfirmTopicARNFault, missingTagFault, moreTagsFault)
 	}
 	attrs, fault := call("GetTopicAttributes", map[string]any{"TopicArn": arn})
-	if fault != nil || str(asMap(attrs.Output["Attributes"])["DisplayName"]) != "before" {
+	if fault != nil || str(spi.Object(attrs.Output["Attributes"])["DisplayName"]) != "before" {
 		t.Fatalf("malformed SetTopicAttributes mutated topic: %#v/%v", attrs, fault)
 	}
 	if _, fault := call("DeleteTopic", map[string]any{"TopicArn": arn}); fault != nil {
@@ -1260,11 +1260,11 @@ func TestSNSListPagination(t *testing.T) {
 		}
 	}
 	first, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListTopics", Input: map[string]any{}})
-	if err != nil || len(asSlice(first.Output["Topics"])) != 100 || str(first.Output["NextToken"]) == "" {
+	if err != nil || len(spi.Slice(first.Output["Topics"])) != 100 || str(first.Output["NextToken"]) == "" {
 		t.Fatalf("first topic page=%#v err=%v", first, err)
 	}
 	second, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListTopics", Input: map[string]any{"NextToken": first.Output["NextToken"]}})
-	if err != nil || len(asSlice(second.Output["Topics"])) != 1 || second.Output["NextToken"] != nil {
+	if err != nil || len(spi.Slice(second.Output["Topics"])) != 1 || second.Output["NextToken"] != nil {
 		t.Fatalf("second topic page=%#v err=%v", second, err)
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListTopics", Input: map[string]any{"NextToken": "bad"}}); err == nil {
@@ -1282,11 +1282,11 @@ func TestSNSListPagination(t *testing.T) {
 		}
 	}
 	first, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSubscriptionsByTopic", Input: map[string]any{"TopicArn": topic}})
-	if err != nil || len(asSlice(first.Output["Subscriptions"])) != 100 || str(first.Output["NextToken"]) == "" {
+	if err != nil || len(spi.Slice(first.Output["Subscriptions"])) != 100 || str(first.Output["NextToken"]) == "" {
 		t.Fatalf("first subscription page=%#v err=%v", first, err)
 	}
 	second, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSubscriptionsByTopic", Input: map[string]any{"TopicArn": topic, "NextToken": first.Output["NextToken"]}})
-	if err != nil || len(asSlice(second.Output["Subscriptions"])) != 1 || second.Output["NextToken"] != nil {
+	if err != nil || len(spi.Slice(second.Output["Subscriptions"])) != 1 || second.Output["NextToken"] != nil {
 		t.Fatalf("second subscription page=%#v err=%v", second, err)
 	}
 }
@@ -1406,7 +1406,7 @@ func TestSNSFIFOTopicToSQSWithoutQueueDeduplication(t *testing.T) {
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{
 		"QueueName": "sns-fifo-no-dedup.fifo", "AttributeNames": []any{"All"},
 	}})
-	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+	if err != nil || len(spi.Slice(received.Output["Messages"])) != 1 {
 		t.Fatalf("FIFO SNS delivery=%#v err=%v", received, err)
 	}
 }
@@ -1426,13 +1426,13 @@ func TestSNSFIFOTopicToStandardSQS(t *testing.T) {
 		invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": topicARN, "Message": "deduplicated", "MessageGroupId": "group-1"})
 	}
 	first := invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": "sns-fifo-standard", "MaxNumberOfMessages": 10})
-	if len(asSlice(first.Output["Messages"])) != 1 {
+	if len(spi.Slice(first.Output["Messages"])) != 1 {
 		t.Fatalf("first delivery=%#v", first.Output)
 	}
-	message := asMap(asSlice(first.Output["Messages"])[0])
+	message := spi.Object(spi.Slice(first.Output["Messages"])[0])
 	invokeSNSQueue(t, qp, id, "DeleteMessage", map[string]any{"QueueName": "sns-fifo-standard", "ReceiptHandle": message["ReceiptHandle"]})
 	second := invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": "sns-fifo-standard", "MaxNumberOfMessages": 10})
-	if len(asSlice(second.Output["Messages"])) != 0 {
+	if len(spi.Slice(second.Output["Messages"])) != 0 {
 		t.Fatalf("duplicate delivery=%#v", second.Output)
 	}
 }
@@ -1464,11 +1464,11 @@ func TestSNSFIFOPublishBatchRedrivesToFIFODLQ(t *testing.T) {
 		map[string]any{"Id": "two", "Message": "second", "MessageGroupId": "group", "MessageDeduplicationId": "dedup-two"},
 	}
 	batch := invokeSNS(t, p, id, "PublishBatch", map[string]any{"TopicArn": topicARN, "Entries": entries})
-	if len(asSlice(batch.Output["Successful"])) != len(entries) {
+	if len(spi.Slice(batch.Output["Successful"])) != len(entries) {
 		t.Fatalf("publish batch=%#v", batch.Output)
 	}
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "sns-fifo-dlq.fifo", "AttributeNames": []any{"All"}, "MaxNumberOfMessages": 10}})
-	if err != nil || len(asSlice(received.Output["Messages"])) != len(entries) {
+	if err != nil || len(spi.Slice(received.Output["Messages"])) != len(entries) {
 		t.Fatalf("FIFO DLQ messages=%#v err=%v", received, err)
 	}
 }
@@ -1493,11 +1493,11 @@ func TestSNSPublishBatchToFIFOSQS(t *testing.T) {
 		map[string]any{"Id": "three", "Message": "three", "MessageGroupId": "g"},
 	}
 	response, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PublishBatch", Input: map[string]any{"TopicArn": topic, "Entries": entries}})
-	if err != nil || len(asSlice(response.Output["Successful"])) != len(entries) {
+	if err != nil || len(spi.Slice(response.Output["Successful"])) != len(entries) {
 		t.Fatalf("FIFO batch response=%#v err=%v", response, err)
 	}
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "sns-batch.fifo", "MaxNumberOfMessages": 10}})
-	if err != nil || len(asSlice(received.Output["Messages"])) != len(entries) {
+	if err != nil || len(spi.Slice(received.Output["Messages"])) != len(entries) {
 		t.Fatalf("FIFO batch delivery=%#v err=%v", received, err)
 	}
 }
@@ -1521,7 +1521,7 @@ func TestSNSFIFODeduplicationAcrossSubscriptions(t *testing.T) {
 	}
 	for _, queue := range []string{"dedup-one", "dedup-two"} {
 		received := invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": queue, "MaxNumberOfMessages": 10}).Output["Messages"]
-		if len(asSlice(received)) != 1 {
+		if len(spi.Slice(received)) != 1 {
 			t.Fatalf("queue %s received %#v", queue, received)
 		}
 	}
@@ -1548,13 +1548,13 @@ func TestSNSFIFOOrderingAcrossSubscriptions(t *testing.T) {
 	}
 	var expected []string
 	for _, queue := range []string{"order-one.fifo", "order-two.fifo"} {
-		received := asSlice(invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": queue, "MaxNumberOfMessages": 10, "AttributeNames": []any{"All"}}).Output["Messages"])
+		received := spi.Slice(invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": queue, "MaxNumberOfMessages": 10, "AttributeNames": []any{"All"}}).Output["Messages"])
 		if len(received) != 3 {
 			t.Fatalf("queue %s received %#v", queue, received)
 		}
 		var bodies []string
 		for _, message := range received {
-			bodies = append(bodies, str(asMap(message)["Body"]))
+			bodies = append(bodies, str(spi.Object(message)["Body"]))
 		}
 		if expected == nil {
 			expected = bodies
@@ -1579,8 +1579,8 @@ func TestSNSFIFONoContentDeduplicationDelivery(t *testing.T) {
 	input := map[string]any{"TopicArn": topic, "Message": "explicit-dedup", "MessageGroupId": "group", "MessageDeduplicationId": "dedup-id"}
 	invokeSNS(t, p, id, "Publish", input)
 	invokeSNS(t, p, id, "Publish", input)
-	received := asSlice(invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": "sns-no-cbd.fifo", "MaxNumberOfMessages": 10}).Output["Messages"])
-	if len(received) != 1 || str(asMap(received[0])["Body"]) == "" {
+	received := spi.Slice(invokeSNSQueue(t, qp, id, "ReceiveMessage", map[string]any{"QueueName": "sns-no-cbd.fifo", "MaxNumberOfMessages": 10}).Output["Messages"])
+	if len(received) != 1 || str(spi.Object(received[0])["Body"]) == "" {
 		t.Fatalf("FIFO no-CBD delivery=%#v", received)
 	}
 }
@@ -1739,7 +1739,7 @@ func TestSNSPublishBatchSQSDelivery(t *testing.T) {
 			map[string]any{"Id": "five", "Message": `{"default":"test default","sqs":"test sqs"}`, "MessageStructure": "json"},
 		},
 	}})
-	if err != nil || len(asSlice(response.Output["Successful"])) != 5 {
+	if err != nil || len(spi.Slice(response.Output["Successful"])) != 5 {
 		t.Fatalf("batch response=%#v err=%v", response, err)
 	}
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{
@@ -1748,16 +1748,16 @@ func TestSNSPublishBatchSQSDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	messages := asSlice(received.Output["Messages"])
+	messages := spi.Slice(received.Output["Messages"])
 	if len(messages) != 5 {
 		t.Fatalf("batch messages=%#v", received.Output)
 	}
 	seen := map[string]bool{}
 	for _, raw := range messages {
-		message := asMap(raw)
+		message := spi.Object(raw)
 		body := str(message["Body"])
 		seen[body] = true
-		if body == "two attributes" && len(asMap(message["MessageAttributes"])) != 2 {
+		if body == "two attributes" && len(spi.Object(message["MessageAttributes"])) != 2 {
 			t.Fatalf("raw attributes=%#v", message)
 		}
 	}
@@ -1832,7 +1832,7 @@ func TestSNSSQSSubscriptionAutoConfirmation(t *testing.T) {
 	}
 	topic := str(invokeSNS(t, p, id, "CreateTopic", map[string]any{"Name": "auto-confirm"}).Output["TopicArn"])
 	sub := invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:auto-confirm"})
-	attrs := asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}).Output["Attributes"])
+	attrs := spi.Object(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}).Output["Attributes"])
 	if str(attrs["PendingConfirmation"]) != "false" {
 		t.Fatalf("SQS subscription remained pending: %#v", attrs)
 	}
@@ -1919,7 +1919,7 @@ func TestSNSPlatformEndpointAttributesProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"Enabled": "true", "Token": "token", "CustomUserData": "custom"}
-	if got := asMap(get.Output["Attributes"]); !reflect.DeepEqual(got, want) {
+	if got := spi.Object(get.Output["Attributes"]); !reflect.DeepEqual(got, want) {
 		t.Fatalf("endpoint attributes %#v, want %#v", got, want)
 	}
 }
@@ -1946,7 +1946,7 @@ func TestSNSPlatformEndpointCustomUserDataPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := str(asMap(get.Output["Attributes"])["CustomUserData"]); got != "parameter" {
+	if got := str(spi.Object(get.Output["Attributes"])["CustomUserData"]); got != "parameter" {
 		t.Fatalf("custom user data=%q", got)
 	}
 }
@@ -1971,11 +1971,11 @@ func TestSNSPlatformEndpointListProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	endpoints := asSlice(listed.Output["Endpoints"])
+	endpoints := spi.Slice(listed.Output["Endpoints"])
 	if len(endpoints) != 1 {
 		t.Fatalf("endpoints %#v", listed.Output)
 	}
-	entry := asMap(endpoints[0])
+	entry := spi.Object(endpoints[0])
 	if got := str(entry["EndpointArn"]); !strings.Contains(got, ":endpoint/GCM/endpoint-list/") {
 		t.Fatalf("endpoint ARN %q", got)
 	}
@@ -2038,7 +2038,7 @@ func TestSNSPlatformApplicationAttributesProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := asMap(get.Output["Attributes"]); !reflect.DeepEqual(got, map[string]any{"Enabled": "true"}) {
+	if got := spi.Object(get.Output["Attributes"]); !reflect.DeepEqual(got, map[string]any{"Enabled": "true"}) {
 		t.Fatalf("initial application attributes %#v", got)
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "SetPlatformApplicationAttributes", Input: map[string]any{
@@ -2051,11 +2051,11 @@ func TestSNSPlatformApplicationAttributesProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{"Enabled": "true", "SuccessFeedbackSampleRate": "50"}
-	if got := asMap(get.Output["Attributes"]); !reflect.DeepEqual(got, want) {
+	if got := spi.Object(get.Output["Attributes"]); !reflect.DeepEqual(got, want) {
 		t.Fatalf("updated application attributes %#v, want %#v", got, want)
 	}
 	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListPlatformApplications"})
-	if err != nil || len(asSlice(listed.Output["PlatformApplications"])) != 1 || !reflect.DeepEqual(asMap(asSlice(listed.Output["PlatformApplications"])[0])["Attributes"], want) {
+	if err != nil || len(spi.Slice(listed.Output["PlatformApplications"])) != 1 || !reflect.DeepEqual(spi.Object(spi.Slice(listed.Output["PlatformApplications"])[0])["Attributes"], want) {
 		t.Fatalf("listed application attributes %#v err=%v", listed, err)
 	}
 }
@@ -2216,7 +2216,7 @@ func TestSNSPlatformEndpointDeletionCleansSubscriptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(asSlice(listed.Output["Subscriptions"])) != 0 {
+	if len(spi.Slice(listed.Output["Subscriptions"])) != 0 {
 		t.Fatalf("endpoint subscription remained: %#v", listed.Output)
 	}
 }
@@ -2254,7 +2254,7 @@ func TestSNSPlatformApplicationDeletionCleansSubscriptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(asSlice(listed.Output["Subscriptions"])) != 0 {
+	if len(spi.Slice(listed.Output["Subscriptions"])) != 0 {
 		t.Fatalf("application subscription remained: %#v", listed.Output)
 	}
 }
@@ -2272,7 +2272,7 @@ func TestSNSTopicAttributesIncludeDefaultPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := str(asMap(attrs.Output["Attributes"])["Policy"])
+	policy := str(spi.Object(attrs.Output["Attributes"])["Policy"])
 	var decoded map[string]any
 	if json.Unmarshal([]byte(policy), &decoded) != nil || decoded["Version"] != "2008-10-17" || decoded["Id"] != "__default_policy_ID" || !strings.Contains(policy, "__default_statement_ID") || !strings.Contains(policy, created.Output["TopicArn"].(string)) {
 		t.Fatalf("default topic policy=%q", policy)
@@ -2429,7 +2429,7 @@ func TestSNSTopicTagLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListTagsForResource", Input: map[string]any{"ResourceArn": untagged.Output["TopicArn"]}})
-	if err != nil || len(asSlice(listed.Output["Tags"])) != 0 {
+	if err != nil || len(spi.Slice(listed.Output["Tags"])) != 0 {
 		t.Fatalf("empty tags=%#v err=%v", listed, err)
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateTopic", Input: map[string]any{
@@ -2458,7 +2458,7 @@ func TestSNSTopicTagLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	listed, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListTagsForResource", Input: map[string]any{"ResourceArn": recreated.Output["TopicArn"]}})
-	if err != nil || len(asSlice(listed.Output["Tags"])) != 1 || str(asMap(asSlice(listed.Output["Tags"])[0])["Value"]) != "new" {
+	if err != nil || len(spi.Slice(listed.Output["Tags"])) != 1 || str(spi.Object(spi.Slice(listed.Output["Tags"])[0])["Value"]) != "new" {
 		t.Fatalf("recreated tags=%#v err=%v", listed, err)
 	}
 }
@@ -2501,11 +2501,11 @@ func TestSNSTopicDeliveryPolicyCRUD(t *testing.T) {
 		if getErr != nil {
 			t.Fatal(getErr)
 		}
-		return asMap(response.Output["Attributes"])
+		return spi.Object(response.Output["Attributes"])
 	}
 	attrs := get()
-	effectiveHTTP := asMap(asMap(attrs["EffectiveDeliveryPolicy"])["http"])
-	requestPolicy := asMap(effectiveHTTP["defaultRequestPolicy"])
+	effectiveHTTP := spi.Object(spi.Object(attrs["EffectiveDeliveryPolicy"])["http"])
+	requestPolicy := spi.Object(effectiveHTTP["defaultRequestPolicy"])
 	if str(requestPolicy["headerContentType"]) != "application/json" || !strings.Contains(str(attrs["DeliveryPolicy"]), "application/json") {
 		t.Fatalf("initial delivery policy %#v", get())
 	}
@@ -2573,14 +2573,14 @@ func TestSNSTopicPermissionLifecycle(t *testing.T) {
 	add("grant-one")
 	add("grant-two")
 	attrs, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": topic}})
-	if err != nil || !strings.Contains(str(asMap(attrs.Output["Attributes"])["Policy"]), "grant-one") || !strings.Contains(str(asMap(attrs.Output["Attributes"])["Policy"]), "grant-two") {
+	if err != nil || !strings.Contains(str(spi.Object(attrs.Output["Attributes"])["Policy"]), "grant-one") || !strings.Contains(str(spi.Object(attrs.Output["Attributes"])["Policy"]), "grant-two") {
 		t.Fatalf("added permissions=%#v err=%v", attrs, err)
 	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "RemovePermission", Input: map[string]any{"TopicArn": topic, "Label": "grant-one"}}); err != nil {
 		t.Fatal(err)
 	}
 	attrs, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": topic}})
-	policy := str(asMap(attrs.Output["Attributes"])["Policy"])
+	policy := str(spi.Object(attrs.Output["Attributes"])["Policy"])
 	if err != nil || strings.Contains(policy, "grant-one") || !strings.Contains(policy, "grant-two") {
 		t.Fatalf("removed permission policy=%q err=%v", policy, err)
 	}
@@ -2613,7 +2613,7 @@ func TestSNSSMSAttributeValidationAndSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	attrs := asMap(response.Output["Attributes"])
+	attrs := spi.Object(response.Output["Attributes"])
 	if len(attrs) != 2 || attrs["DefaultSenderID"] != "Mirror" || attrs["DefaultSMSType"] != "Promotional" {
 		t.Fatalf("filtered SMS attributes %#v", attrs)
 	}
@@ -2638,7 +2638,7 @@ func TestSNSSMSAttributesMerge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	attrs := asMap(response.Output["Attributes"])
+	attrs := spi.Object(response.Output["Attributes"])
 	if attrs["DefaultSenderID"] != "Alerts" || attrs["DefaultSMSType"] != "Promotional" {
 		t.Fatalf("SMS attributes did not merge: %#v", attrs)
 	}
@@ -2651,7 +2651,7 @@ func TestSNSDefaultSMSAttributes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	attrs := asMap(response.Output["Attributes"])
+	attrs := spi.Object(response.Output["Attributes"])
 	if attrs["MonthlySpendLimit"] != "1" {
 		t.Fatalf("default SMS attributes %#v", attrs)
 	}
@@ -2727,11 +2727,11 @@ func TestSNSSubscriptionListProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	subs := asSlice(listed.Output["Subscriptions"])
+	subs := spi.Slice(listed.Output["Subscriptions"])
 	if len(subs) != 1 {
 		t.Fatalf("subscriptions %#v", listed.Output)
 	}
-	entry := asMap(subs[0])
+	entry := spi.Object(subs[0])
 	want := map[string]any{"Endpoint": "arn:aws:sqs:us-east-1:1:queue", "Owner": "1", "Protocol": "sqs", "SubscriptionArn": str(subs[0].(map[string]any)["SubscriptionArn"]), "TopicArn": topic.Output["TopicArn"]}
 	if !reflect.DeepEqual(entry, want) {
 		t.Fatalf("subscription summary %#v, want %#v", entry, want)
@@ -2740,7 +2740,7 @@ func TestSNSSubscriptionListProjection(t *testing.T) {
 		t.Fatalf("subscription leaked internal fields %#v", entry)
 	}
 	allListed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSubscriptions"})
-	if err != nil || len(asSlice(allListed.Output["Subscriptions"])) != 1 || !reflect.DeepEqual(asSlice(allListed.Output["Subscriptions"])[0], entry) {
+	if err != nil || len(spi.Slice(allListed.Output["Subscriptions"])) != 1 || !reflect.DeepEqual(spi.Slice(allListed.Output["Subscriptions"])[0], entry) {
 		t.Fatalf("all subscription summaries %#v err=%v", allListed, err)
 	}
 }
@@ -2866,7 +2866,7 @@ func TestSNSConfirmSubscriptionTokenValidation(t *testing.T) {
 	if err != nil || str(confirmed.Output["SubscriptionArn"]) != str(sub.Output["SubscriptionArn"]) {
 		t.Fatalf("confirm=%#v err=%v", confirmed, err)
 	}
-	attrs := asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": confirmed.Output["SubscriptionArn"]}).Output["Attributes"])
+	attrs := spi.Object(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": confirmed.Output["SubscriptionArn"]}).Output["Attributes"])
 	if str(attrs["PendingConfirmation"]) != "false" {
 		t.Fatalf("confirmed subscription remained pending: %#v", attrs)
 	}
@@ -2898,7 +2898,7 @@ func TestSNSPendingEmailSubscription(t *testing.T) {
 		t.Fatalf("email subscription=%#v err=%v", sub, err)
 	}
 	listed, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "ListSubscriptions", Input: map[string]any{}})
-	if err != nil || len(asSlice(listed.Output["Subscriptions"])) != 1 || str(asMap(asSlice(listed.Output["Subscriptions"])[0])["SubscriptionArn"]) != "PendingConfirmation" {
+	if err != nil || len(spi.Slice(listed.Output["Subscriptions"])) != 1 || str(spi.Object(spi.Slice(listed.Output["Subscriptions"])[0])["SubscriptionArn"]) != "PendingConfirmation" {
 		t.Fatalf("pending email listing=%#v err=%v", listed, err)
 	}
 	withARN, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "Subscribe", Input: map[string]any{
@@ -2982,11 +2982,11 @@ func TestSNSListSubscriptionsByTopicPagination(t *testing.T) {
 		})
 	}
 	first := invokeSNS(t, p, id, "ListSubscriptionsByTopic", map[string]any{"TopicArn": topic})
-	if len(asSlice(first.Output["Subscriptions"])) != 100 || str(first.Output["NextToken"]) == "" {
+	if len(spi.Slice(first.Output["Subscriptions"])) != 100 || str(first.Output["NextToken"]) == "" {
 		t.Fatalf("first subscription page=%#v", first.Output)
 	}
 	second := invokeSNS(t, p, id, "ListSubscriptionsByTopic", map[string]any{"TopicArn": topic, "NextToken": first.Output["NextToken"]})
-	if len(asSlice(second.Output["Subscriptions"])) != 20 || second.Output["NextToken"] != nil {
+	if len(spi.Slice(second.Output["Subscriptions"])) != 20 || second.Output["NextToken"] != nil {
 		t.Fatalf("second subscription page=%#v", second.Output)
 	}
 }
@@ -3062,7 +3062,7 @@ func TestSNSHTTPSubscriptionRedrive(t *testing.T) {
 		t.Fatal(err)
 	}
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueUrl": queue.Output["QueueUrl"]}})
-	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+	if err != nil || len(spi.Slice(received.Output["Messages"])) != 1 {
 		t.Fatalf("DLQ messages=%#v err=%v", received, err)
 	}
 }
@@ -3104,7 +3104,7 @@ func TestSNSSQSSubscriptionRedrive(t *testing.T) {
 		t.Fatal(err)
 	}
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueUrl": "http://localhost:4566/1/sns-sqs-dlq"}})
-	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+	if err != nil || len(spi.Slice(received.Output["Messages"])) != 1 {
 		t.Fatalf("SQS DLQ messages=%#v err=%v", received, err)
 	}
 }
@@ -3148,7 +3148,7 @@ func TestSNSLambdaSubscriptionRedrive(t *testing.T) {
 		t.Fatal(err)
 	}
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueUrl": "http://localhost:4566/1/sns-lambda-dlq"}})
-	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+	if err != nil || len(spi.Slice(received.Output["Messages"])) != 1 {
 		t.Fatalf("Lambda DLQ messages=%#v err=%v", received, err)
 	}
 }
@@ -3252,7 +3252,7 @@ func TestSNSCreateTopicIdempotencyPreservesAttributes(t *testing.T) {
 		t.Fatal(err)
 	}
 	attrs, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetTopicAttributes", Input: map[string]any{"TopicArn": topic}})
-	if err != nil || str(asMap(attrs.Output["Attributes"])["DisplayName"]) != "AlreadySet" {
+	if err != nil || str(spi.Object(attrs.Output["Attributes"])["DisplayName"]) != "AlreadySet" {
 		t.Fatalf("idempotent attributes=%#v err=%v", attrs, err)
 	}
 }
@@ -3498,7 +3498,7 @@ func TestSNSMessageBodyFilterDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(asSlice(msgs.Output["Messages"])); got != 1 {
+	if got := len(spi.Slice(msgs.Output["Messages"])); got != 1 {
 		t.Fatalf("body filter delivered %d messages, want 1", got)
 	}
 }
@@ -3610,7 +3610,7 @@ func TestSNSConcurrentFilterSubscribeChaos(t *testing.T) {
 		t.Fatal(err)
 	}
 	listed := invokeSNS(t, p, id, "ListSubscriptionsByTopic", map[string]any{"TopicArn": topic})
-	if got := len(asSlice(listed.Output["Subscriptions"])); got != 16 {
+	if got := len(spi.Slice(listed.Output["Subscriptions"])); got != 16 {
 		t.Fatalf("subscriptions=%d want 16", got)
 	}
 }
@@ -3656,7 +3656,7 @@ func TestSNSSubscriptionAttributesProjection(t *testing.T) {
 		"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:subscription-attributes",
 		"Attributes": map[string]any{"RawMessageDelivery": "TrUe", "FilterPolicyScope": "MessageBody", "FilterPolicy": ""},
 	})
-	attrs := asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}).Output["Attributes"])
+	attrs := spi.Object(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}).Output["Attributes"])
 	if str(attrs["RawMessageDelivery"]) != "true" || str(attrs["FilterPolicyScope"]) != "MessageBody" {
 		t.Fatalf("subscription attributes %#v", attrs)
 	}
@@ -3758,10 +3758,10 @@ func TestSNSFilterPolicyNumericSQSDelivery(t *testing.T) {
 		"MessageAttributes": map[string]any{"attr1": map[string]any{"DataType": "Number", "StringValue": "111"}},
 	})
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "numeric-filter"}})
-	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+	if err != nil || len(spi.Slice(received.Output["Messages"])) != 1 {
 		t.Fatalf("numeric filter delivery=%#v err=%v", received, err)
 	}
-	body := str(asMap(asSlice(received.Output["Messages"])[0])["Body"])
+	body := str(spi.Object(spi.Slice(received.Output["Messages"])[0])["Body"])
 	if !strings.Contains(body, "in-range") || strings.Contains(body, "out-of-range") {
 		t.Fatalf("numeric filter body %q", body)
 	}
@@ -3785,7 +3785,7 @@ func TestSNSLambdaSubscribeNotificationEnvelope(t *testing.T) {
 	sub := invokeSNS(t, p, id, "Subscribe", map[string]any{
 		"TopicArn": topic, "Protocol": "lambda", "Endpoint": "arn:aws:lambda:us-east-1:1:function:sns-lambda-envelope",
 	})
-	attrs := asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}).Output["Attributes"])
+	attrs := spi.Object(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}).Output["Attributes"])
 	if str(attrs["PendingConfirmation"]) != "false" {
 		t.Fatalf("lambda subscription pending: %#v", attrs)
 	}
@@ -3798,11 +3798,11 @@ func TestSNSLambdaSubscribeNotificationEnvelope(t *testing.T) {
 	if json.Unmarshal(raw, &envelope) != nil {
 		t.Fatalf("lambda event %s", raw)
 	}
-	records := asSlice(envelope["Records"])
-	if len(records) != 1 || str(asMap(records[0])["EventSource"]) != "aws:sns" {
+	records := spi.Slice(envelope["Records"])
+	if len(records) != 1 || str(spi.Object(records[0])["EventSource"]) != "aws:sns" {
 		t.Fatalf("lambda records %#v", envelope)
 	}
-	sns := asMap(asMap(records[0])["Sns"])
+	sns := spi.Object(spi.Object(records[0])["Sns"])
 	if str(sns["Type"]) != "Notification" || str(sns["Message"]) != "Hello world." || str(sns["Subject"]) != "[Subject] Test subject" || str(sns["SignatureVersion"]) != "1" || !validTestSNSNotificationSignature(sns) {
 		t.Fatalf("lambda sns envelope %#v", sns)
 	}
@@ -3836,16 +3836,16 @@ func TestSNSMultipleHTTPSubscriptions(t *testing.T) {
 		}
 	}()
 	listed := invokeSNS(t, p, id, "ListSubscriptionsByTopic", map[string]any{"TopicArn": topic})
-	if len(asSlice(listed.Output["Subscriptions"])) != 4 {
+	if len(spi.Slice(listed.Output["Subscriptions"])) != 4 {
 		t.Fatalf("subscriptions %#v", listed.Output)
 	}
 	confirmed := invokeSNS(t, p, id, "ConfirmSubscription", map[string]any{"TopicArn": topic, "Token": <-tokens})
-	if str(asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": confirmed.Output["SubscriptionArn"]}).Output["Attributes"])["PendingConfirmation"]) != "false" {
+	if str(spi.Object(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": confirmed.Output["SubscriptionArn"]}).Output["Attributes"])["PendingConfirmation"]) != "false" {
 		t.Fatalf("confirmed subscription remained pending %#v", confirmed.Output)
 	}
 	pending := 0
 	for _, arn := range arns {
-		attrs := asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": arn}).Output["Attributes"])
+		attrs := spi.Object(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": arn}).Output["Attributes"])
 		if str(attrs["PendingConfirmation"]) == "true" {
 			pending++
 		}
@@ -3892,7 +3892,7 @@ func TestSNSEmailDeliveredThroughSES(t *testing.T) {
 	if len(messages) != 1 || str(messages[0]["Source"]) != "admin@localstack.com" {
 		t.Fatalf("confirmation email %#v", messages)
 	}
-	token := str(asMap(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}).Output["Attributes"])["Token"])
+	token := str(spi.Object(invokeSNS(t, p, id, "GetSubscriptionAttributes", map[string]any{"SubscriptionArn": sub.Output["SubscriptionArn"]}).Output["Attributes"])["Token"])
 	if token == "" {
 		b, ok, _ := (&Pack{deps: deps}).col(&spi.Request{Identity: id}, "subs").Get(context.Background(), str(sub.Output["SubscriptionArn"]))
 		var rec map[string]any
@@ -3939,11 +3939,11 @@ func TestSNSCertURLUsesAdvertiseHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "cert-host"}})
-	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+	if err != nil || len(spi.Slice(received.Output["Messages"])) != 1 {
 		t.Fatalf("cert host delivery %#v err=%v", received, err)
 	}
 	var envelope map[string]any
-	if json.Unmarshal([]byte(str(asMap(asSlice(received.Output["Messages"])[0])["Body"])), &envelope) != nil || !strings.Contains(str(envelope["SigningCertURL"]), "http://sns.example:4566/_aws/sns/SimpleNotificationService.pem") {
+	if json.Unmarshal([]byte(str(spi.Object(spi.Slice(received.Output["Messages"])[0])["Body"])), &envelope) != nil || !strings.Contains(str(envelope["SigningCertURL"]), "http://sns.example:4566/_aws/sns/SimpleNotificationService.pem") {
 		t.Fatalf("signing cert url %#v", envelope)
 	}
 }
@@ -3973,10 +3973,10 @@ func TestSNSLambdaFunctionDLQToTopic(t *testing.T) {
 	invokeSNS(t, p, id, "Subscribe", map[string]any{"TopicArn": src, "Protocol": "lambda", "Endpoint": "arn:aws:lambda:us-east-1:1:function:sns-dlq-fn"})
 	invokeSNS(t, p, id, "Publish", map[string]any{"TopicArn": src, "Message": `{"fail":true}`})
 	received, err := qp.Invoke(ctx, &spi.Request{Identity: id, Operation: "ReceiveMessage", Input: map[string]any{"QueueName": "lambda-dlq"}})
-	if err != nil || len(asSlice(received.Output["Messages"])) != 1 {
+	if err != nil || len(spi.Slice(received.Output["Messages"])) != 1 {
 		t.Fatalf("lambda dlq %#v err=%v", received, err)
 	}
-	body := str(asMap(asSlice(received.Output["Messages"])[0])["Body"])
+	body := str(spi.Object(spi.Slice(received.Output["Messages"])[0])["Body"])
 	if !strings.Contains(body, "RetriesExhausted") || !strings.Contains(body, "Unhandled") {
 		t.Fatalf("dlq body %s", body)
 	}

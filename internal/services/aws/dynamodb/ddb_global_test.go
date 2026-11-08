@@ -44,13 +44,13 @@ func TestDynamoDBGlobalTableReplicas(t *testing.T) {
 
 	for _, region := range []string{"ap-south-1", "us-east-1", "eu-west-1"} {
 		table := must(region, "DescribeTable", map[string]any{"TableName": "songs"}).Output["Table"].(map[string]any)
-		if replicas := asSlice(table["Replicas"]); len(replicas) != 2 || !hasReplica(replicas, "us-east-1") || !hasReplica(replicas, "eu-west-1") {
+		if replicas := spi.Slice(table["Replicas"]); len(replicas) != 2 || !hasReplica(replicas, "us-east-1") || !hasReplica(replicas, "eu-west-1") {
 			t.Fatalf("%s replicas %#v", region, replicas)
 		}
-		if arn := str(table["LatestStreamArn"]); !strings.Contains(arn, ":"+region+":") {
+		if arn := spi.Str(table["LatestStreamArn"]); !strings.Contains(arn, ":"+region+":") {
 			t.Fatalf("%s stream ARN %q", region, arn)
 		}
-		if tables := asSlice(must(region, "ListTables", nil).Output["TableNames"]); len(tables) != 1 || str(tables[0]) != "songs" {
+		if tables := spi.Slice(must(region, "ListTables", nil).Output["TableNames"]); len(tables) != 1 || spi.Str(tables[0]) != "songs" {
 			t.Fatalf("%s tables %#v", region, tables)
 		}
 		if got := must(region, "GetItem", map[string]any{"TableName": "songs", "Key": map[string]any{"Artist": map[string]any{"S": "Oasis"}, "SongTitle": map[string]any{"S": "Live Forever"}}}).Output["Item"]; got == nil {
@@ -64,10 +64,10 @@ func TestDynamoDBGlobalTableReplicas(t *testing.T) {
 		if got := must(region, "GetItem", map[string]any{"TableName": "songs", "Key": item}).Output["Item"]; got == nil {
 			t.Fatalf("%s missed replicated item", region)
 		}
-		streams := asSlice(must(region, "ListStreams", map[string]any{"TableName": "songs"}).Output["Streams"])
-		arn := str(asMap(streams[0])["StreamArn"])
-		iterator := str(must(region, "GetShardIterator", map[string]any{"StreamArn": arn, "ShardIteratorType": "TRIM_HORIZON"}).Output["ShardIterator"])
-		if records := asSlice(must(region, "GetRecords", map[string]any{"ShardIterator": iterator}).Output["Records"]); len(records) != 1 {
+		streams := spi.Slice(must(region, "ListStreams", map[string]any{"TableName": "songs"}).Output["Streams"])
+		arn := spi.Str(spi.Object(streams[0])["StreamArn"])
+		iterator := spi.Str(must(region, "GetShardIterator", map[string]any{"StreamArn": arn, "ShardIteratorType": "TRIM_HORIZON"}).Output["ShardIterator"])
+		if records := spi.Slice(must(region, "GetRecords", map[string]any{"ShardIterator": iterator}).Output["Records"]); len(records) != 1 {
 			t.Fatalf("%s stream records %#v", region, records)
 		}
 	}
@@ -85,7 +85,7 @@ func TestDynamoDBGlobalTableReplicas(t *testing.T) {
 		t.Fatalf("missing replica delete: %v", err)
 	}
 	for _, region := range []string{"ap-south-1", "us-east-1"} {
-		replicas := asSlice(must(region, "DescribeTable", map[string]any{"TableName": "songs"}).Output["Table"].(map[string]any)["Replicas"])
+		replicas := spi.Slice(must(region, "DescribeTable", map[string]any{"TableName": "songs"}).Output["Table"].(map[string]any)["Replicas"])
 		if len(replicas) != 1 || !hasReplica(replicas, "us-east-1") {
 			t.Fatalf("%s replicas after delete %#v", region, replicas)
 		}
@@ -120,7 +120,7 @@ func TestDynamoDBLegacyGlobalTableLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replicas := asSlice(asMap(updated.Output["GlobalTableDescription"])["ReplicationGroup"]); len(replicas) != 4 || hasReplica(replicas, "us-west-1") {
+	if replicas := spi.Slice(spi.Object(updated.Output["GlobalTableDescription"])["ReplicationGroup"]); len(replicas) != 4 || hasReplica(replicas, "us-west-1") {
 		t.Fatalf("updated replicas %#v", replicas)
 	}
 	if _, err := call("UpdateGlobalTable", map[string]any{"GlobalTableName": "missing"}); err == nil || !strings.Contains(err.Error(), "GlobalTableNotFoundException") {

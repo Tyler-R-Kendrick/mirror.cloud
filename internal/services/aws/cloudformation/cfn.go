@@ -436,8 +436,9 @@ func (p *Pack) order(tpl map[string]any) ([]string, error) {
 	return order, nil
 }
 
-// names adds to named every name v refers to: a Ref's, a Fn::GetAtt's resource, and each ${Name} of a
-// Fn::Sub string.
+// names adds to named every name v refers to: a Ref's, a Fn::GetAtt's resource, and each Name of a
+// ${Name} or ${Name.Attribute} in a Fn::Sub string, but for a variable its map defines, whose value is
+// walked instead, and a ${!Literal}, which names nothing.
 func names(v any, named map[string]bool) {
 	switch t := v.(type) {
 	case map[string]any:
@@ -448,10 +449,14 @@ func names(v any, named map[string]bool) {
 			case "Fn::GetAtt":
 				logical, _, _ := strings.Cut(str(x), ".")
 				named[cmp.Or(str(append(spi.Slice(x), nil)[0]), logical)] = true
-			case "Fn::Sub": // "text", or ["text", {variables}]
-				for _, m := range subVariable.FindAllStringSubmatch(str(append(spi.Slice(x), x)[0]), -1) {
-					named[m[1]] = true
+			case "Fn::Sub":
+				parts := append(spi.Slice(x), x, nil) // "text", or ["text", {variables}]
+				for _, m := range subVariable.FindAllStringSubmatch(str(parts[0]), -1) {
+					if n, _, _ := strings.Cut(m[1], "."); asMap(parts[1])[m[1]] == nil && !strings.HasPrefix(n, "!") {
+						named[n] = true
+					}
 				}
+				names(parts[1], named)
 			default:
 				names(x, named)
 			}
@@ -796,7 +801,8 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 	switch t := v.(type) {
 	case map[string]any:
 		if r, ok := t["Ref"]; ok {
-			return p.ref(str(r), refs, req, stack)
+			v, _ := p.ref(str(r), refs, req, stack)
+			return v
 		}
 		if g, ok := t["Fn::GetAtt"]; ok {
 			return p.getAtt(g, refs, req)
@@ -823,16 +829,16 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 	}
 }
 
-func (p *Pack) ref(name string, refs map[string]string, req *spi.Request, stack string) string {
+// ref is what a Ref to name answers, a pseudo parameter's value, a parameter's or a resource's, and
+// whether name is any of them; the name itself when it is none.
+func (p *Pack) ref(name string, refs map[string]string, req *spi.Request, stack string) (string, bool) {
 	pseudo := map[string]string{"AWS::AccountId": req.Identity.Account, "AWS::Region": req.Identity.Region,
 		"AWS::StackName": stack, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com"}
 	if v, ok := pseudo[name]; ok {
-		return v
+		return v, true
 	}
-	if v, ok := refs[name]; ok {
-		return v
-	}
-	return name
+	v, ok := refs[name]
+	return cmp.Or(v, name), ok
 }
 
 func (p *Pack) getAtt(g any, refs map[string]string, req *spi.Request) string {
@@ -872,16 +878,24 @@ func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack str
 	return strings.Join(ss, sep)
 }
 
+// fnSub is the Fn::Sub string with each ${...} substituted: ${!Literal} is the literal ${Literal}, a
+// variable its map defines is the variable's value, ${Name.Attribute} is Fn::GetAtt's and ${Name} a Ref's
+// (Template Reference, Fn::Sub). A name that is none of them is left as written.
 func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack string) string {
-	arr, _ := s.([]any) // "text", or ["text", {variables}]
-	out := str(append(slices.Clip(arr), s)[0])
-	for k, v := range refs {
-		out = strings.ReplaceAll(out, "${"+k+"}", v)
-	}
-	out = strings.ReplaceAll(out, "${AWS::AccountId}", req.Identity.Account)
-	out = strings.ReplaceAll(out, "${AWS::Region}", req.Identity.Region)
-	out = strings.ReplaceAll(out, "${AWS::StackName}", stack)
-	return out
+	parts := append(spi.Slice(s), s, nil) // "text", or ["text", {variables}]
+	return subVariable.ReplaceAllStringFunc(str(parts[0]), func(m string) string {
+		name := m[2 : len(m)-1]
+		if literal, ok := strings.CutPrefix(name, "!"); ok {
+			return "${" + literal + "}"
+		} else if v, ok := asMap(parts[1])[name]; ok {
+			return str(p.resolve(v, refs, req, stack))
+		} else if logical, attr, ok := strings.Cut(name, "."); ok {
+			return p.getAtt([]any{logical, attr}, refs, req)
+		} else if v, ok := p.ref(name, refs, req, stack); ok {
+			return v
+		}
+		return m
+	})
 }
 
 func parseTemplate(body string) (map[string]any, error) {

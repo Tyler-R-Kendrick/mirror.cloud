@@ -459,7 +459,8 @@ func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
 	p := New(spitest.Deps(t))
 	req := &spi.Request{Identity: spi.Identity{Account: "000000000000", Region: "us-east-1"}}
 	refs := map[string]string{"Bucket": "bucket", "Queue": "http://localhost/000000000000/queue"}
-	if p.ref("AWS::AccountId", refs, req, "stack") != "000000000000" || p.ref("AWS::Partition", refs, req, "stack") != "aws" || p.ref("AWS::URLSuffix", refs, req, "stack") != "amazonaws.com" || p.ref("missing", refs, req, "stack") != "missing" {
+	ref := func(name string) string { v, _ := p.ref(name, refs, req, "stack"); return v }
+	if ref("AWS::AccountId") != "000000000000" || ref("AWS::Partition") != "aws" || ref("AWS::URLSuffix") != "amazonaws.com" || ref("missing") != "missing" {
 		t.Fatal("pseudo-parameter references")
 	}
 	if p.getAtt("Bucket.Arn", refs, req) != "arn:aws:s3:::bucket" || p.getAtt([]any{"Queue", "Arn"}, refs, req) != "arn:aws:sqs:us-east-1:000000000000:queue" || p.getAtt([]any{"Queue", "QueueName"}, refs, req) != "queue" {

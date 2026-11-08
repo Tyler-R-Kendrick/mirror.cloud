@@ -207,3 +207,44 @@ func TestCloudFormationACycleNamesOnlyItsMembers(t *testing.T) {
 		}
 	}
 }
+
+// Fn::Sub's ${Name.Attribute} is that resource's Fn::GetAtt, a name its
+// variable map defines is that variable's value, and ${!Literal} is the
+// literal ${Literal} ("To write a dollar sign and curly braces (${}) literally,
+// add an exclamation point (!) after the open curly brace, such as
+// ${!Literal}. CloudFormation resolves this text as ${Literal}.", Template
+// Reference, Fn::Sub). Each is ordered by what it names: a resource named by
+// ${Name.Attribute} or by a variable's value is made first, and one a
+// variable's name or ${!...} merely spells is not. Before, ${ZQueue.Arn} and
+// ${X} were left as written and ordered nothing, and ${ZQueue} under a
+// variable of that name was the queue's URL.
+func TestCloudFormationSubstitutesEveryForm(t *testing.T) {
+	h := newStacks(t)
+	param := func(sub any) map[string]any {
+		return map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": map[string]any{"Fn::Sub": sub}}}
+	}
+	h.mustCreate("sub", map[string]map[string]any{
+		"ZQueue": {"Type": "AWS::SQS::Queue"},
+		"ZTopic": {"Type": "AWS::SNS::Topic", "Properties": map[string]any{"TopicName": "sub-topic"}},
+		"A":      param("${ZQueue.Arn}"),
+		"B":      param([]any{"${X}-${AWS::Region}", map[string]any{"X": map[string]any{"Ref": "ZTopic"}}}),
+		"C":      param("${!Literal}-${!ZQueue}"),
+		"D":      param([]any{"${ZQueue}", map[string]any{"ZQueue": "mapped"}}),
+	})
+	made, at := map[string]res{}, map[string]int{}
+	for i, r := range h.resources("sub") {
+		made[r.Logical], at[r.Logical] = r, i
+	}
+	queue := "arn:aws:sqs:us-east-1:000000000000:" + spi.LastSlash(made["ZQueue"].Physical)
+	for logical, want := range map[string]string{"A": queue, "B": "arn:aws:sns:us-east-1:000000000000:sub-topic-us-east-1", "C": "${Literal}-${ZQueue}", "D": "mapped"} {
+		out, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": made[logical].Physical})
+		if got := str(asMap(out["Parameter"])["Value"]); err != nil || got != want {
+			t.Errorf("%s is %q (%v), want %q", logical, got, err, want)
+		}
+	}
+	for _, before := range [][2]string{{"ZQueue", "A"}, {"ZTopic", "B"}, {"D", "ZQueue"}, {"C", "ZQueue"}} {
+		if at[before[0]] > at[before[1]] {
+			t.Errorf("%s was made after %s (order %v)", before[0], before[1], at)
+		}
+	}
+}

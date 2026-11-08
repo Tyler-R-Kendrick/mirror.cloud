@@ -162,6 +162,13 @@ The oracle is AWS's documentation as it ships in the vendored model
     each after those its properties name by `Ref`, `Fn::GetAtt` or `Fn::Sub`
     ("Resource B is created before resource A", Template Reference, DependsOn
     attribute), and otherwise by logical id; `DependsOn` itself is not read.
+    `Fn::Sub` substitutes every form its Template Reference gives:
+    `${Name.Attribute}` is that resource's `Fn::GetAtt`, a name its variable
+    map defines is the variable's value, and `${!Literal}` is the literal
+    `${Literal}`; each orders by what it names (a resource named by
+    `${Name.Attribute}` or by a variable's value is made first, one a variable
+    or `${!...}` merely spells is not). Before, `${Name.Attribute}` and the
+    variable map were left as written and ordered nothing.
     The order is found once per operation, by one walk of each resource's
     properties for the names they refer to and Kahn's algorithm over them,
     so it costs time linear in the template; round 7's resolved every

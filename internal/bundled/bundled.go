@@ -19,6 +19,7 @@ package bundled
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"sync"
 
@@ -32,6 +33,12 @@ import (
 )
 
 func init() {
+	// A fuzz worker is killed as hung when an input is slow, and its first input
+	// would pay for decoding every model (seconds, more on a loaded runner), which
+	// process start used to pay for it. So a worker pays it before it takes one.
+	if slices.Contains(os.Args[1:], "-test.fuzzworker") {
+		specboot.Bundle()
+	}
 	for _, id := range ServiceIDs() {
 		registry.Register(registry.Factory{
 			ServiceID: id,

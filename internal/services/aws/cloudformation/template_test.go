@@ -346,10 +346,8 @@ func TestCloudFormationARefAnswersWhatItsTypeDocuments(t *testing.T) {
 }
 
 // Every property the engine passes to a service is read as the type the
-// operation's model declares, by one helper keyed by that type, and given
-// in the form the service's own codec would decode it: a JSON protocol's
-// number is a float64, restXml's integer an int and a query string's
-// scalar its text. So a function's MemorySize from a Number parameter (a
+// operation's model declares, by one helper keyed by that type. So a
+// function's MemorySize from a Number parameter (a
 // Ref's value "becomes a string", User Guide, Parameters) is 256, and its
 // Timeout 30; a table's ReadCapacityUnits from a parameter is 5; a bucket's
 // tag values, which are strings, written true and 123 unquoted, are "true"

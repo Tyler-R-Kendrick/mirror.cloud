@@ -778,10 +778,9 @@ func input(id, op string, in map[string]any) map[string]any {
 }
 
 // typed is v read as the shape it is given for declares (coerce), through structures, lists and maps:
-// a template's 256 or "256" for an integer member, "true" or "123" for a string, true for a boolean. It is
-// in the form the service's own codec decodes it in: a JSON protocol's number is a float64, restXml's
-// integer an int and its long an int64, a query string's scalar its text. A value that is not its type is
-// left as it was given, for the service to refuse.
+// a template's 256 or "256" is 256 for an integer member, true and 123 are "true" and "123" for a string,
+// "true" is true for a boolean. A value that is not its type is left as it was given, for the service to
+// refuse.
 func typed(svc *model.Service, shapeID string, v any) any {
 	sh := svc.Shapes[shapeID]
 	switch t := v.(type) {
@@ -800,18 +799,10 @@ func typed(svc *model.Service, shapeID string, v any) any {
 	}
 	want := map[model.ShapeKind]string{model.KindString: "String", model.KindEnum: "String", model.KindInteger: "Integer",
 		model.KindLong: "Integer", model.KindBoolean: "Boolean"}[sh.Kind]
-	c, ok := coerce(v, want)
-	switch n, isInt := c.(int); {
-	case want == "" || !ok:
-		return v
-	case svc.Protocol == model.ProtoAWSQuery || svc.Protocol == model.ProtoEC2Query:
-		return spi.JSONText(c)
-	case isInt && svc.Protocol != model.ProtoRESTXML:
-		return float64(n)
-	case isInt && sh.Kind == model.KindLong:
-		return int64(n)
+	if c, ok := coerce(v, want); ok && want != "" {
+		return c
 	}
-	return c
+	return v
 }
 
 // configureBucket applies the bucket properties that map one to one onto an S3 operation, and stores the

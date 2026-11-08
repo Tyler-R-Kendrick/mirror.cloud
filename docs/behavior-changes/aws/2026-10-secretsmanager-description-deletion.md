@@ -375,9 +375,7 @@ The oracle is AWS's documentation as it ships in the vendored model
     Every property the engine passes to a service, the ones it passes whole
     included (a function's, a table's), is read by the same rule, keyed by
     the type the operation's model declares for the member, through
-    structures, lists and maps, and given in the form that service's codec
-    decodes it in (a JSON protocol's number a float64, restXml's integer an
-    int, a query string's scalar its text). So `MemorySize: !Ref Memory` is
+    structures, lists and maps. So `MemorySize: !Ref Memory` is
     256, `ReadCapacityUnits` from a parameter is 5, and a bucket's tag
     values written `true` and `123` are `"true"` and `"123"`. Before, a
     function got `MemorySize` `"256"`, a table `"5"`, and the tags were

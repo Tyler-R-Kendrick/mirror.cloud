@@ -140,12 +140,13 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		} else if id = cmp.Or(old.ID, id); found || update { // an update reserves nothing
 			return nil
 		}
-		raw, _ = json.Marshal(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS"})
+		raw, _ = json.Marshal(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Resources: []res{}, Outputs: []any{}})
 		return tx.Put(name, raw)
 	}); err != nil {
 		return nil, err
 	}
-	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: params}
+	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: params,
+		Resources: []res{}, Outputs: []any{}} // never null: every read of a stack lists both
 	fail := func(err error) (*spi.Response, error) {
 		if st.Reason = err.Error(); !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")

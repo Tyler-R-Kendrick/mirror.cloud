@@ -213,7 +213,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     has deleted everything it made, with the create's error as its
     `StackStatusReason` (which `ListStacks` answers too, as the model's
     `StackSummary` has it), and every read of it answers it with no
-    resources (the record never holds a null list). The name stays taken (`CreateStack` is
+    resources. No record holds a null list: the reservation a create writes
+    first, a stack with no outputs and a rolled-back stack each list
+    `Resources` and `Outputs` as `[]` (round 7 claimed this, and the
+    reservation and a stack with no outputs held null). The name stays taken (`CreateStack` is
     `AlreadyExistsException`; `UpdateStack` is `ValidationError`, "Stack:...
     is in ROLLBACK_COMPLETE state and can not be updated.") until
     `DeleteStack` removes the stack ("Deleted stacks don't show up in the

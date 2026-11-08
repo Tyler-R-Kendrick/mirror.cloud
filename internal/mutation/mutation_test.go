@@ -9661,13 +9661,13 @@ var mutants = []mutant{
 	{
 		name: "firehose-leak-successful-http-retry-payload",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old: `func (p *Pack) deleteHTTPRetry(ctx context.Context, collection spi.Collection, key, dataKey string) {
+		old: `func (p *Pack) deleteWork(ctx context.Context, collection spi.Collection, key, dataKey string) {
 	_ = collection.Delete(ctx, key)
 	if p.deps.Blobs != nil {
 		_ = p.deps.Blobs.Delete(ctx, dataKey)
 	}
 }`,
-		new: `func (p *Pack) deleteHTTPRetry(ctx context.Context, collection spi.Collection, key, dataKey string) {
+		new: `func (p *Pack) deleteWork(ctx context.Context, collection spi.Collection, key, dataKey string) {
 	_ = collection.Delete(ctx, key)
 }`,
 		pkg: "./internal/services/aws/firehose",
@@ -9728,8 +9728,8 @@ var mutants = []mutant{
 	{
 		name: "firehose-ignore-persisted-http-buffers",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-http-buffers")`,
-		new:  `collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("mutated")`,
+		old:  `return p.scan(ctx, "fh-http-buffers", func(`,
+		new:  `return p.scan(ctx, "mutated", func(`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseHTTPEndpointDestination",
 	},
@@ -10001,8 +10001,8 @@ var mutants = []mutant{
 	{
 		name: "firehose-ignore-persisted-redshift-retries",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-redshift-work")`,
-		new:  `collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("mutated")`,
+		old:  `return p.scan(ctx, "fh-redshift-work", func(`,
+		new:  `return p.scan(ctx, "mutated", func(`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseRedshiftPersistentRetry",
 	},
@@ -10010,9 +10010,9 @@ var mutants = []mutant{
 		name: "firehose-retry-redshift-after-expiry",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 		old: `if !now.Before(work.Expires) {
-		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)`,
+		p.deleteWork(ctx, collection, key, work.DataKey)`,
 		new: `if false {
-		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)`,
+		p.deleteWork(ctx, collection, key, work.DataKey)`,
 		pkg: "./internal/services/aws/firehose",
 		run: "TestFirehoseRedshiftRetryExpiryAndDelete",
 	},
@@ -10020,7 +10020,7 @@ var mutants = []mutant{
 		name: "firehose-leak-successful-redshift-retry",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 		old: `if err == nil {
-		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)`,
+		p.deleteWork(ctx, collection, key, work.DataKey)`,
 		new: `if err == nil {
 		_ = collection`,
 		pkg: "./internal/services/aws/firehose",

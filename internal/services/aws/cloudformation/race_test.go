@@ -308,3 +308,39 @@ func TestCloudFormationAnUpdateThatLosesUndoesItself(t *testing.T) {
 		})
 	}
 }
+
+// Termination protection is the stack's until UpdateTerminationProtection
+// changes it ("you can't delete the stack while termination protection is
+// enabled", User Guide, Protect a stack from being deleted): an UpdateStack,
+// and an ExecuteChangeSet, keep it, so DeleteStack is still refused and the
+// stack still stands. Before, UpdateStack wrote a record without it, and a
+// DeleteStack after the update deleted the stack.
+func TestCloudFormationAnUpdateKeepsTerminationProtection(t *testing.T) {
+	h := newStacks(t)
+	queue := func(n string) map[string]map[string]any {
+		return map[string]map[string]any{"Q": {"Type": "AWS::SQS::Queue", "Properties": map[string]any{"QueueName": n}}}
+	}
+	h.mustCreate("kept", queue("kept-a"))
+	if _, err := h.invoke("UpdateTerminationProtection", map[string]any{"StackName": "kept", "EnableTerminationProtection": true}); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]any{"Resources": queue("kept-b")})
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "kept", "TemplateBody": string(body)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "kept", "ChangeSetName": "cs", "TemplateBody": string(body)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "kept", "ChangeSetName": "cs"}); err != nil {
+		t.Fatal(err)
+	}
+	if protect, _ := h.record("kept")["Protect"].(bool); !protect {
+		t.Errorf("after the updates the record is %v, want Protect", h.record("kept"))
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "kept"}); code(err) != "ValidationError" {
+		t.Errorf("DeleteStack of the protected stack answered %v, want ValidationError", err)
+	}
+	if status, _, err := h.status("kept"); err != nil || status != "UPDATE_COMPLETE" {
+		t.Errorf("kept is %s (%v), want UPDATE_COMPLETE", status, err)
+	}
+}

@@ -279,7 +279,8 @@ The oracle is AWS's documentation as it ships in the vendored model
     nothing back. An update reserves nothing, as here an update has no
     `UPDATE_IN_PROGRESS` state for `CancelUpdateStack` to act on, but writes
     only over the record it read (termination protection aside, which it
-    keeps); one that finds the stack changed by another update or a
+    keeps: an `UpdateStack` or `ExecuteChangeSet` of a protected stack leaves
+    it protected, where round 7's wrote a record without it); one that finds the stack changed by another update or a
     `DeleteStack` deletes what it made that the stack does not now hold (all
     of it when the stack is being deleted) and is `ValidationError`, "...is in
     UPDATE_IN_PROGRESS state..." or "...DELETE_IN_PROGRESS...", naming the

@@ -294,6 +294,16 @@ The oracle is AWS's documentation as it ships in the vendored model
     a final delete left the second set behind (300 parameters in the round-8
     repro); and the later of two updates wrote over the earlier's record,
     whose resources then belonged to no stack.
+  - The stack record has no writer but the engine, each write one store
+    transaction: `UpdateTerminationProtection` is native and sets the
+    protection in a transaction over the record it reads (its Boolean in any
+    case, so `TRUE` protects), and `ContinueUpdateRollback`, whose one
+    accepted state, `UPDATE_ROLLBACK_FAILED`, no stack here rests in (a
+    failed update is not rolled back), refuses every stack and writes
+    nothing. Before, the bundle's `UpdateTerminationProtection` read the
+    record and wrote it back separately, so a create that finished between
+    the two was written back `CREATE_IN_PROGRESS`, and a `DeleteStack` then
+    left it `DELETE_IN_PROGRESS` for good; `TRUE` left a stack unprotected.
   - A `CreateStack` that fails rolls back what it had created, as
     CloudFormation's default `OnFailure` (`ROLLBACK`) does, deleting a secret
     without a recovery window so its name is free again. A resource is

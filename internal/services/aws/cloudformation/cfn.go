@@ -28,7 +28,7 @@ import (
 // natives are the operations behavior/aws/cloudformation lists as native: the template engine. Parsing a
 // template, resolving its intrinsics and provisioning resources through their owning services is Go; the
 // stack, change set, stack set and type bookkeeping is the bundle's.
-var natives = []string{"CreateStack", "UpdateStack", "DeleteStack", "ExecuteChangeSet", "ValidateTemplate", "GetTemplateSummary", "ListExports"}
+var natives = []string{"CreateStack", "UpdateStack", "DeleteStack", "ExecuteChangeSet", "ValidateTemplate", "GetTemplateSummary", "ListExports", "UpdateTerminationProtection"}
 
 func init() {
 	for _, op := range natives {
@@ -65,6 +65,16 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.upsert(ctx, req, name, req.Operation == "UpdateStack")
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
+	case "UpdateTerminationProtection": // in one transaction, as every write of the record is (settle)
+		protect, _ := coerce(req.Input["EnableTerminationProtection"], "Boolean") // a Boolean in any case
+		st, found, err := p.settle(ctx, req, name, func(cur stack) (stack, bool) { cur.Protect = protect == true; return cur, cur.ID != "" })
+		if err == nil && !found {
+			err = invalid("Stack [" + name + "] does not exist")
+		}
+		if err != nil {
+			return nil, err
+		}
+		return &spi.Response{Output: map[string]any{"StackId": st.ID}}, nil
 	case "GetTemplateSummary":
 		_, tpl, _, err := p.template(ctx, req)
 		if st, loadErr := p.load(ctx, req, name); err != nil && name != "" && loadErr == nil {

@@ -472,6 +472,18 @@ The oracle is AWS's documentation as it ships in the vendored model
   - A listing page that keeps nothing while more secrets follow now moves
     `NextToken` past what it read; before, `ListSecrets` with a scheduled
     secret between two listed ones lost the second (an engine fix).
+  - A `NextToken` is only one a listing answered: `ListSecrets` and
+    `BatchGetSecretValue`'s `Filters` form answer an opaque token (base64 of
+    `secret:` and the last name listed), and a token neither answered is
+    `InvalidNextTokenException`, "The NextToken value is invalid.". An empty
+    one breaks `NextTokenType`'s "Minimum length of 1" and is
+    `ValidationException`, the framework's constraint error, on those two
+    and `ListSecretVersionIds`. `ListSecretVersionIds`' `MaxResults` is a
+    `MaxResultsType`, a whole number from 1 to 100, with `ListSecrets`'
+    checks. The token's form is this bundle's; the model says only that
+    callers pass back what they were given. Before, a garbage token was read
+    as a name to list after, an empty one as none, and
+    `ListSecretVersionIds` took any `MaxResults`.
 - **CreateSecret keeps its Tags** ("A list of tags to attach to the
   secret"), as `TagResource` keeps them, so `DescribeSecret` answers them, the
   `tag-key` and `tag-value` filters find the secret and a later `TagResource`

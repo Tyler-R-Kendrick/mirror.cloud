@@ -37,7 +37,10 @@ func init() {
 }
 
 // Pack is the template engine behind the native operations.
-type Pack struct{ deps spi.Deps }
+type Pack struct {
+	deps  spi.Deps
+	walks int // resources whose properties order walked, which a test counts
+}
 
 // New constructs the template engine.
 func New(d spi.Deps) *Pack { return &Pack{deps: d} }
@@ -51,7 +54,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	name := str(req.Input["StackName"])
 	switch req.Operation {
 	case "ValidateTemplate":
-		_, tpl, err := p.template(ctx, req)
+		_, tpl, _, err := p.template(ctx, req)
 		if err != nil {
 			return nil, err
 		}
@@ -61,7 +64,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
 	case "GetTemplateSummary":
-		_, tpl, err := p.template(ctx, req)
+		_, tpl, _, err := p.template(ctx, req)
 		if st, loadErr := p.load(ctx, req, name); err != nil && name != "" && loadErr == nil {
 			tpl, err = parseTemplate(st.Template)
 		}
@@ -124,7 +127,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	if name == "" {
 		return nil, invalid("StackName required")
 	}
-	body, tpl, err := p.template(ctx, req)
+	body, tpl, order, err := p.template(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +158,6 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		return nil, err
 	}
 	resources, planned := asMap(tpl["Resources"]), maps.Clone(st.Refs)
-	order, _ := p.order(req, tpl)
 	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
 		typ, props := str(rm["Type"]), asMap(p.resolve(rm["Properties"], planned, req, name))
@@ -241,17 +243,18 @@ func as(old, st stack) func(stack) (stack, bool) {
 	}
 }
 
-// template reads the request's template body and parses it.
-func (p *Pack) template(ctx context.Context, req *spi.Request) (string, map[string]any, error) {
+// template reads the request's template body, parses it and orders its resources.
+func (p *Pack) template(ctx context.Context, req *spi.Request) (string, map[string]any, []string, error) {
 	body, err := p.templateBody(ctx, req)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	tpl, err := parseTemplate(body)
+	var order []string
 	if err == nil {
-		_, err = p.order(req, tpl)
+		order, err = p.order(tpl)
 	}
-	return body, tpl, err
+	return body, tpl, order, err
 }
 
 // templateBody is the request's template: TemplateBody, "a maximum length of 51,200 bytes", or the S3
@@ -389,24 +392,70 @@ func planID(req *spi.Request, typ, n string, props map[string]any) string {
 
 // order is the order a template's resources are made in: each after those its properties name, by Ref,
 // Fn::GetAtt or Fn::Sub ("Resource B is created before resource A", Template Reference, DependsOn
-// attribute), else by logical id. A cycle orders none, and is CloudFormation's error.
-func (p *Pack) order(req *spi.Request, tpl map[string]any) ([]string, error) {
-	resources, marks, order := asMap(tpl["Resources"]), map[string]string{}, []string(nil)
-	todo := slices.Sorted(maps.Keys(resources))
-	for _, logical := range todo {
-		marks[logical] = unknown
-	}
-	for len(todo) > 0 {
-		i := slices.IndexFunc(todo, func(l string) bool {
-			return !strings.Contains(spi.JSONText(p.resolve(asMap(resources[l])["Properties"], marks, req, "")), unknown)
-		})
-		if i < 0 {
-			return nil, invalid("Circular dependency between resources: [" + strings.Join(todo, ", ") + "]")
+// attribute), else by logical id. One walk of each resource's properties finds the names, and Kahn's
+// algorithm orders them, the earliest logical id first of those ready. A cycle orders none, and is
+// CloudFormation's error.
+func (p *Pack) order(tpl map[string]any) ([]string, error) {
+	resources, waiting, users := asMap(tpl["Resources"]), map[string]int{}, map[string][]string{}
+	var ready, order []string
+	for logical, r := range resources {
+		p.walks++
+		named := map[string]bool{}
+		names(asMap(r)["Properties"], named)
+		for n := range named {
+			if _, ok := resources[n]; ok {
+				waiting[logical], users[n] = waiting[logical]+1, append(users[n], logical)
+			}
 		}
-		marks[todo[i]], order, todo = "", append(order, todo[i]), slices.Delete(slices.Clone(todo), i, i+1)
+		if waiting[logical] == 0 {
+			ready = append(ready, logical)
+		}
+	}
+	for slices.Sort(ready); len(ready) > 0; ready = ready[1:] {
+		order = append(order, ready[0])
+		for _, u := range users[ready[0]] {
+			if waiting[u]--; waiting[u] == 0 {
+				i, _ := slices.BinarySearch(ready[1:], u)
+				ready = slices.Insert(ready, i+1, u)
+			}
+		}
+	}
+	if len(order) < len(resources) {
+		left := slices.DeleteFunc(slices.Sorted(maps.Keys(resources)), func(l string) bool { return waiting[l] == 0 })
+		return nil, invalid("Circular dependency between resources: [" + strings.Join(left, ", ") + "]")
 	}
 	return order, nil
 }
+
+// names adds to named every name v refers to: a Ref's, a Fn::GetAtt's resource, and each ${Name} of a
+// Fn::Sub string.
+func names(v any, named map[string]bool) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, x := range t {
+			switch k {
+			case "Ref":
+				named[str(x)] = true
+			case "Fn::GetAtt":
+				logical, _, _ := strings.Cut(str(x), ".")
+				named[cmp.Or(str(append(spi.Slice(x), nil)[0]), logical)] = true
+			case "Fn::Sub": // "text", or ["text", {variables}]
+				for _, m := range subVariable.FindAllStringSubmatch(str(append(spi.Slice(x), x)[0]), -1) {
+					named[m[1]] = true
+				}
+			default:
+				names(x, named)
+			}
+		}
+	case []any:
+		for _, x := range t {
+			names(x, named)
+		}
+	}
+}
+
+// subVariable is a ${...} in a Fn::Sub string.
+var subVariable = regexp.MustCompile(`\$\{([^}]*)\}`)
 
 // claim answers the name a resource is made under: the template's, or else physicalName's. A given name
 // that a resource the stack did not make under it holds is the service's error for a name taken: several

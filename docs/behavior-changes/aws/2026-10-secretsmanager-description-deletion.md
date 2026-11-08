@@ -162,6 +162,11 @@ The oracle is AWS's documentation as it ships in the vendored model
     each after those its properties name by `Ref`, `Fn::GetAtt` or `Fn::Sub`
     ("Resource B is created before resource A", Template Reference, DependsOn
     attribute), and otherwise by logical id; `DependsOn` itself is not read.
+    The order is found once per operation, by one walk of each resource's
+    properties for the names they refer to and Kahn's algorithm over them,
+    so it costs time linear in the template; round 7's resolved every
+    unordered resource each time it placed one, 125,250 walks to validate
+    500 chained parameters and 250,500 to make them.
     A cycle is `ValidationError` ("Circular dependency between resources:
     [A, B]") on `CreateStack`, `UpdateStack`, `ValidateTemplate` and
     `GetTemplateSummary`, and makes no stack. Before, a `Ref` to a resource

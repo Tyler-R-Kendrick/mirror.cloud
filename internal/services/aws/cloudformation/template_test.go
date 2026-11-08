@@ -132,3 +132,43 @@ func TestCloudFormationReadsADeepTemplate(t *testing.T) {
 		}
 	}
 }
+
+// Resources are ordered once per operation, in time linear in the template:
+// one walk of each resource's properties collects the names it refers to,
+// and Kahn's algorithm orders them, the earliest logical id first among
+// those ready. 500 SSM parameters, each naming the next by Ref (the order
+// that took the most work before), are validated and made with exactly 500
+// walks each, and in the order the chain gives. A 30 s timer catches only a
+// hang. Before, ordering resolved every unordered resource's properties each
+// time it placed one, twice per create: 125,250 walks to validate, 250,500 to
+// create, 3.9 s and 8.1 s.
+func TestCloudFormationOrdersInLinearTime(t *testing.T) {
+	h := newStacks(t)
+	resources := map[string]any{}
+	for i := range 500 {
+		props := map[string]any{"Type": "String", "Value": "end"}
+		if i < 499 {
+			props["Value"] = map[string]any{"Ref": fmt.Sprintf("P%03d", i+1)}
+		}
+		resources[fmt.Sprintf("P%03d", i)] = map[string]any{"Type": "AWS::SSM::Parameter", "Properties": props}
+	}
+	body, _ := json.Marshal(map[string]any{"Resources": resources})
+	for _, op := range []string{"ValidateTemplate", "CreateStack"} {
+		pack := New(h.deps)
+		done := make(chan error, 1)
+		go func() {
+			_, err := pack.Invoke(h.ctx, &spi.Request{Identity: h.id, Operation: op, Input: map[string]any{"StackName": "chain", "TemplateBody": string(body)}})
+			done <- err
+		}()
+		if err := within(t, done, op); err != nil {
+			t.Fatalf("%s answered %v", op, err)
+		}
+		if pack.walks != 500 {
+			t.Errorf("%s walked %d resources' properties, want 500", op, pack.walks)
+		}
+	}
+	made := h.resources("chain")
+	if len(made) != 500 || made[0].Logical != "P499" || made[499].Logical != "P000" {
+		t.Errorf("the chain was made %d resources long, from %v", len(made), made[:min(len(made), 2)])
+	}
+}

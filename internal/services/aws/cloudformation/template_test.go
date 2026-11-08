@@ -400,3 +400,26 @@ func TestCloudFormationPassesEveryPropertyAsItsModelType(t *testing.T) {
 		t.Errorf("the bucket's tags are %s (%v), want the values \"true\" and \"123\"", text, err)
 	}
 }
+
+// "CloudFormation doesn't support the following features: The binary, omap,
+// pairs, set, and timestamp tags[,] Aliases[,] Hash merges" (User Guide,
+// Template formats): it names aliases, not anchors, so an anchor nothing
+// refers to is read as if it were not there (a reading), on a mapping and on
+// a scalar, while an alias is still refused. Before, any anchor was
+// ValidationError.
+func TestCloudFormationReadsALoneAnchor(t *testing.T) {
+	h := newStacks(t)
+	body := "Resources:\n  Q: &queue\n    Type: AWS::SQS::Queue\n    Properties:\n      QueueName: &name lone-anchor\n"
+	for _, op := range []string{"ValidateTemplate", "CreateStack"} {
+		if _, err := h.invoke(op, map[string]any{"StackName": "anchor", "TemplateBody": body}); err != nil {
+			t.Errorf("%s of a template with a lone anchor answered %v", op, err)
+		}
+	}
+	if _, err := h.service("aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "lone-anchor"}); err != nil {
+		t.Errorf("the anchored name made no queue: %v", err)
+	}
+	aliased := body + "  R:\n    Type: AWS::SQS::Queue\n    Properties:\n      QueueName: *name\n"
+	if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": aliased}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "aliases") {
+		t.Errorf("an alias of the anchor answered %v, want ValidationError: aliases", err)
+	}
+}

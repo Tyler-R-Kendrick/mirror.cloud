@@ -639,8 +639,8 @@ func TestCloudFormationReadsGenerateSecretStringAsATemplateDoes(t *testing.T) {
 
 // "CloudFormation supports the YAML Version 1.1 specification with a few
 // exceptions. CloudFormation doesn't support the following features: ...
-// Aliases[,] Hash merges" (User Guide, Template formats). An anchor, an alias
-// or a merge key is ValidationError, so no alias can recurse (a: &a [*a]),
+// Aliases[,] Hash merges" (User Guide, Template formats). An alias or a merge
+// key is ValidationError, so no alias can recurse (a: &a [*a]),
 // multiply (a billion laughs) or carry a tag away from its node; a template's
 // size and depth are bounded where it is read (TestCloudFormationBoundsATemplateBySize,
 // TestCloudFormationReadsADeepTemplate). Before, the self-alias overflowed the

@@ -23,12 +23,13 @@ func parseYAML(src string) (map[string]any, error) {
 	return nil, fmt.Errorf("yaml root must be a map")
 }
 
-// CloudFormation "doesn't support ... Aliases[,] Hash merges" (User Guide, Template formats), so an
-// anchor, an alias or a merge key is refused, and no node is read twice: a template's size bounds its
-// walk (templateBody), and yaml.v3 its depth, 10,000 levels.
+// CloudFormation "doesn't support ... Aliases[,] Hash merges" (User Guide, Template formats), so an alias
+// or a merge key is refused, and no node is read twice: a template's size bounds its walk (templateBody),
+// and yaml.v3 its depth, 10,000 levels. The sentence names no anchor: one no alias refers to is read as if
+// it were not there.
 func yamlValue(n *yaml.Node) (any, error) {
-	if n.Kind == yaml.AliasNode || n.Anchor != "" || n.Tag == "!!merge" {
-		return nil, fmt.Errorf("line %d: YAML anchors, aliases and merge keys are not supported", n.Line)
+	if n.Kind == yaml.AliasNode || n.Tag == "!!merge" {
+		return nil, fmt.Errorf("line %d: YAML aliases and merge keys are not supported", n.Line)
 	}
 	tag := ""
 	if strings.HasPrefix(n.Tag, "!") && !strings.HasPrefix(n.Tag, "!!") {
@@ -44,7 +45,7 @@ func yamlValue(n *yaml.Node) (any, error) {
 	case yaml.MappingNode:
 		m := map[string]any{}
 		for i := 0; i+1 < len(n.Content); i += 2 {
-			_, err := yamlValue(n.Content[i]) // a key can be a merge key or an anchor
+			_, err := yamlValue(n.Content[i]) // a key can be a merge key
 			item, itemErr := yamlValue(n.Content[i+1])
 			if err = cmp.Or(err, itemErr); err != nil {
 				return nil, err

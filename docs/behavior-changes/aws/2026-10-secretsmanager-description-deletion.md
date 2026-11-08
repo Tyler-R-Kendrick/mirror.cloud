@@ -111,7 +111,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     read a flow sequence such as `Tags: [{Key: env, Value: dev}]` as a string
     and refused a block scalar. CloudFormation "doesn't support the following
     features: ... Aliases[,] Hash merges" (User Guide, Template formats), so
-    an anchor, an alias or a merge key is `ValidationError`. Without that, the
+    an alias or a merge key is `ValidationError`. An anchor no alias refers
+    to is read as if it were not there, as the sentence names aliases and
+    hash merges and no anchor (a reading; round 7 refused every anchor).
+    Without that, the
     library's aliases let a template refer to itself (`a: &a [*a]`, which
     overflowed the stack) or multiply (a billion laughs, which ran without
     end).

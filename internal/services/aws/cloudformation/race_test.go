@@ -344,3 +344,31 @@ func TestCloudFormationAnUpdateKeepsTerminationProtection(t *testing.T) {
 		t.Errorf("kept is %s (%v), want UPDATE_COMPLETE", status, err)
 	}
 }
+
+// RollbackStack accepts a stack in CREATE_FAILED or UPDATE_FAILED and
+// CancelUpdateStack one in UPDATE_IN_PROGRESS (API reference), and here no
+// stack rests in any of them: a failed create rolls back at once and an
+// update reserves no UPDATE_IN_PROGRESS record. Neither can carry out what it
+// says, so a record in one of those states (planted, as no operation makes
+// one) is refused, ValidationError, and left as it was, never answered with a
+// success that changes nothing. Before, RollbackStack of CREATE_FAILED and
+// UPDATE_FAILED and CancelUpdateStack of UPDATE_IN_PROGRESS answered success
+// and did nothing.
+func TestCloudFormationTheRollbackFamilyNeverSucceedsSilently(t *testing.T) {
+	h := newStacks(t)
+	cfn := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn")
+	for _, status := range []string{"CREATE_FAILED", "UPDATE_FAILED", "UPDATE_IN_PROGRESS"} {
+		raw, _ := json.Marshal(stack{Name: "planted", ID: "arn:aws:cloudformation:us-east-1:000000000000:stack/planted/1", Status: status, Resources: []res{}, Outputs: []any{}})
+		if err := cfn.Put(h.ctx, "planted", raw); err != nil {
+			t.Fatal(err)
+		}
+		for _, op := range []string{"RollbackStack", "CancelUpdateStack"} {
+			if _, err := h.invoke(op, map[string]any{"StackName": "planted"}); code(err) != "ValidationError" {
+				t.Errorf("%s of a %s stack answered %v, want ValidationError", op, status, err)
+			}
+			if got, _, _ := h.status("planted"); got != status {
+				t.Errorf("%s left the %s stack %s", op, status, got)
+			}
+		}
+	}
+}

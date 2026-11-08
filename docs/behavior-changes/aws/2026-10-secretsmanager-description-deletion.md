@@ -340,9 +340,12 @@ The oracle is AWS's documentation as it ships in the vendored model
     UPDATE_FAILED stack statuses", `ContinueUpdateRollback` "from
     UPDATE_ROLLBACK_FAILED to UPDATE_ROLLBACK_COMPLETE state", and
     `CancelUpdateStack` "only stacks that are in the UPDATE_IN_PROGRESS
-    state". Nothing here runs asynchronously and a failed create rolls back at
-    once, so no stack rests in the first, second or last of those states:
-    every call on another stack, a `ROLLBACK_FAILED` one with its
+    state". A failed create rolls back at once and an update reserves no
+    record, so no stack rests in `CREATE_FAILED`, `UPDATE_FAILED` or
+    `UPDATE_IN_PROGRESS`, and neither `RollbackStack` nor `CancelUpdateStack`
+    could carry out what it says: each refuses every stack, a record in a
+    state it accepts included (round 7 answered those with a success that
+    changed nothing). Every call on another stack, a `ROLLBACK_FAILED` one with its
     `DELETE_FAILED` orphan included (its way forward is `DeleteStack`), is
     `ValidationError` ("RollbackStack cannot be called from current stack
     status", in the words `CancelUpdateStack` uses) and changes nothing, and

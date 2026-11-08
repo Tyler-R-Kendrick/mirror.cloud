@@ -245,9 +245,12 @@ operations:
   # stack statuses", ContinueUpdateRollback "from UPDATE_ROLLBACK_FAILED to
   # UPDATE_ROLLBACK_COMPLETE state", and CancelUpdateStack only "stacks that
   # are in the UPDATE_IN_PROGRESS state". Nothing here runs asynchronously and
-  # a failed create rolls back at once, so no stack rests in CREATE_FAILED,
-  # UPDATE_FAILED or UPDATE_IN_PROGRESS: RollbackStack and CancelUpdateStack
-  # refuse every stack, and a ROLLBACK_FAILED stack's way forward is
+  # a failed create rolls back at once and an update reserves no record, so
+  # no stack rests in CREATE_FAILED, UPDATE_FAILED or UPDATE_IN_PROGRESS, and
+  # neither operation could carry out what it says: RollbackStack and
+  # CancelUpdateStack refuse every stack, a record in a state they accept
+  # included, rather than answer a success that changes nothing; a
+  # ROLLBACK_FAILED stack's way forward is
   # DeleteStack. ContinueUpdateRollback never marks a stack complete while a
   # resource the rollback could not delete (DELETE_FAILED) remains, since it
   # cannot retry that delete. Every refusal is ValidationError, in the words
@@ -261,7 +264,7 @@ operations:
         cond: s_found
         error: Validation
         message_expr: "'Stack [' + string(input.StackName) + '] does not exist'"
-      - cond: "s.Status in ['CREATE_FAILED', 'UPDATE_FAILED']"
+      - cond: "false" # it accepts CREATE_FAILED and UPDATE_FAILED, which no stack here rests in
         error: Validation
         message: "RollbackStack cannot be called from current stack status"
     output:
@@ -272,7 +275,7 @@ operations:
       s: { resource: stack }
     require:
       - *stackExists
-      - cond: "s.Status == 'UPDATE_IN_PROGRESS'"
+      - cond: "false" # it accepts UPDATE_IN_PROGRESS, which no stack here rests in
         error: Validation
         message: "CancelUpdateStack cannot be called from current stack status"
     output: {}

@@ -603,3 +603,26 @@ func TestCloudFormationFindsACycleInLinearTime(t *testing.T) {
 		t.Errorf("finding the cycle walked %d resources, want at most 1000", pack.walks)
 	}
 }
+
+// "Resources: The maximum number of resources that you can declare in your
+// CloudFormation template. 500 resources" (User Guide, Understand
+// CloudFormation quotas): 500 are a template, 501 are ValidationError on every
+// operation that reads one. Before, any number was read.
+func TestCloudFormationHoldsATemplateTo500Resources(t *testing.T) {
+	h := newStacks(t)
+	for n, ok := range map[int]bool{500: true, 501: false} {
+		resources := map[string]any{}
+		for i := range n {
+			resources[fmt.Sprintf("R%03d", i)] = map[string]any{"Type": "AWS::SQS::Queue"}
+		}
+		body, _ := json.Marshal(map[string]any{"Resources": resources})
+		for _, op := range []string{"ValidateTemplate", "GetTemplateSummary", "CreateStack"} {
+			_, err := h.invoke(op, map[string]any{"StackName": fmt.Sprintf("quota%d", n), "TemplateBody": string(body)})
+			if ok && err != nil && op != "CreateStack" {
+				t.Errorf("%s of %d resources answered %v", op, n, err)
+			} else if !ok && (code(err) != "ValidationError" || !strings.Contains(err.Error(), "maximum allowed, 500")) {
+				t.Errorf("%s of %d resources answered %v, want ValidationError: maximum allowed, 500", op, n, err)
+			}
+		}
+	}
+}

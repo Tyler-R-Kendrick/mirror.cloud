@@ -1085,6 +1085,8 @@ func parseTemplate(body string) (map[string]any, error) {
 	}
 	if len(asMap(m["Resources"])) == 0 { // "The Resources section is required in every CloudFormation template"
 		return nil, invalid("Template format error: At least one Resources member must be defined.")
+	} else if n := len(asMap(m["Resources"])); n > 500 { // "The maximum number of resources that you can declare ... 500 resources" (quotas)
+		return nil, invalid("Template format error: Number of resources, " + strconv.Itoa(n) + ", is greater than maximum allowed, 500")
 	}
 	return m, nil
 }

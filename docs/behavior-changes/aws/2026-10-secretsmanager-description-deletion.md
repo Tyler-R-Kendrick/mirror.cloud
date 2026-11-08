@@ -136,6 +136,11 @@ The oracle is AWS's documentation as it ships in the vendored model
     tag (`!!str yes`) is read as tagged. Before, `yes` was the string
     `"yes"` and made `FifoQueue: yes` a standard queue, `1:20` was a string,
     `1e3` was 1000 and `0o17` was 15.
+  - "Resources: The maximum number of resources that you can declare in your
+    CloudFormation template. 500 resources" (User Guide, quotas): a template
+    of 501 is `ValidationError`, "Template format error: Number of
+    resources, 501, is greater than maximum allowed, 500" (the wording is a
+    reading). Before, any number was read.
   - A template is bounded by its size, CloudFormation's own limits:
     `TemplateBody` is "a maximum length of 51,200 bytes", and the template
     `TemplateURL` names "max size: 1 MB" (API reference, `CreateStack`;

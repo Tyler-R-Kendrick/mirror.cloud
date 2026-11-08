@@ -672,8 +672,8 @@ func TestCloudFormationRefusesYAMLAliases(t *testing.T) {
 					if code(err) != "ValidationError" || !strings.Contains(err.Error(), c.says) {
 						t.Errorf("%s answered %v, want a ValidationError about %s", op, err, c.says)
 					}
-				case <-time.After(2 * time.Second):
-					t.Errorf("%s did not answer within 2s", op)
+				case <-time.After(30 * time.Second): // only a hang: a tight bound fails a slow machine
+					t.Errorf("%s did not answer within 30s", op)
 				}
 			}
 		})

@@ -234,8 +234,22 @@ The oracle is AWS's documentation as it ships in the vendored model
     evaluated once per operation however many name it (round 8 evaluated a
     named condition afresh wherever it was named, so a chain of 24
     conditions each naming the last twice took 19 s). A condition they do
-    not settle (one on a pseudo parameter) orders by both branches, a
-    reading. A cycle of conditions, one naming itself included, is
+    not settle orders by both branches, a reading. A condition "can be
+    based on: Input or pseudo parameter values" (User Guide, Conditions
+    syntax), and each pseudo parameter the engine answers a `Ref` with
+    settles one: `AWS::Region`, `AccountId`, `StackName`, `StackId`,
+    `Partition`, `URLSuffix` and `NoValue`, the stack's two only once there
+    is a stack (round 9 settled none, so `!If [East, e, w]` on
+    `!Equals [!Ref AWS::Region, us-east-1]` stored `""`). A stack is made
+    or updated only with every condition settled: one the engine cannot
+    evaluate (a `Fn::FindInMap`) is `ValidationError`, "Template error: the
+    condition <name> cannot be evaluated" (a reading). A condition may not
+    name a resource ("you can't reference resource logical IDs or their
+    attributes in conditions"), "Template format error: Unresolved
+    dependencies [P]. Cannot reference resources in the Conditions block of
+    the template", and a `Fn::If` or `Condition` may not name a condition
+    the template does not declare, "Template error: unresolved condition
+    dependency <name>" (both wordings are readings), on every operation. A cycle of conditions, one naming itself included, is
     `ValidationError`, "Template format error: Circular dependency between
     conditions: [A, B]" (the wording is a reading), on every operation that
     reads a template; round 9 left each unsettled, so the template passed and

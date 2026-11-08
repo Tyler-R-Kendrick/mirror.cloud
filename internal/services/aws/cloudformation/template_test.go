@@ -503,8 +503,8 @@ func TestCloudFormationReadsYAMLAsVersion11(t *testing.T) {
 // prod and names B otherwise, and B, which names A only when Env is not
 // prod, are no cycle; E, which names ZZ only in prod, is made after it, and
 // F, which names ZZ only outside prod, before it, by its logical id.
-// A condition the parameters do not settle (one on AWS::Region) orders by
-// both branches, a reading, so C and D, each naming the other under it, are a
+// A condition the template alone does not settle (one on AWS::StackName,
+// which ValidateTemplate has no stack for) orders by both branches, a reading, so C and D, each naming the other under it, are a
 // cycle (one that names itself is refused, TestCloudFormationRefusesACycleOf
 // Conditions). Before, every Fn::If ordered by both
 // branches, and A and B were "Circular dependency between resources: [A, B]".
@@ -520,10 +520,10 @@ func TestCloudFormationOrdersAnIfByTheBranchItTakes(t *testing.T) {
 	tpl := map[string]any{
 		"Parameters": map[string]any{"Env": map[string]any{"Type": "String", "Default": "prod"}},
 		"Conditions": map[string]any{
-			"IsProd":   map[string]any{"Fn::Equals": []any{ref("Env"), "prod"}},
-			"IsDev":    map[string]any{"Fn::Not": []any{map[string]any{"Condition": "IsProd"}}},
-			"Both":     map[string]any{"Fn::And": []any{map[string]any{"Condition": "IsProd"}, map[string]any{"Fn::Or": []any{map[string]any{"Condition": "IsDev"}, map[string]any{"Condition": "IsProd"}}}}},
-			"InRegion": map[string]any{"Fn::Equals": []any{ref("AWS::Region"), "us-east-1"}},
+			"IsProd": map[string]any{"Fn::Equals": []any{ref("Env"), "prod"}},
+			"IsDev":  map[string]any{"Fn::Not": []any{map[string]any{"Condition": "IsProd"}}},
+			"Both":   map[string]any{"Fn::And": []any{map[string]any{"Condition": "IsProd"}, map[string]any{"Fn::Or": []any{map[string]any{"Condition": "IsDev"}, map[string]any{"Condition": "IsProd"}}}}},
+			"Named":  map[string]any{"Fn::Equals": []any{ref("AWS::StackName"), "s"}},
 		},
 		"Resources": map[string]any{
 			"A": param(when("IsProd", "fixed", ref("B"))), "B": param(when("IsDev", ref("A"), "fixed")),
@@ -534,10 +534,10 @@ func TestCloudFormationOrdersAnIfByTheBranchItTakes(t *testing.T) {
 	if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": string(body)}); err != nil {
 		t.Errorf("A and B, settled by Env, answered %v", err)
 	}
-	if order, err := h.pack.order(tpl, map[string]string{"Env": "prod"}); err != nil || slices.Index(order, "E") < slices.Index(order, "ZZ") || slices.Index(order, "F") > slices.Index(order, "ZZ") {
+	if order, err := h.pack.order(tpl, conditions(tpl, map[string]string{"Env": "prod"})); err != nil || slices.Index(order, "E") < slices.Index(order, "ZZ") || slices.Index(order, "F") > slices.Index(order, "ZZ") {
 		t.Errorf("the order is %v (%v), want E after ZZ and F, which names ZZ only outside prod, before it", order, err)
 	}
-	for _, cond := range []string{"InRegion"} {
+	for _, cond := range []string{"Named"} {
 		tpl["Resources"] = map[string]any{"C": param(when(cond, ref("D"), "x")), "D": param(when(cond, ref("C"), "x"))}
 		body, _ := json.Marshal(tpl)
 		if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": string(body)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "[C, D]") {
@@ -791,6 +791,76 @@ func TestCloudFormationRefusesACycleOfConditions(t *testing.T) {
 		}
 		if _, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": "cc-p"}); err == nil {
 			t.Errorf("the conditions %v made the parameter", conds)
+		}
+	}
+}
+
+// A condition "can be based on: Input or pseudo parameter values" (User
+// Guide, Conditions syntax), and the engine knows each pseudo parameter it
+// answers a Ref with when it makes or updates a stack: AWS::Region,
+// AccountId, StackName, StackId, Partition, URLSuffix and NoValue. So each
+// condition on one settles, and its Fn::If takes its branch. A condition the
+// engine cannot settle when it makes the stack (here a Fn::FindInMap, which it
+// does not evaluate) is ValidationError naming it, never stored as the Fn::If
+// map or "". A condition may not name a resource ("you can't reference
+// resource logical IDs or their attributes in conditions"), and a Fn::If may
+// not name a condition the template does not declare: both are
+// ValidationError on every operation. Before, a condition on a pseudo
+// parameter was never settled, so the value was the Fn::If's map, and the
+// others passed.
+func TestCloudFormationSettlesConditionsOnPseudoParameters(t *testing.T) {
+	h := newStacks(t)
+	ref := func(n string) any { return map[string]any{"Ref": n} }
+	is := func(n, v string) any { return map[string]any{"Fn::Equals": []any{ref(n), v}} }
+	conds := map[string]any{"Region": is("AWS::Region", "us-east-1"), "Account": is("AWS::AccountId", "000000000000"),
+		"Name": is("AWS::StackName", "ps"), "Partition": is("AWS::Partition", "aws"), "Suffix": is("AWS::URLSuffix", "amazonaws.com"),
+		"Other": is("AWS::Region", "eu-west-1")}
+	outputs := map[string]any{}
+	for c := range conds {
+		outputs[c] = map[string]any{"Value": map[string]any{"Fn::If": []any{c, "yes", "no"}}}
+	}
+	body, _ := json.Marshal(map[string]any{"Conditions": conds, "Outputs": outputs, "Resources": map[string]any{
+		"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "ps-p", "Type": "String", "Value": map[string]any{"Fn::If": []any{"Region", "e", "w"}}}}}})
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "ps", "TemplateBody": string(body)}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": "ps-p"}); err != nil || str(asMap(got["Parameter"])["Value"]) != "e" {
+		t.Errorf("the parameter is %v (%v), want e", got, err)
+	}
+	for _, o := range spi.Slice(h.record("ps")["Outputs"]) {
+		if want := map[bool]string{true: "no", false: "yes"}[asMap(o)["OutputKey"] == "Other"]; asMap(o)["OutputValue"] != want {
+			t.Errorf("output %v is %v, want %s", asMap(o)["OutputKey"], asMap(o)["OutputValue"], want)
+		}
+	}
+	id, _ := json.Marshal(map[string]any{"Conditions": map[string]any{"Mine": map[string]any{"Fn::Not": []any{is("AWS::StackId", "x")}}}, "Resources": map[string]any{
+		"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "ps-id", "Type": "String", "Value": map[string]any{"Fn::If": []any{"Mine", "mine", "x"}}}}}})
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "psid", "TemplateBody": string(id)}); err != nil {
+		t.Fatal(err)
+	} else if got, _ := h.service("aws.ssm", "GetParameter", map[string]any{"Name": "ps-id"}); str(asMap(got["Parameter"])["Value"]) != "mine" {
+		t.Errorf("the parameter on AWS::StackId is %v, want mine", got)
+	}
+	refused := map[string]map[string]any{
+		"unsettled": {"Mappings": map[string]any{"M": map[string]any{"k": map[string]any{"v": "x"}}},
+			"Conditions": map[string]any{"Mapped": map[string]any{"Fn::Equals": []any{map[string]any{"Fn::FindInMap": []any{"M", "k", "v"}}, "x"}}}},
+		"resource":   {"Conditions": map[string]any{"OnP": is("P", "x")}},
+		"undeclared": {"Conditions": map[string]any{}},
+	}
+	for name, tpl := range refused {
+		cond := map[string]string{"unsettled": "Mapped", "resource": "OnP", "undeclared": "Nope"}[name]
+		tpl["Resources"] = map[string]any{"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "ps-" + name, "Type": "String",
+			"Value": map[string]any{"Fn::If": []any{cond, "a", "b"}}}}}
+		body, _ := json.Marshal(tpl)
+		ops := []string{"CreateStack"}
+		if name != "unsettled" {
+			ops = append(ops, "ValidateTemplate")
+		}
+		for _, op := range ops {
+			if _, err := h.invoke(op, map[string]any{"StackName": "ps-" + name, "TemplateBody": string(body)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), map[string]string{"unsettled": "Mapped", "resource": "[P]", "undeclared": "Nope"}[name]) {
+				t.Errorf("%s of the %s condition answered %v, want ValidationError", op, name, err)
+			}
+		}
+		if _, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": "ps-" + name}); err == nil {
+			t.Errorf("the %s condition made its parameter", name)
 		}
 	}
 }

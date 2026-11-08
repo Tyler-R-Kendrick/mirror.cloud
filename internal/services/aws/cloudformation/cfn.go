@@ -77,7 +77,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"StackId": st.ID}}, nil
 	case "GetTemplateSummary":
 		_, tpl, _, err := p.template(ctx, req)
-		if st, loadErr := p.load(ctx, req, name); err != nil && name != "" && loadErr == nil {
+		if st, loadErr := p.load(ctx, req, name); err != nil && name != "" && loadErr == nil && cmp.Or(str(req.Input["TemplateBody"]), str(req.Input["TemplateURL"])) == "" {
 			tpl, err = parseTemplate(st.Template)
 		}
 		if err != nil {

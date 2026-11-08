@@ -282,6 +282,11 @@ The oracle is AWS's documentation as it ships in the vendored model
     Before, it made a second set of resources and wrote its record over the
     first, which then belonged to no stack, and creates racing on one name
     each made a set.
+  - `CreateChangeSet` refuses the stacks `UpdateStack` refuses, a
+    `ROLLBACK_*` or `DELETE_FAILED` one too (round 8 refused only one in
+    progress), and `GetTemplateSummary` reads the stored template only when
+    the request gives none, so an oversize `TemplateBody` beside a
+    `StackName` is the member's constraint error.
   - A stack in any `_IN_PROGRESS` state takes no update: `UpdateStack`,
     `CreateChangeSet` and `ExecuteChangeSet` are `ValidationError`,
     "Stack:<id> is in CREATE_IN_PROGRESS state and can not be updated.", the

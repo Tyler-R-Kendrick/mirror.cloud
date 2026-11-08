@@ -281,15 +281,15 @@ operations:
   # equally shadowed; only the inline TemplateBody path is transcribed, and
   # the bundle faults ValidationError where the pack would have fetched.
 
-  # A stack in any _IN_PROGRESS state takes no change set, in the words
-  # UpdateStack refuses it with (the pack's).
+  # A stack UpdateStack refuses (any _IN_PROGRESS, ROLLBACK_* or
+  # DELETE_FAILED state) takes no change set, in the pack's words.
   CreateChangeSet:
     reads:
       s: { resource: stack }
     require:
       - cond: "'TemplateBody' in input && string(input.TemplateBody) != ''"
         error: Validation
-      - cond: "!s_found || !string(s.Status).endsWith('_IN_PROGRESS')"
+      - cond: "!s_found || !(string(s.Status).endsWith('_IN_PROGRESS') || string(s.Status).startsWith('ROLLBACK_') || s.Status == 'DELETE_FAILED')"
         error: Validation
         message_expr: "'Stack:' + string(s.ID) + ' is in ' + string(s.Status) + ' state and can not be updated.'"
       # TemplateBody is "a maximum length of 51,200 bytes" (API reference,

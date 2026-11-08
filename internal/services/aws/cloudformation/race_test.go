@@ -433,3 +433,37 @@ func TestCloudFormationTerminationProtectionWritesWithTheEngine(t *testing.T) {
 		t.Error("EnableTerminationProtection TRUE left tp unprotected")
 	}
 }
+
+// A change set is refused for the stacks UpdateStack and ExecuteChangeSet
+// refuse: one ROLLBACK_* or DELETE_FAILED, as well as one in progress, each
+// "Stack:<id> is in <status> state and can not be updated.". Before,
+// CreateChangeSet refused only a stack in progress.
+func TestCloudFormationNoChangeSetForAStackThatTakesNoUpdate(t *testing.T) {
+	h := newStacks(t)
+	if err := h.create("rolled", map[string]map[string]any{"Q": nameable()["Queue"], "ZZZ": {"Type": "AWS::Nope::Thing"}}); err == nil {
+		t.Fatal("a template with an unsupported resource type was created")
+	}
+	tpl, _ := json.Marshal(map[string]any{"Resources": map[string]any{"Q": nameable()["Queue"]}})
+	for _, op := range []string{"UpdateStack", "CreateChangeSet"} {
+		_, err := h.invoke(op, map[string]any{"StackName": "rolled", "ChangeSetName": "cs", "TemplateBody": string(tpl)})
+		if code(err) != "ValidationError" || !strings.Contains(err.Error(), "is in ROLLBACK_COMPLETE state and can not be updated.") {
+			t.Errorf("%s of a ROLLBACK_COMPLETE stack answered %v, want ValidationError: ROLLBACK_COMPLETE", op, err)
+		}
+	}
+}
+
+// GetTemplateSummary reads the stored template only when the request gives
+// none: a TemplateBody over 51,200 bytes beside a StackName is the member's
+// constraint error, as on every operation. Before, the stored template was
+// summarised instead.
+func TestCloudFormationSummarisesNoStoredTemplateForAnOversizeBody(t *testing.T) {
+	h := newStacks(t)
+	h.mustCreate("sum", map[string]map[string]any{"Q": nameable()["Queue"]})
+	_, err := h.invoke("GetTemplateSummary", map[string]any{"StackName": "sum", "TemplateBody": padded(51_201, false)})
+	if code(err) != "ValidationError" || !strings.Contains(err.Error(), "51200") {
+		t.Errorf("GetTemplateSummary of an oversize body answered %v, want the 51200 constraint", err)
+	}
+	if _, err := h.invoke("GetTemplateSummary", map[string]any{"StackName": "sum"}); err != nil {
+		t.Errorf("GetTemplateSummary of the stored template answered %v", err)
+	}
+}

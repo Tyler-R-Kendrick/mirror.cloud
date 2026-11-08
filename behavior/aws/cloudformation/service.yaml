@@ -304,6 +304,11 @@ operations:
     require:
       - cond: "'TemplateBody' in input && string(input.TemplateBody) != ''"
         error: Validation
+      # TemplateBody is "a maximum length of 51,200 bytes" (API reference,
+      # CreateChangeSet), as the pack holds every operation's.
+      - cond: "size(bytes(string(input.TemplateBody))) <= 51200"
+        error: Validation
+        message: "1 validation error detected: Value at 'templateBody' failed to satisfy constraint: Member must have length less than or equal to 51200"
     effects:
       - generate: { bind: csid, kind: hex, bytes: 8 }
       - create:

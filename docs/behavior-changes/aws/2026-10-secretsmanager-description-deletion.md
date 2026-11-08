@@ -111,11 +111,25 @@ The oracle is AWS's documentation as it ships in the vendored model
     read a flow sequence such as `Tags: [{Key: env, Value: dev}]` as a string
     and refused a block scalar. CloudFormation "doesn't support the following
     features: ... Aliases[,] Hash merges" (User Guide, Template formats), so
-    an anchor, an alias or a merge key is `ValidationError`, and a template
-    nesting deeper than 100 levels or holding more than 100,000 nodes is
-    refused too. Without that, the library's aliases let a template refer to
-    itself (`a: &a [*a]`, which overflowed the stack) or multiply (a billion
-    laughs, which ran without end).
+    an anchor, an alias or a merge key is `ValidationError`. Without that, the
+    library's aliases let a template refer to itself (`a: &a [*a]`, which
+    overflowed the stack) or multiply (a billion laughs, which ran without
+    end).
+  - A template is bounded by its size, CloudFormation's own limits:
+    `TemplateBody` is "a maximum length of 51,200 bytes", and the template
+    `TemplateURL` names "max size: 1 MB" (API reference, `CreateStack`;
+    "Template body size in a request" and "... in an Amazon S3 object", User
+    Guide, Understand CloudFormation quotas). A longer body, YAML or JSON, is
+    `ValidationError`, the member's constraint error ("Member must have length
+    less than or equal to 51200"), on `CreateStack`, `UpdateStack`,
+    `ValidateTemplate`, `GetTemplateSummary` and `CreateChangeSet`; an S3
+    object over 1,000,000 bytes is `ValidationError` too. That the quotas'
+    1 MB is 1,000,000 bytes is a reading: the page writes 204,800 bytes as
+    "204.8 KB". Neither page gives the error's wording. Depth is bounded by
+    the parsers, which refuse nesting past 10,000 levels (`exceeded max
+    depth`), as `ValidationError`. A round-7 bound of 100 levels and 100,000
+    nodes refused real templates (200 mappings of 100 keys of two attributes,
+    642 KB, within the quotas) and is gone.
   - A resource the template does not name, of any type, is made under
     `<stack>-<logical id>-<suffix>`, the modelled form: the suffix is twelve
     hex digits of a hash of the stack id and logical id, so no two stacks, and

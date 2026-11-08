@@ -199,8 +199,13 @@ func (p *Pack) template(ctx context.Context, req *spi.Request) (string, map[stri
 	return body, tpl, err
 }
 
+// templateBody is the request's template: TemplateBody, "a maximum length of 51,200 bytes", or the S3
+// object TemplateURL names, "max size: 1 MB" (API reference, CreateStack), which the quotas page, writing
+// 204,800 bytes "204.8 KB", counts as 1,000,000 bytes.
 func (p *Pack) templateBody(ctx context.Context, req *spi.Request) (string, error) {
-	if body := str(req.Input["TemplateBody"]); body != "" {
+	if body := str(req.Input["TemplateBody"]); len(body) > 51_200 {
+		return "", invalid("1 validation error detected: Value at 'templateBody' failed to satisfy constraint: Member must have length less than or equal to 51200")
+	} else if body != "" {
 		return body, nil
 	}
 	location := str(req.Input["TemplateURL"])
@@ -224,7 +229,10 @@ func (p *Pack) templateBody(ctx context.Context, req *spi.Request) (string, erro
 		return "", invalid("TemplateURL object not found")
 	}
 	defer reader.Close()
-	body, err := io.ReadAll(reader)
+	body, err := io.ReadAll(io.LimitReader(reader, 1_000_001))
+	if len(body) > 1_000_000 {
+		return "", invalid("The template at TemplateURL is larger than a template's maximum size in S3, 1 MB")
+	}
 	return string(body), err
 }
 

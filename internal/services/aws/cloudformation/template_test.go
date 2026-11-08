@@ -626,3 +626,42 @@ func TestCloudFormationHoldsATemplateTo500Resources(t *testing.T) {
 		}
 	}
 }
+
+// Fn::If resolves to the branch its condition takes, the conditions read
+// from the parameters once; AWS::NoValue "Removes the corresponding resource
+// property when specified as a return value in the Fn::If intrinsic function"
+// and AWS::StackId "Returns the ID (ARN) of the stack" (User Guide, pseudo
+// parameters). So in prod the parameter's Value is "p", the secret has no
+// Description, its value is the stack's id, and an output takes its branch.
+// Before, the Fn::If map itself reached the service (SSM refused it), and
+// AWS::StackId was left as written.
+func TestCloudFormationResolvesFnIf(t *testing.T) {
+	h := newStacks(t)
+	when := func(c string, a, b any) any { return map[string]any{"Fn::If": []any{c, a, b}} }
+	body, _ := json.Marshal(map[string]any{
+		"Parameters": map[string]any{"Env": map[string]any{"Type": "String", "Default": "prod"}},
+		"Conditions": map[string]any{"IsProd": map[string]any{"Fn::Equals": []any{map[string]any{"Ref": "Env"}, "prod"}}},
+		"Resources": map[string]any{
+			"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "if-p", "Type": "String", "Value": when("IsProd", "p", "d")}},
+			"S": map[string]any{"Type": "AWS::SecretsManager::Secret", "Properties": map[string]any{"Name": "if-s",
+				"Description":  when("IsProd", map[string]any{"Ref": "AWS::NoValue"}, "dev"),
+				"SecretString": map[string]any{"Fn::Sub": "${AWS::StackId}"}}}},
+		"Outputs": map[string]any{"O": map[string]any{"Value": when("IsProd", "out-p", "out-d")}},
+	})
+	out, err := h.invoke("CreateStack", map[string]any{"StackName": "ifs", "TemplateBody": string(body)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": "if-p"}); err != nil || str(asMap(got["Parameter"])["Value"]) != "p" {
+		t.Errorf("the parameter is %v (%v), want p", got, err)
+	}
+	if got, err := h.service("aws.secretsmanager", "DescribeSecret", map[string]any{"SecretId": "if-s"}); err != nil || got["Description"] != nil {
+		t.Errorf("the secret is %v (%v), want no Description", got, err)
+	}
+	if got, err := h.service("aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": "if-s"}); err != nil || got["SecretString"] != out["StackId"] {
+		t.Errorf("the secret's value is %v (%v), want the stack id %v", got["SecretString"], err, out["StackId"])
+	}
+	if !strings.Contains(spi.JSONText(h.record("ifs")["Outputs"]), `"OutputValue":"out-p"`) {
+		t.Errorf("the outputs are %v, want O out-p", h.record("ifs")["Outputs"])
+	}
+}

@@ -160,8 +160,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}); err != nil {
 		return nil, err
 	}
-	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: params,
+	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: conditions(tpl, params),
 		Resources: []res{}, Outputs: []any{}} // never null: every read of a stack lists both
+	st.Refs["AWS::StackId"] = id // "Returns the ID (ARN) of the stack" (User Guide, pseudo parameters)
 	fail := func(err error) (*spi.Response, error) {
 		if st.Reason = err.Error(); !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, "CREATE_IN_PROGRESS", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
@@ -422,6 +423,9 @@ func attribute(refs map[string]string, req *spi.Request, typ, logical, id string
 
 // unknown stands for an id known only once its resource is made, and in order for one not yet ordered.
 const unknown = "\uffff"
+
+// noValue is what a Ref to AWS::NoValue answers, and resolve drops.
+const noValue = "\ufffe"
 
 // planID is the id a resource named n is made with, which a Ref to it answers: n in the form its
 // service gives it back. A queue's URL (its endpoint's business), a KMS key's id and a REST API's are
@@ -1002,15 +1006,23 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 		if s, ok := t["Fn::Sub"]; ok {
 			return p.fnSub(s, refs, req, stack)
 		}
+		branches := append(spi.Slice(t["Fn::If"]), nil, nil, nil) // the branch its condition takes (conditions)
+		if yes, settled := refs["Condition::"+str(branches[0])]; settled && t["Fn::If"] != nil {
+			return p.resolve(branches[map[bool]int{true: 1, false: 2}[yes == "true"]], refs, req, stack)
+		}
 		out := map[string]any{}
 		for k, val := range t {
-			out[k] = p.resolve(val, refs, req, stack)
+			if r := p.resolve(val, refs, req, stack); r != noValue { // AWS::NoValue "Removes the corresponding resource property"
+				out[k] = r
+			}
 		}
 		return out
 	case []any:
-		out := make([]any, len(t))
-		for i, val := range t {
-			out[i] = p.resolve(val, refs, req, stack)
+		out := []any{}
+		for _, val := range t {
+			if r := p.resolve(val, refs, req, stack); r != noValue {
+				out = append(out, r)
+			}
 		}
 		return out
 	default:
@@ -1022,7 +1034,7 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 // whether name is any of them; the name itself when it is none.
 func (p *Pack) ref(name string, refs map[string]string, req *spi.Request, stack string) (string, bool) {
 	pseudo := map[string]string{"AWS::AccountId": req.Identity.Account, "AWS::Region": req.Identity.Region,
-		"AWS::StackName": stack, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com"}
+		"AWS::StackName": stack, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com", "AWS::NoValue": noValue}
 	if v, ok := pseudo[name]; ok {
 		return v, true
 	}

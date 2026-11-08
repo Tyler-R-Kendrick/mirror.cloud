@@ -230,8 +230,12 @@ The oracle is AWS's documentation as it ships in the vendored model
     named condition afresh wherever it was named, so a chain of 24
     conditions each naming the last twice took 19 s). A condition they do
     not settle (one on a pseudo parameter, or one that names itself) orders
-    by both branches, a reading. `Fn::If` is not otherwise resolved here; its
-    value reaches the service as written. Before, every `Fn::If` ordered by
+    by both branches, a reading. A settled `Fn::If` also resolves to its branch,
+    and `AWS::NoValue` there "Removes the corresponding resource property"
+    (an element of a list too); an unsettled one reaches the service as
+    written, a reading. `AWS::StackId` "Returns the ID (ARN) of the stack"
+    (User Guide, pseudo parameters). Round 8 resolved no `Fn::If`, so its
+    map reached the service, and left `AWS::StackId` as written. Before, every `Fn::If` ordered by
     both branches, so two resources naming each other only in branches never
     both taken were refused as a cycle.
     The order is found once per operation, by one walk of each resource's

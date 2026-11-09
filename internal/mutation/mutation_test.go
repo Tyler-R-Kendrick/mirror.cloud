@@ -5099,6 +5099,14 @@ var mutants = []mutant{
 		run:  "TestCloudFormationAnUpdateMakesNoStack|TestRV15UpdateMissingPrecedence|TestRV14UpdateVsDeleteResurrects",
 	},
 	{
+		name: "cloudformation-a-stale-update-keeps-what-it-read",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  "\t\treq.Input = input\n",
+		new:  "\t\t_ = input\n",
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationAnUpdateReadsPreviousValuesFromTheRecordItReserves",
+	},
+	{
 		name: "cloudformation-an-output-holds-a-list",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
 		old:  `"OutputValue": text(v)`,

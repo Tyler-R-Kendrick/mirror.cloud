@@ -8,7 +8,7 @@ A service is its ID (aws.s3); @FILE reads IDs from a file, one per line, blank
 lines and # comments ignored (profiles/core.txt). The binary then embeds the
 models and bundles of those services only, links only their hand-written packs,
 and starts and serves exactly them. Nothing in the source tree changes: the
-overlay hides the other services' embedded files and swaps one import list, so
+overlay hides the other services' embedded files and their one-line import files, so
 the full build is untouched and a typo here cannot leak into it.
 
 What a smaller build gives up: a service left out answers nothing, and what in
@@ -20,6 +20,7 @@ The files the overlay points at are written beside it, so keep them together.
 They are not named *.go, so an overlay written inside the module (make build-slim
 writes bin/slim-overlay.json) does not put two stray packages in `go vet ./...`.
 """
+import glob
 import json
 import os
 import re
@@ -75,25 +76,26 @@ def main(argv):
             f.write(text)
         return path
 
-    # The one list of hand-written packs, cut to the kept services.
-    allservices = os.path.join(root, "internal", "allservices", "allservices.go")
-    lines = []
-    for line in open(allservices).read().split("\n"):
-        pack = re.search(r'internal/services/([a-z]+)/([a-z0-9]+)"', line)
-        if pack and (pack.group(1), pack.group(2)) not in keep:
-            continue
-        if "cicd/register" in line and not cicd:
-            continue
-        lines.append(line)
-    replace[allservices] = write("allservices.go.txt", "\n".join(lines))
+    # The hand-written packs are one file each in allservices (svc_<p>_<d>.go),
+    # so leaving a service out is hiding its file. CI/CD executors are one line
+    # in allservices.go.
+    for pack in sorted(glob.glob(os.path.join(root, "internal", "allservices", "svc_*.go"))):
+        m = re.fullmatch(r"svc_([a-z]+)_([a-z0-9]+)\.go", os.path.basename(pack))
+        if m and m.groups() not in keep:
+            replace[pack] = ""
+    if not cicd:
+        allservices = os.path.join(root, "internal", "allservices", "allservices.go")
+        lines = [l for l in open(allservices).read().split("\n") if "cicd/register" not in l]
+        replace[allservices] = write("allservices.go.txt", "\n".join(lines))
 
     # `*/*/ops/*.yaml` must match something or the build fails, and a handful of
-    # services may have no split operations. A bundle with no service in it is
-    # skipped by the loader.
+    # services may have no split operations. The tracked placeholder bundle
+    # (behavior/none/placeholder) is hidden with the services left out, so the
+    # build brings its own.
     replace[os.path.join(root, "behavior", "aws", "placeholder", "ops", "placeholder.yaml")] = write(
         "placeholder.yaml", "# keeps the embed pattern matching when no kept service splits its operations\n")
-    replace[os.path.join(root, "internal", "specboot", "slim.go")] = write(
-        "slim.go.txt", "package specboot\n\nfunc init() { slim = true }\n")
+    # specboot/complete.go says the tree holds every service; this build does not.
+    replace[os.path.join(root, "internal", "specboot", "complete.go")] = ""
 
     with open(out, "w") as f:
         json.dump({"Replace": replace}, f)

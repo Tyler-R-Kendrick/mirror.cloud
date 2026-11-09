@@ -1,0 +1,46 @@
+{
+  "_comment": "Which tier each test is reported under, and what each promotion stage runs. scripts/test-tiers.py reads tiers; test/ci (TestTiersPartitionPackages, TestEveryCIJobHasAStage) checks both against the module and the workflows. A test lands in the first tier whose rule matches it: tests names a test-name pattern in any package, packages a package pattern (relative to the module, or test/sdk/go) for every test in it.",
+  "tiers": [
+    {"name": "fuzz seeds", "tests": "^Fuzz"},
+    {"name": "snapshot", "tests": "Characterization$|^TestNamedBucketConfigurations$|^TestUploadPartCopyConditionsAndRange$"},
+    {"name": "chaos", "packages": "^internal/chaos$"},
+    {"name": "bdd", "packages": "^test/behavior(/.*)?$|^test/terraform$"},
+    {"name": "contract", "packages": "^internal/conformance$|^internal/proto(/.*)?$|^test/sdk/go(/.*)?$"},
+    {"name": "equivalence", "packages": "^internal/equivalence$|^internal/bundled$"},
+    {"name": "snapshot", "packages": "^internal/(edge|identity|mock|runtime|specdiff)$"},
+    {"name": "unit", "packages": ".*"}
+  ],
+  "stages": {
+    "pull_request": {
+      "plan": "computes the selection: cmd/affected over the files the pull request changes",
+      "check": "full: vet, gofmt, the ratchet",
+      "unit": "every package, each read from main's result cache unless its inputs changed",
+      "coverage": "full and uncached: the 80% floor",
+      "race": "the affected packages, -race -short (internal/racegate skips single-goroutine large-input tests)",
+      "fuzz": "the targets in the affected packages",
+      "mutation": "the mutants on changed files, of changed tests, or whose entries changed (internal/mutation select_test.go)",
+      "image": "when cmd/mirror, a Dockerfile or a profile changes",
+      "generated-models": "when specs, internal/generated or cmd/mirrorgen change",
+      "cloudflare-miniflare": "when internal/execution, test/behavior/cloudflare or tools/cloudflare-runtime change",
+      "test": "fails unless every required job passed or was skipped as unaffected"
+    },
+    "main": {
+      "plan": "selects everything",
+      "check": "full",
+      "unit": "every package, writing the result cache pull requests read",
+      "coverage": "full and uncached",
+      "race": "every package, -race, strict",
+      "fuzz": "every target",
+      "mutation": "every mutant",
+      "image": "always",
+      "generated-models": "always",
+      "cloudflare-miniflare": "always",
+      "test": "fails unless every required job passed"
+    },
+    "nightly": {
+      "unit": "every package, -count=1",
+      "coverage": "full and uncached",
+      "race": "every package, -race, -count=1"
+    }
+  }
+}

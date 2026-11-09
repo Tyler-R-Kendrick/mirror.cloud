@@ -15,7 +15,8 @@ JSON (build errors, make's own lines) as it arrives. So `scripts/known-red.py`
 reads its output like any other run. Then it prints the table, and appends it to
 $GITHUB_STEP_SUMMARY when that is set.
 
-A test lands in the first tier whose rule matches it, in the order of TIERS.
+A test lands in the first tier whose rule matches it, in the order of
+test/tiers.json.
 Exit status is 1 when any test or package failed, 0 otherwise.
 """
 import json
@@ -25,18 +26,10 @@ import sys
 
 MODULE = "github.com/tyler-r-kendrick/mirror.cloud/"
 
-# (tier, package pattern, test-name pattern). The rules follow the Makefile
-# targets that used to run each tier as its own step.
-TIERS = [
-    ("fuzz seeds", r".*", r"^Fuzz"),
-    ("snapshot", r".*", r"Characterization$|^TestNamedBucketConfigurations$|^TestUploadPartCopyConditionsAndRange$"),
-    ("chaos", r"^internal/chaos$", r".*"),
-    ("bdd", r"^test/behavior(/.*)?$|^test/terraform$", r".*"),
-    ("contract", r"^internal/conformance$|^internal/proto(/.*)?$|^test/sdk/go(/.*)?$", r".*"),
-    ("equivalence", r"^internal/equivalence$|^internal/bundled$", r".*"),
-    ("snapshot", r"^internal/(edge|identity|mock|runtime|specdiff)$", r".*"),
-    ("unit", r".*", r".*"),
-]
+# (tier, package pattern, test-name pattern), from test/tiers.json, which says
+# what each tier holds and which tests the stages run.
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "test", "tiers.json")) as f:
+    TIERS = [(t["name"], t.get("packages", ".*"), t.get("tests", ".*")) for t in json.load(f)["tiers"]]
 RULES = [(name, re.compile(p), re.compile(t)) for name, p, t in TIERS]
 ORDER = []
 for name, _, _ in TIERS:

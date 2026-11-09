@@ -54,9 +54,22 @@ func TestEveryTrackedFileMapsSomewhere(t *testing.T) {
 }
 
 // Fail closed: a path nothing accounts for selects every package, and so do
-// the module's requirements.
+// the module's requirements. A path that is gone and that no package holds
+// selects nothing: nothing can compile it.
 func TestUnknownPathsSelectEverything(t *testing.T) {
-	g, _ := moduleGraph(t)
+	shared, _ := moduleGraph(t)
+	// The same graph, looking for unplaced paths in a tree where these exist.
+	g := *shared
+	g.root = t.TempDir()
+	for _, p := range []string{"nowhere/new.bin", "a-new-root-file", ".github/new-thing.yml"} {
+		os.MkdirAll(filepath.Dir(filepath.Join(g.root, p)), 0o755)
+		if err := os.WriteFile(filepath.Join(g.root, p), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if r := g.selectFor([]string{"internal/services/aws/gone/gone.go", "RELEASE"}); r.all || len(r.pkgs) != 0 {
+		t.Errorf("deleted paths no package holds selected %v (all=%v)", r.pkgs, r.all)
+	}
 	for _, p := range []string{"nowhere/new.bin", "a-new-root-file", "go.mod", "go.sum", ".github/new-thing.yml"} {
 		r := g.selectFor([]string{"docs/TESTING.md", p})
 		if !r.all || len(r.pkgs) != len(g.pkgs) {
@@ -125,7 +138,7 @@ func TestGoldenSelections(t *testing.T) {
 		"a pinned spec":         {"specs/mirror.lock"},
 		"the sdk module":        {"test/sdk/go/go.mod"},
 		"the module file":       {"go.mod"},
-		"an unknown root file":  {"brand-new.txt"},
+		"a deleted root file":   {"RELEASE"},
 		"a fuzz target's tests": {"internal/proto/aws/httpuri/httpuri_test.go"},
 		"the dockerfile":        {"Dockerfile"},
 		"the miniflare runtime": {"tools/cloudflare-runtime/package-lock.json"},

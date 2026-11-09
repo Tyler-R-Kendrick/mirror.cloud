@@ -1,4 +1,15 @@
 {
+  "a deleted root file": {
+    "files": [
+      "RELEASE"
+    ],
+    "jobs": {
+      "cloudflare-miniflare": false,
+      "generated-models": false,
+      "image": false
+    },
+    "packages": []
+  },
   "a fuzz target's tests": {
     "files": [
       "internal/proto/aws/httpuri/httpuri_test.go"
@@ -46,17 +57,6 @@
       "./internal/mutation",
       "./test/ci"
     ]
-  },
-  "an unknown root file": {
-    "all": "brand-new.txt: no rule and no package owns it",
-    "files": [
-      "brand-new.txt"
-    ],
-    "jobs": {
-      "cloudflare-miniflare": true,
-      "generated-models": true,
-      "image": true
-    }
   },
   "one leaf package": {
     "files": [

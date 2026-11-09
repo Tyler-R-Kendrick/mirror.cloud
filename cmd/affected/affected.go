@@ -3,9 +3,13 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -82,6 +86,7 @@ type graph struct {
 	pkgs []string            // every package, as "./dir", sorted
 	dirs map[string]string   // "dir" (slash, from the root; "" for the root) -> "./dir"
 	deps map[string][]string // "./dir" -> every module package its test binaries link
+	root string              // where to look for a path no package or rule places
 }
 
 // load runs go list in root. -test lists each package's test binary (p.test)
@@ -107,7 +112,7 @@ func load(root string) (*graph, error) {
 }
 
 func parse(module, root string, listing []byte) (*graph, error) {
-	g := &graph{dirs: map[string]string{}, deps: map[string][]string{}}
+	g := &graph{dirs: map[string]string{}, deps: map[string][]string{}, root: root}
 	rel := func(importPath string) (string, bool) {
 		importPath, _, _ = strings.Cut(importPath, " ")
 		if importPath == module {
@@ -206,6 +211,15 @@ func (g *graph) classify(p string) classification {
 			return classification{direct: append([]string{pkg}, readers...), why: "a test input of " + pkg}
 		}
 		return classification{code: []string{pkg}, direct: readers, why: "in " + pkg}
+	}
+	// A file that is gone and that no package holds now is not compiled into
+	// anything: a package that imported the package it was in has to change
+	// its own imports, and is selected by that change. A path that still
+	// exists here, or a root we cannot read, stays unknown.
+	if g.root != "" {
+		if _, err := os.Lstat(filepath.Join(g.root, filepath.FromSlash(p))); errors.Is(err, fs.ErrNotExist) {
+			return classification{why: "deleted, and no package holds it"}
+		}
 	}
 	return classification{all: true, why: "no rule and no package owns it"}
 }

@@ -1,12 +1,13 @@
 {
-  "_comment": "Which tier each test is reported under, and what each promotion stage runs. scripts/test-tiers.py reads tiers; test/ci (TestTiersPartitionPackages, TestEveryCIJobHasAStage) checks both against the module and the workflows. A test lands in the first tier whose rule matches it: tests names a test-name pattern in any package, packages a package pattern (relative to the module, or test/sdk/go) for every test in it.",
+  "_comment": "Which tier each test is reported under, and what each promotion stage runs. scripts/test-tiers.py reads tiers; test/ci (TestTiersPartitionPackages, TestEveryCIJobHasAStage) checks both against the module and the workflows. A test lands in the first tier whose rule matches it: packages is a package pattern (relative to the module, or test/sdk/go; every package when absent), tests a test-name pattern (every test when absent). A rule with tests cuts tests out of whichever tier their package is in; a rule with packages alone is a package tier.",
   "tiers": [
     {"name": "fuzz seeds", "tests": "^Fuzz"},
     {"name": "snapshot", "tests": "Characterization$|^TestNamedBucketConfigurations$|^TestUploadPartCopyConditionsAndRange$"},
     {"name": "chaos", "packages": "^internal/chaos$"},
     {"name": "bdd", "packages": "^test/behavior(/.*)?$|^test/terraform$"},
     {"name": "contract", "packages": "^internal/conformance$|^internal/proto(/.*)?$|^test/sdk/go(/.*)?$"},
-    {"name": "equivalence", "packages": "^internal/equivalence$|^internal/bundled$"},
+    {"name": "equivalence", "packages": "^internal/equivalence$"},
+    {"name": "equivalence", "packages": "^internal/bundled$", "tests": "^(TestEveryBundleBuilds|TestBundlesAreRegistered|TestShadowBundlesAreStillGated)$", "_comment": "what make equivalence runs of internal/bundled; the rest of it is unit"},
     {"name": "snapshot", "packages": "^internal/(edge|identity|mock|runtime|specdiff)$"},
     {"name": "unit", "packages": ".*"}
   ],
@@ -40,7 +41,8 @@
     "nightly": {
       "unit": "every package, -count=1",
       "coverage": "full and uncached",
-      "race": "every package, -race, -count=1"
+      "race": "every package, -race, -count=1",
+      "report": "when a job above fails, adds the run to the one open issue titled nightly failed"
     }
   }
 }

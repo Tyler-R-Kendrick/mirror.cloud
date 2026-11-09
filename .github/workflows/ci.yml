@@ -150,6 +150,9 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
+        with:
+          # The ratchet's baseline guard in internal/check skips without history.
+          fetch-depth: 0
       - uses: ./.github/actions/go
         with:
           cache: coverage
@@ -205,7 +208,8 @@ jobs:
   # goroutine, where the race detector costs ten to forty times as much and
   # can find nothing. unit runs those on every pull request without race, and
   # main runs them under it. A pull request's -short results are not main's, so
-  # they never come from main's race cache.
+  # they never come from main's race cache. On main every shard reads the race
+  # cache, but only shard 0 saves it; nightly.yml runs all four uncached.
   race:
     needs: plan
     runs-on: ubuntu-latest

@@ -136,20 +136,20 @@ def main(argv):
     providers = {k.split("/")[0] for k in need if k in modeled}
     for p in sorted(whole):
         include += [d for d in (f"specs/{p}",) if d in dirs]
-    leave_out = []
+    leave_out, tests_out = [], []
     for d in sorted(set(prod) | set(test)):
-        if d.startswith("internal/services/"):
+        if d.startswith("internal/services/") or (prod.get(d, set()) | test.get(d, set())) <= need:
             continue
-        deps = prod.get(d, set()) | test.get(d, set())
+        # It names a service that is not here. Its tests cannot run; a package
+        # with code that something else builds keeps that code.
         has_code = any(f.endswith(".go") and not f.endswith("_test.go")
                        for f in git("ls-tree", "--name-only", ref, d + "/").split())
-        if not has_code and not deps <= need:
-            leave_out.append(d)  # a suite that imports a service that is not here
+        (tests_out if has_code else leave_out).append(d)
     for p in sorted(whole):
         d = f"test/behavior/{p}"
         if d in dirs and d not in leave_out:
             include.append(d)
-    exclude += leave_out
+    exclude += leave_out + [f"{d}/*_test.go" for d in tests_out] + [f"{d}/testdata" for d in tests_out if f"{d}/testdata" in dirs]
     # A pack that is here only because another needs it is built, not tested:
     # its tests import services the first one does not, and nobody runs them.
     for k in sorted(need - requested):
@@ -163,7 +163,7 @@ def main(argv):
     sys.stderr.write(
         f"sparse: {len(requested)} services asked for, {len(need - requested)} brought along "
         f"({', '.join(sorted(need - requested)) or 'none'}); left out: "
-        f"{', '.join(leave_out) or 'no suite'}\n")
+        f"{', '.join(leave_out) or 'no suite'}; tests left out of {len(tests_out)} packages that name a service not here\n")
     if listing:
         print("\n".join(patterns))
         return

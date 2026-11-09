@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Print which service packs each directory of the tree imports: profiles/graph.txt.
+"""Print which services each directory of the tree needs: profiles/graph.txt.
 
     python3 scripts/service-graph.py > profiles/graph.txt     # make graph
 
 One line per directory that needs a service other than its own, as
 `dir: provider/service ...` for what its production code needs and
-`dir [test]: provider/service ...` for what only its tests need. A pack needs a
-service when it imports its pack or names it in a string ("aws.sqs": the service
-is reached through the registry, so no import shows it); the strings are only
-read in packs, because every core package names a hundred services. A pack and
-its helper packages (aws/dynamodb/expr) are one entry, the pack's directory. The
-allservices package is left out: it is one file per pack. `service => pack` says
-a pack serves a service under another name (gcp.storage is in gcp/gcs).
+`dir [test]: provider/service ...` for what only its tests need. A directory
+needs a service when it imports the service's pack or names the service in a
+string ("aws.sqs": a service reached through the registry shows no import).
+Production code is read only in packs, because the runtime names a hundred and
+sixty services in a table. A pack and its helper packages (aws/dynamodb/expr)
+are one entry, the pack's directory. allservices is left out: it is one file per
+pack. `service => pack` says a pack serves a service under another name
+(gcp.storage is in gcp/gcs).
+
 scripts/sparse.py reads this file instead of the sources, so a sparse checkout
 can decide what to leave out without downloading what it leaves out.
 test/ci checks the committed file against the tree.
@@ -23,11 +25,32 @@ import sys
 
 MOD = "github.com/tyler-r-kendrick/mirror.cloud/"
 PACK = re.compile(r"^internal/services/([a-z0-9]+)/([a-z0-9]+)")
-fmt = "{{.ImportPath}}|{{join .Imports \" \"}}|{{join .TestImports \" \"}}|{{join .XTestImports \" \"}}"
-out = subprocess.run(["go", "list", "-e", "-f", fmt, "./..."], check=True, capture_output=True, text=True).stdout
 
+
+def key_of(service_id):
+    provider, _, rest = service_id.partition(".")
+    return f"{provider}/{re.sub(r'[^a-z0-9]', '', rest.lower())}"
+
+
+modeled = {f"{p}/{d}" for base in ("internal/generated", "behavior") if os.path.isdir(base)
+           for p in os.listdir(base) if p != "none" and os.path.isdir(f"{base}/{p}")
+           for d in os.listdir(f"{base}/{p}") if os.path.isdir(f"{base}/{p}/{d}")}
+providers = sorted({k.split("/")[0] for k in modeled})
+named = re.compile(r"(?<![\w/.\-])((?:%s)\.[a-z0-9][a-z0-9.\-]*)" % "|".join(providers))
+
+literal = re.compile(r'"((?:[^"\\\n]|\\.)*)"|`([^`]*)`')  # a string literal, not a comment
 prod, test = {}, {}
-for line in out.splitlines():
+
+
+def add(kind, home, k):
+    own = PACK.match(home)
+    if k in modeled and not (own and f"{own.group(1)}/{own.group(2)}" == k):
+        kind.setdefault(home, set()).add(k)
+
+
+# What each directory imports.
+fmt = '{{.ImportPath}}|{{join .Imports " "}}|{{join .TestImports " "}}|{{join .XTestImports " "}}'
+for line in subprocess.run(["go", "list", "-e", "-f", fmt, "./..."], check=True, capture_output=True, text=True).stdout.splitlines():
     path, *imports = line.split("|")
     me = path.removeprefix(MOD)
     if me == "internal/allservices":
@@ -37,32 +60,34 @@ for line in out.splitlines():
     for kind, group in ((prod, imports[:1]), (test, imports[1:])):
         for imp in " ".join(group).split():
             m = PACK.match(imp.removeprefix(MOD)) if imp.startswith(MOD) else None
-            if m and not (own and own.groups() == m.groups()):
-                kind.setdefault(home, set()).add(f"{m.group(1)}/{m.group(2)}")
+            if m:
+                add(kind, home, f"{m.group(1)}/{m.group(2)}")
 
+# What each directory names: everywhere in tests, and in packs in production too.
+skip = {".git", "specs", "node_modules", "bin"}
+for here, dirs, files in os.walk("."):
+    dirs[:] = [d for d in dirs if d not in skip and os.path.join(here, d) not in ("./internal/generated", "./behavior")]
+    rel = os.path.normpath(here)
+    own = PACK.match(rel)
+    home = f"internal/services/{own.group(1)}/{own.group(2)}" if own else rel
+    for f in files:
+        if not f.endswith(".go") or rel == "internal/allservices":
+            continue
+        is_test = f.endswith("_test.go")
+        if not (is_test or own):
+            continue
+        text = open(os.path.join(here, f), errors="ignore").read()
+        strings = " ".join(a or b for a, b in literal.findall(text))
+        for name in set(named.findall(strings)):
+            add(test if is_test else prod, home, key_of(name.rstrip(".-")))
 
-# Services named in a pack's own files.
-modeled = {f"{p}/{d}" for base in ("internal/generated", "behavior") if os.path.isdir(base)
-           for p in os.listdir(base) if p != "none" and os.path.isdir(f"{base}/{p}")
-           for d in os.listdir(f"{base}/{p}") if os.path.isdir(f"{base}/{p}/{d}")}
-quoted = re.compile(r'"((?:%s)\.[a-z0-9][a-z0-9.\-]*)"' % "|".join(sorted({k.split("/")[0] for k in modeled})))
+# A pack under another name than its service's.
 alias = {}
 for provider in sorted(os.listdir("internal/services")):
     for d in sorted(os.listdir(f"internal/services/{provider}")):
-        home = f"internal/services/{provider}/{d}"
-        for here, _, files in os.walk(home):
-            for f in sorted(files):
-                if not f.endswith(".go"):
-                    continue
-                kind = test if f.endswith("_test.go") else prod
-                for name in set(quoted.findall(open(os.path.join(here, f), errors="ignore").read())):
-                    p2, _, rest = name.partition(".")
-                    k = f"{p2}/{re.sub(r'[^a-z0-9]', '', rest.lower())}"
-                    if k in modeled and k != f"{provider}/{d}":
-                        kind.setdefault(home, set()).add(k)
-        if f"{provider}/{d}" not in modeled:  # a pack under another name than its service's
-            for k in prod.get(home, ()):
-                if k in modeled and not os.path.isdir(f"internal/services/{k}"):
+        if f"{provider}/{d}" not in modeled:
+            for k in prod.get(f"internal/services/{provider}/{d}", ()):
+                if not os.path.isdir(f"internal/services/{k}"):
                     alias[k] = f"{provider}/{d}"
 
 sys.stdout.write("# Generated by scripts/service-graph.py (make graph); do not edit.\n")

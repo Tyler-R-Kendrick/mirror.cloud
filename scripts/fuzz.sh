@@ -23,9 +23,17 @@ pkgs=${FUZZ_PKGS:-}
 # Every listed package must be a package of this module, whatever FUZZ_PKGS
 # selects: a path that went stale would otherwise drop out of every pull
 # request's selection, and out of main's too once nothing names it.
+# Only stdout is read: on a cold module cache go writes "go: downloading" lines
+# to stderr, which pass through to the log and say nothing about the packages.
 listed=$(awk '$1 != "" && $1 !~ /^#/ {print $1}' "$list" | sort -u)
-if [[ -n "$listed" ]] && ! bad=$(go list -e -f '{{if .Error}}{{.ImportPath}}: {{.Error}}{{end}}' $listed 2>&1) || [[ -n "$bad" ]]; then
-  echo "$bad"; echo "fuzz: $list names a package this module does not have" >&2; exit 1
+if [[ -n "$listed" ]]; then
+  # shellcheck disable=SC2086 # one argument per package
+  found=$(go list -e -f '{{.ImportPath}}{{if .Error}} ERR {{.Error}}{{end}}' $listed) || {
+    echo "fuzz: go list failed on the packages $list names" >&2; exit 1
+  }
+  if grep ' ERR ' <<<"$found" || (( $(wc -l <<<"$found") != $(wc -l <<<"$listed") )); then
+    echo "fuzz: $list names a package this module does not have" >&2; exit 1
+  fi
 fi
 n=0 ran=0
 while read -r pkg name; do

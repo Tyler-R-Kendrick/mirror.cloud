@@ -3,6 +3,7 @@ package ci
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -301,5 +302,36 @@ func TestFuzzScriptRefusesAStalePackage(t *testing.T) {
 	out, err := run(t, root, []string{"FUZZ_TARGETS=" + targets, "FUZZ_PKGS=" + pkgs}, "bash", filepath.Join(root, "scripts", "fuzz.sh"))
 	if err == nil || !strings.Contains(out, "does not have") {
 		t.Errorf("a stale package passed: err=%v\n%s", err, out)
+	}
+}
+
+// On a cold module cache go writes "go: downloading" lines to stderr; fuzz.sh's
+// package check reads only stdout, so a list of real packages still passes it.
+// The stand-in go writes that noise and runs the real one.
+func TestFuzzScriptCheckIgnoresGoStderr(t *testing.T) {
+	root := repo(t)
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	os.MkdirAll(bin, 0o755)
+	os.WriteFile(filepath.Join(bin, "go"), []byte("#!/bin/sh\necho 'go: downloading github.com/itchyny/gojq v0.12.17' >&2\nexec "+goBin+" \"$@\"\n"), 0o755)
+	pkgs := filepath.Join(dir, "pkgs")
+	os.WriteFile(pkgs, []byte("./internal/engine\n"), 0o644)
+	env := []string{"PATH=" + bin + ":" + os.Getenv("PATH"), "FUZZ_PKGS=" + pkgs}
+	// The real list, filtered to a package with no fuzz target: only the
+	// check runs, and it must pass.
+	out, err := run(t, root, env, "bash", filepath.Join(root, "scripts", "fuzz.sh"))
+	if err != nil || !strings.Contains(out, "hold no fuzz target") || !strings.Contains(out, "go: downloading") {
+		t.Errorf("the check failed on real packages with go: downloading on stderr: err=%v\n%s", err, out)
+	}
+	// And a stale package still fails through the same noise.
+	targets := filepath.Join(dir, "targets")
+	os.WriteFile(targets, []byte("./internal/no/such/package FuzzX\n"), 0o644)
+	out, err = run(t, root, append(env, "FUZZ_TARGETS="+targets), "bash", filepath.Join(root, "scripts", "fuzz.sh"))
+	if err == nil || !strings.Contains(out, "does not have") {
+		t.Errorf("a stale package passed through stderr noise: err=%v\n%s", err, out)
 	}
 }

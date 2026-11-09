@@ -57,3 +57,10 @@ func TestCloudFormationAChangeSetReadsItsTemplateOnce(t *testing.T) {
 		}
 	}
 }
+
+// live is the record of the stack named name unless it is DELETE_COMPLETE, which this branch keeps: the
+// reviewer's repros read a deleted stack's record as gone.
+func (h *stacks) live(name string) (map[string]any, bool) {
+	rec, ok := h.stored(name)
+	return rec, ok && rec["Status"] != "DELETE_COMPLETE"
+}

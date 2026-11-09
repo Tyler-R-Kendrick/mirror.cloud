@@ -1052,3 +1052,31 @@ func TestCloudFormationFindsInMap(t *testing.T) {
 		t.Errorf("a Fn::FindInMap with a DefaultValue answered %v, want ValidationError", err)
 	}
 }
+
+// "For parameters without default values, users must specify a key name value
+// at stack creation. If they don't, CloudFormation fails to create the stack and
+// throws an exception: Parameters: [KeyName] must have values" (User Guide,
+// Parameters). So CreateStack without a value for a parameter that has no
+// Default is ValidationError in those words and makes nothing, while
+// ValidateTemplate, which makes no stack, takes the template. Before, the
+// parameter was left out, and a Ref to it named itself.
+func TestCloudFormationAParameterMustHaveAValue(t *testing.T) {
+	h := newStacks(t)
+	body, _ := json.Marshal(map[string]any{"Parameters": map[string]any{"Key": map[string]any{"Type": "String"}, "Other": map[string]any{"Type": "String"},
+		"Given": map[string]any{"Type": "String", "Default": "g"}},
+		"Resources": map[string]any{"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": map[string]any{"Ref": "Key"}}}}})
+	if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": string(body)}); err != nil {
+		t.Errorf("ValidateTemplate answered %v", err)
+	}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "pmv", "TemplateBody": string(body)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Parameters: [Key, Other] must have values") {
+		t.Errorf("CreateStack without values answered %v, want ValidationError: Parameters: [Key, Other] must have values", err)
+	}
+	if record, left := h.stored("pmv"); left {
+		t.Errorf("the refused stack left %v", record)
+	}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "pmv", "TemplateBody": string(body),
+		"Parameters.member.1.ParameterKey": "Key", "Parameters.member.1.ParameterValue": "k",
+		"Parameters.member.2.ParameterKey": "Other", "Parameters.member.2.ParameterValue": "o"}); err != nil {
+		t.Errorf("CreateStack with the values answered %v", err)
+	}
+}

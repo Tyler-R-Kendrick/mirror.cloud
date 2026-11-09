@@ -150,6 +150,15 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		id = cur.ID
 	}
 	body, tpl, order, refs, err := p.template(ctx, req, name, id)
+	var unvalued []string // "Parameters: [KeyName] must have values", for parameters without default values (User Guide)
+	for _, k := range slices.Sorted(maps.Keys(asMap(tpl["Parameters"]))) {
+		if _, valued := refs[k]; !valued {
+			unvalued = append(unvalued, k)
+		}
+	}
+	if len(unvalued) > 0 && err == nil {
+		err = invalid("Parameters: [" + strings.Join(unvalued, ", ") + "] must have values")
+	}
 	for _, c := range slices.Sorted(maps.Keys(asMap(tpl["Conditions"]))) { // a stack is made only with every condition settled
 		if _, settled := refs["Condition::"+c]; err == nil && !settled {
 			err = invalid("Template error: the condition " + c + " cannot be evaluated") // a function the engine does not evaluate

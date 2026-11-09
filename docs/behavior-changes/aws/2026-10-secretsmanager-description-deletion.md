@@ -480,7 +480,12 @@ The oracle is AWS's documentation as it ships in the vendored model
     engine named were. A
     parameter is a string ("the parameter value becomes a string", User
     Guide, Parameters), so a numeric `Default`, `Default: 16` in JSON or
-    YAML, is its text `"16"`; before, it became `""`. Each
+    YAML, is its text `"16"`; before, it became `""`. "For parameters
+    without default values, users must specify a key name value at stack
+    creation", or it is "Parameters: [KeyName] must have values" (User
+    Guide, Parameters): `CreateStack` and `UpdateStack` refuse such a
+    template in those words before anything is reserved (round 10 left the
+    parameter out). Each
     way it can be wrong is `ValidationError` with its own message: not an
     object; `SecretString` beside it; `GenerateStringKey` without
     `SecretStringTemplate`, or the reverse; a template that is not JSON, or

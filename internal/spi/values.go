@@ -111,8 +111,9 @@ func Entries(ctx context.Context, c Collection, prefix, after string, limit int)
 	return kvs
 }
 
-// GetJSON reads the JSON object c holds under key: whether c holds it, and the error of the read or
-// of the decode (none, and not held, when it is not an object).
+// GetJSON reads the JSON object c holds under key: whether c holds it, and the error of the read or of the
+// decode. A value that is not an object is the decode's error, and not held; a JSON null is no object, held,
+// and no error.
 func GetJSON(ctx context.Context, c Collection, key string) (map[string]any, bool, error) {
 	raw, ok, err := c.Get(ctx, key)
 	if err != nil || !ok {
@@ -123,6 +124,17 @@ func GetJSON(ctx context.Context, c Collection, key string) (map[string]any, boo
 		return nil, false, err
 	}
 	return rec, true, nil
+}
+
+// ReadJSON decodes into v the JSON c holds under key, when c holds any, and answers whether it does: v
+// keeps what it held for what the JSON does not set (a map is merged into), and a decode error is dropped,
+// as each reader that kept a default and overlaid the record on it read it.
+func ReadJSON(ctx context.Context, c Collection, key string, v any) bool {
+	raw, ok, _ := c.Get(ctx, key)
+	if ok {
+		_ = json.Unmarshal(raw, v)
+	}
+	return ok
 }
 
 // Fold answers m's value under key, or else under a key equal to it under Unicode case folding: a

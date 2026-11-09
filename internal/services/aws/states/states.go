@@ -1383,11 +1383,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !p.tagResourceExists(ctx, req, arn) {
 			return nil, &spi.Fault{Code: resourceARNFault(arn), HTTPStatus: 400, Fault: "client"}
 		}
-		b, ok, _ := p.col(req, "tag").Get(ctx, arn)
 		var tags any = []any{}
-		if ok {
-			_ = json.Unmarshal(b, &tags)
-		}
+		spi.ReadJSON(ctx, p.col(req, "tag"), arn, &tags)
 		return &spi.Response{Output: map[string]any{"tags": tags}}, nil
 	default:
 		return nil, spi.NotImplemented("aws.states", req.Operation, "emulate")
@@ -6389,15 +6386,8 @@ func inputNumber(input map[string]any, keys ...string) float64 {
 }
 
 func getRecord(ctx context.Context, collection spi.Collection, key string) (map[string]any, bool) {
-	encoded, ok, _ := collection.Get(ctx, key)
-	if !ok {
-		return nil, false
-	}
-	var record map[string]any
-	if json.Unmarshal(encoded, &record) != nil {
-		return nil, false
-	}
-	return record, true
+	record, ok, _ := spi.GetJSON(ctx, collection, key)
+	return record, ok
 }
 
 func listRecords(ctx context.Context, collection spi.Collection, selectRecord func(map[string]any) (map[string]any, bool)) []any {

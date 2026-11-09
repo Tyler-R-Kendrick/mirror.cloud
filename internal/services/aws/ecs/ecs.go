@@ -51,10 +51,8 @@ func (p tasks) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"tasks": []any{rec}, "failures": []any{}}}, nil
 	case "StopTask":
 		id := spi.LastSlash(spi.First(req.Input, "task"))
-		b, ok, _ := p.col(req, "ecstask").Get(ctx, cluster+"/"+id)
 		rec := map[string]any{"taskArn": id, "lastStatus": "STOPPED"}
-		if ok {
-			_ = json.Unmarshal(b, &rec)
+		if spi.ReadJSON(ctx, p.col(req, "ecstask"), cluster+"/"+id, &rec) {
 			p.syncTargets(ctx, req, rec, false)
 			rec["lastStatus"] = "STOPPED"
 			rec["desiredStatus"] = "STOPPED"
@@ -67,11 +65,8 @@ func (p tasks) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			id = spi.LastSlash(spi.First(req.Input, "containerInstance"))
 		}
 		key := cluster + "/" + id
-		b, ok, _ := p.col(req, "ecstask").Get(ctx, key)
 		rec := map[string]any{}
-		if ok {
-			_ = json.Unmarshal(b, &rec)
-		}
+		spi.ReadJSON(ctx, p.col(req, "ecstask"), key, &rec)
 		if st := spi.First(req.Input, "status"); st != "" {
 			if st == "RUNNING" {
 				p.syncTargets(ctx, req, rec, true)

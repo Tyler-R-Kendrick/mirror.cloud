@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
 // wire boots a server and answers a function that sends one CloudFormation
@@ -96,5 +98,102 @@ func TestBootedServerCloudFormationAnEmptyParameterIsAValue(t *testing.T) {
 	}
 	if b := do(url.Values{"Action": {"DescribeStacks"}, "StackName": {"s"}}); !strings.Contains(b, "<OutputValue>&lt;&gt;</OutputValue>") {
 		t.Errorf("DescribeStacks = %s, want the output <>", b)
+	}
+}
+
+// arnsOf answers DescribeStacks' NotificationARNs for the stack.
+func (h *stacks) arnsOf(stack string) any {
+	h.t.Helper()
+	out, err := h.invoke("DescribeStacks", map[string]any{"StackName": stack})
+	if err != nil {
+		h.t.Fatalf("DescribeStacks %s: %v", stack, err)
+	}
+	return out["Stacks"].([]any)[0].(map[string]any)["NotificationARNs"]
+}
+
+// A stack's NotificationARNs: DescribeStacks answers them, an UpdateStack
+// without the member keeps them and one with an empty list removes them
+// ("Specify an empty list to remove all notification topics", API
+// reference, UpdateStack), more than five are refused ("Maximum number of 5
+// items", CreateStack and UpdateStack), and with none the pseudo parameter
+// is the empty list, never null. Before, the ARNs were never stored: an
+// update without them lost them and DescribeStacks answered none.
+func TestCloudFormationNotificationARNsAreTheStacks(t *testing.T) {
+	h := newStacks(t)
+	body, _ := json.Marshal(map[string]any{"Resources": map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}},
+		"Outputs": map[string]any{"N": map[string]any{"Value": map[string]any{"Fn::Join": []any{",", map[string]any{"Ref": "AWS::NotificationARNs"}}}}}})
+	a, b := "arn:aws:sns:us-east-1:000000000000:a", "arn:aws:sns:us-east-1:000000000000:b"
+	six := []any{a, a, a, a, a, a}
+	for _, op := range []string{"CreateStack", "UpdateStack"} {
+		if _, err := h.invoke(op, map[string]any{"StackName": "six", "TemplateBody": string(body), "NotificationARNs": six}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Member must have length less than or equal to 5") {
+			t.Errorf("%s with six NotificationARNs answered %v, want ValidationError", op, err)
+		}
+	}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "na", "TemplateBody": string(body), "NotificationARNs": []any{a, b}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.arnsOf("na"); !reflect.DeepEqual(got, []any{a, b}) {
+		t.Errorf("DescribeStacks' NotificationARNs = %#v, want [%s %s]", got, a, b)
+	}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "na", "TemplateBody": string(body)}); err != nil {
+		t.Fatal(err)
+	}
+	if got, joined := h.arnsOf("na"), h.outputs("na")["N"]; !reflect.DeepEqual(got, []any{a, b}) || joined != a+","+b {
+		t.Errorf("after an UpdateStack without NotificationARNs, DescribeStacks answers %#v and the output %q, want both ARNs kept", got, joined)
+	}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "na", "TemplateBody": string(body), "NotificationARNs": []any{}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.arnsOf("na"); !reflect.DeepEqual(got, []any{}) {
+		t.Errorf("after an UpdateStack with an empty list, NotificationARNs = %#v, want []", got)
+	}
+	none := &spi.Request{Identity: h.id, Input: map[string]any{}}
+	if got := pseudo(none, "s", "id")["AWS::NotificationARNs"]; got != "[]" {
+		t.Errorf("AWS::NotificationARNs with none given = %q, want []", got)
+	}
+	if got := h.pack.resolve(map[string]any{"Ref": "AWS::NotificationARNs"}, map[string]string{}, none, "s"); !reflect.DeepEqual(got, []any{}) {
+		t.Errorf("a Ref to AWS::NotificationARNs with none given resolves to %#v, want []", got)
+	}
+}
+
+// Over the wire the decoder builds the NotificationARNs list beside the flat
+// keys, and the list is read once: before, the engine read both and every
+// ARN came twice. The list ends at a gap, as the decoder reads one.
+func TestBootedServerCloudFormationNotificationARNs(t *testing.T) {
+	do := wire(t)
+	tpl := `{"Resources":{"P":{"Type":"AWS::SSM::Parameter","Properties":{"Type":"String","Value":"v"}}},` +
+		`"Outputs":{"N":{"Value":{"Fn::Join":[",",{"Ref":"AWS::NotificationARNs"}]}}}}`
+	if b := do(url.Values{"Action": {"CreateStack"}, "StackName": {"s"}, "TemplateBody": {tpl},
+		"NotificationARNs.member.1": {"arn:a"}, "NotificationARNs.member.2": {"arn:b"}, "NotificationARNs.member.4": {"arn:d"}}); !strings.Contains(b, "<StackId>") {
+		t.Fatal(b)
+	}
+	b := do(url.Values{"Action": {"DescribeStacks"}, "StackName": {"s"}})
+	if !strings.Contains(b, "<OutputValue>arn:a,arn:b</OutputValue>") || !strings.Contains(b, "<NotificationARNs><member>arn:a</member><member>arn:b</member></NotificationARNs>") {
+		t.Errorf("DescribeStacks = %s, want the output arn:a,arn:b and those two NotificationARNs", b)
+	}
+}
+
+// UsePreviousValue: "During a stack update, use the existing parameter value
+// that the stack is using for a given parameter key" (API reference,
+// Parameter), a value given or a Default taken. Before, it was ignored, and
+// an update without a ParameterValue lost the value.
+func TestCloudFormationUsePreviousValue(t *testing.T) {
+	h := newStacks(t)
+	body, _ := json.Marshal(map[string]any{
+		"Parameters": map[string]any{"Key": map[string]any{"Type": "String"}, "Def": map[string]any{"Type": "String", "Default": "dflt"}},
+		"Resources":  map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}}, // CreateTopic "is idempotent": an update makes it again
+		"Outputs":    map[string]any{"K": map[string]any{"Value": map[string]any{"Ref": "Key"}}, "D": map[string]any{"Value": map[string]any{"Ref": "Def"}}}})
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "prev", "TemplateBody": string(body), "Parameters": givenParams("Key", "first")}); err != nil {
+		t.Fatal(err)
+	}
+	previous := []any{map[string]any{"ParameterKey": "Key", "UsePreviousValue": "true"}, map[string]any{"ParameterKey": "Def", "UsePreviousValue": true}}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "prev", "TemplateBody": string(body), "Parameters": previous}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.outputs("prev"); got["K"] != "first" || got["D"] != "dflt" {
+		t.Errorf("outputs after UsePreviousValue = %v, want K first and D dflt", got)
+	}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "prev", "TemplateBody": string(body), "Parameters": []any{map[string]any{"ParameterKey": "Key"}}}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Parameters: [Key] must have values") {
+		t.Errorf("an update with neither a value nor UsePreviousValue answered %v, want Parameters: [Key] must have values", err)
 	}
 }

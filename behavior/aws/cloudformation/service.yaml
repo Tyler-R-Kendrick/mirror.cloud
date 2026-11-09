@@ -144,7 +144,8 @@ operations:
     output:
       Stacks: >-
         items.map(s, merge({'StackName': s.Name, 'StackId': s.ID,
-          'StackStatus': s.Status, 'Outputs': s.Outputs},
+          'StackStatus': s.Status, 'Outputs': s.Outputs,
+          'NotificationARNs': 'NotificationARNs' in s && s.NotificationARNs != null ? s.NotificationARNs : []},
           'Reason' in s ? {'StackStatusReason': s.Reason} : {}))
 
   ListStacks:

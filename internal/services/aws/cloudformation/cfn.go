@@ -131,6 +131,7 @@ type stack struct {
 	Resources                  []res
 	Outputs                    []any
 	Refs                       map[string]string
+	NotificationARNs           []any
 	Protect                    bool
 }
 
@@ -148,6 +149,11 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	id := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name + "/" + p.deps.Rand.Hex(8)
 	if cur, err := p.load(ctx, req, name); err == nil && update { // the id an update's AWS::StackId answers
 		id = cur.ID
+		previous(req.Input, cur)
+	}
+	arns := append([]any{}, spi.Slice(req.Input["NotificationARNs"])...)
+	if len(arns) > 5 { // "Maximum number of 5 items" (API reference, CreateStack and UpdateStack)
+		return nil, invalid("1 validation error detected: Value at 'notificationARNs' failed to satisfy constraint: Member must have length less than or equal to 5")
 	}
 	body, tpl, order, refs, err := p.template(ctx, req, name, id)
 	missing := func(section, prefix string) []string { // what a section declares that refs holds no value of
@@ -186,13 +192,13 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		} else if id = cmp.Or(old.ID, id); found || update { // an update reserves nothing: it writes only over what it read
 			return nil
 		}
-		raw, _ = json.Marshal(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}})
+		raw, _ = json.Marshal(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns})
 		return tx.Put(name, raw)
 	}); err != nil {
 		return nil, err
 	}
 	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: refs,
-		Resources: []res{}, Outputs: []any{}} // never null: every read of a stack lists both
+		Resources: []res{}, Outputs: []any{}, NotificationARNs: arns} // never null: every read of a stack lists them
 	fail := func(err error) (*spi.Response, error) {
 		if st.Reason = err.Error(); !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, "CREATE_IN_PROGRESS", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
@@ -316,7 +322,7 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 func pseudo(req *spi.Request, stack, id string) map[string]string {
 	known := map[string]string{"AWS::AccountId": req.Identity.Account, "AWS::Region": req.Identity.Region, "AWS::StackName": stack,
 		"AWS::StackId": id, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com", "AWS::NoValue": noValue,
-		"AWS::NotificationARNs": spi.JSONText(append(spi.Slice(req.Input["NotificationARNs"]), spi.Members(req.Input, "NotificationARNs")...))} // a list, as JSON
+		"AWS::NotificationARNs": spi.JSONText(append([]any{}, spi.Slice(req.Input["NotificationARNs"])...))} // a list, as JSON: [] for none
 	maps.DeleteFunc(known, func(_, v string) bool { return v == "" })
 	return known
 }
@@ -699,7 +705,10 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 
 var unnameable = regexp.MustCompile(`[^A-Za-z0-9-]+`)
 
-func fifo(p map[string]any) bool { b, ok := coerce(p["FifoQueue"], "Boolean"); return ok && b == true }
+func fifo(p map[string]any) bool { return isTrue(p["FifoQueue"]) }
+
+// isTrue is whether v is the Boolean true, in any case (coerce).
+func isTrue(v any) bool { b, _ := coerce(v, "Boolean"); return b == true }
 
 func isBoolean(v any) bool { _, ok := coerce(v, "Boolean"); return ok }
 
@@ -1294,7 +1303,9 @@ func each(v any, fn func(map[string]any)) {
 func parameters(in, tpl map[string]any) map[string]string {
 	out := map[string]string{}
 	for _, p := range spi.Slice(in["Parameters"]) {
-		out[str(asMap(p)["ParameterKey"])] = str(asMap(p)["ParameterValue"])
+		if v, valued := asMap(p)["ParameterValue"]; valued {
+			out[str(asMap(p)["ParameterKey"])] = str(v)
+		}
 	}
 	for k, v := range asMap(tpl["Parameters"]) {
 		if _, given := out[k]; !given && asMap(v)["Default"] != nil {
@@ -1302,6 +1313,21 @@ func parameters(in, tpl map[string]any) map[string]string {
 		}
 	}
 	return out
+}
+
+// previous puts in an update's request what it takes from the stack cur: its NotificationARNs when the
+// request names none, as UpdateStack keeps them ("Specify an empty list to remove all notification topics",
+// API reference), and the value of each parameter whose UsePreviousValue is true, "the existing parameter
+// value that the stack is using for a given parameter key" (API reference, Parameter).
+func previous(in map[string]any, cur stack) {
+	if _, named := in["NotificationARNs"]; !named {
+		in["NotificationARNs"] = cur.NotificationARNs
+	}
+	for _, p := range spi.Slice(in["Parameters"]) {
+		if v, ok := cur.Refs[str(asMap(p)["ParameterKey"])]; ok && isTrue(asMap(p)["UsePreviousValue"]) {
+			asMap(p)["ParameterValue"] = v
+		}
+	}
 }
 
 func paramDecls(tpl map[string]any) []any {

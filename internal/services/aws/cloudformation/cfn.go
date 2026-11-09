@@ -392,14 +392,16 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		}
 		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": text(v)})
 	}
-	if cur, wrote, err := p.settle(ctx, req, map[bool]stack{false: reserved, true: read}[update], st, retire(name, cs)); err == nil && !wrote && !update {
+	if cur, wrote, err := p.settle(ctx, req, map[bool]stack{false: reserved, true: read}[update], st, retire(name, cs)); err != nil {
+		return fail(err) // the final write failed: an error, never success
+	} else if !wrote && !update {
 		// A DeleteStack begun during the create ends here: what it made goes, and then the stack.
 		if cur.ID != id || cur.Status != "DELETE_IN_PROGRESS" {
 			cur = stack{} // the stack is another's now: nothing is recorded
 		}
 		_ = p.unwind(ctx, req, cur, st, nil, st.Resources, nil, "DELETE_COMPLETE", "DELETE_FAILED", retains(tpl, "DeletionPolicy", "Retain"))
 		return &spi.Response{Output: map[string]any{"StackId": id}}, nil
-	} else if err == nil && !wrote {
+	} else if !wrote {
 		// Another change came first, in progress while this update ran: what this update made that the stack
 		// does not hold goes, all of it when the stack is being deleted (its delete may have run first).
 		rival := map[bool]string{true: "DELETE_IN_PROGRESS", false: "UPDATE_IN_PROGRESS"}[cur.ID != id || strings.HasPrefix(cur.Status, "DELETE_")]
@@ -590,6 +592,8 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 		return nil, cmp.Or(nameErr, err)
 	} else if st.Protect {
 		err = invalid("stack has termination protection")
+	} else if strings.HasPrefix(st.Status, "UPDATE_") && strings.HasSuffix(st.Status, "_IN_PROGRESS") { // the wording is the service's
+		err = invalid("Stack [" + name + "] cannot be deleted while in status " + st.Status)
 	} else if was, del := st.Status, st; was != "DELETE_IN_PROGRESS" { // one being deleted is left to that delete
 		// "Once the call completes successfully, stack deletion starts" (API reference): the record is
 		// DELETE_IN_PROGRESS, written only over the record read. One being created is left to its create,
@@ -894,26 +898,23 @@ func planID(req *spi.Request, typ, n string, props map[string]any) string {
 func (p *Pack) order(tpl map[string]any, refs map[string]string) ([]string, error) {
 	resources, waiting, users := asMap(tpl["Resources"]), map[string]int{}, map[string][]string{}
 	var ready, order, undeclared []string
-	// A Ref, a Fn::GetAtt or a Fn::Sub variable names a parameter, a pseudo parameter or a resource the
-	// template declares ("can be template parameter names, resource logical IDs, resource attributes"), or
-	// it is "Unresolved": refused before anything is made, as the service refuses it.
+	// A Ref, a Fn::GetAtt, a Fn::Sub variable or a DependsOn names a parameter, a pseudo parameter or a
+	// resource the template declares ("can be template parameter names, resource logical IDs, resource
+	// attributes"; a Fn::GetAtt's and a DependsOn's, a resource), or it is "Unresolved": refused before
+	// anything is made, in any block and either branch of a Fn::If, as the service refuses it.
 	unresolved := func(n string) string {
-		if v, _ := strings.CutPrefix(n, "${"); strings.TrimPrefix(v, ".") != "" && resources[strings.TrimPrefix(v, ".")] == nil && asMap(tpl["Parameters"])[v] == nil && !strings.HasPrefix(v, "AWS::") {
-			return strings.TrimPrefix(v, ".") // names marks a Fn::GetAtt's resource with a dot
+		v, _ := strings.CutPrefix(n, "${")
+		if l, attr := strings.CutPrefix(v, "."); l != "" && resources[l] == nil && (attr || asMap(tpl["Parameters"])[l] == nil && !strings.HasPrefix(l, "AWS::")) {
+			return v
 		}
 		return ""
 	}
 	for logical, r := range resources {
 		p.walks++
 		named := map[string]bool{}
-		names(asMap(r)["Properties"], named, refs)
-		for _, d := range dependsOn(r) {
-			named[d] = true
-		}
+		names(r, named, refs) // its properties and its DependsOn; the order prunes what a settled Fn::If does not take
 		for n := range named {
-			if v := unresolved(n); v != "" {
-				undeclared = append(undeclared, v)
-			} else if _, ok := resources[n]; ok {
+			if _, ok := resources[n]; ok {
 				waiting[logical], users[n] = waiting[logical]+1, append(users[n], logical)
 			}
 		}
@@ -921,13 +922,22 @@ func (p *Pack) order(tpl map[string]any, refs map[string]string) ([]string, erro
 			ready = append(ready, logical)
 		}
 	}
-	block, named := "Resources", map[string]bool{}
-	if names(tpl["Outputs"], named, refs); len(undeclared) == 0 { // then what an output names
-		for n := range named {
-			if v := unresolved(n); v != "" {
-				block, undeclared = "Outputs", append(undeclared, v)
+	block := "Resources"
+	for _, b := range []string{"Resources", "Outputs", "Conditions"} {
+		if all := map[string]bool{}; len(undeclared) == 0 {
+			names(tpl[b], all, nil) // every branch of a Fn::If
+			for n := range all {
+				if v := unresolved(n); v != "" {
+					block, undeclared = b, append(undeclared, v)
+				}
 			}
 		}
+	}
+	if i := slices.IndexFunc(undeclared, func(u string) bool { return strings.HasPrefix(u, ".") && asMap(tpl["Parameters"])[u[1:]] != nil }); i >= 0 {
+		return nil, invalid("Template error: instance of Fn::GetAtt references undefined resource " + undeclared[i][1:])
+	}
+	for i, u := range undeclared {
+		undeclared[i] = strings.TrimPrefix(u, ".")
 	}
 	if len(undeclared) > 0 {
 		return nil, invalid("Template format error: Unresolved resource dependencies [" + strings.Join(slices.Compact(slices.Sorted(slices.Values(undeclared))), ", ") + "] in the " + block + " block of the template")
@@ -1012,6 +1022,12 @@ func names(v any, named map[string]bool, refs map[string]string) {
 					}
 				}
 				names(parts[1], named, refs)
+			case "DependsOn": // "Resource B is created before resource A": a string or a list of them, each a resource
+				for _, d := range append(spi.Slice(x), x) {
+					if d, ok := d.(string); ok {
+						named[d], named["."+d] = true, true
+					}
+				}
 			case "Fn::If": // [condition, then, else]
 				branches := append(spi.Slice(x), nil, nil, nil)
 				if yes, settled := refs["Condition::"+str(branches[0])]; settled {
@@ -1857,7 +1873,9 @@ func parseTemplate(body string) (map[string]any, error) {
 			named["."+d] = true
 		}
 		for n := range named {
-			if l, resource := strings.CutPrefix(n, "."); asMap(m["Resources"])[l] == nil && (resource || asMap(m["Parameters"])[n] == nil && !strings.HasPrefix(n, "AWS::")) {
+			if l, resource := strings.CutPrefix(n, "."); resource && asMap(m["Resources"])[l] == nil && asMap(m["Parameters"])[l] != nil {
+				return nil, invalid("Template error: instance of Fn::GetAtt references undefined resource " + l)
+			} else if asMap(m["Resources"])[l] == nil && (resource || asMap(m["Parameters"])[n] == nil && !strings.HasPrefix(n, "AWS::")) {
 				undeclared[l] = true
 			}
 		}

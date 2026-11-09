@@ -23,7 +23,7 @@ missing_input_error: Validation
 # deprovisions them in reverse, keeping any it cannot delete; ValidateTemplate and GetTemplateSummary parse
 # without provisioning; ListExports flattens every stack's outputs. The stack
 # record below is the one the engine writes.
-native: [CreateStack, UpdateStack, DeleteStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports, UpdateTerminationProtection]
+native: [CreateStack, UpdateStack, DeleteStack, CreateChangeSet, ExecuteChangeSet, DeleteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports, UpdateTerminationProtection]
 
 resources:
   # The stack record, written only by the native template engine, in one
@@ -287,96 +287,9 @@ operations:
   # equally shadowed; only the inline TemplateBody path is transcribed, and
   # the bundle faults ValidationError where the pack would have fetched.
 
-  # A stack UpdateStack refuses (any _IN_PROGRESS, ROLLBACK_* or
-  # DELETE_FAILED state) takes no change set, in the pack's words.
-  CreateChangeSet:
-    reads:
-      s: { resource: stack }
-    require:
-      - cond: "'TemplateBody' in input && string(input.TemplateBody) != ''"
-        error: Validation
-      # "You can't use the UPDATE type to create a change set for a new stack
-      # or the CREATE type to create a change set for an existing stack"
-      # (API reference, CreateChangeSet, ChangeSetType); a CREATE change set's
-      # stack, REVIEW_IN_PROGRESS, takes more CREATE change sets. The two
-      # wordings are readings.
-      - cond: "!s_found || ('ChangeSetType' in input && input.ChangeSetType == 'CREATE' && s.Status == 'REVIEW_IN_PROGRESS') || !(string(s.Status).endsWith('_IN_PROGRESS') || string(s.Status).startsWith('ROLLBACK_') || s.Status == 'DELETE_FAILED')"
-        error: Validation
-        message_expr: "'Stack:' + string(s.ID) + ' is in ' + string(s.Status) + ' state and can not be updated.'"
-      - cond: "s_found || 'ChangeSetType' in input && input.ChangeSetType == 'CREATE'"
-        error: Validation
-        message_expr: "'Stack [' + string(input.StackName) + '] does not exist'"
-      - cond: "!s_found || !('ChangeSetType' in input && input.ChangeSetType == 'CREATE') || s.Status == 'REVIEW_IN_PROGRESS'"
-        error: AlreadyExists
-        message_expr: "'Stack [' + string(input.StackName) + '] already exists and cannot be created again with the changeSet [' + string(input.ChangeSetName) + '].'"
-      # TemplateBody is "a maximum length of 51,200 bytes" (API reference,
-      # CreateChangeSet), as the pack holds every operation's.
-      - cond: "size(bytes(string(input.TemplateBody))) <= 51200"
-        error: Validation
-        message: "1 validation error detected: Value at 'templateBody' failed to satisfy constraint: Member must have length less than or equal to 51200"
-      # A UsePreviousValue: "If you specify true, do not specify a parameter
-      # value" (API reference, Parameter); the wording is a reading.
-      - cond: "!('Parameters' in input) || !input.Parameters.exists(p, 'UsePreviousValue' in p && string(p.UsePreviousValue) in ['true', 'True', 'TRUE'] && 'ParameterValue' in p)"
-        error: Validation
-        message: "Invalid input for parameter: Cannot specify usePreviousValue as true and non empty value for a parameter"
-      # NotificationARNs: "Maximum number of 5 items", as CreateStack's.
-      - cond: "!('NotificationARNs' in input) || size(input.NotificationARNs) <= 5"
-        error: Validation
-        message: "1 validation error detected: Value at 'notificationARNs' failed to satisfy constraint: Member must have length less than or equal to 5"
-    effects:
-      - generate: { bind: csid, kind: hex, bytes: 8 }
-      - generate: { bind: sid, kind: hex, bytes: 8 }
-      # "If you create a change set for a new stack, CloudFormation creates a
-      # stack with a unique stack ID, but no template or resources. The stack
-      # will be in the REVIEW_IN_PROGRESS state until you execute the change
-      # set" (API reference, CreateChangeSet, ChangeSetType).
-      - put:
-          resource: stack
-          when: "!s_found"
-          record:
-            Name: string(input.StackName)
-            ID: >-
-              'arn:aws:cloudformation:' + identity.region + ':'
-              + identity.account + ':stack/' + string(input.StackName) + '/' + fx.sid
-            Status: "'REVIEW_IN_PROGRESS'"
-            Template: "''"
-            Resources: "[]"
-            Outputs: "[]"
-            NotificationARNs: "[]"
-      # The change set holds what CreateChangeSet takes that CreateStack and
-      # UpdateStack take, and ExecuteChangeSet makes or updates the stack with
-      # it: its parameters, NotificationARNs, tags and capabilities, and the
-      # id of the stack, minted here for a CREATE change set.
-      - create:
-          resource: changeset
-          record:
-            ChangeSetName: string(input.ChangeSetName)
-            ChangeSetId: >-
-              'arn:aws:cloudformation:' + identity.region + ':'
-              + identity.account + ':changeSet/' + string(input.ChangeSetName)
-              + '/' + fx.csid
-            ChangeSetType: "'ChangeSetType' in input ? string(input.ChangeSetType) : 'UPDATE'"
-            StackName: string(input.StackName)
-            StackId: >-
-              s_found ? string(s.ID) : 'arn:aws:cloudformation:' + identity.region + ':'
-              + identity.account + ':stack/' + string(input.StackName) + '/' + fx.sid
-            Status: "'CREATE_COMPLETE'"
-            ExecutionStatus: "'AVAILABLE'"
-            TemplateBody: string(input.TemplateBody)
-            # A UsePreviousValue is read now, from the stack the change set is
-            # made for: Parameters are "the input parameters and their values
-            # used to create the change set" (DescribeChangeSet).
-            Parameters: >-
-              ('Parameters' in input ? input.Parameters : []).map(p,
-              s_found && 'UsePreviousValue' in p && string(p.UsePreviousValue) in ['true', 'True', 'TRUE']
-              && 'Refs' in s && s.Refs != null && string(p.ParameterKey) in s.Refs
-              ? {'ParameterKey': p.ParameterKey, 'ParameterValue': s.Refs[string(p.ParameterKey)]} : p)
-            NotificationARNs: "'NotificationARNs' in input ? input.NotificationARNs : null"
-            Tags: "'Tags' in input ? input.Tags : []"
-            Capabilities: "'Capabilities' in input ? input.Capabilities : []"
-    output:
-      Id: rec.ChangeSetId
-      StackId: rec.StackId
+  # CreateChangeSet, ExecuteChangeSet and DeleteChangeSet are native: each
+  # writes a change set, and CreateChangeSet a stack too, in one store
+  # transaction with what the engine writes of the stack (cfn.go).
 
   # The pack answers the whole stored record, TemplateBody included; the
   # response shape does not declare TemplateBody, so the bundle answers the
@@ -392,10 +305,11 @@ operations:
       StackName: cs.StackName
       StackId: "'StackId' in cs ? cs.StackId : null"
       Status: cs.Status
+      StatusReason: "'StatusReason' in cs ? cs.StatusReason : null"
       ExecutionStatus: "'ExecutionStatus' in cs ? cs.ExecutionStatus : 'AVAILABLE'"
       Parameters: "'Parameters' in cs ? cs.Parameters : []"
       NotificationARNs: "'NotificationARNs' in cs && cs.NotificationARNs != null ? cs.NotificationARNs : []"
-      Tags: "'Tags' in cs ? cs.Tags : []"
+      Tags: "'Tags' in cs && cs.Tags != null ? cs.Tags : []"
       Capabilities: "'Capabilities' in cs ? cs.Capabilities : []"
 
   ListChangeSets:
@@ -404,10 +318,15 @@ operations:
       member: Summaries
       paginate: model
       filter: "item.StackName == string(input.StackName)"
+    # ChangeSetSummary's members, and no others; a change set stored before
+    # it had an ExecutionStatus is AVAILABLE, as DescribeChangeSet reads it.
     output:
-      Summaries: items
+      Summaries: >-
+        items.map(c, merge({'ChangeSetId': c.ChangeSetId, 'ChangeSetName': c.ChangeSetName,
+          'StackName': c.StackName, 'Status': c.Status,
+          'ExecutionStatus': 'ExecutionStatus' in c ? c.ExecutionStatus : 'AVAILABLE'},
+          merge('StackId' in c ? {'StackId': c.StackId} : {}, 'StatusReason' in c ? {'StatusReason': c.StatusReason} : {})))
 
-  DeleteChangeSet: {delete: {resource: changeset, missing: ignore}}
   SignalResource:
 
   # --- stack sets ------------------------------------------------------------
@@ -1046,13 +965,9 @@ quirks:
       APIs), which no trace step can observe from this service's answers.
   - operation: CreateChangeSet
     note: >
-      Only the inline TemplateBody path is transcribed. With TemplateURL the
-      pack reads the template out of the blob store (s3:// and
-      *.s3 host forms), which the bundle cannot express; the bundle faults
-      ValidationError where the pack would have fetched. The pack faults
-      "TemplateBody or TemplateURL required" when neither is present. The
-      model requires StackName and ChangeSetName, so the pack's empty-name
-      key (":name") is dead.
+      Native (cfn.go): it reads TemplateBody or the TemplateURL object, and
+      writes the change set, and a CREATE change set's REVIEW_IN_PROGRESS
+      stack, in one store transaction with what it read.
   - operation: DescribeChangeSet
     note: >
       The pack answers the whole stored record, TemplateBody included, but

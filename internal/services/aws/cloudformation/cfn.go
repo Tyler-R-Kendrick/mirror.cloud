@@ -28,7 +28,7 @@ import (
 // natives are the operations behavior/aws/cloudformation lists as native: the template engine. Parsing a
 // template, resolving its intrinsics and provisioning resources through their owning services is Go; the
 // stack, change set, stack set and type bookkeeping is the bundle's.
-var natives = []string{"CreateStack", "UpdateStack", "DeleteStack", "ExecuteChangeSet", "ValidateTemplate", "GetTemplateSummary", "ListExports", "UpdateTerminationProtection"}
+var natives = []string{"CreateStack", "UpdateStack", "DeleteStack", "CreateChangeSet", "ExecuteChangeSet", "DeleteChangeSet", "ValidateTemplate", "GetTemplateSummary", "ListExports", "UpdateTerminationProtection"}
 
 func init() {
 	for _, op := range natives {
@@ -63,14 +63,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"Description": str(tpl["Description"]), "Parameters": paramDecls(tpl)}}, nil
 	case "CreateStack", "UpdateStack":
-		out, err := p.upsert(ctx, req, name, req.Operation == "UpdateStack", "")
-		for _, kv := range spi.Entries(ctx, p.col(req, "cfn-cs"), name+":", "", 0) { // a change set is "OBSOLETE ... because the stack was already updated" (DescribeChangeSet)
-			if rec := spi.Decode[map[string]any](kv.Value); err == nil && rec["ExecutionStatus"] == "AVAILABLE" {
-				rec["ExecutionStatus"] = "OBSOLETE"
-				_ = p.col(req, "cfn-cs").Put(ctx, kv.Key, []byte(spi.JSONText(rec)))
-			}
-		}
-		return out, err
+		return p.upsert(ctx, req, name, req.Operation == "UpdateStack", "", "")
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
 	case "UpdateTerminationProtection": // in one transaction, as every write of the record is (settle)
@@ -114,46 +107,139 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 		}
 		return &spi.Response{Output: map[string]any{"Exports": ex}}, nil
+	case "CreateChangeSet":
+		return p.createChangeSet(ctx, req, name)
 	case "ExecuteChangeSet":
-		key, sets := name+":"+str(req.Input["ChangeSetName"]), p.col(req, "cfn-cs")
-		rec, err := p.claimChangeSet(ctx, sets, key) // what CreateChangeSet took that CreateStack and UpdateStack take (the bundle's record)
-		if err != nil {
-			return nil, err
+		key := name + ":" + str(req.Input["ChangeSetName"])
+		raw, ok, _ := p.col(req, "cfn-cs").Get(ctx, key)
+		rec := spi.Decode[map[string]any](raw) // what CreateChangeSet took that CreateStack and UpdateStack take
+		if !ok {
+			return nil, &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
 		}
-		for _, k := range []string{"TemplateBody", "Parameters", "NotificationARNs", "Tags", "Capabilities"} {
+		for _, k := range changeSetMembers {
 			if rec[k] != nil {
 				req.Input[k] = rec[k]
 			}
 		}
-		_, err = p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE", str(rec["StackId"]))
-		if rec["ExecutionStatus"] = "EXECUTE_FAILED"; err == nil { // "CloudFormation deletes all other change sets associated with the stack"
-			for _, kv := range spi.Entries(ctx, sets, name+":", "", 0) {
-				_ = sets.Delete(ctx, kv.Key)
-			}
-			rec["ExecutionStatus"] = "EXECUTE_COMPLETE"
-		}
-		_ = sets.Put(ctx, key, []byte(spi.JSONText(rec)))
+		_, err := p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE", str(rec["StackId"]), key) // claims it as it starts
+		p.unsettled(ctx, req, key, "AVAILABLE", err)                                                   // a refusal leaves it as it was, and says why
 		return &spi.Response{Output: map[string]any{}}, err
+	case "DeleteChangeSet": // not one being executed (the wording is a reading)
+		key := name + ":" + str(req.Input["ChangeSetName"])
+		err := p.col(req, "cfn-cs").Txn(ctx, func(tx spi.Tx) error {
+			if raw, _, _ := tx.Get(key); status(spi.Decode[map[string]any](raw)) == "EXECUTE_IN_PROGRESS" {
+				return fault("InvalidChangeSetStatus", "ChangeSet ["+key+"] cannot be deleted in its current execution status of [EXECUTE_IN_PROGRESS]")
+			}
+			return tx.Delete(key)
+		})
+		if err != nil {
+			return nil, err
+		}
+		return &spi.Response{Output: map[string]any{}}, nil
 	default:
 		return nil, spi.NotImplemented("aws.cloudformation", req.Operation, "emulate")
 	}
 }
 
-// claimChangeSet answers the change set stored under key, which it marks EXECUTE_IN_PROGRESS in the
-// transaction that finds it AVAILABLE: a change set executes once, and one executed, failed or being
-// executed is InvalidChangeSetStatus, "The specified change set can't be used to update the stack".
-func (p *Pack) claimChangeSet(ctx context.Context, sets spi.Collection, key string) (rec map[string]any, err error) {
-	err = sets.Txn(ctx, func(tx spi.Tx) error {
-		raw, ok, _ := tx.Get(key)
-		if rec = spi.Decode[map[string]any](raw); !ok {
-			return &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
-		} else if status := str(rec["ExecutionStatus"]); status != "AVAILABLE" { // the wording is a reading
-			return fault("InvalidChangeSetStatus", "ChangeSet ["+str(rec["ChangeSetId"])+"] cannot be executed in its current execution status of ["+status+"]")
+// changeSetMembers are what CreateChangeSet takes that CreateStack and UpdateStack take: a change set keeps
+// those given, DescribeChangeSet answers them, and ExecuteChangeSet makes or updates the stack with them.
+var changeSetMembers = []string{"TemplateBody", "Parameters", "NotificationARNs", "Tags", "Capabilities"}
+
+// createChangeSet records the change set, and for a new stack the stack itself, in one transaction over what
+// it finds: "You can't use the UPDATE type to create a change set for a new stack or the CREATE type to create a
+// change set for an existing stack", and "If you create a change set for a new stack, CloudFormation creates a
+// stack with a unique stack ID, but no template or resources. The stack will be in the REVIEW_IN_PROGRESS state
+// until you execute the change set" (API reference, CreateChangeSet). A UsePreviousValue is read now: its
+// Parameters are "the input parameters and their values used to create the change set" (DescribeChangeSet).
+func (p *Pack) createChangeSet(ctx context.Context, req *spi.Request, name string) (*spi.Response, error) {
+	csn, create := str(req.Input["ChangeSetName"]), req.Input["ChangeSetType"] == "CREATE"
+	body, err := p.templateBody(ctx, req)
+	if _, paramErr := parameters(req.Input, stored(body)); err == nil {
+		err = paramErr
+	}
+	if err == nil && len(spi.Slice(req.Input["NotificationARNs"])) > 5 { // as CreateStack's
+		err = invalid("1 validation error detected: Value at 'notificationARNs' failed to satisfy constraint: Member must have length less than or equal to 5")
+	}
+	if err != nil {
+		return nil, err
+	}
+	prefix := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account
+	rec := map[string]any{"ChangeSetName": csn, "ChangeSetId": prefix + ":changeSet/" + csn + "/" + p.deps.Rand.Hex(8), "StackName": name,
+		"ChangeSetType": cmp.Or(str(req.Input["ChangeSetType"]), "UPDATE"), "Status": "CREATE_COMPLETE", "ExecutionStatus": "AVAILABLE",
+		"StackId": prefix + ":stack/" + name + "/" + p.deps.Rand.Hex(8)}
+	for _, k := range changeSetMembers {
+		if v, given := req.Input[k]; given { // one not given is not kept, Tags and NotificationARNs too: its execution keeps the stack's (previous)
+			rec[k] = v
 		}
-		rec["ExecutionStatus"] = "EXECUTE_IN_PROGRESS"
-		return tx.Put(key, []byte(spi.JSONText(rec)))
+	}
+	err = p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
+		raw, found, _ := stx.Collection("cfn").Get(name)
+		cur := spi.Decode[stack](raw)
+		review := create && cur.Status == "REVIEW_IN_PROGRESS"
+		if _, taken, _ := stx.Collection("cfn-cs").Get(name + ":" + csn); taken { // the wordings are readings
+			return fault("AlreadyExistsException", "ChangeSet ["+csn+"] already exists")
+		} else if !found && !create {
+			return invalid("Stack [" + name + "] does not exist")
+		} else if found && create && !review {
+			return fault("AlreadyExistsException", "Stack ["+name+"] already exists and cannot be created again with the changeSet ["+csn+"].")
+		} else if found && !review && (strings.HasSuffix(cur.Status, "_IN_PROGRESS") || strings.HasPrefix(cur.Status, "ROLLBACK_") || cur.Status == "DELETE_FAILED") {
+			return invalid("Stack:" + cur.ID + " is in " + cur.Status + " state and can not be updated.")
+		} else if found {
+			previous(req.Input, cur)
+			rec["StackId"] = cur.ID
+		} else if err := stx.Collection("cfn").Put(name, []byte(spi.JSONText(stack{Name: name, ID: str(rec["StackId"]), Status: "REVIEW_IN_PROGRESS",
+			Resources: []res{}, Outputs: []any{}, NotificationARNs: []any{}, Tags: []any{}}))); err != nil {
+			return err
+		}
+		return stx.Collection("cfn-cs").Put(name+":"+csn, []byte(spi.JSONText(rec)))
 	})
-	return rec, err
+	if err != nil {
+		return nil, err
+	}
+	return &spi.Response{Output: map[string]any{"Id": rec["ChangeSetId"], "StackId": rec["StackId"]}}, nil
+}
+
+// status is a change set's ExecutionStatus; AVAILABLE for a record stored before it had one.
+func status(rec map[string]any) string { return cmp.Or(str(rec["ExecutionStatus"]), "AVAILABLE") }
+
+// unsettled records why an execution of the change set under key did not finish, while the change set is
+// still in status was: one a refusal left AVAILABLE stays so, one claimed is EXECUTE_FAILED, each with the
+// error as its StatusReason.
+func (p *Pack) unsettled(ctx context.Context, req *spi.Request, key, was string, cause error) {
+	_ = p.col(req, "cfn-cs").Txn(ctx, func(tx spi.Tx) error {
+		raw, ok, _ := tx.Get(key)
+		if rec := spi.Decode[map[string]any](raw); ok && cause != nil && status(rec) == was {
+			if rec["StatusReason"] = cause.Error(); was != "AVAILABLE" {
+				rec["ExecutionStatus"] = "EXECUTE_FAILED"
+			}
+			return tx.Put(key, []byte(spi.JSONText(rec)))
+		}
+		return nil
+	})
+}
+
+// retire is what a stack's write that ends an operation does to its change sets, in the same transaction:
+// the change set under key being executed (its claim, and take's check of the stack, hold it) is
+// EXECUTE_COMPLETE, and "CloudFormation
+// deletes all other change sets associated with the stack" (ExecuteChangeSet); an update of no change set
+// (key "") leaves each available one OBSOLETE, "because the stack was already updated" (DescribeChangeSet).
+func retire(name, key string) func(spi.Tx) error {
+	return func(tx spi.Tx) error {
+		kvs, _, _ := tx.List(name+":", "", 0)
+		for _, kv := range kvs {
+			rec, err := spi.Decode[map[string]any](kv.Value), error(nil)
+			if kv.Key == key || key == "" && status(rec) == "AVAILABLE" {
+				rec["ExecutionStatus"] = map[bool]string{true: "EXECUTE_COMPLETE", false: "OBSOLETE"}[kv.Key == key]
+				err = tx.Put(kv.Key, []byte(spi.JSONText(rec)))
+			} else if key != "" {
+				err = tx.Delete(kv.Key)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 }
 
 type stack struct {
@@ -174,8 +260,9 @@ type res struct {
 }
 
 // upsert makes the stack named name, or updates it, a create under id when one is given (a CREATE change
-// set's, which it answered).
-func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string) (*spi.Response, error) {
+// set's, which it answered), as the execution of the change set under key when one is given: claimed in the
+// transaction that starts it, retired in the one that ends it.
+func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id, key string) (*spi.Response, error) {
 	if name == "" {
 		return nil, invalid("StackName required")
 	} else if len(spi.Slice(req.Input["NotificationARNs"])) > 5 { // "Maximum number of 5 items" (API reference, CreateStack and UpdateStack)
@@ -217,9 +304,12 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}
 	order = slices.DeleteFunc(order, func(l string) bool { return skip[l] })
 	var old stack // what an update finds; a create reserves the name, CREATE_IN_PROGRESS, in the same transaction
-	if err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
+	if err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
+		tx := stx.Collection("cfn")
 		raw, found, _ := tx.Get(name)
-		if _ = json.Unmarshal(raw, &old); found && !update && old.Status == "REVIEW_IN_PROGRESS" && old.ID == id {
+		if err := claim(stx.Collection("cfn-cs"), key); err != nil { // a refusal below puts it back: nothing is written
+			return err
+		} else if _ = json.Unmarshal(raw, &old); found && !update && old.Status == "REVIEW_IN_PROGRESS" && old.ID == id {
 			found, old = false, stack{} // a CREATE change set's stack, which its execution makes
 		}
 		if found && !update {
@@ -239,6 +329,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		if st.Reason = err.Error(); !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, "CREATE_IN_PROGRESS", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
 		}
+		p.unsettled(ctx, req, key, "EXECUTE_IN_PROGRESS", err)
 		return nil, err
 	}
 	planned := maps.Clone(st.Refs)
@@ -277,10 +368,10 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		return fail(err)
 	}
 	if !update { // a DeleteStack begun during the create ends here: what it made goes, and then the stack
-		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS")); err == nil && !wrote {
+		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS"), retire(name, key)); err == nil && !wrote {
 			_ = p.unwind(ctx, req, st, "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED")
 		}
-	} else if cur, wrote, err := p.settle(ctx, req, name, as(old, st)); err == nil && !wrote {
+	} else if cur, wrote, err := p.settle(ctx, req, name, as(old, st), retire(name, key)); err == nil && !wrote {
 		// Another change came first, in progress while this update ran: what this update made that the stack
 		// does not hold goes, all of it when the stack is being deleted (its delete may have run first).
 		rival := map[bool]string{true: "DELETE_IN_PROGRESS", false: "UPDATE_IN_PROGRESS"}[cur.ID != id || strings.HasPrefix(cur.Status, "DELETE_")]
@@ -291,29 +382,57 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			return slices.ContainsFunc(cur.Resources, func(c res) bool { return c.Physical == r.Physical })
 		})
 		_ = p.unwind(ctx, req, st, "", "", "")
-		return nil, invalid("Stack:" + id + " is in " + rival + " state and can not be updated.")
+		return fail(invalid("Stack:" + id + " is in " + rival + " state and can not be updated."))
 	}
 	return &spi.Response{Output: map[string]any{"StackId": id}}, nil
 }
 
 // settle rewrites the stack record in one store transaction: take, given the record (empty when there is
-// none), answers the record to write instead, and whether to write it; a DELETE_COMPLETE one is removed.
+// none), answers the record to write instead, and whether to write it; a DELETE_COMPLETE one is removed,
+// and with it the stack's change sets. sets, when given, writes the change sets in the same transaction.
 // settle answers the record it found and whether it wrote.
-func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take func(stack) (stack, bool)) (stack, bool, error) {
+func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take func(stack) (stack, bool), sets ...func(spi.Tx) error) (stack, bool, error) {
 	var cur stack
 	wrote := false
-	err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
+	err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
+		tx, cs := stx.Collection("cfn"), stx.Collection("cfn-cs")
 		raw, _, _ := tx.Get(name)
 		_ = json.Unmarshal(raw, &cur)
 		next, yes := take(cur)
 		if wrote = yes; !yes {
 			return nil
-		} else if next.Status == "DELETE_COMPLETE" {
+		} else if next.Status == "DELETE_COMPLETE" { // its change sets go with it
+			kvs, _, _ := cs.List(name+":", "", 0)
+			for _, kv := range kvs {
+				if err := cs.Delete(kv.Key); err != nil {
+					return err
+				}
+			}
 			return tx.Delete(name)
+		}
+		for _, write := range sets {
+			if err := write(cs); err != nil {
+				return err
+			}
 		}
 		return tx.Put(name, []byte(spi.JSONText(next)))
 	})
 	return cur, wrote, err
+}
+
+// claim moves the change set under key (none for "") from AVAILABLE to EXECUTE_IN_PROGRESS: a change set
+// executes once, and one executed, failed, obsolete or being executed is InvalidChangeSetStatus, "The
+// specified change set can't be used to update the stack" (the wording is a reading).
+func claim(tx spi.Tx, key string) error {
+	raw, _, _ := tx.Get(key)
+	if rec := spi.Decode[map[string]any](raw); key == "" {
+		return nil
+	} else if s := status(rec); s != "AVAILABLE" {
+		return fault("InvalidChangeSetStatus", "ChangeSet ["+str(rec["ChangeSetId"])+"] cannot be executed in its current execution status of ["+s+"]")
+	} else {
+		rec["ExecutionStatus"] = "EXECUTE_IN_PROGRESS"
+		return tx.Put(key, []byte(spi.JSONText(rec)))
+	}
 }
 
 // from writes st while the record is still st's stack in status was, keeping the record's termination
@@ -1477,7 +1596,7 @@ func parameters(in, tpl map[string]any) (map[string]string, error) {
 	out, undeclared := map[string]string{}, []string{}
 	for _, p := range spi.Slice(in["Parameters"]) {
 		k, v, valued := str(asMap(p)["ParameterKey"]), asMap(p)["ParameterValue"], asMap(p)["ParameterValue"] != nil
-		if valued && isTrue(asMap(p)["UsePreviousValue"]) {
+		if str(v) != "" && isTrue(asMap(p)["UsePreviousValue"]) { // "non empty", as the service words it
 			return nil, invalid("Invalid input for parameter key " + k + ". Cannot specify usePreviousValue as true and non empty value for a parameter")
 		} else if asMap(tpl["Parameters"])[k] == nil {
 			undeclared = append(undeclared, k)
@@ -1507,7 +1626,7 @@ func previous(in map[string]any, cur stack) {
 		}
 	}
 	for _, p := range spi.Slice(in["Parameters"]) {
-		_, valued := asMap(p)["ParameterValue"] // one given both is refused (undeclared)
+		valued := str(asMap(p)["ParameterValue"]) != "" // one given both is refused (parameters)
 		if v, ok := cur.Refs[str(asMap(p)["ParameterKey"])]; ok && !valued && isTrue(asMap(p)["UsePreviousValue"]) {
 			asMap(p)["ParameterValue"] = v
 			delete(asMap(p), "UsePreviousValue") // taken

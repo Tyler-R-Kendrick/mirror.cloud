@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/url"
@@ -291,7 +292,7 @@ type res struct {
 // upsert makes the stack named name, or updates it, a create under id when one is given (a CREATE change
 // set's, which it answered), as the execution of the change set under key when one is given: claimed in the
 // transaction that starts it, retired in the one that ends it.
-func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (*spi.Response, error) {
+func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (out *spi.Response, err error) {
 	if err := checkStackName(name, update); err != nil {
 		return nil, err
 	}
@@ -300,8 +301,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}
 	given, name := name, named(name)
 	id = cmp.Or(id, "arn:aws:cloudformation:"+req.Identity.Region+":"+req.Identity.Account+":stack/"+name+"/"+p.deps.Rand.Hex(8))
+	input, loaded := spi.Decode[map[string]any]([]byte(spi.JSONText(req.Input))), stack{}
 	if cur, err := p.load(ctx, req, given); err == nil && update { // the id an update's AWS::StackId answers
-		id = cur.ID
+		id, loaded = cur.ID, cur
 		previous(req.Input, cur)
 	} else if update { // "Stack [x] does not exist" before any template error; read again where it is written
 		return nil, err
@@ -323,6 +325,8 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			return err
 		} else if _ = json.Unmarshal(raw, &old); old.Status == "DELETE_COMPLETE" || found && !update && old.Status == "REVIEW_IN_PROGRESS" && old.ID == id {
 			found, old = false, stack{} // a deleted stack's name is free; a CREATE change set's stack is made by its execution
+		} else if update && found && !reflect.DeepEqual(old, loaded) {
+			return errStale // changed since its previous values were read: read again
 		}
 		if found && !update {
 			return fault("AlreadyExistsException", "Stack ["+name+"] already exists")
@@ -335,7 +339,10 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			return tx.Put(name, []byte(spi.JSONText(held)))
 		}
 		return tx.Put(name, []byte(spi.JSONText(reserved)))
-	}); err != nil {
+	}); errors.Is(err, errStale) {
+		req.Input = input
+		return p.upsert(ctx, req, given, update, "", cs)
+	} else if err != nil {
 		return nil, err
 	}
 	read := held // the record as the update reserved it, which its writes go over (a rollback changes old's resources)
@@ -355,6 +362,11 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", err)
 		return nil, err
 	}
+	defer func() { // a panic between the reservation and the settle ends the reservation, as a failure does
+		if r := recover(); r != nil {
+			out, err = fail(&spi.Fault{Code: "InternalFailure", Message: fmt.Sprint(r), HTTPStatus: 500, Fault: "server"})
+		}
+	}()
 	planned := maps.Clone(st.Refs)
 	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
@@ -432,6 +444,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	})
 	return &spi.Response{Output: map[string]any{"StackId": id}}, nil
 }
+
+// errStale is an update's reservation finding the record changed since the update read it.
+var errStale = errors.New("stale")
 
 // changeSet is the change set an execution executes: its key, and the id of the copy it read.
 type changeSet struct{ key, id string }
@@ -912,7 +927,14 @@ func (p *Pack) order(tpl map[string]any, refs map[string]string) ([]string, erro
 	for logical, r := range resources {
 		p.walks++
 		named := map[string]bool{}
-		names(r, named, refs) // its properties and its DependsOn; the order prunes what a settled Fn::If does not take
+		names(asMap(r)["Properties"], named, refs)                                          // the order prunes what a settled Fn::If does not take
+		for _, d := range append(spi.Slice(asMap(r)["DependsOn"]), asMap(r)["DependsOn"]) { // "Resource B is created before resource A"
+			if d, ok := d.(string); ok && resources[d] != nil && !off(resources[d], refs) {
+				named[d] = true
+			} else if ok { // a DependsOn names a resource the stack makes, nothing else
+				undeclared = append(undeclared, d)
+			}
+		}
 		for n := range named {
 			if _, ok := resources[n]; ok {
 				waiting[logical], users[n] = waiting[logical]+1, append(users[n], logical)
@@ -1022,12 +1044,6 @@ func names(v any, named map[string]bool, refs map[string]string) {
 					}
 				}
 				names(parts[1], named, refs)
-			case "DependsOn": // "Resource B is created before resource A": a string or a list of them, each a resource
-				for _, d := range append(spi.Slice(x), x) {
-					if d, ok := d.(string); ok {
-						named[d], named["."+d] = true, true
-					}
-				}
 			case "Fn::If": // [condition, then, else]
 				branches := append(spi.Slice(x), nil, nil, nil)
 				if yes, settled := refs["Condition::"+str(branches[0])]; settled {
@@ -1148,7 +1164,9 @@ func (p *Pack) next(ctx context.Context, req *spi.Request, st, old stack, logica
 // services answer such a create with what they hold, which a rollback or DeleteStack would then delete.
 func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logical, typ string, props map[string]any) (string, error) {
 	k, n := kinds[typ], str(props[kinds[typ].member])
-	if v, set := props["FifoQueue"]; typ == "AWS::SQS::Queue" && set && !isBoolean(v) { // FifoQueue is a Boolean (Template Reference)
+	if arn := planID(req, typ, "", props); typ == "AWS::Kinesis::ResourcePolicy" && p.holder(ctx, req, st.Name, res{Type: typ, Physical: arn}) != "" { // another stack's
+		return "", fault("AlreadyExistsException", "Resource of type '"+typ+"' with identifier '"+arn+"' already exists.") // the wording is a reading
+	} else if v, set := props["FifoQueue"]; typ == "AWS::SQS::Queue" && set && !isBoolean(v) { // FifoQueue is a Boolean (Template Reference)
 		return "", invalid("Properties validation failed for resource " + logical + ": FifoQueue must be a Boolean, not " + spi.JSONText(v))
 	}
 	if holds(props[k.member], unknown) { // one built on an id known only once made is checked as it is made:
@@ -1868,9 +1886,9 @@ func parseTemplate(body string) (map[string]any, error) {
 	undeclared := map[string]bool{}
 	for _, r := range asMap(m["Resources"]) {
 		named := map[string]bool{}
-		names(r, named, nil)
-		for _, d := range dependsOn(r) {
-			named["."+d] = true
+		names(asMap(r)["Properties"], named, nil)
+		for _, d := range slices.DeleteFunc(dependsOn(r), func(d string) bool { return asMap(m["Resources"])[d] != nil }) {
+			undeclared[d] = true // a DependsOn names a resource, nothing else
 		}
 		for n := range named {
 			if l, resource := strings.CutPrefix(n, "."); resource && asMap(m["Resources"])[l] == nil && asMap(m["Parameters"])[l] != nil {

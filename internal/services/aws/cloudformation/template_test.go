@@ -1107,3 +1107,23 @@ func TestCloudFormationNotificationARNsIsAList(t *testing.T) {
 		}
 	}
 }
+
+// GetTemplateSummary of a stack reads the template the stack was made from as
+// stored: the stack was made from it, and a check added since may refuse it
+// (here an output's ${ Q }, refused since round 10). Before, the stored
+// template went through every check again, and the summary was the check's
+// ValidationError.
+func TestCloudFormationSummarisesAStoredTemplateAsStored(t *testing.T) {
+	h := newStacks(t)
+	h.mustCreate("kept", map[string]map[string]any{"Q": {"Type": "AWS::SNS::Topic"}})
+	record := h.record("kept")
+	record["Template"] = `{"Resources":{"Q":{"Type":"AWS::SNS::Topic"}},"Outputs":{"O":{"Value":{"Fn::Sub":"${ Q }"}}}}`
+	raw, _ := json.Marshal(record)
+	if err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "kept", raw); err != nil {
+		t.Fatal(err)
+	}
+	out, err := h.invoke("GetTemplateSummary", map[string]any{"StackName": "kept"})
+	if err != nil || fmt.Sprint(out["ResourceTypes"]) != "[AWS::SNS::Topic]" {
+		t.Errorf("GetTemplateSummary of the stored template answered %v, %v, want its resource types", out, err)
+	}
+}

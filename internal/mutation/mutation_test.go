@@ -4525,6 +4525,14 @@ var mutants = []mutant{
 		run:  "TestCloudFormationACycleNamesOnlyItsMembers",
 	},
 	{
+		name: "cloudformation-summarise-a-stored-template-with-todays-checks",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `tpl, err = stored(st.Template), nil`,
+		new:  `tpl, err = parseTemplate(st.Template)`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationSummarisesAStoredTemplateAsStored",
+	},
+	{
 		name: "cloudformation-describe-stacks-answers-no-tags",
 		file: filepath.Join("behavior", "aws", "cloudformation", "service.yaml"),
 		old:  `'Tags': 'Tags' in s && s.Tags != null ? s.Tags : []},`,

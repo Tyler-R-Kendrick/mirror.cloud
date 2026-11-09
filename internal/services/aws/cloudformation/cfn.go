@@ -92,7 +92,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "GetTemplateSummary":
 		_, tpl, _, _, err := p.template(ctx, req, "", "")
 		if st, loadErr := p.load(ctx, req, name); err != nil && name != "" && loadErr == nil && cmp.Or(str(req.Input["TemplateBody"]), str(req.Input["TemplateURL"])) == "" {
-			tpl, err = parseTemplate(st.Template)
+			tpl, err = stored(st.Template), nil
 		}
 		if err != nil {
 			return nil, err
@@ -1305,21 +1305,10 @@ func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack stri
 }
 
 func parseTemplate(body string) (map[string]any, error) {
-	body = strings.TrimSpace(body)
-	if body == "" {
-		return nil, invalid("empty TemplateBody")
-	}
-	var m map[string]any
-	if body[0] == '{' {
-		if err := json.Unmarshal([]byte(body), &m); err != nil {
-			return nil, invalid(err.Error())
-		}
-	} else if yml, err := parseYAML(body); err != nil {
-		return nil, invalid("TemplateBody YAML: " + err.Error())
-	} else {
-		m = yml
-	}
-	if len(asMap(m["Resources"])) == 0 { // "The Resources section is required in every CloudFormation template"
+	m, err := decode(body)
+	if err != nil {
+		return nil, err
+	} else if len(asMap(m["Resources"])) == 0 { // "The Resources section is required in every CloudFormation template"
 		return nil, invalid("Template format error: At least one Resources member must be defined.")
 	} else if n := len(asMap(m["Resources"])); n > 500 { // "The maximum number of resources that you can declare ... 500 resources" (quotas)
 		return nil, invalid("Template format error: Number of resources, " + strconv.Itoa(n) + ", is greater than maximum allowed, 500")
@@ -1408,6 +1397,27 @@ func referred(v any, refs map[string]string) []string {
 	named := map[string]bool{}
 	names(v, named, refs)
 	return slices.Sorted(maps.Keys(named))
+}
+
+// decode is a template body as JSON, or YAML, before any check of what it holds.
+func decode(body string) (m map[string]any, err error) {
+	if body = strings.TrimSpace(body); body == "" {
+		err = invalid("empty TemplateBody")
+	} else if body[0] == '{' {
+		if jsonErr := json.Unmarshal([]byte(body), &m); jsonErr != nil {
+			err = invalid(jsonErr.Error())
+		}
+	} else if m, err = parseYAML(body); err != nil {
+		err = invalid("TemplateBody YAML: " + err.Error())
+	}
+	return m, err
+}
+
+// stored is a stack's stored template as it holds it: the stack was made from it, so it is read, not
+// checked again by checks added since.
+func stored(body string) map[string]any {
+	m, _ := decode(body)
+	return m
 }
 
 // each calls fn with every map v holds, v itself included.

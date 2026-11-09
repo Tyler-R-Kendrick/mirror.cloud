@@ -358,8 +358,7 @@ func eventTime(v any, fallback time.Time) string {
 func (p *Pack) fanout(ctx context.Context, req *spi.Request, event map[string]any, bus string) {
 	raw, _ := json.Marshal(event)
 	_ = p.deps.Bus.Publish(ctx, "events", raw)
-	kvs, _, _ := p.col(req, "targets").List(ctx, "", "", 0)
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, p.col(req, "targets"), "", "", 0) {
 		rule, ok := p.load(ctx, req, "rules", kv.Key)
 		if !ok || !ruleMatches(rule, bus, event) {
 			continue

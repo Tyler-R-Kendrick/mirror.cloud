@@ -347,8 +347,7 @@ func (p *objects) objectList(ctx context.Context, req *spi.Request) (*spi.Respon
 	prefixes := map[string]bool{}
 	var next string
 	for _, kv := range kvs {
-		var rec objectRec
-		_ = json.Unmarshal(kv.Value, &rec)
+		rec := spi.Decode[objectRec](kv.Value)
 		rest := strings.TrimPrefix(rec.Name, prefix)
 		if delim != "" {
 			if i := strings.Index(rest, delim); i >= 0 {
@@ -556,8 +555,7 @@ func (p *objects) loadObject(ctx context.Context, req *spi.Request, bucket, name
 	if !ok {
 		return objectRec{}, fault("notFound", "object "+name+" not found", 404)
 	}
-	var rec objectRec
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.Decode[objectRec](b)
 	return rec, nil
 }
 

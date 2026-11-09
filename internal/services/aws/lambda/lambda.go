@@ -168,8 +168,7 @@ func (p *runner) consumeSQS(ctx context.Context, payload []byte) {
 		sourceARN = "arn:aws:sqs:" + identity.Region + ":" + identity.Account + ":" + queue
 	}
 	req := &spi.Request{Identity: identity}
-	kvs, _, _ := p.col(req, "lambdaesm").List(ctx, "", "", 0)
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, p.col(req, "lambdaesm"), "", "", 0) {
 		var mapping map[string]any
 		if json.Unmarshal(kv.Value, &mapping) != nil || spi.Str(mapping["EventSourceArn"]) != sourceARN {
 			continue

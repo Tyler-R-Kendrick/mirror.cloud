@@ -608,8 +608,7 @@ func decodedEvent(event any) any {
 	}
 	decoded := spi.Clone(record)
 	if body := spi.Str(record["body"]); json.Valid([]byte(body)) {
-		var value any
-		_ = json.Unmarshal([]byte(body), &value)
+		value := spi.Decode[any]([]byte(body))
 		decoded["body"] = value
 	}
 	return decoded
@@ -732,8 +731,7 @@ func matchesFilters(raw any, event map[string]any) bool {
 	}
 	filterEvent := spi.Clone(event)
 	if body := spi.Str(event["body"]); json.Valid([]byte(body)) {
-		var decoded any
-		_ = json.Unmarshal([]byte(body), &decoded)
+		decoded := spi.Decode[any]([]byte(body))
 		filterEvent["body"] = decoded
 	}
 	for _, rawFilter := range filters {

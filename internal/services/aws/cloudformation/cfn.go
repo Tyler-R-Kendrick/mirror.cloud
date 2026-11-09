@@ -101,8 +101,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		kvs, _, _ := p.col(req, "cfn").List(ctx, "", "", 0)
 		var ex []any
 		for _, kv := range kvs {
-			var st stack
-			_ = json.Unmarshal(kv.Value, &st)
+			st := spi.Decode[stack](kv.Value)
 			for _, o := range st.Outputs {
 				ex = append(ex, map[string]any{"Name": asMap(o)["OutputKey"], "Value": asMap(o)["OutputValue"], "ExportingStackId": st.ID})
 			}
@@ -1069,8 +1068,7 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 		if r, ok := t["Ref"]; ok {
 			v, _ := p.ref(str(r), refs, req, stack)
 			if str(r) == "AWS::NotificationARNs" {
-				var arns []any
-				_ = json.Unmarshal([]byte(v), &arns)
+				arns := spi.Decode[[]any]([]byte(v))
 				return arns
 			}
 			return v

@@ -89,8 +89,7 @@ func (p reader) s3Resource(ctx context.Context, req *spi.Request, bucket string)
 		props["VersioningConfiguration"] = map[string]any{"Status": string(version)}
 	}
 	if tags, ok, _ := p.col(req, "tags").Get(ctx, bucket); ok {
-		var value any
-		_ = json.Unmarshal(tags, &value)
+		value := spi.Decode[any](tags)
 		props["Tags"] = value
 	}
 	configs := map[string]string{

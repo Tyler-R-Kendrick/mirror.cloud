@@ -103,8 +103,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			if len(spi.Slice(tags)) > 0 {
 				existingTags, found, _ := p.col(req, "tags").Get(ctx, str(current["arn"]))
-				var decodedTags []any
-				_ = json.Unmarshal(existingTags, &decodedTags)
+				decodedTags := spi.Decode[[]any](existingTags)
 				if !found || len(decodedTags) == 0 {
 					return nil, clientFault("TopicAlreadyExists", "Topic already exists with a different attribute value.", 400)
 				}
@@ -147,8 +146,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "topics").Delete(ctx, name)
 		_ = p.col(req, "tags").Delete(ctx, arn)
 		_ = p.col(req, "dpp").Delete(ctx, arn)
-		kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, p.col(req, "subs"), "", "", 0) {
 			var sub map[string]any
 			if json.Unmarshal(kv.Value, &sub) == nil && str(sub["TopicArn"]) == arn {
 				_ = p.col(req, "subs").Delete(ctx, kv.Key)
@@ -175,8 +173,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			"SubscriptionsConfirmed":  "0", "SubscriptionsDeleted": "0", "SubscriptionsPending": "0",
 		}
 		confirmedCount, pendingCount := 0, 0
-		kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, p.col(req, "subs"), "", "", 0) {
 			var sub map[string]any
 			if json.Unmarshal(kv.Value, &sub) != nil || str(sub["TopicArn"]) != str(m["arn"]) {
 				continue
@@ -412,8 +409,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				return nil, fault
 			}
 		}
-		kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, p.col(req, "subs"), "", "", 0) {
 			var existing map[string]any
 			if json.Unmarshal(kv.Value, &existing) != nil || str(existing["TopicArn"]) != str(req.Input["TopicArn"]) || str(existing["Protocol"]) != str(req.Input["Protocol"]) || str(existing["Endpoint"]) != str(req.Input["Endpoint"]) {
 				continue
@@ -630,8 +626,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		b, found, _ := p.col(req, "tags").Get(ctx, arn)
 		if found {
-			var current []any
-			_ = json.Unmarshal(b, &current)
+			current := spi.Decode[[]any](b)
 			remove := map[string]bool{}
 			for _, key := range spi.Slice(keys) {
 				remove[str(key)] = true
@@ -736,8 +731,7 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 		out["SequenceNumber"] = fmt.Sprintf("1%019d", n+1)
 	}
 	_ = p.deps.Bus.Publish(ctx, "sns:"+arn, []byte(body))
-	kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, p.col(req, "subs"), "", "", 0) {
 		sub := spi.JSONObject(kv.Value)
 		if str(sub["TopicArn"]) != arn {
 			continue
@@ -851,8 +845,7 @@ func (p *Pack) smsOptedOut(ctx context.Context, req *spi.Request, phone string) 
 
 func (p *Pack) recordJSONList(ctx context.Context, req *spi.Request, col, key string, item any) {
 	b, _, _ := p.col(req, col).Get(ctx, key)
-	var list []any
-	_ = json.Unmarshal(b, &list)
+	list := spi.Decode[[]any](b)
 	list = append(list, item)
 	_ = p.col(req, col).Put(ctx, key, mustJSON(list))
 }

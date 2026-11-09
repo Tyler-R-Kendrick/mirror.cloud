@@ -428,8 +428,7 @@ func withoutReplica(replicas []any, region string) []any {
 }
 
 func clearCollection(ctx context.Context, collection spi.Collection) {
-	entries, _, _ := collection.List(ctx, "", "", 0)
-	for _, entry := range entries {
+	for _, entry := range spi.Entries(ctx, collection, "", "", 0) {
 		_ = collection.Delete(ctx, entry.Key)
 	}
 }
@@ -476,8 +475,7 @@ func (p *Pack) restorePITR(ctx context.Context, req *spi.Request) (*spi.Response
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 	}
 	_ = p.col(req, "tables").Put(ctx, dst, tb)
-	kvs, _, _ := p.col(req, "items:"+src).List(ctx, "", "", 0)
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, p.col(req, "items:"+src), "", "", 0) {
 		_ = p.col(req, "items:"+dst).Put(ctx, kv.Key, kv.Value)
 	}
 	return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": dst, "TableStatus": "ACTIVE"}}}, nil

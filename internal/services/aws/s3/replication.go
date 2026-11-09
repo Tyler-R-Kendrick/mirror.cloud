@@ -126,8 +126,7 @@ func (p *Pack) storedTags(ctx context.Context, req *spi.Request, bucket, key, ve
 	if !ok {
 		return nil
 	}
-	var values []any
-	_ = json.Unmarshal(raw, &values)
+	values := spi.Decode[[]any](raw)
 	tags := make(map[string]string, len(values))
 	for _, value := range values {
 		tag := spi.Object(value)
@@ -340,8 +339,7 @@ func tagSet(tags map[string]string) []any {
 func (p *Pack) rememberReplica(ctx context.Context, req *spi.Request, bucket, key string, ref replicaRef) {
 	col := p.col(req, "replicas")
 	raw, _, _ := col.Get(ctx, bucket+"/"+key)
-	var refs []replicaRef
-	_ = json.Unmarshal(raw, &refs)
+	refs := spi.Decode[[]replicaRef](raw)
 	for _, existing := range refs {
 		if existing == ref {
 			return
@@ -357,8 +355,7 @@ func (p *Pack) syncReplicaTags(ctx context.Context, req *spi.Request, bucket, ke
 	if !ok {
 		return
 	}
-	var refs []replicaRef
-	_ = json.Unmarshal(raw, &refs)
+	refs := spi.Decode[[]replicaRef](raw)
 	for _, ref := range refs {
 		if ref.Version != "" && ref.Version != version {
 			continue
@@ -376,8 +373,7 @@ func (p *Pack) syncReplicaObjectLock(ctx context.Context, req *spi.Request, buck
 	if !ok {
 		return
 	}
-	var refs []replicaRef
-	_ = json.Unmarshal(raw, &refs)
+	refs := spi.Decode[[]replicaRef](raw)
 	for _, ref := range refs {
 		if ref.Version != "" && ref.Version != version {
 			continue

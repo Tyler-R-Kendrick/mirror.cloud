@@ -514,8 +514,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		p.deleteHTTPStreamWork(ctx, req, name)
 		_ = p.col(req, "fh").Delete(ctx, name)
 		_ = p.col(req, "fhtag").Delete(ctx, name)
-		kvs, _, _ := p.col(req, "fhrec:"+name).List(ctx, "", "", 0)
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, p.col(req, "fhrec:"+name), "", "", 0) {
 			_ = p.col(req, "fhrec:"+name).Delete(ctx, kv.Key)
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -1296,8 +1295,7 @@ func validTagKey(key string) bool {
 }
 
 func loadTags(b []byte) map[string]string {
-	var stored []map[string]any
-	_ = json.Unmarshal(b, &stored)
+	stored := spi.Decode[[]map[string]any](b)
 	tags := make(map[string]string, len(stored))
 	for _, tag := range stored {
 		key, _ := tag["Key"].(string)
@@ -3040,8 +3038,7 @@ func (p *Pack) bufferSearch(ctx context.Context, req *spi.Request, stream, desti
 			next = now
 		}
 		for _, item := range items {
-			var work searchWork
-			_ = json.Unmarshal(item.Value, &work)
+			work := spi.Decode[searchWork](item.Value)
 			work.Next = next
 			stored, _ := json.Marshal(work)
 			if err := tx.Put(item.Key, stored); err != nil {
@@ -3348,8 +3345,7 @@ func (p *Pack) bufferEndpoint(ctx context.Context, req *spi.Request, stream, des
 		if total >= sizeLimit {
 			next = now
 			for _, item := range items {
-				var buffer httpBuffer
-				_ = json.Unmarshal(item.Value, &buffer)
+				buffer := spi.Decode[httpBuffer](item.Value)
 				buffer.Next = now
 				stored, _ := json.Marshal(buffer)
 				if err := tx.Put(item.Key, stored); err != nil {
@@ -3496,8 +3492,7 @@ func (p *Pack) deleteHTTPStreamWork(ctx context.Context, req *spi.Request, strea
 	buffers := p.col(req, "fh-http-buffers")
 	items, _, _ := buffers.List(ctx, stream+"/", "", 0)
 	for _, item := range items {
-		var buffer httpBuffer
-		_ = json.Unmarshal(item.Value, &buffer)
+		buffer := spi.Decode[httpBuffer](item.Value)
 		p.deleteHTTPBuffer(ctx, buffers, []httpBufferItem{{Key: item.Key, Buffer: buffer}})
 	}
 	retries := p.col(req, "fh-http-retries")
@@ -3511,15 +3506,13 @@ func (p *Pack) deleteHTTPStreamWork(ctx context.Context, req *spi.Request, strea
 	search := p.col(req, "fh-search-work")
 	items, _, _ = search.List(ctx, stream+"/", "", 0)
 	for _, item := range items {
-		var work searchWork
-		_ = json.Unmarshal(item.Value, &work)
+		work := spi.Decode[searchWork](item.Value)
 		p.deleteWork(ctx, search, item.Key, work.DataKey)
 	}
 	redshift := p.col(req, "fh-redshift-work")
 	items, _, _ = redshift.List(ctx, stream+"/", "", 0)
 	for _, item := range items {
-		var work redshiftWork
-		_ = json.Unmarshal(item.Value, &work)
+		work := spi.Decode[redshiftWork](item.Value)
 		p.deleteWork(ctx, redshift, item.Key, work.DataKey)
 	}
 }
@@ -3752,8 +3745,7 @@ func (p *Pack) deliverSnowflake(ctx context.Context, req *spi.Request, destinati
 		if err != nil {
 			return err
 		}
-		var existing []map[string]any
-		_ = json.Unmarshal(stored, &existing)
+		existing := spi.Decode[[]map[string]any](stored)
 		existing = append(existing, rows...)
 		encoded, _ := json.Marshal(existing)
 		return tx.Put(key, encoded)

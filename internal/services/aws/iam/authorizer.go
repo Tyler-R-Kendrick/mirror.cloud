@@ -2,7 +2,6 @@ package iam
 
 import (
 	"context"
-	"encoding/json"
 	"net/url"
 	"strconv"
 	"strings"
@@ -117,8 +116,7 @@ func principal(ctx context.Context, scope spi.Scope, id spi.Identity) (kind, nam
 		return "role", role, true
 	}
 	if id.AccessKeyID != "" {
-		kvs, _, _ := scope.Collection("iamak").List(ctx, "", "", 0)
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, scope.Collection("iamak"), "", "", 0) {
 			rec := spi.JSONObject(kv.Value)
 			if spi.Str(rec["AccessKeyId"]) == id.AccessKeyID {
 				return "user", spi.Str(rec["UserName"]), !strings.EqualFold(spi.Str(rec["Status"]), "Inactive")
@@ -188,8 +186,7 @@ func loadPrincipalDocs(ctx context.Context, scope spi.Scope, kind, name string) 
 	docs := loadInlineDocs(ctx, scope.Collection(inline), name+":")
 	docs = append(docs, loadAttachedDocs(ctx, scope, attached, name+":")...)
 	if kind == "user" {
-		groups, _, _ := scope.Collection("iamug:"+name).List(ctx, "", "", 0)
-		for _, kv := range groups {
+		for _, kv := range spi.Entries(ctx, scope.Collection("iamug:"+name), "", "", 0) {
 			docs = append(docs, loadInlineDocs(ctx, scope.Collection("iamgp"), kv.Key+":")...)
 			docs = append(docs, loadAttachedDocs(ctx, scope, "iamgable", kv.Key+":")...)
 		}
@@ -199,8 +196,7 @@ func loadPrincipalDocs(ctx context.Context, scope spi.Scope, kind, name string) 
 
 func loadInlineDocs(ctx context.Context, col spi.Collection, prefix string) []map[string]any {
 	var docs []map[string]any
-	kvs, _, _ := col.List(ctx, prefix, "", 0)
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, col, prefix, "", 0) {
 		rec := spi.JSONObject(kv.Value)
 		if d := parseDoc(rec["PolicyDocument"]); len(statements(d)) > 0 {
 			docs = append(docs, d)
@@ -211,8 +207,7 @@ func loadInlineDocs(ctx context.Context, col spi.Collection, prefix string) []ma
 
 func loadAttachedDocs(ctx context.Context, scope spi.Scope, attachments, prefix string) []map[string]any {
 	var docs []map[string]any
-	atts, _, _ := scope.Collection(attachments).List(ctx, prefix, "", 0)
-	for _, kv := range atts {
+	for _, kv := range spi.Entries(ctx, scope.Collection(attachments), prefix, "", 0) {
 		rec := spi.JSONObject(kv.Value)
 		arn, _ := rec["PolicyArn"].(string)
 		name := arn
@@ -261,8 +256,7 @@ func loadSCPDocs(ctx context.Context, st spi.Store, id spi.Identity) []map[strin
 	targets = append(targets, id.Account)
 	var docs []map[string]any
 	for _, target := range targets {
-		attachments, _, _ := col.List(ctx, target+"/", "", 0)
-		for _, attachment := range attachments {
+		for _, attachment := range spi.Entries(ctx, col, target+"/", "", 0) {
 			link := spi.JSONObject(attachment.Value)
 			policy, found, _ := policies.Get(ctx, spi.Str(link["PolicyId"]))
 			if !found {
@@ -282,8 +276,7 @@ func parseDoc(v any) map[string]any {
 	case map[string]any:
 		return t
 	case string:
-		var m map[string]any
-		_ = json.Unmarshal([]byte(t), &m)
+		m := spi.Decode[map[string]any]([]byte(t))
 		return m
 	}
 	return map[string]any{}

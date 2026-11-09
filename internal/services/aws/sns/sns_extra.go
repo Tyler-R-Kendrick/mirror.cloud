@@ -459,12 +459,10 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		_ = col.Delete(ctx, app)
 		endpoints := p.col(req, "platend")
 		subs := p.col(req, "subs")
-		kvs, _, _ := endpoints.List(ctx, "", "", 0)
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, endpoints, "", "", 0) {
 			var endpoint map[string]any
 			if json.Unmarshal(kv.Value, &endpoint) == nil && str(endpoint["PlatformApplicationArn"]) == app {
-				subKVs, _, _ := subs.List(ctx, "", "", 0)
-				for _, subKV := range subKVs {
+				for _, subKV := range spi.Entries(ctx, subs, "", "", 0) {
 					var sub map[string]any
 					if json.Unmarshal(subKV.Value, &sub) == nil && str(sub["Endpoint"]) == str(endpoint["EndpointArn"]) {
 						_ = subs.Delete(ctx, subKV.Key)
@@ -568,8 +566,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		if customUserData != nil {
 			requestedAttrs["CustomUserData"] = customUserData
 		}
-		kvs, _, _ := col.List(ctx, "", "", 0)
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, col, "", "", 0) {
 			var existing map[string]any
 			if json.Unmarshal(kv.Value, &existing) == nil && str(existing["PlatformApplicationArn"]) == app && str(existing["Token"]) == tok {
 				for key, value := range requestedAttrs {
@@ -594,8 +591,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 	case "DeleteEndpoint":
 		arn := str(req.Input["EndpointArn"])
 		_ = col.Delete(ctx, arn)
-		kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, p.col(req, "subs"), "", "", 0) {
 			var sub map[string]any
 			if json.Unmarshal(kv.Value, &sub) == nil && str(sub["Endpoint"]) == arn {
 				_ = p.col(req, "subs").Delete(ctx, kv.Key)

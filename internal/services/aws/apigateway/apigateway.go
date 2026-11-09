@@ -122,8 +122,7 @@ func resourceForPath(ctx context.Context, deps spi.Deps, req *spi.Request, api, 
 	if path == "" || path == "/" {
 		return "root"
 	}
-	kvs, _, _ := col(deps, req, "apigwres:"+api).List(ctx, "", "", 0)
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, col(deps, req, "apigwres:"+api), "", "", 0) {
 		rec := spi.JSONObject(kv.Value)
 		if spi.Str(rec["path"]) == path {
 			return spi.Str(rec["id"])

@@ -226,7 +226,12 @@ The oracle is AWS's documentation as it ships in the vendored model
     in a key-value map", and a pseudo parameter; any other, `${Nope}`, is
     `ValidationError`, "Template format error: Unresolved resource
     dependencies [Nope] in the Resources block of the template" (round 8 left
-    it in the string).
+    it in the string). The page says nothing of a space inside `${}`;
+    CloudFormation answers `${ Q }` with "Template error: variable names in
+    Fn::Sub syntax must contain only alphanumeric characters, underscores,
+    periods, and colons", and so does this engine, on every operation (the
+    service's wording, a reading; round 9 read `" Q "` as an undeclared
+    name).
     A `Fn::If` whose condition the parameters settle orders by the branch it
     takes and only that one: `Fn::Equals` of literals and `Ref`s to
     parameters, and `Fn::Not`, `Fn::And`, `Fn::Or` and `Condition` over such

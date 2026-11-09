@@ -918,3 +918,26 @@ func TestCloudFormationMakesOnlyWhatItsConditionAllows(t *testing.T) {
 		t.Errorf("a Condition naming no condition answered %v, want ValidationError", err)
 	}
 }
+
+// A Fn::Sub variable is a template parameter, logical id, attribute,
+// variable or pseudo parameter name (Template Reference, Fn::Sub), and the
+// page says nothing of spaces inside ${}: CloudFormation answers such a name,
+// ${ Q }, with "Template error: variable names in Fn::Sub syntax must contain
+// only alphanumeric characters, underscores, periods, and colons", which is
+// matched here (the service's wording, not the page's, a reading). So ${ Q }
+// is refused although Q is declared, and ${Q}, ${Q.Arn}, ${AWS::Region} and
+// ${!Literal} are not. Before, " Q " was read as an undeclared name.
+func TestCloudFormationASubVariableHasNoSpaces(t *testing.T) {
+	h := newStacks(t)
+	sub := func(text string) string {
+		body, _ := json.Marshal(map[string]any{"Parameters": map[string]any{"Q": map[string]any{"Type": "String", "Default": "q"}}, "Resources": map[string]any{
+			"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": map[string]any{"Fn::Sub": text}}}}})
+		return string(body)
+	}
+	for text, ok := range map[string]bool{"${Q}-${AWS::Region}-${!Literal}": true, "${ Q }": false, "${Q }": false, "${ AWS::Region}": false} {
+		_, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": sub(text)})
+		if ok && err != nil || !ok && (code(err) != "ValidationError" || !strings.Contains(err.Error(), "variable names in Fn::Sub syntax must contain only alphanumeric characters, underscores, periods, and colons")) {
+			t.Errorf("Fn::Sub %q answered %v", text, err)
+		}
+	}
+}

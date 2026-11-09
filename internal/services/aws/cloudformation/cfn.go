@@ -664,8 +664,8 @@ func conditions(tpl map[string]any, params map[string]string) map[string]string 
 	return refs
 }
 
-// subVariable is a ${...} in a Fn::Sub string.
-var subVariable = regexp.MustCompile(`\$\{([^}]*)\}`)
+// subVariable is a ${...} in a Fn::Sub string, and subName the name one may hold.
+var subVariable, subName = regexp.MustCompile(`\$\{([^}]*)\}`), regexp.MustCompile(`^[A-Za-z0-9_.:]+$`)
 
 // claim answers the name a resource is made under: the template's, or else physicalName's. A given name
 // that a resource the stack did not make under it holds is the service's error for a name taken: several
@@ -1179,11 +1179,18 @@ func parseTemplate(body string) (map[string]any, error) {
 			undeclared = append(undeclared, c)
 		}
 	})
+	spaced := false
 	each([]any{m["Resources"], m["Outputs"]}, func(x map[string]any) {
 		if c := str(append(spi.Slice(x["Fn::If"]), nil)[0]); x["Fn::If"] != nil && conds[c] == nil {
 			undeclared = append(undeclared, c)
 		}
+		for _, v := range subVariable.FindAllStringSubmatch(str(append(spi.Slice(x["Fn::Sub"]), x["Fn::Sub"])[0]), -1) {
+			spaced = spaced || !strings.HasPrefix(v[1], "!") && !subName.MatchString(v[1])
+		}
 	})
+	if spaced { // the service's wording: the Template Reference says nothing of a space in ${} (a reading)
+		return nil, invalid("Template error: variable names in Fn::Sub syntax must contain only alphanumeric characters, underscores, periods, and colons")
+	}
 	for _, v := range slices.Concat(slices.Collect(maps.Values(asMap(m["Resources"]))), slices.Collect(maps.Values(asMap(m["Outputs"])))) {
 		if c, ok := asMap(v)["Condition"].(string); ok && conds[c] == nil { // a resource's or output's Condition attribute
 			undeclared = append(undeclared, c)

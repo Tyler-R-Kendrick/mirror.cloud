@@ -2,6 +2,7 @@ package spi
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 )
 
@@ -79,4 +80,23 @@ func JSONObject(raw []byte) map[string]any {
 	var m map[string]any
 	_ = json.Unmarshal(raw, &m)
 	return m
+}
+
+// Members is the list the query protocol spells name.member.1, name.member.2 and on, in that order.
+func Members(in map[string]any, name string) []any {
+	by := map[int]any{}
+	for k, v := range in {
+		if n, ok := strings.CutPrefix(k, name+".member."); ok {
+			if i, err := strconv.Atoi(n); err == nil {
+				by[i] = v
+			}
+		}
+	}
+	values := make([]any, 0, len(by))
+	for i := 1; i <= len(by); i++ {
+		if value, ok := by[i]; ok {
+			values = append(values, value)
+		}
+	}
+	return values
 }

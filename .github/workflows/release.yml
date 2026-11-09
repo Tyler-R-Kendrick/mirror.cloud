@@ -230,8 +230,8 @@ jobs:
   # never pushed over.
   #
   # Only this job can write packages, and it uses the runner's Docker and no
-  # third-party action. A package ghcr creates is private until a repository
-  # admin makes it public (docs/RELEASING.md).
+  # third-party action. Whether a new package is public is the registry's
+  # decision, so check it after a release (docs/RELEASING.md).
   images:
     name: container images
     needs: checksums

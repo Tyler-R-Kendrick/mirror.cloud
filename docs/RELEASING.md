@@ -146,10 +146,12 @@ version that is already in the registry is never pushed over, and neither image
 is pushed if either exists. Run by hand, the workflow does all of that except
 the login and the push.
 
-The registry creates a package **private**, and only a repository admin can make
-it public (the package's settings, "Change visibility"); the first release needs
-that once. The images carry `org.opencontainers.image.source`, which links the
-package to this repository.
+The images carry `org.opencontainers.image.source`, which links the package to
+this repository. The packages of the first release (`v0.0.1-alpha.1`) are public:
+the registry served them without a login. Whether a new package is public is the
+registry's decision and the owner's setting, not this workflow's, so check it after
+a release; one that is private needs a repository admin to change its visibility
+(the package's settings, "Change visibility").
 
 ## SHA256SUMS
 

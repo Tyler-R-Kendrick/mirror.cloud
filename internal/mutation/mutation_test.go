@@ -7268,14 +7268,10 @@ var mutants = []mutant{
 	{
 		name: "states-shift-json-path-index",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old: `					if index >= 0 && index < len(array) {
-						next = append(next, array[index])
-					}`,
-		new: `					if index >= 0 && index < len(array) {
-						next = append(next, array[max(0, index-1)])
-					}`,
-		pkg: "./internal/services/aws/states",
-		run: "TestStatesLifecycleAndWalkerUnits",
+		old:  `return []any{node[index]}`,
+		new:  `return []any{node[max(0, index-1)]}`,
+		pkg:  "./internal/services/aws/states",
+		run:  "TestStatesLifecycleAndWalkerUnits",
 	},
 	{
 		name: "states-reject-empty-json-path-result",
@@ -7324,8 +7320,8 @@ var mutants = []mutant{
 	{
 		name: "states-ignore-json-path-member-union",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  "case 'f':\n\t\t\t\t\t\tif object, ok := node.(map[string]any); ok {",
-		new:  "case 'f':\n\t\t\t\t\t\tif object, ok := node.(map[string]any); false && (ok) {",
+		old:  `next = append(next, selected(selector, node)...)`,
+		new:  `if selector.kind != 'f' { next = append(next, selected(selector, node)...) }`,
 		pkg:  "./internal/services/aws/states",
 		run:  "TestStatesLifecycleAndWalkerUnits",
 	},
@@ -11208,8 +11204,8 @@ var mutants = []mutant{
 	{
 		name: "firehose-accept-unrelated-deaggregation-parameter",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `if name != "SubRecordType" && name != "Delimiter" {`,
-		new:  `if false && (name != "SubRecordType" && name != "Delimiter") {`,
+		old:  `if !onlyParameters(processor, "SubRecordType", "Delimiter") {`,
+		new:  `if false && !onlyParameters(processor, "SubRecordType", "Delimiter") {`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseRecordDeAggregation",
 	},
@@ -11224,8 +11220,8 @@ var mutants = []mutant{
 	{
 		name: "firehose-accept-unrelated-decompression-parameter",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `if spi.First(parameter, "ParameterName") != "CompressionFormat" {`,
-		new:  `if false && (spi.First(parameter, "ParameterName") != "CompressionFormat") {`,
+		old:  `if !onlyParameters(processor, "CompressionFormat") {`,
+		new:  `if false && !onlyParameters(processor, "CompressionFormat") {`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseDecompressionProcessing",
 	},
@@ -11304,8 +11300,8 @@ var mutants = []mutant{
 	{
 		name: "firehose-accept-unrelated-cloudwatch-message-parameter",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `if spi.First(parameter, "ParameterName") != "DataMessageExtraction" {`,
-		new:  `if false && (spi.First(parameter, "ParameterName") != "DataMessageExtraction") {`,
+		old:  `if !onlyParameters(processor, "DataMessageExtraction") {`,
+		new:  `if false && !onlyParameters(processor, "DataMessageExtraction") {`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseCloudWatchMessageExtraction",
 	},
@@ -11552,8 +11548,8 @@ var mutants = []mutant{
 	{
 		name: "firehose-accept-unrelated-lambda-parameter",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `case "LambdaArn", "NumberOfRetries", "RoleArn", "BufferSizeInMBs", "BufferIntervalInSeconds":`,
-		new:  `case "LambdaArn", "NumberOfRetries", "RoleArn", "BufferSizeInMBs", "BufferIntervalInSeconds", "JsonParsingEngine":`,
+		old:  `if !onlyParameters(processor, "LambdaArn", "NumberOfRetries", "RoleArn", "BufferSizeInMBs", "BufferIntervalInSeconds") {`,
+		new:  `if !onlyParameters(processor, "LambdaArn", "NumberOfRetries", "RoleArn", "BufferSizeInMBs", "BufferIntervalInSeconds", "JsonParsingEngine") {`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseLambdaProcessing",
 	},
@@ -11924,8 +11920,8 @@ var mutants = []mutant{
 	{
 		name: "firehose-accept-unrelated-metadata-parameter",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `if name != "MetadataExtractionQuery" && name != "JsonParsingEngine" {`,
-		new:  `if false && (name != "MetadataExtractionQuery" && name != "JsonParsingEngine") {`,
+		old:  `if !onlyParameters(processor, "MetadataExtractionQuery", "JsonParsingEngine") {`,
+		new:  `if false && !onlyParameters(processor, "MetadataExtractionQuery", "JsonParsingEngine") {`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseMetadataExtraction",
 	},

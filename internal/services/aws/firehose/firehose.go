@@ -1421,10 +1421,7 @@ func validateIcebergDestination(destination map[string]any, region string) error
 	if err := validateS3Configuration(s3, region, false); err != nil {
 		return err
 	}
-	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 900) || !optionalInteger(hints, "SizeInMBs", 1, 128)) {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
+	if !validOptions(destination, 900, 128) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if mode := spi.First(destination, "S3BackupMode"); mode != "" && mode != "FailedDataOnly" && mode != "AllData" {
@@ -1494,10 +1491,7 @@ func validateElasticsearchDestination(destination map[string]any, region string)
 	default:
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 900) || !optionalInteger(hints, "SizeInMBs", 1, 100)) {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
+	if !validOptions(destination, 900, 100) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if mode := spi.First(destination, "S3BackupMode"); mode != "" && mode != "FailedDocumentsOnly" && mode != "AllDocuments" {
@@ -1536,10 +1530,7 @@ func validateOpenSearchServerlessDestination(destination map[string]any, region 
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 	}
-	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 900) || !optionalInteger(hints, "SizeInMBs", 1, 100)) {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
+	if !validOptions(destination, 900, 100) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if mode := spi.First(destination, "S3BackupMode"); mode != "" && mode != "FailedDocumentsOnly" && mode != "AllDocuments" {
@@ -1666,10 +1657,7 @@ func validateSplunkDestination(destination map[string]any, region string) error 
 	if (destination["HECToken"] != nil && !hasToken) || len(token) > 2048 || strings.ContainsAny(token, "\r\n") {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 60) || !optionalInteger(hints, "SizeInMBs", 1, 5)) {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
+	if !validOptions(destination, 60, 5) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if timeout, exists := destination["HECAcknowledgmentTimeoutInSeconds"]; exists {
@@ -1758,10 +1746,7 @@ func validateSnowflakeDestination(destination map[string]any, region string) err
 	if !enabled && (!userOK || !privateKeyOK) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 900) || !optionalInteger(hints, "SizeInMBs", 1, 128)) {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
+	if !validOptions(destination, 900, 128) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if mode := spi.First(destination, "S3BackupMode"); mode != "" && mode != "FailedDataOnly" && mode != "AllData" {
@@ -2127,37 +2112,24 @@ func validateProcessingConfiguration(raw any) error {
 			} else if subRecordType == "JSON" && delimiter != "" {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
-			parameters, _ := processor["Parameters"].([]any)
-			for _, rawParameter := range parameters {
-				parameter, _ := rawParameter.(map[string]any)
-				name := spi.First(parameter, "ParameterName")
-				if name != "SubRecordType" && name != "Delimiter" {
-					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-				}
+			if !onlyParameters(processor, "SubRecordType", "Delimiter") {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 		case "Decompression":
 			format := processorParameter(processor, "CompressionFormat")
 			if format != "" && format != "GZIP" {
 				return spi.NotImplemented("aws.firehose", "Decompression="+format, "emulate")
 			}
-			parameters, _ := processor["Parameters"].([]any)
-			for _, rawParameter := range parameters {
-				parameter, _ := rawParameter.(map[string]any)
-				if spi.First(parameter, "ParameterName") != "CompressionFormat" {
-					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-				}
+			if !onlyParameters(processor, "CompressionFormat") {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			decompressed = true
 		case "CloudWatchLogProcessing":
 			if !decompressed || processorParameter(processor, "DataMessageExtraction") != "true" {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
-			parameters, _ := processor["Parameters"].([]any)
-			for _, rawParameter := range parameters {
-				parameter, _ := rawParameter.(map[string]any)
-				if spi.First(parameter, "ParameterName") != "DataMessageExtraction" {
-					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-				}
+			if !onlyParameters(processor, "DataMessageExtraction") {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 		case "Lambda":
 			arn := processorParameter(processor, "LambdaArn")
@@ -2185,14 +2157,8 @@ func validateProcessingConfiguration(raw any) error {
 					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 				}
 			}
-			parameters, _ := processor["Parameters"].([]any)
-			for _, rawParameter := range parameters {
-				parameter, _ := rawParameter.(map[string]any)
-				switch spi.First(parameter, "ParameterName") {
-				case "LambdaArn", "NumberOfRetries", "RoleArn", "BufferSizeInMBs", "BufferIntervalInSeconds":
-				default:
-					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-				}
+			if !onlyParameters(processor, "LambdaArn", "NumberOfRetries", "RoleArn", "BufferSizeInMBs", "BufferIntervalInSeconds") {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 		case "MetadataExtraction":
 			query, engine := processorParameter(processor, "MetadataExtractionQuery"), processorParameter(processor, "JsonParsingEngine")
@@ -2203,13 +2169,8 @@ func validateProcessingConfiguration(raw any) error {
 			if _, err := gojq.Compile(parsed); err != nil {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
-			parameters, _ := processor["Parameters"].([]any)
-			for _, rawParameter := range parameters {
-				parameter, _ := rawParameter.(map[string]any)
-				name := spi.First(parameter, "ParameterName")
-				if name != "MetadataExtractionQuery" && name != "JsonParsingEngine" {
-					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-				}
+			if !onlyParameters(processor, "MetadataExtractionQuery", "JsonParsingEngine") {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 		default:
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -2227,6 +2188,26 @@ func processorParameter(processor map[string]any, name string) string {
 		}
 	}
 	return ""
+}
+
+// validOptions is whether a destination's BufferingHints, where given, are an object with IntervalInSeconds
+// from 0 to maxInterval and SizeInMBs from 1 to maxSize where given, and its RetryOptions, where given, an
+// object with DurationInSeconds from 0 to 7200 where given.
+func validOptions(destination map[string]any, maxInterval, maxSize int) bool {
+	hints, hintsOK := destination["BufferingHints"].(map[string]any)
+	retry, retryOK := destination["RetryOptions"].(map[string]any)
+	return (destination["BufferingHints"] == nil || hintsOK && optionalInteger(hints, "IntervalInSeconds", 0, maxInterval) && optionalInteger(hints, "SizeInMBs", 1, maxSize)) &&
+		(destination["RetryOptions"] == nil || retryOK && optionalInteger(retry, "DurationInSeconds", 0, 7200))
+}
+
+// onlyParameters is whether every Parameters entry of a processor is one of names.
+func onlyParameters(processor map[string]any, names ...string) bool {
+	for _, parameter := range spi.Slice(processor["Parameters"]) {
+		if !slices.Contains(names, spi.First(spi.Object(parameter), "ParameterName")) {
+			return false
+		}
+	}
+	return true
 }
 
 func validProcessorParameter(name string) bool {

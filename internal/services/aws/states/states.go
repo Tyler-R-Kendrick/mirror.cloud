@@ -1676,6 +1676,12 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	walkRequest.Input["_executionType"] = rec["type"]
 	walkRequest.Input["_executionRedriveCount"] = rec["redriveCount"]
 	walkRequest.Input["_executionDeadline"] = pend.Deadline
+	failExecution := func(name, cause string) (*spi.Response, error) { // the execution ends FAILED, with why
+		rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", name, cause, float64(now)
+		nb, _ := json.Marshal(rec)
+		_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
+		return &spi.Response{Output: map[string]any{}}, nil
+	}
 	persistRetry := func(delay time.Duration) bool {
 		scheduled := p.scheduleRetry(ctx, &walkRequest, pend.StateName, pend.StateInput, pend.Retries, pend.Variables, delay, nil)
 		if scheduled == nil {
@@ -1741,10 +1747,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 				failure = stateFailure{name: "States.Runtime", cause: "States.Runtime"}
 			}
 			if !caught || next == "" {
-				rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", failure.name, failure.cause, float64(now)
-				nb, _ := json.Marshal(rec)
-				_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
-				return &spi.Response{Output: map[string]any{}}, nil
+				return failExecution(failure.name, failure.cause)
 			}
 			sm["StartAt"] = next
 			def, _ := json.Marshal(sm)
@@ -1770,10 +1773,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 				def, _ := json.Marshal(sm)
 				definition, from, data = string(def), "", out
 			} else {
-				rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", failure.name, failure.cause, float64(now)
-				nb, _ := json.Marshal(rec)
-				_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
-				return &spi.Response{Output: map[string]any{}}, nil
+				return failExecution(failure.name, failure.cause)
 			}
 		}
 	} else {
@@ -1785,10 +1785,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 			valid = applyJSONPathAssignments(result, stateContext, pend.Variables, pend.Variables, p.deps.Rand, st)
 		}
 		if !valid {
-			rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", failure, failure, float64(now)
-			nb, _ := json.Marshal(rec)
-			_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
-			return &spi.Response{Output: map[string]any{}}, nil
+			return failExecution(failure, failure)
 		}
 		data = out
 	}
@@ -1796,10 +1793,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		if output, valid := applyDataPath(st, "OutputPath", data, pend.Variables); valid {
 			data = output
 		} else {
-			rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", "States.Runtime", "States.Runtime", float64(now)
-			nb, _ := json.Marshal(rec)
-			_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
-			return &spi.Response{Output: map[string]any{}}, nil
+			return failExecution("States.Runtime", "States.Runtime")
 		}
 	}
 	var retries map[string]map[int]int
@@ -3266,7 +3260,7 @@ func evalJSONataValue(value any, scope jsonataScope) (any, bool) {
 					items[index] = array.Get(index)
 				}
 			}
-			size, numeric := intrinsicNumber(args[1])
+			size, numeric := choiceNumber(args[1])
 			width := int(math.Floor(size))
 			if !ok || !numeric || width < 1 {
 				return nil, errors.New("invalid partition arguments")
@@ -3282,9 +3276,9 @@ func evalJSONataValue(value any, scope jsonataScope) (any, bool) {
 			if len(args) != 3 {
 				return nil, errors.New("range takes three arguments")
 			}
-			startValue, startOK := intrinsicNumber(args[0])
-			endValue, endOK := intrinsicNumber(args[1])
-			stepValue, stepOK := intrinsicNumber(args[2])
+			startValue, startOK := choiceNumber(args[0])
+			endValue, endOK := choiceNumber(args[1])
+			stepValue, stepOK := choiceNumber(args[2])
 			start, end, step := int(math.Floor(startValue)), int(math.Floor(endValue)), int(math.Floor(stepValue))
 			if !startOK || !endOK || !stepOK || step == 0 {
 				return nil, errors.New("invalid range arguments")
@@ -4351,7 +4345,7 @@ func evalIntrinsic(expression string, data any, context map[string]any, random s
 			break
 		}
 		array, ok := args[0].([]any)
-		number, numeric := intrinsicNumber(args[1])
+		number, numeric := choiceNumber(args[1])
 		size := int(math.Round(number))
 		if !ok || !numeric || size <= 0 {
 			break
@@ -4381,9 +4375,9 @@ func evalIntrinsic(expression string, data any, context map[string]any, random s
 		if len(args) != 3 {
 			break
 		}
-		startValue, startOK := intrinsicNumber(args[0])
-		endValue, endOK := intrinsicNumber(args[1])
-		stepValue, stepOK := intrinsicNumber(args[2])
+		startValue, startOK := choiceNumber(args[0])
+		endValue, endOK := choiceNumber(args[1])
+		stepValue, stepOK := choiceNumber(args[2])
 		start, end, step := int(math.Round(startValue)), int(math.Round(endValue)), int(math.Round(stepValue))
 		if !startOK || !endOK || !stepOK || step == 0 {
 			break
@@ -4404,7 +4398,7 @@ func evalIntrinsic(expression string, data any, context map[string]any, random s
 			break
 		}
 		array, ok := args[0].([]any)
-		number, numeric := intrinsicNumber(args[1])
+		number, numeric := choiceNumber(args[1])
 		index := int(math.Round(number))
 		if !ok || !numeric || index < 0 || index >= len(array) {
 			break
@@ -4478,22 +4472,22 @@ func evalIntrinsic(expression string, data any, context map[string]any, random s
 		}
 	case "MathAdd":
 		if len(args) == 2 {
-			left, lok := intrinsicNumber(args[0])
-			right, rok := intrinsicNumber(args[1])
+			left, lok := choiceNumber(args[0])
+			right, rok := choiceNumber(args[1])
 			if lok && rok {
 				return math.Round(left) + math.Round(right), true
 			}
 		}
 	case "MathRandom":
 		if len(args) == 2 || len(args) == 3 {
-			startValue, startOK := intrinsicNumber(args[0])
-			endValue, endOK := intrinsicNumber(args[1])
+			startValue, startOK := choiceNumber(args[0])
+			endValue, endOK := choiceNumber(args[1])
 			start, end := int(math.Round(startValue)), int(math.Round(endValue))
 			if !startOK || !endOK || start >= end {
 				break
 			}
 			if len(args) == 3 {
-				seed, ok := intrinsicNumber(args[2])
+				seed, ok := choiceNumber(args[2])
 				if !ok {
 					break
 				}
@@ -4660,24 +4654,6 @@ func intrinsicHash(data, algorithm string) (any, bool) {
 		return nil, false
 	}
 	return hex.EncodeToString(sum), true
-}
-
-func intrinsicNumber(value any) (float64, bool) {
-	switch number := value.(type) {
-	case float64:
-		return number, true
-	case float32:
-		return float64(number), true
-	case int:
-		return float64(number), true
-	case int64:
-		return float64(number), true
-	case json.Number:
-		parsed, err := number.Float64()
-		return parsed, err == nil
-	default:
-		return 0, false
-	}
 }
 
 type inspectedTaskResult struct {
@@ -5305,6 +5281,26 @@ func choiceNumber(value any) (float64, bool) {
 	}
 }
 
+// selected is what a field ('f') or index ('i', negative from the end) token picks out of node: nothing
+// when node has no such member.
+func selected(token pathToken, node any) []any {
+	switch node := node.(type) {
+	case map[string]any:
+		if value, exists := node[token.key]; token.kind == 'f' && exists {
+			return []any{value}
+		}
+	case []any:
+		index := token.start
+		if index < 0 {
+			index += len(node)
+		}
+		if token.kind == 'i' && index >= 0 && index < len(node) {
+			return []any{node[index]}
+		}
+	}
+	return nil
+}
+
 func isString(value any) bool { _, ok := value.(string); return ok }
 func isNumber(value any) bool { _, ok := choiceNumber(value); return ok }
 func isBool(value any) bool   { _, ok := value.(bool); return ok }
@@ -5543,22 +5539,8 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 		var next []any
 		for _, node := range nodes {
 			switch token.kind {
-			case 'f':
-				if object, ok := node.(map[string]any); ok {
-					if value, exists := object[token.key]; exists {
-						next = append(next, value)
-					}
-				}
-			case 'i':
-				if array, ok := node.([]any); ok {
-					index := token.start
-					if index < 0 {
-						index += len(array)
-					}
-					if index >= 0 && index < len(array) {
-						next = append(next, array[index])
-					}
-				}
+			case 'f', 'i':
+				next = append(next, selected(token, node)...)
 			case '*':
 				switch node := node.(type) {
 				case []any:
@@ -5590,24 +5572,7 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 				}
 			case 'u':
 				for _, selector := range token.selectors {
-					switch selector.kind {
-					case 'f':
-						if object, ok := node.(map[string]any); ok {
-							if value, exists := object[selector.key]; exists {
-								next = append(next, value)
-							}
-						}
-					case 'i':
-						if array, ok := node.([]any); ok {
-							index := selector.start
-							if index < 0 {
-								index += len(array)
-							}
-							if index >= 0 && index < len(array) {
-								next = append(next, array[index])
-							}
-						}
-					}
+					next = append(next, selected(selector, node)...)
 				}
 			case 'r':
 				var descend func(any)

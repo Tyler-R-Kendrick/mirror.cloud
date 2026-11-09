@@ -153,15 +153,21 @@ jobs:
         if: ${{ !cancelled() }}
         run: make known-red RUN=ci-run.log
 
-  # The Dockerfile is built here and nowhere else, so a change that breaks it
-  # shows up on the pull request and not in the first release that needs it.
-  # Only the slim build: it is the one with an argument to get wrong, and the
-  # whole image is the same Dockerfile.
+  # The Dockerfile and Dockerfile.release are built here and nowhere else before
+  # a tag, so a change that breaks either shows up on the pull request and not in
+  # the first release that needs it. Dockerfile: only the slim build, the one
+  # with an argument to get wrong. Dockerfile.release: laid out and built the way
+  # release.yml does it, for both architectures, from binaries built here in
+  # place of the archives, and everything but the push.
   image:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+      - uses: ./.github/actions/go
+        with:
+          cache: check
+          save: "false"
       - name: build with a service list
         run: docker build --build-arg SERVICES=@profiles/core.txt -t mirror-core .
       - name: it serves exactly that list, from a scratch image
@@ -169,6 +175,22 @@ jobs:
           got=$(docker run --rm mirror-core services | cut -f1 | sort | tr '\n' ' ')
           want=$(grep -v '^#' profiles/core.txt | sort | tr '\n' ' ')
           [ "$got" = "$want" ] || { echo "::error::image serves: $got; profile lists: $want"; exit 1; }
+      - name: the release image builds for both architectures
+        run: |
+          set -euo pipefail
+          python3 -I scripts/slim-overlay.py "$RUNNER_TEMP/overlay.json" @profiles/core.txt
+          for arch in amd64 arm64; do
+            mkdir -p "ctx/linux_$arch"
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags '-s -w' \
+              -overlay "$RUNNER_TEMP/overlay.json" -o "ctx/linux_$arch/mirror" ./cmd/mirror
+          done
+          cp Dockerfile.release ctx/Dockerfile
+          docker buildx create --name ci --driver docker-container --use > /dev/null
+          docker buildx build --platform linux/amd64,linux/arm64 --output "type=oci,dest=$RUNNER_TEMP/image.tar" ctx
+          docker buildx build --platform linux/amd64 --load -t release-shaped ctx
+          got=$(docker run --rm release-shaped services | cut -f1 | sort | tr '\n' ' ')
+          want=$(grep -v '^#' profiles/core.txt | sort | tr '\n' ' ')
+          [ "$got" = "$want" ] || { echo "::error::release image serves: $got; profile lists: $want"; exit 1; }
 
   # Fails unless every job above passed. A job that is skipped or cancelled is
   # not a pass, and `needs` alone would skip this one with it.

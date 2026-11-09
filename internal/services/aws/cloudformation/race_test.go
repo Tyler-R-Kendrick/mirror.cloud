@@ -394,7 +394,8 @@ func TestCloudFormationTerminationProtectionNeedsItsBoolean(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, in := range []map[string]any{{"StackName": "tp"}, {"StackName": "tp", "EnableTerminationProtection": "maybe"}, {"StackName": "tp", "EnableTerminationProtection": nil}} {
-		if _, err := h.invoke("UpdateTerminationProtection", in); code(err) != "ValidationError" || !strings.Contains(err.Error(), "EnableTerminationProtection") {
+		_, err := h.invoke("UpdateTerminationProtection", in)
+		if missing := in["EnableTerminationProtection"] == nil; code(err) != "ValidationError" || missing && err.Error() != "ValidationError: EnableTerminationProtection" || !strings.Contains(err.Error(), "EnableTerminationProtection") {
 			t.Errorf("UpdateTerminationProtection %v answered %v, want ValidationError naming EnableTerminationProtection", in, err)
 		}
 		if h.record("tp")["Protect"] != true {

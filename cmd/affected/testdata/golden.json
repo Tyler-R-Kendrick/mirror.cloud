@@ -1,0 +1,155 @@
+{
+  "a fuzz target's tests": {
+    "files": [
+      "internal/proto/aws/httpuri/httpuri_test.go"
+    ],
+    "packages": [
+      "./internal/check",
+      "./internal/mutation",
+      "./internal/proto/aws/httpuri"
+    ]
+  },
+  "a pinned spec": {
+    "files": [
+      "specs/mirror.lock"
+    ],
+    "packages": [
+      "./cmd/mirror",
+      "./cmd/mirrorgen",
+      "./internal/check",
+      "./internal/mutation",
+      "./internal/specboot",
+      "./test/behavior/vercel"
+    ]
+  },
+  "a test file": {
+    "files": [
+      "test/ci/cache_test.go"
+    ],
+    "packages": [
+      "./internal/check",
+      "./internal/mutation",
+      "./test/ci"
+    ]
+  },
+  "an unknown root file": {
+    "all": "brand-new.txt: no rule and no package owns it",
+    "files": [
+      "brand-new.txt"
+    ]
+  },
+  "one leaf package": {
+    "files": [
+      "internal/services/aws/scheduleexpr/scheduleexpr.go"
+    ],
+    "packages": [
+      "./behavior",
+      "./cmd/mirror",
+      "./internal/allservices",
+      "./internal/bir",
+      "./internal/bundled",
+      "./internal/chaos",
+      "./internal/check",
+      "./internal/conformance",
+      "./internal/edge",
+      "./internal/engine",
+      "./internal/equivalence",
+      "./internal/execution/cicd/amplify",
+      "./internal/execution/cicd/awsdelivery",
+      "./internal/execution/cicd/codebuild",
+      "./internal/execution/cicd/codedeploy",
+      "./internal/execution/cicd/codepipeline",
+      "./internal/execution/cicd/delivery",
+      "./internal/execution/cicd/vercel",
+      "./internal/mutation",
+      "./internal/prim",
+      "./internal/proto/aws/restjson",
+      "./internal/proto/aws/restxml",
+      "./internal/proto/graphql",
+      "./internal/runtime",
+      "./internal/services/aws/apigateway",
+      "./internal/services/aws/athena",
+      "./internal/services/aws/cloudcontrol",
+      "./internal/services/aws/cloudformation",
+      "./internal/services/aws/dynamodb",
+      "./internal/services/aws/ecs",
+      "./internal/services/aws/elasticloadbalancing",
+      "./internal/services/aws/events",
+      "./internal/services/aws/firehose",
+      "./internal/services/aws/iam",
+      "./internal/services/aws/kafka",
+      "./internal/services/aws/kinesis",
+      "./internal/services/aws/kms",
+      "./internal/services/aws/lambda",
+      "./internal/services/aws/organizations",
+      "./internal/services/aws/pipes",
+      "./internal/services/aws/rds",
+      "./internal/services/aws/redshift",
+      "./internal/services/aws/s3",
+      "./internal/services/aws/s3tables",
+      "./internal/services/aws/scheduleexpr",
+      "./internal/services/aws/scheduler",
+      "./internal/services/aws/sns",
+      "./internal/services/aws/ssm",
+      "./internal/services/aws/states",
+      "./internal/services/gcp/gcs",
+      "./internal/spine",
+      "./test/behavior/aws",
+      "./test/behavior/azure",
+      "./test/behavior/bundled",
+      "./test/behavior/cloudflare",
+      "./test/behavior/digitalocean",
+      "./test/behavior/fly",
+      "./test/behavior/gcp",
+      "./test/behavior/hetzner",
+      "./test/behavior/hostinger",
+      "./test/behavior/railway",
+      "./test/behavior/stripe",
+      "./test/behavior/vercel",
+      "./test/terraform"
+    ]
+  },
+  "root markdown": {
+    "files": [
+      "README.md",
+      "AGENTS.md"
+    ],
+    "packages": []
+  },
+  "testing docs": {
+    "files": [
+      "docs/TESTING.md"
+    ],
+    "packages": [
+      "./internal/check",
+      "./internal/mutation",
+      "./internal/runtime",
+      "./test/behavior/cloudflare",
+      "./test/behavior/vercel"
+    ]
+  },
+  "the ci workflow": {
+    "files": [
+      ".github/workflows/ci.yml"
+    ],
+    "packages": [
+      "./internal/check",
+      "./internal/execution",
+      "./internal/mutation",
+      "./test/ci",
+      "./test/release"
+    ]
+  },
+  "the module file": {
+    "all": "go.mod: the module's requirements",
+    "files": [
+      "go.mod"
+    ]
+  },
+  "the sdk module": {
+    "files": [
+      "test/sdk/go/go.mod"
+    ],
+    "packages": []
+  }
+}

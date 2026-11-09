@@ -78,10 +78,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if err == nil && !found {
 			err = invalid("Stack [" + name + "] does not exist")
 		}
-		if err != nil {
-			return nil, err
-		}
-		return &spi.Response{Output: map[string]any{"StackId": st.ID}}, nil
+		return &spi.Response{Output: map[string]any{"StackId": st.ID}}, err
 	case "GetTemplateSummary":
 		_, tpl, _, _, err := p.template(ctx, req, "", "")
 		if st, loadErr := p.load(ctx, req, name); err != nil && name != "" && loadErr == nil && cmp.Or(str(req.Input["TemplateBody"]), str(req.Input["TemplateURL"])) == "" {
@@ -132,10 +129,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			return tx.Delete(key)
 		})
-		if err != nil {
-			return nil, err
-		}
-		return &spi.Response{Output: map[string]any{}}, nil
+		return &spi.Response{Output: map[string]any{}}, err
 	default:
 		return nil, spi.NotImplemented("aws.cloudformation", req.Operation, "emulate")
 	}
@@ -193,10 +187,7 @@ func (p *Pack) createChangeSet(ctx context.Context, req *spi.Request, name strin
 		}
 		return stx.Collection("cfn-cs").Put(name+":"+csn, []byte(spi.JSONText(rec)))
 	})
-	if err != nil {
-		return nil, err
-	}
-	return &spi.Response{Output: map[string]any{"Id": rec["ChangeSetId"], "StackId": rec["StackId"]}}, nil
+	return &spi.Response{Output: map[string]any{"Id": rec["ChangeSetId"], "StackId": rec["StackId"]}}, err
 }
 
 // status is a change set's ExecutionStatus; AVAILABLE for a record stored before it had one.
@@ -397,7 +388,7 @@ func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take f
 	err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
 		tx, cs := stx.Collection("cfn"), stx.Collection("cfn-cs")
 		raw, _, _ := tx.Get(name)
-		_ = json.Unmarshal(raw, &cur)
+		cur = spi.Decode[stack](raw)
 		next, yes := take(cur)
 		if wrote = yes; !yes {
 			return nil
@@ -543,10 +534,7 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 			err = p.unwind(ctx, req, del, "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED")
 		}
 	}
-	if err != nil {
-		return nil, err
-	}
-	return &spi.Response{Output: map[string]any{}}, nil
+	return &spi.Response{Output: map[string]any{}}, err
 }
 
 // unwind deletes a stack's resources, newest first, as a rollback or a DeleteStack does, and records the
@@ -575,13 +563,10 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, was, done
 }
 
 func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, error) {
-	var st stack
-	b, ok, _ := p.col(req, "cfn").Get(ctx, name)
-	if !ok {
-		return st, invalid("Stack [" + name + "] does not exist")
+	if b, ok, _ := p.col(req, "cfn").Get(ctx, name); ok {
+		return spi.Decode[stack](b), nil
 	}
-	_ = json.Unmarshal(b, &st)
-	return st, nil
+	return stack{}, invalid("Stack [" + name + "] does not exist")
 }
 
 // kinds are the types provision names: the property that names one, the longest name its service takes (API

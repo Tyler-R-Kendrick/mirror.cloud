@@ -579,8 +579,11 @@ The oracle is AWS's documentation as it ships in the vendored model
     listed by `DescribeStackEvents` as `DELETE_SKIPPED`, the model's
     `ResourceStatus`. A deleted stack's record stays, `DELETE_COMPLETE`,
     answered by its stack id alone (`DescribeStacks`, `DescribeStackEvents`
-    and the other reads; `ListStacks` lists it), and exports nothing; by its
-    name it does not exist, and the name is free. Before, neither attribute
+    and the other reads; `ListStacks` lists it), and exports nothing, its
+    `Outputs` `[]` (round 9 left them null); by its name it does not exist,
+    and the name is free. Nothing changes it: `UpdateTerminationProtection`
+    by its stack id is "does not exist" (round 9 protected the deleted
+    record). Before, neither attribute
     was read, every resource was deleted, and a deleted stack was gone.
   - A finished `UpdateStack` cleans up. "CloudFormation will replace the
     resource by creating a new one and deleting the old one"

@@ -82,7 +82,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		var st stack
 		err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) (err error) {
 			raw, ok, _ := tx.Get(named(name))
-			if st, err = found(name, raw, ok); err == nil {
+			if st, err = found(name, raw, ok); err == nil && st.Status == "DELETE_COMPLETE" { // read by its id, a deleted stack changes no more
+				err = invalid("Stack [" + name + "] does not exist")
+			} else if err == nil {
 				st.Protect = protect == true
 				err = tx.Put(named(name), []byte(spi.JSONText(st)))
 			}
@@ -435,7 +437,7 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, seen, st stack, kep
 		st.Status, st.Reason = failed, first.Error()
 	}
 	if st.Status == "DELETE_COMPLETE" {
-		st.Outputs = nil
+		st.Outputs = []any{} // never null, as every read of a stack lists its lists
 	}
 	if seen.ID == "" { // the stack is another's: nothing is recorded
 		return first

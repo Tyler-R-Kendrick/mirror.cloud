@@ -544,3 +544,37 @@ func TestCloudFormationASkippedResourceIsStillTheStacks(t *testing.T) {
 		t.Errorf("skip is %s holding %v, want UPDATE_COMPLETE with A and Q", status, h.statuses("skip"))
 	}
 }
+
+// A deleted stack's record stays, DELETE_COMPLETE, and answers only its stack
+// id ("Deleted stacks don't show up in the DescribeStacks operation if the
+// deletion has been completed successfully", unless asked for by id), and
+// UpdateTerminationProtection does not write to it: a stack that is deleted
+// does not exist for a change, by name or by id. DescribeStacks of it by id
+// lists Outputs as [], as every read of a stack lists its lists. Before,
+// UpdateTerminationProtection by the stack id protected the deleted record,
+// and its Outputs read null.
+func TestCloudFormationADeletedStackTakesNoProtection(t *testing.T) {
+	h := newStacks(t)
+	body, _ := json.Marshal(map[string]any{"Resources": map[string]any{"Q": nameable()["Queue"]}, "Outputs": map[string]any{"O": map[string]any{"Value": "v"}}})
+	out, err := h.invoke("CreateStack", map[string]any{"StackName": "gone", "TemplateBody": string(body)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := str(out["StackId"])
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "gone"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{id, "gone"} {
+		if _, err := h.invoke("UpdateTerminationProtection", map[string]any{"StackName": name, "EnableTerminationProtection": true}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "does not exist") {
+			t.Errorf("UpdateTerminationProtection of the deleted stack by %s answered %v, want ValidationError: does not exist", name, err)
+		}
+	}
+	if h.record("gone")["Protect"] == true {
+		t.Error("the deleted stack's record was protected")
+	}
+	described, err := h.invoke("DescribeStacks", map[string]any{"StackName": id})
+	stack := asMap(append(spi.Slice(described["Stacks"]), nil)[0])
+	if err != nil || stack["StackStatus"] != "DELETE_COMPLETE" || spi.JSONText(stack["Outputs"]) != "[]" {
+		t.Errorf("DescribeStacks of the deleted stack by id answered %v (%v), want DELETE_COMPLETE with Outputs []", stack, err)
+	}
+}

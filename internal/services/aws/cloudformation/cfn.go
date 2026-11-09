@@ -1106,8 +1106,10 @@ func getAtt(g any, refs map[string]string) string {
 // variable, an output's value, it is refused.
 func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Request, stack string) error {
 	var values []any
-	for _, r := range asMap(tpl["Resources"]) {
-		values = append(values, p.resolve(asMap(r)["Properties"], refs, req, stack))
+	for _, r := range asMap(tpl["Resources"]) { // all its properties, when AWS::NoValue is the whole attribute (a reading)
+		if v := p.resolve(asMap(r)["Properties"], refs, req, stack); v != noValue {
+			values = append(values, v)
+		}
 	}
 	for _, o := range asMap(tpl["Outputs"]) {
 		values = append(values, p.resolve(asMap(o)["Value"], refs, req, stack))

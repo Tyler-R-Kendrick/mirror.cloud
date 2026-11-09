@@ -275,7 +275,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     Template Reference does not spell out: a reading). It is never a value:
     as part of one, a `Fn::Join`'s separator, a `Fn::Sub`'s string or
     variable, or an output's value, it is `ValidationError` before the
-    stack's name is reserved, on `ValidateTemplate` as on `CreateStack`
+    stack's name is reserved, on `ValidateTemplate` as on `CreateStack`; as
+    the whole `Properties` attribute, `!If [C, {...}, !Ref AWS::NoValue]`,
+    it leaves the resource no properties (the attribute is no property, so
+    this is a reading; round 10 refused it)
     (round 10 found it only after reserving the name, so the refused stack
     stayed `ROLLBACK_COMPLETE` and a retry was `AlreadyExistsException`) (round 9 wrote the sentinel standing for it into the string,
     `"\ufffe,b"`, `"a\ufffeb"`); an unsettled one reaches the service as

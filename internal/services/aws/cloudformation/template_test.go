@@ -973,3 +973,20 @@ func TestCloudFormationRefusesNoValueBeforeReservingTheName(t *testing.T) {
 		}
 	}
 }
+
+// Properties: !If [Cond, {...}, !Ref AWS::NoValue] is a resource with no
+// properties when Cond is false. AWS::NoValue "Removes the corresponding
+// resource property" (User Guide, pseudo parameters); the Properties attribute
+// is no property, so this is a reading, and the whole attribute goes. Before,
+// the sentinel was part of the resource's value and the template was refused.
+func TestCloudFormationNoValueRemovesEveryProperty(t *testing.T) {
+	h := newStacks(t)
+	body, _ := json.Marshal(map[string]any{"Conditions": map[string]any{"No": map[string]any{"Fn::Equals": []any{"a", "b"}}}, "Resources": map[string]any{
+		"Q": map[string]any{"Type": "AWS::SQS::Queue", "Properties": map[string]any{"Fn::If": []any{"No", map[string]any{"QueueName": "nvp-named"}, map[string]any{"Ref": "AWS::NoValue"}}}}}})
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "nvp", "TemplateBody": string(body)}); err != nil {
+		t.Fatalf("CreateStack of a queue whose properties AWS::NoValue removes: %v", err)
+	}
+	if got := h.resources("nvp"); len(got) != 1 || !strings.Contains(got[0].Physical, "nvp-Q-") {
+		t.Errorf("the stack holds %v, want one queue under a generated name", got)
+	}
+}

@@ -4525,6 +4525,14 @@ var mutants = []mutant{
 		run:  "TestCloudFormationACycleNamesOnlyItsMembers",
 	},
 	{
+		name: "cloudformation-an-update-makes-its-stack",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `} else if update { // "Stack [x] does not exist": an update makes no stack`,
+		new:  `} else if false { // "Stack [x] does not exist": an update makes no stack`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationAnUpdateMakesNoStack",
+	},
+	{
 		name: "cloudformation-an-output-holds-a-list",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
 		old:  `"OutputValue": text(p.resolve(asMap(outs[k])["Value"], st.Refs, req, name))`,
@@ -4799,8 +4807,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-take-six-notification-arns",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `if len(arns) > 5 {`,
-		new:  `if len(arns) > 6 {`,
+		old:  `} else if len(spi.Slice(req.Input["NotificationARNs"])) > 5 {`,
+		new:  `} else if len(spi.Slice(req.Input["NotificationARNs"])) > 6 {`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationNotificationARNsAreTheStacks",
 	},

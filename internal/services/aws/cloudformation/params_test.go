@@ -310,3 +310,17 @@ func TestCloudFormationIAMResourcesNeedTheirCapabilities(t *testing.T) {
 		t.Errorf("ExecuteChangeSet of a change set without CAPABILITY_IAM answered %v, want InsufficientCapabilitiesException", err)
 	}
 }
+
+// An UpdateStack of a stack that does not exist is ValidationError, "Stack
+// [nowhere] does not exist", and makes nothing: it updates a stack. Before,
+// it made the stack (round 8's S7, which the follow-up branch fixed).
+func TestCloudFormationAnUpdateMakesNoStack(t *testing.T) {
+	h := newStacks(t)
+	body, _ := json.Marshal(map[string]any{"Resources": map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}}})
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "nowhere", "TemplateBody": string(body)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Stack [nowhere] does not exist") {
+		t.Errorf("UpdateStack of a stack that does not exist answered %v, want ValidationError", err)
+	}
+	if record, left := h.stored("nowhere"); left {
+		t.Errorf("the refused update made %v", record)
+	}
+}

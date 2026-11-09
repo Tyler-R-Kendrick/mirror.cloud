@@ -178,16 +178,17 @@ type res struct {
 func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string) (*spi.Response, error) {
 	if name == "" {
 		return nil, invalid("StackName required")
+	} else if len(spi.Slice(req.Input["NotificationARNs"])) > 5 { // "Maximum number of 5 items" (API reference, CreateStack and UpdateStack)
+		return nil, invalid("1 validation error detected: Value at 'notificationARNs' failed to satisfy constraint: Member must have length less than or equal to 5")
 	}
 	id = cmp.Or(id, "arn:aws:cloudformation:"+req.Identity.Region+":"+req.Identity.Account+":stack/"+name+"/"+p.deps.Rand.Hex(8))
 	if cur, err := p.load(ctx, req, name); err == nil && update { // the id an update's AWS::StackId answers
 		id = cur.ID
 		previous(req.Input, cur)
+	} else if update { // "Stack [x] does not exist": an update makes no stack
+		return nil, err
 	}
 	arns, tags := append([]any{}, spi.Slice(req.Input["NotificationARNs"])...), append([]any{}, spi.Slice(req.Input["Tags"])...)
-	if len(arns) > 5 { // "Maximum number of 5 items" (API reference, CreateStack and UpdateStack)
-		return nil, invalid("1 validation error detected: Value at 'notificationARNs' failed to satisfy constraint: Member must have length less than or equal to 5")
-	}
 	body, tpl, order, refs, err := p.template(ctx, req, name, id)
 	missing := func(section, prefix string) []string { // what a section declares that refs holds no value of
 		return slices.DeleteFunc(slices.Sorted(maps.Keys(asMap(tpl[section]))), func(k string) bool { _, ok := refs[prefix+k]; return ok })

@@ -104,7 +104,7 @@ func runSelect(raw []byte, expr string, header bool) []byte {
 	}
 	var kept []string
 	for _, rec := range rows {
-		if q.whereCol != "" && recGet(rec, q.whereCol) != q.whereVal {
+		if q.whereCol != "" && spi.Fold(rec, strings.TrimPrefix(q.whereCol, "s.")) != q.whereVal {
 			continue
 		}
 		cols := hdr
@@ -113,7 +113,7 @@ func runSelect(raw []byte, expr string, header bool) []byte {
 		}
 		var cells []string
 		for _, c := range cols {
-			cells = append(cells, recGet(rec, c))
+			cells = append(cells, spi.Fold(rec, strings.TrimPrefix(c, "s.")))
 		}
 		kept = append(kept, strings.Join(cells, ","))
 	}
@@ -227,19 +227,6 @@ func parseSelectJSON(raw []byte) ([]map[string]string, []string) {
 		out = append(out, m)
 	}
 	return out, hdr
-}
-
-func recGet(rec map[string]string, col string) string {
-	col = strings.TrimPrefix(col, "s.")
-	if v, ok := rec[col]; ok {
-		return v
-	}
-	for k, v := range rec {
-		if strings.EqualFold(k, col) {
-			return v
-		}
-	}
-	return ""
 }
 
 func (p *Pack) writeGetObjectResponse(ctx context.Context, req *spi.Request) (*spi.Response, error) {

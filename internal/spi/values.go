@@ -137,3 +137,31 @@ func Entries(ctx context.Context, c Collection, prefix, after string, limit int)
 	kvs, _, _ := c.List(ctx, prefix, after, limit)
 	return kvs
 }
+
+// GetJSON reads the JSON object c holds under key: whether c holds it, and the error of the read or
+// of the decode (none, and not held, when it is not an object).
+func GetJSON(ctx context.Context, c Collection, key string) (map[string]any, bool, error) {
+	raw, ok, err := c.Get(ctx, key)
+	if err != nil || !ok {
+		return nil, ok, err
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		return nil, false, err
+	}
+	return rec, true, nil
+}
+
+// Fold answers m's value under key, or else under a key equal to it under Unicode case folding: a
+// column a query names in any case. With several such keys, which one answers is unspecified.
+func Fold(m map[string]string, key string) string {
+	if v, ok := m[key]; ok {
+		return v
+	}
+	for k, v := range m {
+		if strings.EqualFold(k, key) {
+			return v
+		}
+	}
+	return ""
+}

@@ -79,7 +79,7 @@ func (p *worker) Close() error {
 func deletePipe(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
 	scope := deps.Store.Scope(req.Identity.Account, req.Identity.Region)
 	name := spi.First(req.Input, "Name")
-	rec, ok, err := getRecord(ctx, scope.Collection("pipe"), name)
+	rec, ok, err := spi.GetJSON(ctx, scope.Collection("pipe"), name)
 	if err != nil {
 		return nil, err
 	}
@@ -777,18 +777,6 @@ func (p *worker) notify() {
 	case p.wake <- struct{}{}:
 	default:
 	}
-}
-
-func getRecord(ctx context.Context, collection spi.Collection, key string) (map[string]any, bool, error) {
-	b, ok, err := collection.Get(ctx, key)
-	if err != nil || !ok {
-		return nil, ok, err
-	}
-	var rec map[string]any
-	if err := json.Unmarshal(b, &rec); err != nil {
-		return nil, false, err
-	}
-	return rec, true, nil
 }
 
 func optionalInt(input map[string]any, key string, fallback int) int {

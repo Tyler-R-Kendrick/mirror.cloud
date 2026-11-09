@@ -32,28 +32,38 @@ func TestCloudFormationReadsDependsOnOnlyAsAResourceAttribute(t *testing.T) {
 		return map[string]any{"Type": "AWS::SNS::Topic", "DependsOn": dependsOn}
 	}
 	for name, c := range map[string]struct {
-		tpl  map[string]any
-		want string // what the refusal says; none: taken
+		tpl   map[string]any
+		want  string // what the refusal says; none: taken
+		stack bool   // refused by CreateStack only: ValidateTemplate evaluates no condition
 	}{
 		"properties-key": {map[string]any{"Resources": map[string]any{"R": map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{
-			"EventPattern": map[string]any{"source": []any{"app"}, "detail": map[string]any{"DependsOn": []any{"billing"}}}}}}}, ""},
+			"EventPattern": map[string]any{"source": []any{"app"}, "detail": map[string]any{"DependsOn": []any{"billing"}}}}}}}, "", false},
 		"condition-false": {map[string]any{
 			"Conditions": map[string]any{"Off": map[string]any{"Fn::Equals": []any{"a", "b"}}},
 			"Resources":  map[string]any{"B": map[string]any{"Type": "AWS::SNS::Topic", "Condition": "Off"}, "A": topic("B")}},
-			"Unresolved resource dependencies [B] in the Resources block of the template"},
+			"Unresolved resource dependencies [B] in the Resources block of the template", true},
+		// a resource its own condition leaves out may name another left out (round 20's B1)
+		"own-condition-false": {map[string]any{
+			"Conditions": map[string]any{"Off": map[string]any{"Fn::Equals": []any{"a", "b"}}},
+			"Resources": map[string]any{"B": map[string]any{"Type": "AWS::SNS::Topic", "Condition": "Off"},
+				"A": map[string]any{"Type": "AWS::SNS::Topic", "Condition": "Off", "DependsOn": "B"}, "C": map[string]any{"Type": "AWS::SNS::Topic"}}}, "", false},
+		// "a string or a list of strings": anything else is the template's format error (the wording is a reading)
+		"not-a-string":         {map[string]any{"Resources": map[string]any{"A": topic(5), "B": topic(nil)}}, "Template format error: DependsOn must be a string or a list of strings", false},
+		"not-a-string-in-list": {map[string]any{"Resources": map[string]any{"A": topic([]any{"B", 5}), "B": topic(nil)}}, "Template format error: DependsOn must be a string or a list of strings", false},
 		"parameter": {map[string]any{"Parameters": map[string]any{"Nope": map[string]any{"Type": "String", "Default": "x"}},
-			"Resources": map[string]any{"T": topic("Nope")}}, "Unresolved resource dependencies [Nope] in the Resources block of the template"},
-		"cycle-pair": {map[string]any{"Resources": map[string]any{"A": topic("B"), "B": topic([]any{"A"})}}, "Circular dependency between resources: [A, B]"},
-		"cycle-self": {map[string]any{"Resources": map[string]any{"A": topic("A")}}, "Circular dependency between resources: [A]"},
+			"Resources": map[string]any{"T": topic("Nope")}}, "Unresolved resource dependencies [Nope] in the Resources block of the template", false},
+		"cycle-pair": {map[string]any{"Resources": map[string]any{"A": topic("B"), "B": topic([]any{"A"})}}, "Circular dependency between resources: [A, B]", false},
+		"cycle-self": {map[string]any{"Resources": map[string]any{"A": topic("A")}}, "Circular dependency between resources: [A]", false},
 		"cycle-getatt": {map[string]any{"Resources": map[string]any{"A": topic("B"), "B": map[string]any{"Type": "AWS::SSM::Parameter",
-			"Properties": map[string]any{"Type": "String", "Value": map[string]any{"Fn::GetAtt": []any{"A", "TopicName"}}}}}}, "Circular dependency between resources: [A, B]"},
+			"Properties": map[string]any{"Type": "String", "Value": map[string]any{"Fn::GetAtt": []any{"A", "TopicName"}}}}}}, "Circular dependency between resources: [A, B]", false},
 	} {
 		for _, op := range []string{"ValidateTemplate", "CreateStack"} {
+			want := map[bool]string{false: c.want}[op == "ValidateTemplate" && c.stack]
 			_, err := h.invoke(op, map[string]any{"StackName": "rv19-" + name, "TemplateBody": rv19Body(c.tpl)})
-			if c.want == "" && err != nil || c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)) {
-				t.Errorf("%s %s answered %v; want %q (none: taken)", op, name, err, c.want)
+			if want == "" && err != nil || want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
+				t.Errorf("%s %s answered %v; want %q (none: taken)", op, name, err, want)
 			}
-			if _, made := h.stored("rv19-" + name); c.want != "" && made {
+			if _, made := h.stored("rv19-" + name); want != "" && made {
 				t.Errorf("%s %s made the stack it refused", op, name)
 			}
 		}
@@ -154,7 +164,7 @@ func TestCloudFormationAnUpdateReadsPreviousValuesFromTheRecordItReserves(t *tes
 }
 
 // A failed update deletes only what it made: what the stack held before stays. What it made and cannot
-// delete stays on the stack's record as DELETE_FAILED, as a DeleteStack's own failure leaves it
+// delete stays on the stack's record as DELETE_FAILED, apart from its resources, as a DeleteStack's own failure leaves it
 // (DeleteStack, API reference: "Resources that failed to delete"), so the next DeleteStack deletes it.
 func TestCloudFormationAFailedUpdateKeepsWhatItCannotDelete(t *testing.T) {
 	t.Parallel()
@@ -182,7 +192,7 @@ func TestCloudFormationAFailedUpdateKeepsWhatItCannotDelete(t *testing.T) {
 	if _, err := h.service("aws.sns", "GetTopicAttributes", map[string]any{"TopicArn": held}); err != nil {
 		t.Errorf("topic T the stack held before the failed update is gone: %v", err)
 	}
-	if got := h.statuses("pu")["A"]; got != "DELETE_FAILED" {
+	if got := h.statuses("pu")["A"]; got != "DELETE_FAILED" { // this branch lists it with the stack's resources, for ContinueUpdateRollback
 		t.Errorf("bucket A the failed update could not delete is %q on the stack; want DELETE_FAILED", got)
 	}
 	h.fill("rv19bkt", false)

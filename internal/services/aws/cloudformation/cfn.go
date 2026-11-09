@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"maps"
 	"net/url"
@@ -292,7 +291,7 @@ type res struct {
 // upsert makes the stack named name, or updates it, a create under id when one is given (a CREATE change
 // set's, which it answered), as the execution of the change set under key when one is given: claimed in the
 // transaction that starts it, retired in the one that ends it.
-func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (out *spi.Response, err error) {
+func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (*spi.Response, error) {
 	if err := checkStackName(name, update); err != nil {
 		return nil, err
 	}
@@ -302,6 +301,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	given, name := name, named(name)
 	id = cmp.Or(id, "arn:aws:cloudformation:"+req.Identity.Region+":"+req.Identity.Account+":stack/"+name+"/"+p.deps.Rand.Hex(8))
 	input, loaded := spi.Decode[map[string]any]([]byte(spi.JSONText(req.Input))), stack{}
+	rereads, _ := ctx.Value(staleKey{}).(int)
 	if cur, err := p.load(ctx, req, given); err == nil && update { // the id an update's AWS::StackId answers
 		id, loaded = cur.ID, cur
 		previous(req.Input, cur)
@@ -339,9 +339,11 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			return tx.Put(name, []byte(spi.JSONText(held)))
 		}
 		return tx.Put(name, []byte(spi.JSONText(reserved)))
-	}); errors.Is(err, errStale) {
+	}); errors.Is(err, errStale) && rereads < 3 {
 		req.Input = input
-		return p.upsert(ctx, req, given, update, "", cs)
+		return p.upsert(context.WithValue(ctx, staleKey{}, rereads+1), req, given, update, "", cs)
+	} else if errors.Is(err, errStale) { // still changing: a caller it will not serve now, in the service's words
+		return nil, fault("Throttling", "Rate exceeded")
 	} else if err != nil {
 		return nil, err
 	}
@@ -362,11 +364,6 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", err)
 		return nil, err
 	}
-	defer func() { // a panic between the reservation and the settle ends the reservation, as a failure does
-		if r := recover(); r != nil {
-			out, err = fail(&spi.Fault{Code: "InternalFailure", Message: fmt.Sprint(r), HTTPStatus: 500, Fault: "server"})
-		}
-	}()
 	planned := maps.Clone(st.Refs)
 	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
@@ -445,8 +442,11 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	return &spi.Response{Output: map[string]any{"StackId": id}}, nil
 }
 
-// errStale is an update's reservation finding the record changed since the update read it.
+// errStale is an update's reservation finding the record changed since the update read it, which it reads
+// again, as many times as staleKey counts in its context.
 var errStale = errors.New("stale")
+
+type staleKey struct{}
 
 // changeSet is the change set an execution executes: its key, and the id of the copy it read.
 type changeSet struct{ key, id string }
@@ -927,11 +927,16 @@ func (p *Pack) order(tpl map[string]any, refs map[string]string) ([]string, erro
 	for logical, r := range resources {
 		p.walks++
 		named := map[string]bool{}
-		names(asMap(r)["Properties"], named, refs)                                          // the order prunes what a settled Fn::If does not take
-		for _, d := range append(spi.Slice(asMap(r)["DependsOn"]), asMap(r)["DependsOn"]) { // "Resource B is created before resource A"
-			if d, ok := d.(string); ok && resources[d] != nil && !off(resources[d], refs) {
+		names(asMap(r)["Properties"], named, refs) // the order prunes what a settled Fn::If does not take
+		deps := asMap(r)["DependsOn"]              // "a string or a list of strings" (Template Reference, DependsOn attribute), as parseTemplate checks
+		if d, ok := deps.(string); ok {
+			deps = []any{d}
+		}
+		for _, d := range spi.Slice(deps) { // "Resource B is created before resource A"; a resource the stack makes, nothing else,
+			// unless this one is left out too; a template read alone settles no condition here, as ValidateTemplate evaluates none
+			if d := str(d); resources[d] != nil && (off(r, refs) || !off(resources[d], refs) || refs["AWS::StackName"] == "") {
 				named[d] = true
-			} else if ok { // a DependsOn names a resource the stack makes, nothing else
+			} else {
 				undeclared = append(undeclared, d)
 			}
 		}
@@ -1280,7 +1285,8 @@ func (p *Pack) rollback(ctx context.Context, req *spi.Request, seen, old stack, 
 		} else if props := maps.Collect(maps.All(p.props(tpl, r.Logical, old.Refs, req, old.Name))); changed[r.Logical] {
 			if _, err := p.provision(ctx, req, r.Type, r.Logical, r.Name, props, r.Physical, old.ID); err != nil { // UPDATE_FAILED, for ContinueUpdateRollback
 				i := slices.IndexFunc(old.Resources, func(o res) bool { return o.Logical == r.Logical })
-				old.Resources[i].Status, old.Resources[i].Reason, first = "UPDATE_FAILED", err.Error(), cmp.Or(first, err)
+				old.Resources[i].Status, old.Resources[i].Reason = "UPDATE_FAILED", err.Error() // the stack's reason in the service's words
+				first = cmp.Or(first, error(invalid("The following resource(s) failed to update: ["+r.Logical+"].")))
 			}
 		}
 	}
@@ -1376,7 +1382,13 @@ func (p *Pack) dropTargets(ctx context.Context, req *spi.Request, rule string, k
 
 // call invokes another service the way the edge would: through whatever the registry serves it with, pack
 // or bundle. A pack that runs a worker is closed again, since this construction is per call.
-func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map[string]any) (map[string]any, error) {
+func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map[string]any) (out map[string]any, err error) {
+	defer func() { // a service that panics fails the call, as InternalFailure: the stack's rollback, or an update's
+		// put-back, goes on past it, and the stack's reservation ends as a failure ends it
+		if recover() != nil {
+			out, err = nil, internalFailure()
+		}
+	}()
 	for _, f := range registry.Factories() {
 		if f.ServiceID != id {
 			continue
@@ -1536,6 +1548,12 @@ var generateTypes = map[string]string{"PasswordLength": "Integer", "ExcludeChara
 	"ExcludePunctuation": "Boolean", "IncludeSpace": "Boolean", "RequireEachIncludedType": "Boolean"}
 
 func invalid(message string) *spi.Fault { return fault("ValidationError", message) }
+
+// internalFailure is the service's answer to a failure of its own, which says nothing of what failed (Common
+// Errors, API reference).
+func internalFailure() *spi.Fault {
+	return &spi.Fault{Code: "InternalFailure", Message: "The request processing has failed because of an unknown error, exception or failure.", HTTPStatus: 500, Fault: "server"}
+}
 
 func fault(code, message string) *spi.Fault {
 	return &spi.Fault{Code: code, Message: message, HTTPStatus: 400, Fault: "client"}
@@ -1887,6 +1905,10 @@ func parseTemplate(body string) (map[string]any, error) {
 	for _, r := range asMap(m["Resources"]) {
 		named := map[string]bool{}
 		names(asMap(r)["Properties"], named, nil)
+		dep := asMap(r)["DependsOn"] // "a string or a list of strings" (Template Reference, DependsOn attribute)
+		if l, ok := dep.([]any); dep != nil && reflect.TypeOf(dep).Kind() != reflect.String && (!ok || slices.ContainsFunc(l, func(d any) bool { _, s := d.(string); return !s })) {
+			return nil, invalid("Template format error: DependsOn must be a string or a list of strings") // the wording is a reading
+		}
 		for _, d := range slices.DeleteFunc(dependsOn(r), func(d string) bool { return asMap(m["Resources"])[d] != nil }) {
 			undeclared[d] = true // a DependsOn names a resource, nothing else
 		}

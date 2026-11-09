@@ -383,7 +383,7 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 		"Subbed":    map[string]any{"Value": map[string]any{"Fn::Sub": "${AWS::StackName}-${Bucket}"}},
 	}})
 	created, err := p.Invoke(ctx, &spi.Request{Identity: id, HTTP: &http.Request{Host: "localhost:4566"}, Operation: "CreateStack", Input: map[string]any{
-		"StackName": "all", "TemplateBody": string(template),
+		"StackName": "all", "TemplateBody": string(template), "Capabilities": []any{"CAPABILITY_IAM"},
 	}})
 	if err != nil || created.Output["StackId"] == nil {
 		t.Fatalf("create all resources: %#v %v", created, err)
@@ -495,10 +495,10 @@ func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
 	tpl := map[string]any{"Parameters": map[string]any{
 		"Defaulted": map[string]any{"Default": "fallback"}, "Explicit": map[string]any{"Default": "wrong"}, "Required": map[string]any{},
 	}}
-	params := parameters(map[string]any{
+	params, err := parameters(map[string]any{
 		"Parameters": givenParams("Explicit", "set"), "ignored": "value",
 	}, tpl)
-	if params["Explicit"] != "set" || params["Defaulted"] != "fallback" || len(paramDecls(tpl)) != 3 {
+	if err != nil || params["Explicit"] != "set" || params["Defaulted"] != "fallback" || len(paramDecls(tpl)) != 3 {
 		t.Fatalf("parameters %#v %#v", params, tpl)
 	}
 	if spi.LastSlash("plain") != "plain" || lastColon("plain") != "plain" {

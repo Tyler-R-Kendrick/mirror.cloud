@@ -1,0 +1,56 @@
+name: go
+description: >-
+  The Go toolchain, a build and test-result cache that only main writes, and
+  checkout mtimes that let go test reuse a cached result.
+
+inputs:
+  cache:
+    description: Name of this job's cache. Jobs that run different builds (coverage, race, fuzz) keep their own.
+    required: true
+  save:
+    description: Whether this job may write the cache. Main only, whatever this says; one job per cache name, or the first to finish wins.
+    default: "true"
+  mtimes:
+    description: Restore file mtimes from history (needs fetch-depth 0). Only jobs that use go test's result cache need it.
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    # The module's own version, so CI follows go.mod and not a number kept here.
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+        cache: false
+    # setup-go's cache keys on one go.sum and saves once per key, which freezes
+    # the build cache at whatever the first run held: the dependencies, never
+    # this repository's own packages. This one is keyed by commit, written by
+    # main, and read by every pull request through the prefix match below.
+    - id: dirs
+      shell: bash
+      run: |
+        echo "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+        echo "mod=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+    - if: ${{ github.ref == 'refs/heads/main' && inputs.save == 'true' }}
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ steps.dirs.outputs.build }}
+          ${{ steps.dirs.outputs.mod }}
+        key: go-${{ runner.os }}-${{ inputs.cache }}-${{ hashFiles('go.sum', 'test/sdk/go/go.sum') }}-${{ github.sha }}
+        restore-keys: |
+          go-${{ runner.os }}-${{ inputs.cache }}-${{ hashFiles('go.sum', 'test/sdk/go/go.sum') }}-
+          go-${{ runner.os }}-${{ inputs.cache }}-
+    - if: ${{ github.ref != 'refs/heads/main' || inputs.save != 'true' }}
+      uses: actions/cache/restore@v4
+      with:
+        path: |
+          ${{ steps.dirs.outputs.build }}
+          ${{ steps.dirs.outputs.mod }}
+        key: go-${{ runner.os }}-${{ inputs.cache }}-${{ hashFiles('go.sum', 'test/sdk/go/go.sum') }}-${{ github.sha }}
+        restore-keys: |
+          go-${{ runner.os }}-${{ inputs.cache }}-${{ hashFiles('go.sum', 'test/sdk/go/go.sum') }}-
+          go-${{ runner.os }}-${{ inputs.cache }}-
+    - if: ${{ inputs.mtimes == 'true' }}
+      shell: bash
+      run: python3 -I scripts/restore-mtimes.py

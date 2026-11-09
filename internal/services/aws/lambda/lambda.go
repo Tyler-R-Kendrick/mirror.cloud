@@ -55,7 +55,7 @@ func Start(d spi.Deps) func() error {
 }
 
 func (p *runner) emitDLQ(ctx context.Context, req *spi.Request, rec map[string]any, payload []byte, invokeErr error) {
-	target := spi.Str(asMap(rec["DeadLetterConfig"])["TargetArn"])
+	target := spi.Str(spi.Object(rec["DeadLetterConfig"])["TargetArn"])
 	if target == "" || PublishSNS == nil || !strings.Contains(target, ":sns:") {
 		return
 	}
@@ -66,13 +66,6 @@ func (p *runner) emitDLQ(ctx context.Context, req *spi.Request, rec map[string]a
 		"responsePayload": invokeErr.Error(),
 	})
 	PublishSNS(ctx, p.deps, req.Identity, target, string(envelope))
-}
-
-func asMap(v any) map[string]any {
-	if m, ok := v.(map[string]any); ok {
-		return m
-	}
-	return map[string]any{}
 }
 
 func (p *runner) invokeAsync(ctx context.Context, req *spi.Request) (*spi.Response, error) {
@@ -168,8 +161,7 @@ func (p *runner) consumeSQS(ctx context.Context, payload []byte) {
 		sourceARN = "arn:aws:sqs:" + identity.Region + ":" + identity.Account + ":" + queue
 	}
 	req := &spi.Request{Identity: identity}
-	kvs, _, _ := p.col(req, "lambdaesm").List(ctx, "", "", 0)
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, p.col(req, "lambdaesm"), "", "", 0) {
 		var mapping map[string]any
 		if json.Unmarshal(kv.Value, &mapping) != nil || spi.Str(mapping["EventSourceArn"]) != sourceARN {
 			continue

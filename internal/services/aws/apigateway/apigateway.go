@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -46,9 +47,7 @@ func Execute(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Respons
 	}
 	event := proxyEvent(req, path, meth)
 	in := map[string]any{"FunctionName": fn}
-	for k, v := range event {
-		in[k] = v
-	}
+	maps.Copy(in, event)
 	resp, err := bundled.Handler("aws.lambda", deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
 	if err != nil {
 		return nil, err
@@ -122,8 +121,7 @@ func resourceForPath(ctx context.Context, deps spi.Deps, req *spi.Request, api, 
 	if path == "" || path == "/" {
 		return "root"
 	}
-	kvs, _, _ := col(deps, req, "apigwres:"+api).List(ctx, "", "", 0)
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, col(deps, req, "apigwres:"+api), "", "", 0) {
 		rec := spi.JSONObject(kv.Value)
 		if spi.Str(rec["path"]) == path {
 			return spi.Str(rec["id"])

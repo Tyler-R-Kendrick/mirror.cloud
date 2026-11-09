@@ -574,8 +574,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if _, found := getRecord(ctx, p.col(req, "ver"), versionKey); !found {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		aliases, _, _ := p.col(req, "alias").List(ctx, "", "", 0)
-		for _, alias := range aliases {
+		for _, alias := range spi.Entries(ctx, p.col(req, "alias"), "", "", 0) {
 			record := spi.JSONObject(alias.Value)
 			for _, raw := range spi.Slice(record["routingConfiguration"]) {
 				route, _ := raw.(map[string]any)
@@ -780,8 +779,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		if token := spi.First(rec, "pendingToken"); token != "" {
 			if pendingRecord, found, _ := p.col(req, "pending").Get(ctx, token); found {
-				var pending pending
-				_ = json.Unmarshal(pendingRecord, &pending)
+				pending := spi.Decode[pending](pendingRecord)
 				rec["redriveState"], rec["redriveInput"] = pending.StateName, pending.StateInput
 			}
 			_ = p.col(req, "pending").Delete(ctx, token)
@@ -1027,10 +1025,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 			}
 		}
-		kvs, _, _ := p.col(req, "pending").List(ctx, "", "", 0)
-		for _, kv := range kvs {
-			var pend pending
-			_ = json.Unmarshal(kv.Value, &pend)
+		for _, kv := range spi.Entries(ctx, p.col(req, "pending"), "", "", 0) {
+			pend := spi.Decode[pending](kv.Value)
 			if pend.Started || want != "" && pend.ActivityARN != want {
 				continue
 			}
@@ -1054,8 +1050,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !found {
 			return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
 		}
-		var pend pending
-		_ = json.Unmarshal(body, &pend)
+		pend := spi.Decode[pending](body)
 		if !pend.Started {
 			return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
 		}
@@ -1253,8 +1248,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		copy.Input["_testStateName"] = selection.name
 		copy.Input["_testStateRevealSecrets"] = revealSecrets
 		walkRequest := &copy
-		var testMachine map[string]any
-		_ = json.Unmarshal([]byte(wrapped), &testMachine)
+		testMachine := spi.Decode[map[string]any]([]byte(wrapped))
 		testedState, _ := testMachine["States"].(map[string]any)["TestState"].(map[string]any)
 		if _, configured := inputValue(configuration, "mapItemReaderData", "MapItemReaderData"); configured {
 			_, hasReader := testedState["ItemReader"].(map[string]any)
@@ -1334,10 +1328,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if tagFault != "" {
 			return nil, &spi.Fault{Code: tagFault, HTTPStatus: 400, Fault: "client"}
 		}
-		var tags []any
-		if b, ok, _ := p.col(req, "tag").Get(ctx, arn); ok {
-			_ = json.Unmarshal(b, &tags)
-		}
+		b, _, _ := p.col(req, "tag").Get(ctx, arn)
+		tags := spi.Decode[[]any](b)
 		indexes := map[string]int{}
 		for i, tag := range tags {
 			m, _ := tag.(map[string]any)
@@ -1367,10 +1359,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !validKeys || len(keys) == 0 {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
-		var tags []any
-		if b, ok, _ := p.col(req, "tag").Get(ctx, arn); ok {
-			_ = json.Unmarshal(b, &tags)
-		}
+		b, _, _ := p.col(req, "tag").Get(ctx, arn)
+		tags := spi.Decode[[]any](b)
 		drop := map[string]bool{}
 		for _, key := range keys {
 			value := fmt.Sprint(key)
@@ -1536,8 +1526,7 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 	if state == "" {
 		if pendingToken := spi.First(record, "pendingToken"); pendingToken != "" {
 			if pendingRecord, found, _ := p.col(req, "pending").Get(ctx, pendingToken); found {
-				var pending pending
-				_ = json.Unmarshal(pendingRecord, &pending)
+				pending := spi.Decode[pending](pendingRecord)
 				state, input = pending.StateName, pending.StateInput
 				_ = p.col(req, "pending").Delete(ctx, pendingToken)
 			}
@@ -1652,8 +1641,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	_ = p.col(req, "pending").Delete(ctx, tok)
 	data := parseJSON(output)
 	from, definition := pend.StateName, pend.Definition
-	var sm map[string]any
-	_ = json.Unmarshal([]byte(pend.Definition), &sm)
+	sm := spi.Decode[map[string]any]([]byte(pend.Definition))
 	states, _ := sm["States"].(map[string]any)
 	st, _ := states[pend.StateName].(map[string]any)
 	queryLanguage := spi.First(st, "QueryLanguage")
@@ -3176,9 +3164,7 @@ func setJSONataRetryCount(context map[string]any, attempts map[int]int) {
 
 func mergeJSONataContext(context, extra map[string]any) map[string]any {
 	merged := maps.Clone(context)
-	for key, value := range extra {
-		merged[key] = value
-	}
+	maps.Copy(merged, extra)
 	return merged
 }
 
@@ -5025,9 +5011,7 @@ func (p *Pack) invokeLambda(ctx context.Context, req *spi.Request, resource stri
 	in := map[string]any{"FunctionName": name}
 	switch m := payload.(type) {
 	case map[string]any:
-		for k, v := range m {
-			in[k] = v
-		}
+		maps.Copy(in, m)
 	default:
 		in["input"] = m
 	}
@@ -7786,9 +7770,7 @@ func testDefinition(definition, stateName string, input any, mock, configuration
 	}
 	next := spi.First(state, "Next")
 	copy := map[string]any{}
-	for key, value := range state {
-		copy[key] = value
-	}
+	maps.Copy(copy, state)
 	if result, exists := mock["Result"]; exists {
 		copy["_TestStateMockResult"] = result
 	} else if failure, exists := mock["ErrorOutput"]; exists {

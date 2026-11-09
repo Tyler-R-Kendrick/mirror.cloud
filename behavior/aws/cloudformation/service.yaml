@@ -132,6 +132,10 @@ errors:
     code: ChangeSetNotFound
     http: 404
     fault: client
+  AlreadyExists:
+    code: AlreadyExistsException
+    http: 400
+    fault: client
 
 operations:
   # --- stacks --------------------------------------------------------------
@@ -178,7 +182,8 @@ operations:
       Stacks: >-
         items.map(s, merge({'StackName': s.Name, 'StackId': s.ID,
           'StackStatus': s.Status, 'Outputs': s.Outputs,
-          'NotificationARNs': 'NotificationARNs' in s && s.NotificationARNs != null ? s.NotificationARNs : []},
+          'NotificationARNs': 'NotificationARNs' in s && s.NotificationARNs != null ? s.NotificationARNs : [],
+          'Tags': 'Tags' in s && s.Tags != null ? s.Tags : []},
           'Reason' in s ? {'StackStatusReason': s.Reason} : {}))
 
   ListStacks:
@@ -352,6 +357,7 @@ operations:
       StackId: "'StackId' in cs ? cs.StackId : null"
       Status: cs.Status
       StatusReason: "'StatusReason' in cs ? cs.StatusReason : dyn(null)"
+      ExecutionStatus: "'ExecutionStatus' in cs ? cs.ExecutionStatus : 'AVAILABLE'"
       Parameters: "'Parameters' in cs ? cs.Parameters : []"
       NotificationARNs: "'NotificationARNs' in cs && cs.NotificationARNs != null ? cs.NotificationARNs : []"
       Tags: "'Tags' in cs ? cs.Tags : []"

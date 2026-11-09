@@ -50,7 +50,31 @@ stops before publishing if the tag's commit is not an ancestor of `main`.
 | `mirror_<tag>_linux_arm64.tar.gz` | Linux, arm64 |
 | `mirror_<tag>_darwin_arm64.tar.gz` | macOS, Apple silicon |
 | `mirror_<tag>_windows_amd64.zip` | Windows, x86-64 |
-| `SHA256SUMS` | checksums of the four archives |
+| `mirror_<tag>_<platform>_core.tar.gz` (`.zip` on Windows) | the same, with only the services in [`profiles/core.txt`](../profiles/core.txt) |
+| `SHA256SUMS` | checksums of all eight archives |
+
+## The `core` archives and smaller builds of your own
+
+The full binary embeds the models and behavior of every service (7.5 MB of its
+29.5 MB) and decodes them all at start. A `_core` archive is the same build with
+only the services in `profiles/core.txt`, measured on linux/amd64:
+
+| | full | `core` (12 services) |
+|---|---|---|
+| download (`.tar.gz`) | 14.1 MB | 7.8 MB |
+| binary | 29.5 MB | 20.8 MB |
+| `mirror up` until it listens | 4.6 s | 0.8 s |
+| resident memory after start | 415 MB | 59 MB |
+
+For a different set, build it: `make build-slim SERVICES="aws.s3 aws.sqs"`
+(or `SERVICES=@your-list.txt`), or
+`docker build --build-arg SERVICES="aws.s3 aws.sqs" .`. Both run
+`scripts/slim-overlay.py`, which hides the other services from the build without
+changing a source file. A service left out answers nothing, and a call from a
+kept service into one that was left out (S3 notifying a queue, SNS invoking a
+function) fails at that call and names it. `mirror services` lists what a binary
+serves. A release builds a profile with `MIRROR_PROFILE=core`; the archive is
+reproducible like the others.
 
 Each archive holds exactly two files: `LICENSE` and the binary (`mirror`, or
 `mirror.exe`). `mirror version` prints the tag without its `v` (`0.1.0`), the
@@ -61,6 +85,40 @@ workflow, choose the branch or tag in "Use workflow from") and give a label such
 as `v0.0.0-dryrun`. It builds the selected commit under that label and keeps the
 archives and `SHA256SUMS` as artifacts of the run; no release is made and no tag
 has to exist.
+
+## Container images
+
+A tag also publishes two multi-arch (linux/amd64, linux/arm64) images to the
+GitHub Container Registry, built from the archives above and not from source, so
+each holds the binary `SHA256SUMS` covers:
+
+| Image | Holds |
+|---|---|
+| `ghcr.io/<owner>/mirror:<version>`, `:latest` | every service |
+| `ghcr.io/<owner>/mirror:<version>-core`, `:core` | the services in `profiles/core.txt` |
+
+`<version>` is the tag without its `v`. A tag with a hyphen (`v0.1.0-rc1`) gets
+its version tags and not `latest` or `core`. Both are `FROM scratch` plus the
+binary (about 30 MB and 21 MB on disk, half that to pull) and run
+`mirror up --bind 0.0.0.0:4566`:
+
+```sh
+docker run --rm -p 127.0.0.1:4566:4566 ghcr.io/<owner>/mirror:<version>-core
+```
+
+How to run, configure and consume them is [USING.md](USING.md).
+
+Before pushing, the `images` job checks the archives against `SHA256SUMS`, then
+runs what it is about to push: the image must report the tag as its version, and
+serve the services its profile lists (the full image, more than a hundred). A
+version that is already in the registry is never pushed over, and neither image
+is pushed if either exists. Run by hand, the workflow does all of that except
+the login and the push.
+
+The registry creates a package **private**, and only a repository admin can make
+it public (the package's settings, "Change visibility"); the first release needs
+that once. The images carry `org.opencontainers.image.source`, which links the
+package to this repository.
 
 ## SHA256SUMS
 

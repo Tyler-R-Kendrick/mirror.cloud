@@ -1,0 +1,13 @@
+# syntax=docker/dockerfile:1
+#
+# The image a release publishes. It builds nothing: it copies the binary out of
+# the release archive, so the image holds the very bytes SHA256SUMS covers, for
+# both architectures, with no compiler and no emulation. The release workflow
+# lays the context out as linux_amd64/mirror and linux_arm64/mirror. To build
+# from source instead, use the Dockerfile.
+FROM scratch
+ARG TARGETARCH
+COPY linux_${TARGETARCH}/mirror /mirror
+EXPOSE 4566
+ENTRYPOINT ["/mirror"]
+CMD ["up", "--bind", "0.0.0.0:4566"]

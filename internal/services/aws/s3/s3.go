@@ -18,6 +18,7 @@ import (
 	"hash/crc32"
 	"hash/crc64"
 	"io"
+	"maps"
 	"mime"
 	"net/http"
 	"net/url"
@@ -2512,9 +2513,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	stored := map[int]multipartPart{}
 	if u != nil {
 		bucket, key = u.bucket, u.key
-		for number, part := range u.parts {
-			stored[number] = part
-		}
+		maps.Copy(stored, u.parts)
 	}
 	p.mu.Unlock()
 	if !matchesMultipartUpload(u, req) {
@@ -2971,8 +2970,7 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 	}
 
 	records := map[string][]map[string]any{}
-	kvs, _, _ := p.col(req, "versions").List(ctx, b+"/", "", 0)
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, p.col(req, "versions"), b+"/", "", 0) {
 		meta := spi.JSONObject(kv.Value)
 		key := spi.Str(meta["key"])
 		if key == "" {
@@ -2985,8 +2983,7 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 			records[key] = append(records[key], meta)
 		}
 	}
-	objects, _, _ := p.col(req, "objects").List(ctx, b+"/"+prefix, "", 0)
-	for _, kv := range objects {
+	for _, kv := range spi.Entries(ctx, p.col(req, "objects"), b+"/"+prefix, "", 0) {
 		key := strings.TrimPrefix(kv.Key, b+"/")
 		if _, versioned := records[key]; versioned {
 			continue

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -288,8 +289,7 @@ func (p *Pack) targetsFor(ctx context.Context, identity spi.Identity, key string
 	if !ok {
 		return []any{}
 	}
-	var rec struct{ Targets []any }
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.Decode[struct{ Targets []any }](b)
 	if rec.Targets == nil {
 		return []any{}
 	}
@@ -355,8 +355,7 @@ func eventTime(v any, fallback time.Time) string {
 func (p *Pack) fanout(ctx context.Context, req *spi.Request, event map[string]any, bus string) {
 	raw, _ := json.Marshal(event)
 	_ = p.deps.Bus.Publish(ctx, "events", raw)
-	kvs, _, _ := p.col(req, "targets").List(ctx, "", "", 0)
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, p.col(req, "targets"), "", "", 0) {
 		rule, ok := p.load(ctx, req, "rules", kv.Key)
 		if !ok || !ruleMatches(rule, bus, event) {
 			continue
@@ -911,9 +910,7 @@ func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Ident
 		endpoint = strings.Replace(endpoint, "*", url.PathEscape(spi.Str(value)), 1)
 	}
 	headers := map[string]any{"Content-Type": "application/json; charset=utf-8"}
-	for key, value := range mapValue(parameters["HeaderParameters"]) {
-		headers[key] = value
-	}
+	maps.Copy(headers, mapValue(parameters["HeaderParameters"]))
 	result, err := eventhttp.Invoke(ctx, connection, eventhttp.Call{
 		Endpoint: endpoint, Method: spi.Str(destination["HttpMethod"]), Body: payload,
 		Headers: headers, Query: mapValue(parameters["QueryStringParameters"]),

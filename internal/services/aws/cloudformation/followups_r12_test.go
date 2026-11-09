@@ -55,8 +55,8 @@ func TestCloudFormationAChangeSetIsCheckedAsItsExecutionReadsIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	desc, err := h.invoke("DescribeChangeSet", map[string]any{"StackName": "checked", "ChangeSetName": "prev"})
-	if err != nil || desc["Status"] != "CREATE_COMPLETE" || !reflect.DeepEqual(desc["Parameters"], []any{map[string]any{"ParameterKey": "Key", "UsePreviousValue": "true"}}) {
-		t.Errorf("DescribeChangeSet = %v, %v, want CREATE_COMPLETE with the request's Parameters", desc, err)
+	if err != nil || desc["Status"] != "CREATE_COMPLETE" || !reflect.DeepEqual(desc["Parameters"], givenParams("Key", "kept")) {
+		t.Errorf("DescribeChangeSet = %v, %v, want CREATE_COMPLETE with the value read when it was made", desc, err)
 	}
 	if _, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "checked", "ChangeSetName": "prev"}); err != nil {
 		t.Fatal(err)
@@ -71,5 +71,25 @@ func TestCloudFormationAChangeSetIsCheckedAsItsExecutionReadsIt(t *testing.T) {
 	six := []any{"a", "b", "c", "d", "e", "f"}
 	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "checked", "ChangeSetName": "six", "TemplateBody": string(body), "NotificationARNs": six}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Member must have length less than or equal to 5") {
 		t.Errorf("CreateChangeSet with six NotificationARNs answered %v, want ValidationError", err)
+	}
+}
+
+// A change set the template check FAILs is UNAVAILABLE, the model's
+// ExecutionStatus for one that cannot be executed, and a parameter the
+// template does not declare is refused by CreateChangeSet itself, which
+// reads the template: "Parameters: [X] do not exist in the template".
+func TestCloudFormationAFailedChangeSetIsUnavailable(t *testing.T) {
+	h := newStacks(t)
+	body, _ := json.Marshal(map[string]any{"Parameters": map[string]any{"Key": map[string]any{"Type": "String"}},
+		"Resources": map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}}})
+	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "unavail", "ChangeSetName": "nokey", "ChangeSetType": "CREATE", "TemplateBody": string(body)}); err != nil {
+		t.Fatal(err)
+	}
+	if desc, err := h.invoke("DescribeChangeSet", map[string]any{"StackName": "unavail", "ChangeSetName": "nokey"}); err != nil || desc["Status"] != "FAILED" || desc["ExecutionStatus"] != "UNAVAILABLE" {
+		t.Errorf("DescribeChangeSet of a change set without its parameter's value = %v, %v, want FAILED and UNAVAILABLE", desc, err)
+	}
+	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "unavail", "ChangeSetName": "extra", "ChangeSetType": "CREATE", "TemplateBody": string(body),
+		"Parameters": givenParams("Key", "k", "Nope", "n")}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Parameters: [Nope] do not exist in the template") {
+		t.Errorf("CreateChangeSet with an undeclared parameter answered %v, want ValidationError", err)
 	}
 }

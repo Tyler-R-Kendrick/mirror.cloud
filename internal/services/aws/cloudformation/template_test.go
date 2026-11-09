@@ -86,7 +86,7 @@ func TestCloudFormationBoundsATemplateBySize(t *testing.T) {
 	} {
 		for i, op := range []string{"ValidateTemplate", "GetTemplateSummary", "CreateStack", "UpdateStack", "CreateChangeSet"} {
 			stack := map[string]string{"UpdateStack": "big"}[op] // an update of the stack made above
-			in := map[string]any{"StackName": cmp.Or(stack, fmt.Sprintf("s%d-%d", j, i)), "ChangeSetName": "cs", "TemplateBody": c.body}
+			in := map[string]any{"StackName": cmp.Or(stack, fmt.Sprintf("s%d-%d", j, i)), "ChangeSetName": "cs", "ChangeSetType": "CREATE", "TemplateBody": c.body}
 			_, err := h.invoke(op, in)
 			if c.ok && err != nil {
 				t.Errorf("%s of %s answered %v", op, c.name, err)
@@ -285,7 +285,7 @@ func TestCloudFormationARefAnswersWhatItsTypeDocuments(t *testing.T) {
 		}
 	}
 	body, _ := json.Marshal(map[string]any{"Resources": resources, "Outputs": outputs})
-	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "refs", "TemplateBody": string(body)}); err != nil {
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "refs", "TemplateBody": string(body), "Capabilities": []any{"CAPABILITY_NAMED_IAM"}}); err != nil {
 		t.Fatal(err)
 	}
 	physical := map[string]string{}
@@ -1105,5 +1105,25 @@ func TestCloudFormationNotificationARNsIsAList(t *testing.T) {
 		if v := str(asMap(got["Parameter"])["Value"]); err != nil || v != a+","+b {
 			t.Errorf("%s's Fn::Join of AWS::NotificationARNs is %q (%v), want %s,%s", name, v, err, a, b)
 		}
+	}
+}
+
+// GetTemplateSummary of a stack reads the template the stack was made from as
+// stored: the stack was made from it, and a check added since may refuse it
+// (here an output's ${ Q }, refused since round 10). Before, the stored
+// template went through every check again, and the summary was the check's
+// ValidationError.
+func TestCloudFormationSummarisesAStoredTemplateAsStored(t *testing.T) {
+	h := newStacks(t)
+	h.mustCreate("kept", map[string]map[string]any{"Q": {"Type": "AWS::SNS::Topic"}})
+	record := h.record("kept")
+	record["Template"] = `{"Resources":{"Q":{"Type":"AWS::SNS::Topic"}},"Outputs":{"O":{"Value":{"Fn::Sub":"${ Q }"}}}}`
+	raw, _ := json.Marshal(record)
+	if err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "kept", raw); err != nil {
+		t.Fatal(err)
+	}
+	out, err := h.invoke("GetTemplateSummary", map[string]any{"StackName": "kept"})
+	if err != nil || fmt.Sprint(out["ResourceTypes"]) != "[AWS::SNS::Topic]" {
+		t.Errorf("GetTemplateSummary of the stored template answered %v, %v, want its resource types", out, err)
 	}
 }

@@ -84,9 +84,10 @@ func (h *stacks) invoke(op string, in map[string]any) (map[string]any, error) {
 	return out.Output, nil
 }
 
+// create makes the stack from resources, acknowledging any IAM resource they hold (CAPABILITY_NAMED_IAM).
 func (h *stacks) create(stack string, resources map[string]map[string]any) error {
 	tpl, _ := json.Marshal(map[string]any{"Resources": resources})
-	_, err := h.invoke("CreateStack", map[string]any{"StackName": stack, "TemplateBody": string(tpl)})
+	_, err := h.invoke("CreateStack", map[string]any{"StackName": stack, "TemplateBody": string(tpl), "Capabilities": []any{"CAPABILITY_NAMED_IAM"}})
 	return err
 }
 
@@ -1435,7 +1436,9 @@ func TestCloudFormationFindsAStackByItsId(t *testing.T) {
 	} {
 		op := str(missing["op"])
 		delete(missing, "op")
-		if _, err := h.invoke(op, missing); op != "CreateChangeSet" && (code(err) != "ValidationError" || !strings.Contains(err.Error(), "Stack [missing] does not exist")) {
+		if _, err := h.invoke(op, missing); op == "ExecuteChangeSet" && code(err) != "ChangeSetNotFound" { // CreateChangeSet made none
+			t.Errorf("%s of a missing stack answered %v, want ChangeSetNotFound", op, err)
+		} else if op != "ExecuteChangeSet" && (code(err) != "ValidationError" || !strings.Contains(err.Error(), "Stack [missing] does not exist")) {
 			t.Errorf("%s of a missing stack answered %v, want ValidationError: Stack [missing] does not exist", op, err)
 		}
 	}
@@ -1574,7 +1577,7 @@ func TestCloudFormationAnUpdateTouchesOnlyWhatChanged(t *testing.T) {
 	}
 	update := func(resources map[string]map[string]any) error {
 		tpl, _ := json.Marshal(map[string]any{"Resources": resources})
-		_, err := h.invoke("UpdateStack", map[string]any{"StackName": "k", "TemplateBody": string(tpl)})
+		_, err := h.invoke("UpdateStack", map[string]any{"StackName": "k", "TemplateBody": string(tpl), "Capabilities": []any{"CAPABILITY_NAMED_IAM"}})
 		return err
 	}
 	before := ids()
@@ -1628,7 +1631,7 @@ func TestCloudFormationAnUpdateTouchesOnlyWhatChanged(t *testing.T) {
 	h.mustCreate("fixed", map[string]map[string]any{"R": {"Type": "AWS::IAM::Role", "Properties": map[string]any{"RoleName": "fixed-role", "AssumeRolePolicyDocument": role["AssumeRolePolicyDocument"]}}})
 	tpl, _ = json.Marshal(map[string]any{"Resources": map[string]any{"R": map[string]any{"Type": "AWS::IAM::Role", "Properties": map[string]any{"RoleName": "fixed-role", "Path": "/moved/", "AssumeRolePolicyDocument": role["AssumeRolePolicyDocument"]}}}})
 	const want = "CloudFormation cannot update a stack when a custom-named resource requires replacing. Rename fixed-role and update the stack again."
-	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "fixed", "TemplateBody": string(tpl)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), want) {
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "fixed", "TemplateBody": string(tpl), "Capabilities": []any{"CAPABILITY_NAMED_IAM"}}); code(err) != "ValidationError" || !strings.Contains(err.Error(), want) {
 		t.Errorf("replacing the custom-named role answered %v, want ValidationError: %s", err, want)
 	}
 	if _, err := h.service("aws.iam", "GetRole", map[string]any{"RoleName": "fixed-role"}); err != nil {

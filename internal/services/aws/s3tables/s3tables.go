@@ -75,8 +75,7 @@ func (t *Tables) ApplyRows(ctx context.Context, identity spi.Identity, bucket, n
 		if err != nil {
 			return err
 		}
-		var doc rowsDoc
-		_ = json.Unmarshal(stored, &doc)
+		doc := spi.Decode[rowsDoc](stored)
 		rows := doc.Rows
 		for _, mutation := range mutations {
 			for column := range mutation.Values {
@@ -132,8 +131,7 @@ func (t *Tables) TableRows(ctx context.Context, identity spi.Identity, bucket, n
 	description := spi.JSONObject(descriptionBody)
 	columns := stringsFrom(description["columns"])
 	rowsBody, _, _ := t.col(identity, "s3trows").Get(ctx, key)
-	var doc rowsDoc
-	_ = json.Unmarshal(rowsBody, &doc)
+	doc := spi.Decode[rowsDoc](rowsBody)
 	rows := make([]map[string]any, 0, len(doc.Rows))
 	for _, storedRow := range doc.Rows {
 		row := map[string]any{}

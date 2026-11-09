@@ -122,3 +122,18 @@ func PutJSON(ctx context.Context, c Collection, key string, v any) error {
 	}
 	return c.Put(ctx, key, raw)
 }
+
+// Decode answers raw's JSON as a T: the read every stored record's reader makes, its zero value when raw
+// holds no T, as each reader that dropped the error left it.
+func Decode[T any](raw []byte) T {
+	var v T
+	_ = json.Unmarshal(raw, &v)
+	return v
+}
+
+// Entries answers c's List: its entries with the given key prefix, in key order, after after, at most limit
+// (none for limit <= 0); none when the list fails, as each caller that dropped the error read it.
+func Entries(ctx context.Context, c Collection, prefix, after string, limit int) []KV {
+	kvs, _, _ := c.List(ctx, prefix, after, limit)
+	return kvs
+}

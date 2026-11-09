@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 
@@ -456,12 +457,10 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		_ = col.Delete(ctx, app)
 		endpoints := p.col(req, "platend")
 		subs := p.col(req, "subs")
-		kvs, _, _ := endpoints.List(ctx, "", "", 0)
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, endpoints, "", "", 0) {
 			var endpoint map[string]any
 			if json.Unmarshal(kv.Value, &endpoint) == nil && str(endpoint["PlatformApplicationArn"]) == app {
-				subKVs, _, _ := subs.List(ctx, "", "", 0)
-				for _, subKV := range subKVs {
+				for _, subKV := range spi.Entries(ctx, subs, "", "", 0) {
 					var sub map[string]any
 					if json.Unmarshal(subKV.Value, &sub) == nil && str(sub["Endpoint"]) == str(endpoint["EndpointArn"]) {
 						_ = subs.Delete(ctx, subKV.Key)
@@ -484,13 +483,9 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		_ = json.Unmarshal(b, &rec)
 		updated := map[string]any{"Enabled": "true"}
 		if existing, ok := rec["Attributes"].(map[string]any); ok {
-			for key, value := range existing {
-				updated[key] = value
-			}
+			maps.Copy(updated, existing)
 		}
-		for key, value := range flattenAttrEntries(req.Input, "Attributes") {
-			updated[key] = value
-		}
+		maps.Copy(updated, flattenAttrEntries(req.Input, "Attributes"))
 		rec["Attributes"] = updated
 		nb, _ := json.Marshal(rec)
 		_ = col.Put(ctx, arn, nb)
@@ -565,8 +560,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		if customUserData != nil {
 			requestedAttrs["CustomUserData"] = customUserData
 		}
-		kvs, _, _ := col.List(ctx, "", "", 0)
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, col, "", "", 0) {
 			var existing map[string]any
 			if json.Unmarshal(kv.Value, &existing) == nil && str(existing["PlatformApplicationArn"]) == app && str(existing["Token"]) == tok {
 				for key, value := range requestedAttrs {

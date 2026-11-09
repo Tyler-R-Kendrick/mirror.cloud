@@ -14,6 +14,10 @@ import (
 var (
 	once sync.Once
 	got  *model.Bundle
+
+	// slim is set by the file scripts/slim-overlay.py adds to a build of some of
+	// the services, and by nothing else; see derive.
+	slim bool
 )
 
 // Bundle returns the model the runtime serves.
@@ -46,6 +50,14 @@ func derive() *model.Bundle {
 		served[id] = id
 	}
 	for wire, spec := range servedAs {
+		// A build made of some of the services (scripts/slim-overlay.py) has no
+		// model for a wire name whose service it left out. The full build keeps
+		// the panic below, which is what catches a model gone missing.
+		if slim {
+			if _, err := generated.Model(spec); err != nil {
+				continue
+			}
+		}
 		served[wire] = spec
 		if !servedAlsoAsSpec[spec] {
 			delete(served, spec)

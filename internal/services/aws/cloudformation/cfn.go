@@ -40,9 +40,9 @@ func init() {
 
 // Pack is the template engine behind the native operations.
 type Pack struct {
-	deps     spi.Deps
-	walks    int            // resources whose properties order walked, which a test counts
-	mappings map[string]any // the template's Mappings, which findInMap reads, set once an operation's template is parsed
+	deps  spi.Deps
+	walks int            // resources whose properties order walked, which a test counts
+	tpl   map[string]any // the template an operation reads: its Mappings, which findInMap reads, and its parameters' types
 }
 
 // New constructs the template engine.
@@ -68,7 +68,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"Description": str(tpl["Description"]), "Parameters": paramDecls(tpl)}}, nil
 	case "CreateStack", "UpdateStack":
-		return p.upsert(ctx, req, name, req.Operation == "UpdateStack", "")
+		out, err := p.upsert(ctx, req, name, req.Operation == "UpdateStack", "")
+		for _, kv := range spi.Entries(ctx, p.col(req, "cfn-cs"), named(name)+":", "", 0) { // a change set is "OBSOLETE ... because the stack was already updated" (DescribeChangeSet)
+			if rec := spi.Decode[map[string]any](kv.Value); err == nil && rec["ExecutionStatus"] == "AVAILABLE" {
+				rec["ExecutionStatus"] = "OBSOLETE"
+				_ = spi.PutJSON(ctx, p.col(req, "cfn-cs"), kv.Key, rec)
+			}
+		}
+		return out, err
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
 	case "ContinueUpdateRollback":
@@ -115,60 +122,72 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		kvs, _, _ := p.col(req, "cfn").List(ctx, "", "", 0)
 		var ex []any
 		for _, kv := range kvs {
-			var st stack
-			_ = json.Unmarshal(kv.Value, &st)
+			st := spi.Decode[stack](kv.Value)
 			for _, o := range st.Outputs {
 				ex = append(ex, map[string]any{"Name": asMap(o)["OutputKey"], "Value": asMap(o)["OutputValue"], "ExportingStackId": st.ID})
 			}
 		}
 		return &spi.Response{Output: map[string]any{"Exports": ex}}, nil
 	case "CreateChangeSet": // the template is read now: "if your attempt to create a change set failed, CloudFormation shows the error message" (StatusReason)
-		csn, body := str(req.Input["ChangeSetName"]), str(req.Input["TemplateBody"])
-		st, _ := p.load(ctx, req, name)
+		csn, body, create := str(req.Input["ChangeSetName"]), str(req.Input["TemplateBody"]), req.Input["ChangeSetType"] == "CREATE"
+		st, loadErr := p.load(ctx, req, name)                 // "You can't use the UPDATE type to create a change set for a new stack or the CREATE type to create a change set for an existing stack"
+		review := create && st.Status == "REVIEW_IN_PROGRESS" // a CREATE change set's stack, which takes more of them
 		if body == "" {
 			return nil, invalid("TemplateBody required")
-		} else if !updatable(st) { // as UpdateStack refuses one
+		} else if loadErr != nil && !create {
+			return nil, loadErr
+		} else if st.ID != "" && create && !review { // the wording is a reading
+			return nil, fault("AlreadyExistsException", "Stack ["+name+"] already exists and cannot be created again with the changeSet ["+csn+"].")
+		} else if !updatable(st) && !review { // as UpdateStack refuses one
 			return nil, invalid("Stack:" + st.ID + " is in " + st.Status + " state and can not be updated.")
 		} else if _, err := p.templateBody(ctx, req); err != nil { // the member's size, as every operation's
 			return nil, err
+		} else if _, err := parameters(req.Input, stored(body)); err != nil { // the request's own errors are refused now
+			return nil, err
+		} else if err := capable(stored(body), req.Input, name); err != nil {
+			return nil, err
 		}
 		rec := map[string]any{"ChangeSetName": csn, "ChangeSetId": "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":changeSet/" + csn + "/" + p.deps.Rand.Hex(8),
-			"StackName": name, "ChangeSetType": cmp.Or(str(req.Input["ChangeSetType"]), "UPDATE"), "Status": "CREATE_COMPLETE", "TemplateBody": body,
+			"StackName": name, "ChangeSetType": cmp.Or(str(req.Input["ChangeSetType"]), "UPDATE"), "Status": "CREATE_COMPLETE", "ExecutionStatus": "AVAILABLE", "TemplateBody": body,
 			"StackId": cmp.Or(st.ID, "arn:aws:cloudformation:"+req.Identity.Region+":"+req.Identity.Account+":stack/"+named(name)+"/"+p.deps.Rand.Hex(8))} // a CREATE change set's stack is made under the id minted here
 		for _, k := range changeSetMembers {
 			if v, given := req.Input[k]; given {
 				rec[k] = v
 			}
 		}
-		if st.ID != "" { // read as its execution reads it, UsePreviousValue taken
+		if st.ID != "" { // read now, UsePreviousValue taken: "the input parameters and their values used to create the change set"
 			previous(req.Input, st)
 		}
 		if _, _, _, _, err := p.template(ctx, req, named(name), str(rec["StackId"])); err != nil { // every check its execution makes
-			rec["Status"], rec["StatusReason"] = "FAILED", err.Error()
+			rec["Status"], rec["StatusReason"], rec["ExecutionStatus"] = "FAILED", err.Error(), "UNAVAILABLE"
+		}
+		if st.ID == "" && create { // "CloudFormation creates a stack with a unique stack ID, but no template or resources ... in the REVIEW_IN_PROGRESS state"
+			_ = spi.PutJSON(ctx, p.col(req, "cfn"), named(name), stack{Name: named(name), ID: str(rec["StackId"]), Status: "REVIEW_IN_PROGRESS", Resources: []res{}, Outputs: []any{}, NotificationARNs: []any{}, Tags: []any{}})
 		}
 		if err := spi.PutJSON(ctx, p.col(req, "cfn-cs"), named(name)+":"+csn, rec); err != nil {
 			return nil, err
 		}
 		return &spi.Response{Output: map[string]any{"Id": rec["ChangeSetId"], "StackId": rec["StackId"]}}, nil
 	case "ExecuteChangeSet":
-		csn := str(req.Input["ChangeSetName"])
-		b, ok, _ := p.col(req, "cfn-cs").Get(ctx, named(name)+":"+csn)
-		if !ok {
-			return nil, &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
-		}
-		var rec map[string]any
-		if _ = json.Unmarshal(b, &rec); rec["Status"] == "FAILED" { // "The specified change set can't be used to update the stack"
-			return nil, fault("InvalidChangeSetStatus", "ChangeSet ["+str(rec["ChangeSetId"])+"] cannot be executed in its current status of [FAILED]")
+		key, sets := named(name)+":"+str(req.Input["ChangeSetName"]), p.col(req, "cfn-cs")
+		rec, err := p.claimChangeSet(ctx, sets, key) // what CreateChangeSet took that CreateStack and UpdateStack take
+		if err != nil {
+			return nil, err
 		}
 		for _, k := range append([]string{"TemplateBody"}, changeSetMembers...) {
 			if rec[k] != nil {
 				req.Input[k] = rec[k]
 			}
 		}
-		if _, err := p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE", str(rec["StackId"])); err != nil { // an UPDATE change set's stack must exist
-			return nil, err
+		_, err = p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE", str(rec["StackId"])) // an UPDATE change set's stack must exist
+		if rec["ExecutionStatus"] = "EXECUTE_FAILED"; err == nil {                               // "CloudFormation deletes all other change sets associated with the stack"
+			for _, kv := range spi.Entries(ctx, sets, named(name)+":", "", 0) {
+				_ = sets.Delete(ctx, kv.Key)
+			}
+			rec["ExecutionStatus"] = "EXECUTE_COMPLETE"
 		}
-		return &spi.Response{Output: map[string]any{}}, nil
+		_ = spi.PutJSON(ctx, sets, key, rec)
+		return &spi.Response{Output: map[string]any{}}, err
 	default:
 		return nil, spi.NotImplemented("aws.cloudformation", req.Operation, "emulate")
 	}
@@ -178,6 +197,23 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 // a change set keeps them, DescribeChangeSet answers them, and ExecuteChangeSet makes or updates the stack with them.
 var changeSetMembers = []string{"Parameters", "NotificationARNs", "Tags", "Capabilities"}
 
+// claimChangeSet answers the change set stored under key, which it marks EXECUTE_IN_PROGRESS in the
+// transaction that finds it AVAILABLE: a change set executes once, and one executed, failed or being
+// executed is InvalidChangeSetStatus, "The specified change set can't be used to update the stack".
+func (p *Pack) claimChangeSet(ctx context.Context, sets spi.Collection, key string) (rec map[string]any, err error) {
+	err = sets.Txn(ctx, func(tx spi.Tx) error {
+		raw, ok, _ := tx.Get(key)
+		if rec = spi.Decode[map[string]any](raw); !ok {
+			return &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
+		} else if status := str(rec["ExecutionStatus"]); status != "AVAILABLE" { // the wording is a reading
+			return fault("InvalidChangeSetStatus", "ChangeSet ["+str(rec["ChangeSetId"])+"] cannot be executed in its current execution status of ["+status+"]")
+		}
+		rec["ExecutionStatus"] = "EXECUTE_IN_PROGRESS"
+		return tx.Put(key, []byte(spi.JSONText(rec)))
+	})
+	return rec, err
+}
+
 type stack struct {
 	Name, ID, Status, Template string
 	Reason                     string `json:",omitempty"` // StackStatusReason
@@ -185,7 +221,7 @@ type stack struct {
 	Events                     []res `json:",omitempty"` // what left the stack and how: DELETE_SKIPPED
 	Outputs                    []any
 	Refs                       map[string]string
-	NotificationARNs           []any
+	NotificationARNs, Tags     []any
 	Protect                    bool
 }
 
@@ -208,18 +244,18 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		id = cur.ID
 		previous(req.Input, cur)
 	}
-	arns := append([]any{}, spi.Slice(req.Input["NotificationARNs"])...)
+	arns, tags := append([]any{}, spi.Slice(req.Input["NotificationARNs"])...), append([]any{}, spi.Slice(req.Input["Tags"])...)
 	body, tpl, order, refs, err := p.template(ctx, req, name, id)
 	if err != nil {
 		return nil, err
 	}
 	resources, outs := asMap(tpl["Resources"]), asMap(tpl["Outputs"])
 	var old stack // what an update finds; a create reserves the name, CREATE_IN_PROGRESS, in the same transaction
-	reserved := stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns}
+	reserved := stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags}
 	if err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
 		raw, found, _ := tx.Get(name)
-		if _ = json.Unmarshal(raw, &old); old.Status == "DELETE_COMPLETE" { // a deleted stack's name is free
-			found, old = false, stack{}
+		if _ = json.Unmarshal(raw, &old); old.Status == "DELETE_COMPLETE" || found && !update && old.Status == "REVIEW_IN_PROGRESS" && old.ID == id {
+			found, old = false, stack{} // a deleted stack's name is free; a CREATE change set's stack is made by its execution
 		}
 		if found && !update {
 			return fault("AlreadyExistsException", "Stack ["+name+"] already exists")
@@ -230,8 +266,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		} else if id = cmp.Or(old.ID, id); found { // an update reserves nothing: it writes only over what it read
 			return nil
 		}
-		raw, _ = json.Marshal(reserved)
-		return tx.Put(name, raw)
+		return tx.Put(name, []byte(spi.JSONText(reserved)))
 	}); err != nil {
 		return nil, err
 	}
@@ -241,7 +276,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		old.Refs = conditioned(stored(old.Template), old.Refs, req, name, old.ID)
 	}
 	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: refs,
-		Resources: []res{}, Outputs: []any{}, NotificationARNs: arns} // never null: every read of a stack lists them
+		Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags} // never null: every read of a stack lists them
 	changed := map[string]bool{} // what the update changed in place, which a rollback changes back
 	fail := func(err error) (*spi.Response, error) {
 		if st.Reason, old.Reason = err.Error(), err.Error(); !update || old.ID == "" { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
@@ -268,7 +303,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		typ, props := str(rm["Type"]), maps.Collect(maps.All(asMap(p.resolve(rm["Properties"], st.Refs, req, name))))
 		prev, how, n, err := p.next(ctx, req, st, old, logical, typ, props) // again: a name may come from a resource made before it
 		phys := map[string]string{"": prev.Physical}[how]                   // one an update keeps as it is
-		if how != "" && err == nil {
+		if err = cmp.Or(err, selected(props)); how != "" && err == nil {
 			phys, err = p.provision(ctx, req, typ, logical, n, props, map[string]string{"update": prev.Physical}[how], id)
 		}
 		changed[logical] = how == "update"
@@ -283,6 +318,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}
 	for _, k := range slices.Sorted(maps.Keys(outs)) {
 		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)})
+	}
+	if err := selected(st.Outputs); err != nil {
+		return fail(err)
 	}
 	if cur, wrote, err := p.settle(ctx, req, map[bool]stack{false: reserved, true: read}[update], st); err == nil && !wrote && !update {
 		// A DeleteStack begun during the create ends here: what it made goes, and then the stack.
@@ -332,12 +370,16 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 	tpl, err := parseTemplate(body)
 	var order []string
 	var refs map[string]string
+	var known map[string]string
 	if err == nil {
-		p.mappings, refs = asMap(tpl["Mappings"]), conditioned(tpl, parameters(req.Input, tpl), req, stack, id)
+		known, err = parameters(req.Input, tpl)
+	}
+	if err == nil {
+		p.tpl, refs = tpl, conditioned(tpl, known, req, stack, id)
 		order, err = p.order(tpl, refs)
 	}
 	if err == nil {
-		err = p.sound(tpl, refs, req, stack)
+		err = cmp.Or(p.sound(tpl, refs, req, stack), capable(tpl, req.Input, stack))
 	}
 	if err == nil && stack != "" { // a stack, or a change set to one, is made from it
 		order, err = made(tpl, order, refs)
@@ -1289,9 +1331,14 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 		if r, ok := t["Ref"]; ok {
 			v, _ := p.ref(str(r), refs, req, stack)
 			if str(r) == "AWS::NotificationARNs" {
-				var arns []any
-				_ = json.Unmarshal([]byte(v), &arns)
+				arns := spi.Decode[[]any]([]byte(v))
 				return arns
+			} else if typ := str(asMap(asMap(p.tpl["Parameters"])[str(r)])["Type"]); typ == "CommaDelimitedList" || strings.HasPrefix(typ, "List<") {
+				items := []any{} // "a Ref would result in ["test","dev","prod"]": "each member string is space trimmed"
+				for _, item := range strings.Split(v, ",") {
+					items = append(items, strings.TrimSpace(item))
+				}
+				return items
 			}
 			return v
 		}
@@ -1309,8 +1356,10 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 			i, isInt := coerce(p.resolve(args[0], refs, req, stack), "Integer")
 			if list := spi.Slice(p.resolve(args[1], refs, req, stack)); isInt && i.(int) >= 0 && i.(int) < len(list) {
 				return list[i.(int)]
+			} else if slices.ContainsFunc(referred(t, refs), func(n string) bool { _, known := refs[n]; return !known }) {
+				return "" // a list of what is not made yet, checked once it is
 			}
-			return unselected // "doesn't check ... if the index is out of bounds": the stack's error (sound)
+			return unselected // "doesn't check ... if the index is out of bounds": the stack's error (selected)
 		}
 		if args, ok := t["Fn::Split"]; ok { // [delimiter, source string]: "A list of string values"
 			args, parts := append(spi.Slice(args), nil, nil), []any{}
@@ -1324,7 +1373,7 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 			return []any{r + "a", r + "b", r + "c"}
 		}
 		if f, ok := t["Fn::FindInMap"]; ok {
-			if v, _, found := findInMap(f, refs, p.mappings); found {
+			if v, _, found := findInMap(f, refs, asMap(p.tpl["Mappings"])); found {
 				return v
 			}
 		}
@@ -1352,11 +1401,11 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 	}
 }
 
-// props are the resolved Properties of tpl's resource logical, a stack's stored template, whose
-// Fn::FindInMaps read tpl's own Mappings, not the template the operation was given.
+// props are the resolved Properties of tpl's resource logical, a stack's stored template, which its
+// Fn::FindInMaps and Refs read (its Mappings and its parameters' types), not the template the operation was given.
 func (p *Pack) props(tpl map[string]any, logical string, refs map[string]string, req *spi.Request, stack string) map[string]any {
-	defer func(given map[string]any) { p.mappings = given }(p.mappings)
-	p.mappings = asMap(tpl["Mappings"])
+	defer func(given map[string]any) { p.tpl = given }(p.tpl)
+	p.tpl = tpl
 	return asMap(p.resolve(asMap(asMap(tpl["Resources"])[logical])["Properties"], refs, req, stack))
 }
 
@@ -1396,9 +1445,9 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 	for _, o := range asMap(tpl["Outputs"]) {
 		values = append(values, p.resolve(asMap(o)["Value"], refs, req, stack))
 	}
-	if text := spi.JSONText(values); strings.Contains(text, unselected) && stack != "" { // the wording is a reading
-		return invalid("Template error: Fn::Select cannot select nonexistent value")
-	} else if strings.Contains(text, noValue) {
+	if err := selected(values); err != nil && stack != "" {
+		return err
+	} else if strings.Contains(spi.JSONText(values), noValue) {
 		return invalid("Template error: AWS::NoValue removes a property or a list element; it cannot be part of a value")
 	}
 	var err error // without a DefaultValue, "Fn::FindInMap raises an error when a key is not found"
@@ -1409,12 +1458,12 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 			_, ok := coerce(a, "String")
 			literal += map[bool]int{true: 1}[ok]
 		}
-		_, key, found := findInMap(f, refs, p.mappings)
+		_, key, found := findInMap(f, refs, asMap(tpl["Mappings"]))
 		switch _, ok := coerce(args[0], "String"); {
 		case !mapped || err != nil || found:
 		case len(args) != 4: // "Fn::FindInMap: [ MapName, TopLevelKey, SecondLevelKey ]" (Template Reference); the wordings are readings
 			err = invalid("Template error: every Fn::FindInMap object requires three parameters, the map name, map key and the attribute for return value")
-		case ok && p.mappings[str(args[0])] == nil:
+		case ok && asMap(tpl["Mappings"])[str(args[0])] == nil:
 			err = invalid("Template error: Mapping named '" + str(args[0]) + "' is not present in the 'Mappings' section of template.")
 		case stack == "" && literal < 3: // a template read alone checks only what literals name
 		case key != "":
@@ -1424,6 +1473,15 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 		}
 	})
 	return err
+}
+
+// selected is the error for a value holding a Fn::Select of no element of its list (the wording is a reading):
+// sound finds one in a list it knows whole, and a stack's resource or output, resolved, in any list.
+func selected(v any) error {
+	if strings.Contains(spi.JSONText(v), unselected) {
+		return invalid("Template error: Fn::Select cannot select nonexistent value")
+	}
+	return nil
 }
 
 // findInMap is the value a Fn::FindInMap names, "the value corresponding to keys in a two-level map that's
@@ -1519,17 +1577,22 @@ func parseTemplate(body string) (map[string]any, error) {
 			missing = append(missing, c)
 		}
 	})
-	spaced := false
+	var refused *spi.Fault // the first of these refusals, each a reading (the Template Reference gives no wording)
 	each([]any{m["Resources"], m["Outputs"]}, func(x map[string]any) {
 		if c := str(append(spi.Slice(x["Fn::If"]), nil)[0]); x["Fn::If"] != nil && conds[c] == nil {
 			missing = append(missing, c)
 		}
 		for _, v := range subVariable.FindAllStringSubmatch(str(append(spi.Slice(x["Fn::Sub"]), x["Fn::Sub"])[0]), -1) {
-			spaced = spaced || !strings.HasPrefix(v[1], "!") && !subName.MatchString(v[1])
+			if !strings.HasPrefix(v[1], "!") && !subName.MatchString(v[1]) { // the Template Reference says nothing of a space in ${}
+				refused = cmp.Or(refused, invalid("Template error: variable names in Fn::Sub syntax must contain only alphanumeric characters, underscores, periods, and colons"))
+			}
+		}
+		if x["Fn::Split"] != nil && str(append(spi.Slice(x["Fn::Split"]), nil)[0]) == "" { // "For the Fn::Split delimiter, you can't use any functions. You must specify a string value"
+			refused = cmp.Or(refused, invalid("Template error: Fn::Split's delimiter must be a string of one or more characters"))
 		}
 	})
-	if spaced { // the service's wording: the Template Reference says nothing of a space in ${} (a reading)
-		return nil, invalid("Template error: variable names in Fn::Sub syntax must contain only alphanumeric characters, underscores, periods, and colons")
+	if refused != nil {
+		return nil, refused
 	}
 	for _, v := range slices.Concat(slices.Collect(maps.Values(asMap(m["Resources"]))), slices.Collect(maps.Values(asMap(m["Outputs"])))) {
 		if c, ok := asMap(v)["Condition"].(string); ok && conds[c] == nil { // a resource's or output's Condition attribute
@@ -1648,12 +1711,19 @@ func each(v any, fn func(map[string]any)) {
 }
 
 // parameters are the request's parameter values, the Parameters list the query protocol's decoder builds
-// (awsquery's unflatten), and each Default of a parameter it does not give.
-func parameters(in, tpl map[string]any) map[string]string {
-	out := map[string]string{}
+// (awsquery's unflatten), and each Default of a parameter it does not give; or the error for a parameter
+// the template does not declare, or one given both a value and UsePreviousValue: "If you specify true, do
+// not specify a parameter value" (API reference, Parameter). The wordings are readings.
+func parameters(in, tpl map[string]any) (map[string]string, error) {
+	out, undeclared := map[string]string{}, []string{}
 	for _, p := range spi.Slice(in["Parameters"]) {
-		if v, valued := asMap(p)["ParameterValue"]; valued {
-			out[str(asMap(p)["ParameterKey"])] = str(v)
+		k, v, valued := str(asMap(p)["ParameterKey"]), asMap(p)["ParameterValue"], asMap(p)["ParameterValue"] != nil
+		if valued && isTrue(asMap(p)["UsePreviousValue"]) {
+			return nil, invalid("Invalid input for parameter key " + k + ". Cannot specify usePreviousValue as true and non empty value for a parameter")
+		} else if asMap(tpl["Parameters"])[k] == nil {
+			undeclared = append(undeclared, k)
+		} else if valued {
+			out[k] = str(v)
 		}
 	}
 	for k, v := range asMap(tpl["Parameters"]) {
@@ -1661,7 +1731,10 @@ func parameters(in, tpl map[string]any) map[string]string {
 			out[k] = spi.JSONText(asMap(v)["Default"]) // a parameter "becomes a string": Default 16 is "16"
 		}
 	}
-	return out
+	if len(undeclared) > 0 {
+		return nil, invalid("Parameters: [" + strings.Join(undeclared, ", ") + "] do not exist in the template")
+	}
+	return out, nil
 }
 
 // previous puts in an update's request what it takes from the stack cur: its NotificationARNs when the
@@ -1669,18 +1742,37 @@ func parameters(in, tpl map[string]any) map[string]string {
 // API reference), and the value of each parameter whose UsePreviousValue is true, "the existing parameter
 // value that the stack is using for a given parameter key" (API reference, Parameter).
 func previous(in map[string]any, cur stack) {
-	if _, listed := in["NotificationARNs"]; !listed {
-		in["NotificationARNs"] = cur.NotificationARNs
-	}
-	params := []any{} // new maps: a change set keeps the request's own
-	for _, p := range spi.Slice(in["Parameters"]) {
-		m := maps.Clone(asMap(p))
-		if v, ok := cur.Refs[str(m["ParameterKey"])]; ok && isTrue(m["UsePreviousValue"]) {
-			m["ParameterValue"] = v
+	for k, kept := range map[string][]any{"NotificationARNs": cur.NotificationARNs, "Tags": cur.Tags} {
+		if _, listed := in[k]; !listed { // "If you don't specify this parameter, CloudFormation doesn't modify the stack's tags"
+			in[k] = kept
 		}
-		params = append(params, m)
 	}
-	in["Parameters"] = params
+	for _, p := range spi.Slice(in["Parameters"]) {
+		_, valued := asMap(p)["ParameterValue"] // one given both is refused (undeclared)
+		if v, ok := cur.Refs[str(asMap(p)["ParameterKey"])]; ok && !valued && isTrue(asMap(p)["UsePreviousValue"]) {
+			asMap(p)["ParameterValue"] = v
+			delete(asMap(p), "UsePreviousValue") // taken
+		}
+	}
+}
+
+// capable is the error for a template of IAM resources a stack's request does not acknowledge: "If you have IAM
+// resources, you can specify either capability. If you have IAM resources with custom names, you must specify
+// CAPABILITY_NAMED_IAM. If you don't specify either of these capabilities, CloudFormation returns an
+// InsufficientCapabilities error" (API reference, CreateStack). The wording is a reading.
+func capable(tpl, in map[string]any, stack string) error {
+	need, given := "", spi.Slice(in["Capabilities"])
+	for _, r := range asMap(tpl["Resources"]) {
+		if typ := str(asMap(r)["Type"]); strings.HasPrefix(typ, "AWS::IAM::") && asMap(asMap(r)["Properties"])[kinds[typ].member] != nil {
+			need = "CAPABILITY_NAMED_IAM"
+		} else if strings.HasPrefix(typ, "AWS::IAM::") {
+			need = cmp.Or(need, "CAPABILITY_IAM")
+		}
+	}
+	if need == "" || stack == "" || slices.Contains(given, any("CAPABILITY_NAMED_IAM")) || slices.Contains(given, any(need)) {
+		return nil
+	}
+	return fault("InsufficientCapabilitiesException", "Requires capabilities : ["+need+"]")
 }
 
 func paramDecls(tpl map[string]any) []any {

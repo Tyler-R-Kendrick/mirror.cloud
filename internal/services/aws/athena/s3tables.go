@@ -54,8 +54,7 @@ func (p *runner) runS3TablesQuery(ctx context.Context, req *spi.Request, sql, da
 			return nil, nil, fmt.Errorf("table %s.%s not found", db, table)
 		}
 		raw, _, _ := p.col(req, "s3trows").Get(ctx, key)
-		var doc s3Rows
-		_ = json.Unmarshal(raw, &doc)
+		doc := spi.Decode[s3Rows](raw)
 		doc.Rows = append(doc.Rows, parseValues(query[at+len(" VALUES "):])...)
 		raw, _ = json.Marshal(doc)
 		_ = p.col(req, "s3trows").Put(ctx, key, raw)
@@ -102,8 +101,7 @@ func (p *runner) scanS3Table(ctx context.Context, req *spi.Request, bucket strin
 	table := spi.JSONObject(raw)
 	columns := stringValues(table["columns"])
 	raw, _, _ = p.col(req, "s3trows").Get(ctx, key)
-	var doc s3Rows
-	_ = json.Unmarshal(raw, &doc)
+	doc := spi.Decode[s3Rows](raw)
 	stored := doc.Rows
 	projection := columns
 	if len(selection.cols) > 0 {

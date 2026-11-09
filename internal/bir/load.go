@@ -209,6 +209,34 @@ func merge(dst, src *Service, name string) error {
 	return nil
 }
 
+// ShadowOf reads the shadow reason a bundle declares, without validating the
+// bundle. Load carries the same field through merge; this is for the caller that
+// only needs to know whether a bundle serves, which is every process that
+// imports the registry, at start. Loading and validating every bundle for one
+// string cost four seconds there.
+func ShadowOf(fsys fs.FS, dir string) (string, error) {
+	files, err := collect(fsys, dir)
+	if err != nil {
+		return "", err
+	}
+	for _, name := range files {
+		raw, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			return "", err
+		}
+		var head struct {
+			Shadow string `yaml:"shadow"`
+		}
+		if err := yaml.Unmarshal(raw, &head); err != nil {
+			return "", fmt.Errorf("%s: %w", name, err)
+		}
+		if head.Shadow != "" {
+			return head.Shadow, nil
+		}
+	}
+	return "", nil
+}
+
 // ServiceIDOf reads the service ID a bundle declares, without validating it
 // against a model.
 //

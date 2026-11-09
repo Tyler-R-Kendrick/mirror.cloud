@@ -455,11 +455,12 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "Id": "arn:aws:cloudformation:us-east-1:000000000000:changeSet/cs1/7c589129",
-        "StackId": "arn:aws:cloudformation:us-east-1:000000000000:stack/rem/5f59f223"
-      },
-      "recut": "CreateChangeSet answers \"The unique ID of the stack\" (API reference, CreateChangeSetOutput), a stack id, arn:aws:cloudformation:<region>:<account>:stack/<name>/<id>: rem does not exist, so the id is minted with the change set, and its execution makes the stack under it. The pack answered arn:...:stack/rem, which is no stack's id."
+      "recut": "CreateChangeSet's ChangeSetType is UPDATE by default, and \"You can't use the UPDATE type to create a change set for a new stack\" (API reference, CreateChangeSet): rem does not exist, so the call is ValidationError (\"Stack [rem] does not exist\") and makes no change set.",
+      "fault": {
+        "code": "ValidationError",
+        "http_status": 400,
+        "fault": "client"
+      }
     },
     {
       "operation": "DescribeChangeSet",
@@ -474,14 +475,12 @@
         "ARN": "",
         "Project": ""
       },
-      "output": {
-        "ChangeSetId": "arn:aws:cloudformation:us-east-1:000000000000:changeSet/cs1/7c589129",
-        "ChangeSetName": "cs1",
-        "StackName": "rem",
-        "Status": "CREATE_COMPLETE",
-        "TemplateBody": "{\"AWSTemplateFormatVersion\":\"2010-09-09\",\"Resources\":{}}"
+      "fault": {
+        "code": "ChangeSetNotFound",
+        "http_status": 404,
+        "fault": "client"
       },
-      "superseded": "The pack answers the whole change-set record including TemplateBody, which the response shape does not declare; the bundle answers the declared members (ChangeSetId, ChangeSetName, StackName, Status)."
+      "recut": "cs1 does not exist: step 24 no longer makes it (an UPDATE change set for a stack that does not exist is refused)."
     },
     {
       "operation": "ListChangeSets",
@@ -496,19 +495,9 @@
         "Project": ""
       },
       "output": {
-        "Summaries": [
-          {
-            "ChangeSetId": "arn:aws:cloudformation:us-east-1:000000000000:changeSet/cs1/7c589129",
-            "ChangeSetName": "cs1",
-            "StackName": "rem",
-            "Status": "FAILED",
-            "StatusReason": "ValidationError: Template format error: At least one Resources member must be defined.",
-            "TemplateBody": "{\"AWSTemplateFormatVersion\":\"2010-09-09\",\"Resources\":{}}",
-            "StackId": "arn:aws:cloudformation:us-east-1:000000000000:stack/rem/5f59f223"
-          }
-        ]
+        "Summaries": []
       },
-      "recut": "cs1's template has no Resources, which \"is required in every CloudFormation template\", and a change set's template is now validated when it is created: the change set is FAILED, and its summary carries the error as StatusReason (\"if your attempt to create a change set failed, CloudFormation shows the error message\"). Vendored model cloudformation-2010-05-15.json, sha256 9992e820. ChangeSetSummary declares StackId, \"The ID of the stack with which the change set is associated\" (API reference): the record holds the id minted at CreateChangeSet (step 24)."
+      "recut": "rem has no change set: step 24 no longer makes cs1 (an UPDATE change set for a stack that does not exist is refused)."
     },
     {
       "operation": "DescribeChangeSet",

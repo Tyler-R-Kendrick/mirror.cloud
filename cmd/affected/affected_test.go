@@ -127,14 +127,16 @@ func TestGoldenSelections(t *testing.T) {
 		"the module file":       {"go.mod"},
 		"an unknown root file":  {"brand-new.txt"},
 		"a fuzz target's tests": {"internal/proto/aws/httpuri/httpuri_test.go"},
+		"the dockerfile":        {"Dockerfile"},
+		"the miniflare runtime": {"tools/cloudflare-runtime/package-lock.json"},
 	}
 	got := map[string]any{}
 	for name, files := range cases {
 		r := g.selectFor(files)
 		if r.all {
-			got[name] = map[string]any{"files": files, "all": r.reason}
+			got[name] = map[string]any{"files": files, "all": r.reason, "jobs": r.gates(files)}
 		} else {
-			got[name] = map[string]any{"files": files, "packages": nonNil(r.pkgs)}
+			got[name] = map[string]any{"files": files, "packages": nonNil(r.pkgs), "jobs": r.gates(files)}
 		}
 	}
 	enc, _ := json.MarshalIndent(got, "", "  ")
@@ -208,5 +210,37 @@ func TestParseRejectsMalformedListing(t *testing.T) {
 	}
 	if g.dirs[""] != "." || g.dirs["a"] != "./a" || strings.Join(g.deps["./a"], " ") != "./a ." {
 		t.Errorf("%+v", g)
+	}
+}
+
+// Every gate opens for a selection of everything and for its own inputs, and a
+// documentation change opens none.
+func TestGatesOpenForTheirInputs(t *testing.T) {
+	g, _ := moduleGraph(t)
+	for name, files := range map[string][]string{
+		"generated-models":     {"internal/generated/aws/s3/model.go"},
+		"image":                {"profiles/core.txt"},
+		"cloudflare-miniflare": {"tools/cloudflare-runtime/package.json"},
+	} {
+		if !g.selectFor(files).gates(files)[name] {
+			t.Errorf("%s stays shut for %v", name, files)
+		}
+	}
+	for _, files := range [][]string{{"README.md"}, {"docs/TESTING.md"}} {
+		for name, open := range g.selectFor(files).gates(files) {
+			if open {
+				t.Errorf("%v opens %s", files, name)
+			}
+		}
+	}
+	for name, open := range g.selectFor([]string{"go.mod"}).gates([]string{"go.mod"}) {
+		if !open {
+			t.Errorf("go.mod leaves %s shut", name)
+		}
+	}
+	for name, open := range g.selectFor([]string{"Makefile"}).gates([]string{"Makefile"}) {
+		if !open {
+			t.Errorf("the Makefile leaves %s shut", name)
+		}
 	}
 }

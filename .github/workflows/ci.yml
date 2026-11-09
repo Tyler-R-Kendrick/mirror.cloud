@@ -11,7 +11,8 @@ permissions:
 jobs:
   # What this run has to run. On a pull request: the packages the diff can
   # reach (cmd/affected over the files it changes), the fuzz targets they
-  # hold, and the mutants the diff selects. On main: everything.
+  # hold, the mutants the diff selects, and which path-gated jobs its files
+  # open. On main: everything.
   # A path cmd/affected cannot place selects everything, and if this job fails,
   # every job that needs it is skipped, which `test` reads as a failure.
   plan:
@@ -23,6 +24,9 @@ jobs:
       fuzz: ${{ steps.affected.outputs.fuzz }}
       mutation: ${{ steps.mutation.outputs.shards }}
       mutation-count: ${{ steps.mutation.outputs.count }}
+      generated-models: ${{ steps.affected.outputs.generated-models }}
+      image: ${{ steps.affected.outputs.image }}
+      cloudflare-miniflare: ${{ steps.affected.outputs.cloudflare-miniflare }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -38,7 +42,7 @@ jobs:
           git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
           git diff --unified=0 --no-color HEAD^1 HEAD > "$RUNNER_TEMP/pr.diff"
           echo "$(wc -l < "$RUNNER_TEMP/changed.txt") files changed"
-      - name: affected packages
+      - name: affected packages and gates
         id: affected
         run: |
           set -euo pipefail
@@ -249,23 +253,38 @@ jobs:
   # with an argument to get wrong. Dockerfile.release: laid out and built the way
   # release.yml does it, for both architectures, from binaries built here in
   # place of the archives, and everything but the push.
+  #
+  # Path-gated: it runs when ./cmd/mirror, a Dockerfile, a profile or the slim
+  # overlay can have changed (cmd/affected's gates), and otherwise passes as
+  # skipped, so `test` still requires it.
   image:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      GATE: ${{ needs.plan.outputs.image }}
     steps:
+      - name: skipped as unaffected
+        if: env.GATE != 'true'
+        run: echo "nothing the image is built from changed"
       - uses: actions/checkout@v6
+        if: env.GATE == 'true'
       - uses: ./.github/actions/go
+        if: env.GATE == 'true'
         with:
           cache: test
           save: "false"
       - name: build with a service list
+        if: env.GATE == 'true'
         run: docker build --build-arg SERVICES=@profiles/core.txt -t mirror-core .
       - name: it serves exactly that list, from a scratch image
+        if: env.GATE == 'true'
         run: |
           got=$(docker run --rm mirror-core services | cut -f1 | sort | tr '\n' ' ')
           want=$(grep -v '^#' profiles/core.txt | sort | tr '\n' ' ')
           [ "$got" = "$want" ] || { echo "::error::image serves: $got; profile lists: $want"; exit 1; }
       - name: the release image builds for both architectures
+        if: env.GATE == 'true'
         run: |
           set -euo pipefail
           python3 -I scripts/slim-overlay.py "$RUNNER_TEMP/overlay.json" @profiles/core.txt
@@ -285,7 +304,7 @@ jobs:
   # Fails unless every job above passed. A job that is skipped or cancelled is
   # not a pass, and `needs` alone would skip this one with it.
   test:
-    needs: [check, unit, coverage, fuzz, race, image]
+    needs: [plan, check, unit, coverage, fuzz, race, image, generated-models, cloudflare-miniflare]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -352,20 +371,33 @@ jobs:
   # Separate job: syncing specs leaves ~92 MB under specs/, and a populated
   # specs/ changes what the runtime boots from, so it must not share a
   # workspace with the unit tests.
+  #
+  # Path-gated like image: specs/, internal/generated, cmd/mirrorgen and what
+  # it links, and the sync scripts.
   generated-models:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      GATE: ${{ needs.plan.outputs.generated-models }}
     steps:
+      - name: skipped as unaffected
+        if: env.GATE != 'true'
+        run: echo "nothing the models are generated from changed"
       - uses: actions/checkout@v6
+        if: env.GATE == 'true'
       - uses: ./.github/actions/go
+        if: env.GATE == 'true'
         with:
           cache: test
           save: "false"
       - name: regenerate from the pinned specs
+        if: env.GATE == 'true'
         run: |
           make specs-sync
           make generate
       - name: models reproduce byte-for-byte
+        if: env.GATE == 'true'
         # `make specs-sync` fetches exactly what the lock pins -- the AWS
         # models at the recorded commit, the committed Discovery document --
         # so this is deterministic. A diff means the committed models no
@@ -389,22 +421,36 @@ jobs:
   # ci failure is a job failure, never a silent pass. Ordinary CI performs
   # no other npm install and no session start; real-provider probes remain
   # unrun (no credentials, by policy).
+  #
+  # Path-gated like image: internal/execution, test/behavior/cloudflare and
+  # what they link, and tools/cloudflare-runtime.
   cloudflare-miniflare:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      GATE: ${{ needs.plan.outputs.cloudflare-miniflare }}
     steps:
+      - name: skipped as unaffected
+        if: env.GATE != 'true'
+        run: echo "nothing the miniflare suite builds or drives changed"
       - uses: actions/checkout@v6
+        if: env.GATE == 'true'
       - uses: ./.github/actions/go
+        if: env.GATE == 'true'
         with:
           cache: test
           save: "false"
       - uses: actions/setup-node@v4
+        if: env.GATE == 'true'
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: tools/cloudflare-runtime/package-lock.json
       - name: provision pinned miniflare/workerd
+        if: env.GATE == 'true'
         run: npm ci --no-audit --no-fund
         working-directory: tools/cloudflare-runtime
       - name: live miniflare session suite
+        if: env.GATE == 'true'
         run: set -o pipefail; make test-cloudflare-miniflare 2>&1 | tee -a ci-run.log

@@ -3,6 +3,11 @@
     "files": [
       "internal/proto/aws/httpuri/httpuri_test.go"
     ],
+    "jobs": {
+      "cloudflare-miniflare": false,
+      "generated-models": false,
+      "image": false
+    },
     "packages": [
       "./internal/check",
       "./internal/mutation",
@@ -13,6 +18,11 @@
     "files": [
       "specs/mirror.lock"
     ],
+    "jobs": {
+      "cloudflare-miniflare": false,
+      "generated-models": true,
+      "image": false
+    },
     "packages": [
       "./cmd/mirror",
       "./cmd/mirrorgen",
@@ -26,6 +36,11 @@
     "files": [
       "test/ci/cache_test.go"
     ],
+    "jobs": {
+      "cloudflare-miniflare": false,
+      "generated-models": false,
+      "image": false
+    },
     "packages": [
       "./internal/check",
       "./internal/mutation",
@@ -36,12 +51,22 @@
     "all": "brand-new.txt: no rule and no package owns it",
     "files": [
       "brand-new.txt"
-    ]
+    ],
+    "jobs": {
+      "cloudflare-miniflare": true,
+      "generated-models": true,
+      "image": true
+    }
   },
   "one leaf package": {
     "files": [
       "internal/services/aws/scheduleexpr/scheduleexpr.go"
     ],
+    "jobs": {
+      "cloudflare-miniflare": true,
+      "generated-models": false,
+      "image": true
+    },
     "packages": [
       "./behavior",
       "./cmd/mirror",
@@ -114,12 +139,22 @@
       "README.md",
       "AGENTS.md"
     ],
+    "jobs": {
+      "cloudflare-miniflare": false,
+      "generated-models": false,
+      "image": false
+    },
     "packages": []
   },
   "testing docs": {
     "files": [
       "docs/TESTING.md"
     ],
+    "jobs": {
+      "cloudflare-miniflare": false,
+      "generated-models": false,
+      "image": false
+    },
     "packages": [
       "./internal/check",
       "./internal/mutation",
@@ -132,6 +167,11 @@
     "files": [
       ".github/workflows/ci.yml"
     ],
+    "jobs": {
+      "cloudflare-miniflare": true,
+      "generated-models": true,
+      "image": true
+    },
     "packages": [
       "./internal/check",
       "./internal/execution",
@@ -140,16 +180,54 @@
       "./test/release"
     ]
   },
+  "the dockerfile": {
+    "files": [
+      "Dockerfile"
+    ],
+    "jobs": {
+      "cloudflare-miniflare": false,
+      "generated-models": false,
+      "image": true
+    },
+    "packages": []
+  },
+  "the miniflare runtime": {
+    "files": [
+      "tools/cloudflare-runtime/package-lock.json"
+    ],
+    "jobs": {
+      "cloudflare-miniflare": true,
+      "generated-models": false,
+      "image": false
+    },
+    "packages": [
+      "./internal/check",
+      "./internal/execution",
+      "./internal/mutation",
+      "./internal/runtime",
+      "./test/behavior/cloudflare"
+    ]
+  },
   "the module file": {
     "all": "go.mod: the module's requirements",
     "files": [
       "go.mod"
-    ]
+    ],
+    "jobs": {
+      "cloudflare-miniflare": true,
+      "generated-models": true,
+      "image": true
+    }
   },
   "the sdk module": {
     "files": [
       "test/sdk/go/go.mod"
     ],
+    "jobs": {
+      "cloudflare-miniflare": false,
+      "generated-models": false,
+      "image": false
+    },
     "packages": []
   }
 }

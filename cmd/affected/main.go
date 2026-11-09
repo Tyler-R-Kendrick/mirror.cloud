@@ -13,7 +13,8 @@
 // cannot rule out.
 //
 // The output is one package per line, as ./dir. -json prints
-// {"all": bool, "reason": string, "packages": [...]}.
+// {"all": bool, "reason": string, "packages": [...], "jobs": {...}}, where
+// jobs says which path-gated CI jobs the change opens (gates, in affected.go).
 package main
 
 import (
@@ -72,7 +73,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	}
 	if *asJSON {
 		enc := json.NewEncoder(stdout)
-		return enc.Encode(map[string]any{"all": r.all, "reason": r.reason, "packages": nonNil(r.pkgs)})
+		return enc.Encode(map[string]any{"all": r.all, "reason": r.reason, "packages": nonNil(r.pkgs), "jobs": r.gates(changed)})
 	}
 	if r.all {
 		fmt.Fprintf(stderr, "affected: every package (%s)\n", r.reason)

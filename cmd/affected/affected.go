@@ -215,6 +215,7 @@ type result struct {
 	all    bool
 	reason string
 	pkgs   []string
+	linked map[string]bool // selected because their tests link changed code
 }
 
 func (g *graph) selectFor(changed []string) result {
@@ -247,10 +248,14 @@ func (g *graph) selectFor(changed []string) result {
 			}
 		}
 	}
+	linked := map[string]bool{}
+	for p := range code {
+		linked[p] = true
+	}
 	for p, deps := range g.deps {
 		for _, d := range deps {
 			if code[d] {
-				selected[p] = true
+				selected[p], linked[p] = true, true
 				break
 			}
 		}
@@ -260,5 +265,52 @@ func (g *graph) selectFor(changed []string) result {
 		out = append(out, p)
 	}
 	sort.Strings(out)
-	return result{pkgs: out}
+	return result{pkgs: out, linked: linked}
+}
+
+// A gate is a CI job that runs only when its inputs change: paths it reads
+// itself, and packages it builds or tests, which count when changed code
+// reaches them. A selection of everything opens every gate.
+type gate struct {
+	paths []string
+	pkgs  []string
+}
+
+// Every gate also opens for these: the files that say how CI runs it.
+var gateAlways = []string{"Makefile", ".github/workflows/ci.yml", ".github/actions/**"}
+
+var gates = map[string]gate{
+	// Regenerates internal/generated from the pinned specs and diffs it.
+	"generated-models": {
+		paths: []string{"specs/**", "internal/generated/**", "cmd/mirrorgen/**", "scripts/specs-sync.sh", "scripts/resolve_specs.py"},
+		pkgs:  []string{"./cmd/mirrorgen"},
+	},
+	// Builds the Dockerfile and Dockerfile.release around ./cmd/mirror.
+	"image": {
+		paths: []string{"Dockerfile", "Dockerfile.release", ".dockerignore", "profiles/**", "scripts/slim-overlay.py"},
+		pkgs:  []string{"./cmd/mirror"},
+	},
+	// The live miniflare suite: internal/execution and test/behavior/cloudflare
+	// built with -tags miniflare, against the pinned runtime under tools/.
+	"cloudflare-miniflare": {
+		paths: []string{"tools/cloudflare-runtime/**"},
+		pkgs:  []string{"./internal/execution", "./test/behavior/cloudflare"},
+	},
+}
+
+func (r result) gates(changed []string) map[string]bool {
+	out := map[string]bool{}
+	for name, g := range gates {
+		open := r.all
+		for _, p := range g.pkgs {
+			open = open || r.linked[p]
+		}
+		for _, c := range changed {
+			for _, pattern := range append(append([]string(nil), gateAlways...), g.paths...) {
+				open = open || rule{pattern: pattern}.matches(strings.TrimPrefix(path.Clean(c), "./"))
+			}
+		}
+		out[name] = open
+	}
+	return out
 }

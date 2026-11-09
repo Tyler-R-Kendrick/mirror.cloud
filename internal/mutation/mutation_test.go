@@ -2905,8 +2905,8 @@ var mutants = []mutant{
 	{
 		name: "s3-ignore-persisted-object-etag",
 		file: filepath.Join("internal", "services", "aws", "s3", "s3.go"),
-		old:  `if etag := spi.Str(meta["etag"]); etag != "" {`,
-		new:  `if etag := spi.Str(meta["etag"]); false {`,
+		old:  "return cmp.Or(spi.Str(meta[\"etag\"]), `\"`+md5sum+`\"`)",
+		new:  "return cmp.Or(\"\", `\"`+md5sum+`\"`)",
 		pkg:  "./internal/services/aws/s3",
 		run:  "TestMultipartETagForm",
 	},
@@ -21003,8 +21003,8 @@ var mutants = []mutant{
 	{
 		name: "sns-retain-subscription-after-endpoint-delete",
 		file: filepath.Join("internal", "services", "aws", "sns", "sns_extra.go"),
-		old:  "if json.Unmarshal(kv.Value, &sub) == nil && str(sub[\"Endpoint\"]) == arn {",
-		new:  "if (false && (json.Unmarshal(kv.Value, &sub) == nil && str(sub[\"Endpoint\"]) == arn)) {",
+		old:  `p.dropSubscriptions(ctx, req, "Endpoint", arn)`,
+		new:  `_ = arn`,
 		pkg:  "./internal/services/aws/sns",
 		run:  "TestSNSPlatformEndpointDeletionCleansSubscriptions",
 	},

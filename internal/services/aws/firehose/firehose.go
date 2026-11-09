@@ -4,6 +4,7 @@ package firehose
 import (
 	"archive/zip"
 	"bytes"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"crypto/md5"
@@ -2852,10 +2853,7 @@ func searchFailureIndex(destination map[string]any, now time.Time) string {
 }
 
 func persistedSearchDestinationKey(value string) string {
-	if value == "" {
-		return "ElasticsearchDestinationConfiguration"
-	}
-	return value
+	return cmp.Or(value, "ElasticsearchDestinationConfiguration")
 }
 
 // retryDuration is a destination's RetryOptions.DurationInSeconds, 0 to 7200, or else fallback seconds.
@@ -3650,10 +3648,7 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 }
 
 func endpointDestinationKey(key string) string {
-	if key == "" {
-		return "HttpEndpointDestinationConfiguration"
-	}
-	return key
+	return cmp.Or(key, "HttpEndpointDestinationConfiguration")
 }
 
 func (p *Pack) deliverEndpoint(ctx context.Context, req *spi.Request, stream, destination map[string]any, destinationKey, requestID string, data [][]byte, now time.Time) (bool, bool, string, string) {

@@ -4,6 +4,7 @@ package gcs
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -601,17 +602,11 @@ func (p *objects) checkCreatePreconditions(ctx context.Context, req *spi.Request
 }
 
 func (p *objects) bucketName(req *spi.Request) string {
-	if v := spi.Str(req.Input["bucket"]); v != "" {
-		return v
-	}
-	return spi.Str(req.Input["name"])
+	return cmp.Or(spi.Str(req.Input["bucket"]), spi.Str(req.Input["name"]))
 }
 
 func (p *objects) objectName(req *spi.Request) string {
-	if v := spi.Str(req.Input["object"]); v != "" {
-		return v
-	}
-	return spi.Str(req.Input["name"])
+	return cmp.Or(spi.Str(req.Input["object"]), spi.Str(req.Input["name"]))
 }
 
 func (p *objects) base(req *spi.Request) string {

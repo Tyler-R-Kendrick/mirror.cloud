@@ -23,7 +23,7 @@ missing_input_error: Validation
 # deprovisions them in reverse, keeping any it cannot delete; ValidateTemplate and GetTemplateSummary parse
 # without provisioning; ListExports flattens every stack's outputs. The stack
 # record below is the one the engine writes.
-native: [CreateStack, UpdateStack, DeleteStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports, ContinueUpdateRollback, CreateChangeSet, UpdateTerminationProtection]
+native: [CreateStack, UpdateStack, DeleteStack, CreateChangeSet, ExecuteChangeSet, DeleteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports, ContinueUpdateRollback, UpdateTerminationProtection]
 
 resources:
   # The stack record, written only by the native template engine, in one
@@ -333,9 +333,12 @@ operations:
   # equally shadowed; only the inline TemplateBody path is transcribed, and
   # the bundle faults ValidationError where the pack would have fetched.
 
-  # CreateChangeSet is native: it parses and validates the template as it
-  # records the change set, FAILED with the error as its StatusReason when the
-  # template is wrong.
+  # CreateChangeSet, ExecuteChangeSet and DeleteChangeSet are native: each
+  # writes a change set, and CreateChangeSet a stack too, in one store
+  # transaction with what the engine writes of the stack (cfn.go).
+  # CreateChangeSet parses and validates the template as it records the
+  # change set, FAILED with the error as its StatusReason when the template is
+  # wrong.
 
   # The pack answers the whole stored record, TemplateBody included; the
   # response shape does not declare TemplateBody, so the bundle answers the
@@ -360,7 +363,7 @@ operations:
       ExecutionStatus: "'ExecutionStatus' in cs ? cs.ExecutionStatus : 'AVAILABLE'"
       Parameters: "'Parameters' in cs ? cs.Parameters : []"
       NotificationARNs: "'NotificationARNs' in cs && cs.NotificationARNs != null ? cs.NotificationARNs : []"
-      Tags: "'Tags' in cs ? cs.Tags : []"
+      Tags: "'Tags' in cs && cs.Tags != null ? cs.Tags : []"
       Capabilities: "'Capabilities' in cs ? cs.Capabilities : []"
 
   ListChangeSets:
@@ -370,14 +373,14 @@ operations:
       member: Summaries
       paginate: model
       filter: "item.StackName == string(input.StackName)"
+    # ChangeSetSummary's members, and no others; a change set stored before
+    # it had an ExecutionStatus is AVAILABLE, as DescribeChangeSet reads it.
     output:
-      Summaries: "items.map(c, without(c, ['ChangeSetType']))"
-
-  DeleteChangeSet:
-    require: [*stackNameOrId, *stackPattern]
-    effects:
-      - delete: { resource: changeset, missing: ignore }
-    output: {}
+      Summaries: >-
+        items.map(c, merge({'ChangeSetId': c.ChangeSetId, 'ChangeSetName': c.ChangeSetName,
+          'StackName': c.StackName, 'Status': c.Status,
+          'ExecutionStatus': 'ExecutionStatus' in c ? c.ExecutionStatus : 'AVAILABLE'},
+          merge('StackId' in c ? {'StackId': c.StackId} : {}, 'StatusReason' in c ? {'StatusReason': c.StatusReason} : {})))
 
   SignalResource:
     require: [*stackNameOrId, *stackPattern]
@@ -1023,13 +1026,9 @@ quirks:
       APIs), which no trace step can observe from this service's answers.
   - operation: CreateChangeSet
     note: >
-      Only the inline TemplateBody path is transcribed. With TemplateURL the
-      pack reads the template out of the blob store (s3:// and
-      *.s3 host forms), which the bundle cannot express; the bundle faults
-      ValidationError where the pack would have fetched. The pack faults
-      "TemplateBody or TemplateURL required" when neither is present. The
-      model requires StackName and ChangeSetName, so the pack's empty-name
-      key (":name") is dead.
+      Native (cfn.go): it reads TemplateBody or the TemplateURL object, and
+      writes the change set, and a CREATE change set's REVIEW_IN_PROGRESS
+      stack, in one store transaction with what it read.
   - operation: DescribeChangeSet
     note: >
       The pack answers the whole stored record, TemplateBody included, but

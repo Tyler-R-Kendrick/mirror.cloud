@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/s3"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 )
@@ -81,7 +83,47 @@ func (h *stacks) invoke(op string, in map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if op == "DescribeStacks" { // every DescribeStacks answer holds to the model's output shapes
+		h.conforms(op, out.Output)
+	}
 	return out.Output, nil
+}
+
+// conforms fails the test on a member of op's answer that is not the kind its model shape declares: a
+// String that is not a string, a list that is not a list, a structure that is not a map.
+func (h *stacks) conforms(op string, out map[string]any) {
+	h.t.Helper()
+	svc := specboot.Bundle().ServiceByID("aws.cloudformation")
+	var walk func(path, shapeID string, v any)
+	walk = func(path, shapeID string, v any) {
+		shape, known := svc.Shapes[shapeID]
+		if !known || v == nil {
+			return
+		}
+		switch shape.Kind {
+		case model.KindString:
+			if _, isString := v.(string); !isString {
+				h.t.Errorf("%s %s is %#v, which its String shape %s cannot hold", op, path, v, shapeID)
+			}
+		case model.KindStructure:
+			m, isMap := v.(map[string]any)
+			for name, member := range shape.Members {
+				walk(path+"."+name, member.Shape, m[name])
+			}
+			if !isMap {
+				h.t.Errorf("%s %s is %#v, not its structure %s", op, path, v, shapeID)
+			}
+		case model.KindList:
+			list, isList := v.([]any)
+			for _, item := range list {
+				walk(path+"[]", shape.Member, item)
+			}
+			if !isList {
+				h.t.Errorf("%s %s is %#v, not its list %s", op, path, v, shapeID)
+			}
+		}
+	}
+	walk(op, svc.OperationByName(op).Output, out)
 }
 
 // create makes the stack from resources, acknowledging any IAM resource they hold (CAPABILITY_NAMED_IAM).

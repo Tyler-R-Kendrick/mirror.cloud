@@ -17,6 +17,8 @@ a function) fails at that call with the missing service's name. CI/CD executors
 (CodeBuild, CodePipeline, ...) are left out unless --cicd.
 
 The files the overlay points at are written beside it, so keep them together.
+They are not named *.go, so an overlay written inside the module (make build-slim
+writes bin/slim-overlay.json) does not put two stray packages in `go vet ./...`.
 """
 import json
 import os
@@ -83,7 +85,7 @@ def main(argv):
         if "cicd/register" in line and not cicd:
             continue
         lines.append(line)
-    replace[allservices] = write("allservices.go", "\n".join(lines))
+    replace[allservices] = write("allservices.go.txt", "\n".join(lines))
 
     # `*/*/ops/*.yaml` must match something or the build fails, and a handful of
     # services may have no split operations. A bundle with no service in it is
@@ -91,7 +93,7 @@ def main(argv):
     replace[os.path.join(root, "behavior", "aws", "placeholder", "ops", "placeholder.yaml")] = write(
         "placeholder.yaml", "# keeps the embed pattern matching when no kept service splits its operations\n")
     replace[os.path.join(root, "internal", "specboot", "slim.go")] = write(
-        "slim.go", "package specboot\n\nfunc init() { slim = true }\n")
+        "slim.go.txt", "package specboot\n\nfunc init() { slim = true }\n")
 
     with open(out, "w") as f:
         json.dump({"Replace": replace}, f)

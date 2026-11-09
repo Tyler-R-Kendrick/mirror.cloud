@@ -101,6 +101,17 @@ func TestSlimBuildServesExactlyTheServicesItWasGiven(t *testing.T) {
 	if out, err := run(t, root, nil, "python3", "-I", script, filepath.Join(dir, "o.json"), "aws.s3", "aws.sqs"); err != nil {
 		t.Fatalf("%v\n%s", err, out)
 	}
+	// make build-slim writes the overlay inside the module, where a .go file
+	// beside it would become a package of `go vet ./...`.
+	entries, _ := os.ReadDir(filepath.Join(dir, "o.json.d"))
+	if len(entries) == 0 {
+		t.Fatal("the overlay wrote no files beside itself")
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".go") {
+			t.Errorf("%s is a .go file inside the overlay directory", e.Name())
+		}
+	}
 	bin := filepath.Join(dir, "mirror")
 	env := []string{"CGO_ENABLED=0", "GOFLAGS=-buildvcs=false"}
 	if out, err := run(t, root, env, "go", "build", "-overlay", filepath.Join(dir, "o.json"), "-o", bin, "./cmd/mirror"); err != nil {

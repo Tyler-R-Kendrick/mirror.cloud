@@ -108,3 +108,53 @@ func TestCloudFormationAnUpdateHoldsItsStack(t *testing.T) {
 		t.Errorf("the stack is %s and the secret %v, want UPDATE_COMPLETE and a", status, out["SecretString"])
 	}
 }
+
+// An update ends its reservation however it ends: one that fails puts the
+// stack back as it found it, so the next update is taken; and one that finds
+// the stack changed under it, by a DeleteStack that failed, writes nothing
+// over it. These pin what a reservation's end writes.
+func TestCloudFormationAnUpdateEndsItsReservation(t *testing.T) {
+	h := newStacks(t)
+	topic := map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "f", "TemplateBody": r17Tpl(topic, nil)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service("aws.ssm", "PutParameter", map[string]any{"Name": "r17taken", "Type": "String", "Value": "v"}); err != nil {
+		t.Fatal(err)
+	}
+	taken := map[string]any{"T": topic["T"], "P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "r17taken", "Type": "String", "Value": "v"}}}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "f", "TemplateBody": r17Tpl(taken, nil)}); err == nil {
+		t.Fatal("an update making a parameter whose name is taken succeeded")
+	}
+	two := map[string]any{"T": topic["T"], "U": map[string]any{"Type": "AWS::SNS::Topic"}}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "f", "TemplateBody": r17Tpl(two, nil)}); err != nil {
+		t.Errorf("the update after a failed one answered %v, want it taken", err)
+	}
+
+	full := map[string]any{"K": map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "r17full"}}}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "d", "TemplateBody": r17Tpl(full, nil)}); err != nil {
+		t.Fatal(err)
+	}
+	h.fill("r17full", true) // DeleteStack fails on it
+	g := h.gateOn(func(collection, key string, _ []byte) bool {
+		return collection == "bktcfg" && strings.HasSuffix(key, "/cors")
+	})
+	full["C"] = map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "r17cors",
+		"CorsConfiguration": map[string]any{"CorsRules": []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"*"}}}}}}
+	done := make(chan error, 1)
+	go func() {
+		_, err := h.invoke("UpdateStack", map[string]any{"StackName": "d", "TemplateBody": r17Tpl(full, nil)})
+		done <- err
+	}()
+	within(t, g.reached, "the update reaching its bucket")
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "d"}); err == nil {
+		t.Fatal("DeleteStack of a stack holding a full bucket succeeded")
+	}
+	close(g.release)
+	if err := within(t, done, "the update"); code(err) != "ValidationError" {
+		t.Errorf("the update, the stack's delete failing during it, answered %v, want ValidationError", err)
+	}
+	if status, _, _ := h.status("d"); status != "DELETE_FAILED" {
+		t.Errorf("the stack is %s, want DELETE_FAILED: the update wrote over the failed delete", status)
+	}
+}

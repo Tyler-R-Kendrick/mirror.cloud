@@ -4384,7 +4384,7 @@ var mutants = []mutant{
 		old:  `if st.Protect, seen.Protect = cur.Protect, cur.Protect; spi.JSONText(cur) != spi.JSONText(seen) {`,
 		new:  `if st.Protect, seen.Protect = cur.Protect, cur.Protect; spi.JSONText(cur) != spi.JSONText(seen) && seen.Status == "CREATE_IN_PROGRESS" {`,
 		pkg:  "./internal/services/aws/cloudformation",
-		run:  "TestCloudFormationAnUpdateThatLosesUndoesItself",
+		run:  "TestCloudFormationAnUpdateThatLosesUndoesItself|TestCloudFormationAnUpdateEndsItsReservation",
 	},
 	{
 		name: "cloudformation-order-ignores-references",
@@ -4720,7 +4720,7 @@ var mutants = []mutant{
 		old:  `read := held // the record as the update reserved it`,
 		new:  `read := old // the record as the update reserved it`,
 		pkg:  "./internal/services/aws/cloudformation",
-		run:  "TestCloudFormationAnUpdateHoldsItsStack|TestCloudFormationAnUpdateThatLosesUndoesItself",
+		run:  "TestCloudFormationAnUpdateHoldsItsStack|TestCloudFormationAnUpdateThatLosesUndoesItself|TestCloudFormationAnUpdateEndsItsReservation",
 	},
 	{
 		name: "cloudformation-getazs-of-a-mark-is-text",

@@ -54,8 +54,7 @@ func (w *Warehouse) CreateTable(ctx context.Context, identity spi.Identity, clus
 			return errors.New("Redshift table column is empty")
 		}
 	}
-	body, _ := json.Marshal(tableData{Cluster: cluster, Columns: columns})
-	return w.col(identity, "rstable").Put(ctx, redshiftTableKey(cluster, database, table), body)
+	return spi.PutJSON(ctx, w.col(identity, "rstable"), redshiftTableKey(cluster, database, table), tableData{Cluster: cluster, Columns: columns})
 }
 
 // Copy loads records into a declared table using the common Firehose COPY formats.

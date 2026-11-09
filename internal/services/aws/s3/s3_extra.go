@@ -274,8 +274,7 @@ func (p *Pack) updateObjectEncryption(ctx context.Context, req *spi.Request) (*s
 	if algo == "" {
 		algo = "AES256"
 	}
-	doc, _ := json.Marshal(map[string]any{"SSEAlgorithm": algo})
-	_ = p.col(req, "bktcfg").Put(ctx, b+"/"+key+"/objenc", doc)
+	_ = spi.PutJSON(ctx, p.col(req, "bktcfg"), b+"/"+key+"/objenc", map[string]any{"SSEAlgorithm": algo})
 	return &spi.Response{Output: map[string]any{"SSEAlgorithm": algo, "Bucket": b, "Key": key}}, nil
 }
 
@@ -294,8 +293,7 @@ func (p *Pack) objectAnnotation(ctx context.Context, req *spi.Request) (*spi.Res
 	if strings.HasPrefix(op, "Put") {
 		doc := map[string]any{"AnnotationId": id, "Bucket": b, "Key": key}
 		maps.Copy(doc, req.Input)
-		raw, _ := json.Marshal(doc)
-		_ = col.Put(ctx, ck, raw)
+		_ = spi.PutJSON(ctx, col, ck, doc)
 		return &spi.Response{Output: doc}, nil
 	}
 	if strings.HasPrefix(op, "Delete") {
@@ -371,7 +369,6 @@ func (p *Pack) metadataCfg(ctx context.Context, req *spi.Request) (*spi.Response
 			doc["_body"] = string(body)
 		}
 	}
-	raw, _ := json.Marshal(doc)
-	_ = col.Put(ctx, ck, raw)
+	_ = spi.PutJSON(ctx, col, ck, doc)
 	return &spi.Response{Output: doc}, nil
 }

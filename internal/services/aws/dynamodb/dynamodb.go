@@ -239,8 +239,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		td, _, _ := p.col(req, "tables").Get(ctx, table)
 		items, _, _ := p.col(req, "items:"+table).List(ctx, "", "", 0)
 		rec := map[string]any{"BackupArn": "arn:aws:dynamodb:" + req.Identity.Region + ":" + req.Identity.Account + ":table/" + table + "/backup/" + id, "BackupName": name, "TableName": table, "BackupStatus": "AVAILABLE", "Table": string(td), "Items": itemsKV(items)}
-		raw, _ := json.Marshal(rec)
-		_ = p.col(req, "backups").Put(ctx, id, raw)
+		_ = spi.PutJSON(ctx, p.col(req, "backups"), id, rec)
 		return &spi.Response{Output: map[string]any{"BackupDetails": map[string]any{"BackupArn": rec["BackupArn"], "BackupName": name, "BackupStatus": "AVAILABLE"}}}, nil
 	case "RestoreTableFromBackup":
 		id := spi.LastSlash(spi.First(req.Input, "BackupArn"))
@@ -378,8 +377,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if err := p.prepareTableMetadata(ctx, req, m); err != nil {
 			return nil, err
 		}
-		nb, _ := json.Marshal(m)
-		_ = p.col(req, "tables").Put(ctx, table, nb)
+		_ = spi.PutJSON(ctx, p.col(req, "tables"), table, m)
 		description := tableDescription(m, "UPDATING")
 		if spec := spi.Object(req.Input["SSESpecification"]); spec["Enabled"] == false {
 			if sse := spi.Object(description["SSEDescription"]); len(sse) > 0 {

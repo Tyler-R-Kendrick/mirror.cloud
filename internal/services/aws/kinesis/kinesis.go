@@ -162,8 +162,7 @@ func (p records) nextSeq(ctx context.Context, req *spi.Request, name string) int
 	}
 	n := asInt(rec["Seq"])
 	rec["Seq"] = n + 1
-	raw, _ := json.Marshal(rec)
-	_ = p.col(req, "kinesis").Put(ctx, name, raw)
+	_ = spi.PutJSON(ctx, p.col(req, "kinesis"), name, rec)
 	return n
 }
 

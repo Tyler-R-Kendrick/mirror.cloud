@@ -1156,8 +1156,7 @@ func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket str
 		"ReplicationConfiguration": "replication", "NotificationConfiguration": "notification", "WebsiteConfiguration": "website",
 	} {
 		if value, ok := props[property]; ok {
-			raw, _ := json.Marshal(map[string]any{property: value})
-			_ = p.col(req, "bktcfg").Put(ctx, bucket+"/"+kind, raw)
+			_ = spi.PutJSON(ctx, p.col(req, "bktcfg"), bucket+"/"+kind, map[string]any{property: value})
 		}
 	}
 	return nil

@@ -1324,8 +1324,7 @@ func putTags(ctx context.Context, collection spi.Collection, key string, tags ma
 	if len(tags) == 0 {
 		return collection.Delete(ctx, key)
 	}
-	b, _ := json.Marshal(tagList(tags))
-	return collection.Put(ctx, key, b)
+	return spi.PutJSON(ctx, collection, key, tagList(tags))
 }
 
 func putTagsTx(tx spi.Tx, key string, tags map[string]string) error {
@@ -2727,8 +2726,7 @@ func (p *Pack) runRedshiftRetry(ctx context.Context, identity spi.Identity, coll
 	}
 	if !payloadOK {
 		work.Next = now.Add(time.Second)
-		stored, _ := json.Marshal(work)
-		_ = collection.Put(ctx, key, stored)
+		_ = spi.PutJSON(ctx, collection, key, work)
 		return work.Next
 	}
 	if !now.Before(work.Expires) {
@@ -2752,8 +2750,7 @@ func (p *Pack) runRedshiftRetry(ctx context.Context, identity spi.Identity, coll
 	work.Retries++
 	work.ErrorMessage = err.Error()
 	work.Next = minTime(now.Add(5*time.Minute), work.Expires)
-	stored, _ := json.Marshal(work)
-	_ = collection.Put(ctx, key, stored)
+	_ = spi.PutJSON(ctx, collection, key, work)
 	return work.Next
 }
 
@@ -3099,8 +3096,7 @@ func (p *Pack) flushSearchBuffer(ctx context.Context, identity spi.Identity, col
 			next := now.Add(time.Second)
 			for _, item := range items {
 				item.Work.Next = next
-				stored, _ := json.Marshal(item.Work)
-				_ = collection.Put(ctx, item.Key, stored)
+				_ = spi.PutJSON(ctx, collection, item.Key, item.Work)
 			}
 			return next
 		}
@@ -3189,8 +3185,7 @@ func (p *Pack) runSearchRetry(ctx context.Context, identity spi.Identity, collec
 	payload, ok := p.loadSearchPayload(ctx, req, work.DataKey)
 	if !ok {
 		work.Next = now.Add(time.Second)
-		stored, _ := json.Marshal(work)
-		_ = collection.Put(ctx, key, stored)
+		_ = spi.PutJSON(ctx, collection, key, work)
 		return work.Next
 	}
 	if !now.Before(work.Expires) {
@@ -3214,8 +3209,7 @@ func (p *Pack) runSearchRetry(ctx context.Context, identity spi.Identity, collec
 	if !p.writeSearchPayload(ctx, req, work.Stream, work.DataKey, retryable) {
 		work.Next = now.Add(time.Second)
 	}
-	stored, _ := json.Marshal(work)
-	_ = collection.Put(ctx, key, stored)
+	_ = spi.PutJSON(ctx, collection, key, work)
 	return work.Next
 }
 
@@ -3560,8 +3554,7 @@ func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, colle
 		next := now.Add(time.Second)
 		for _, item := range items {
 			item.Buffer.Next = next
-			body, _ := json.Marshal(item.Buffer)
-			_ = collection.Put(ctx, item.Key, body)
+			_ = spi.PutJSON(ctx, collection, item.Key, item.Buffer)
 		}
 		return next
 	}
@@ -3627,8 +3620,7 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 	}
 	if !payloadOK {
 		retry.Next = now.Add(time.Second)
-		body, _ := json.Marshal(retry)
-		_ = collection.Put(ctx, key, body)
+		_ = spi.PutJSON(ctx, collection, key, retry)
 		return retry.Next
 	}
 	if !now.Before(retry.Expires) {
@@ -3653,8 +3645,7 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 	if retry.Next.After(retry.Expires) {
 		retry.Next = retry.Expires
 	}
-	body, _ := json.Marshal(retry)
-	_ = collection.Put(ctx, key, body)
+	_ = spi.PutJSON(ctx, collection, key, retry)
 	return retry.Next
 }
 
@@ -4369,8 +4360,7 @@ func (p *Pack) deliverS3Object(ctx context.Context, req *spi.Request, bucket, ke
 		metadata["serverSideEncryption"] = "aws:kms"
 		metadata["ssekmsKeyId"] = kmsARN
 	}
-	meta, _ := json.Marshal(metadata)
-	_ = p.col(req, "objects").Put(ctx, bucket+"/"+key, meta)
+	_ = spi.PutJSON(ctx, p.col(req, "objects"), bucket+"/"+key, metadata)
 }
 
 var (

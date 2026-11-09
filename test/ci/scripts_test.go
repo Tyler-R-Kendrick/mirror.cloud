@@ -400,12 +400,12 @@ func TestSparseBringsWhatAServiceNeedsAndNothingElse(t *testing.T) {
 		t.Error("the AWS behavior suite imports packs aws.s3 does not bring, so it must be left out")
 	}
 	// A pack that serves its service under another name is found by the service's.
-	if !strings.Contains(list("gcp.storage"), "/internal/services/gcp/gcs/\n") {
+	if !strings.Contains("\n"+list("gcp.storage"), "\n/internal/services/gcp/gcs/\n") {
 		t.Error("gcp.storage does not bring the gcp/gcs pack that serves it")
 	}
 	// A whole provider brings its specs and its behavior suite, which also names
 	// aws.s3, so that suite waits until S3 is asked for too.
-	if strings.Contains(list("vercel.*"), "/test/behavior/vercel/\n") {
+	if strings.Contains("\n"+list("vercel.*"), "\n/test/behavior/vercel/\n") {
 		t.Error("the Vercel suite names aws.s3 and must wait for it")
 	}
 	v := list("vercel.*", "aws.s3")

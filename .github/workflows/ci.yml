@@ -9,24 +9,18 @@ concurrency:
 permissions:
   contents: read
 jobs:
-  # What used to be one job was 69 minutes of independent checks run one after
-  # another, 41 of them native fuzzing. They are separate jobs now, so the run
-  # takes as long as the slowest and each failure names its own job.
-  #
-  # `test` at the bottom keeps the name that job had, for anything that requires
-  # it by name, and fails unless every one of these passed.
-  #
-  # Inside each job, every step still runs whatever the ones before it did, and
-  # the job still fails if any of them fail. Without that a step failure skips
-  # the rest, and one had been doing that for six merges: the ratchet sat third
-  # and nine checks after it never ran at all. A red gate that hides other gates
-  # reports less than no gate, because the silence reads as coverage.
-  # What this run has to run. On a pull request, the mutants its diff selects
-  # (internal/mutation select_test.go); on main, every one of them.
+  # What this run has to run. On a pull request: the packages the diff can
+  # reach (cmd/affected over the files it changes), the fuzz targets they
+  # hold, and the mutants the diff selects. On main: everything.
+  # A path cmd/affected cannot place selects everything, and if this job fails,
+  # every job that needs it is skipped, which `test` reads as a failure.
   plan:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
+      packages: ${{ steps.affected.outputs.packages }}
+      race: ${{ steps.affected.outputs.race }}
+      fuzz: ${{ steps.affected.outputs.fuzz }}
       mutation: ${{ steps.mutation.outputs.shards }}
       mutation-count: ${{ steps.mutation.outputs.count }}
     steps:
@@ -40,7 +34,20 @@ jobs:
           save: "false"
       - name: what changed
         if: github.event_name == 'pull_request'
-        run: git diff --unified=0 --no-color HEAD^1 HEAD > "$RUNNER_TEMP/pr.diff"
+        run: |
+          git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
+          git diff --unified=0 --no-color HEAD^1 HEAD > "$RUNNER_TEMP/pr.diff"
+          echo "$(wc -l < "$RUNNER_TEMP/changed.txt") files changed"
+      - name: affected packages
+        id: affected
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            go run ./cmd/affected -json -files "$RUNNER_TEMP/changed.txt" > "$RUNNER_TEMP/affected.json"
+          else
+            go run ./cmd/affected -json -all -files /dev/null > "$RUNNER_TEMP/affected.json"
+          fi
+          python3 -I scripts/ci-plan.py "$RUNNER_TEMP/affected.json" >> "$GITHUB_OUTPUT"
       - name: mutants selected
         id: mutation
         run: |
@@ -50,6 +57,18 @@ jobs:
           cat "$RUNNER_TEMP/mutation.json"
           python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print("shards=" + json.dumps(d["shards"])); print("count=%d" % len(d["shards"]))' "$RUNNER_TEMP/mutation.json" >> "$GITHUB_OUTPUT"
 
+  # What used to be one job was 69 minutes of independent checks run one after
+  # another, 41 of them native fuzzing. They are separate jobs now, so the run
+  # takes as long as the slowest and each failure names its own job.
+  #
+  # `test` at the bottom keeps the name that job had, for anything that requires
+  # it by name, and fails unless every one of these passed.
+  #
+  # Inside each job, every step still runs whatever the ones before it did, and
+  # the job still fails if any of them fail. Without that a step failure skips
+  # the rest, and one had been doing that for six merges: the ratchet sat third
+  # and nine checks after it never ran at all. A red gate that hides other gates
+  # reports less than no gate, because the silence reads as coverage.
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -136,48 +155,92 @@ jobs:
         if: ${{ !cancelled() }}
         run: make known-red RUN=ci-run.log
 
-  # 127 native fuzz targets, 10000 executions each. Run in one job they were 41
-  # minutes; the split is by line of scripts/fuzz-targets.txt, so the 68 targets
-  # of one package spread across all six.
+  # The native fuzz targets in scripts/fuzz-targets.txt, 10000 executions each.
+  # Run in one job they were 41 minutes; main splits them six ways by line. A
+  # pull request fuzzes only the targets in the packages its diff can reach, in
+  # as many shards as they need (scripts/ci-plan.py), and one shard that says
+  # so when there are none.
   fuzz:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5]
+        shard: ${{ fromJSON(needs.plan.outputs.fuzz).shards }}
+    env:
+      SHARDS: ${{ fromJSON(needs.plan.outputs.fuzz).count }}
+      TARGETS: ${{ fromJSON(needs.plan.outputs.fuzz).targets }}
     steps:
+      - name: skipped as unaffected
+        if: env.TARGETS == '0'
+        run: echo "no fuzz target is in a package this change can reach"
       - uses: actions/checkout@v6
+        if: env.TARGETS != '0'
       - uses: ./.github/actions/go
+        if: env.TARGETS != '0'
         with:
           cache: fuzz
           save: ${{ matrix.shard == 0 }}
-      - name: fuzz shard ${{ matrix.shard }} of 6
-        run: scripts/fuzz.sh ${{ matrix.shard }} 6
+      - name: fuzz shard ${{ matrix.shard }}
+        if: env.TARGETS != '0'
+        env:
+          AFFECTED: ${{ needs.plan.outputs.packages }}
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            printf '%s\n' "$AFFECTED" > "$RUNNER_TEMP/affected.txt"
+            export FUZZ_PKGS="$RUNNER_TEMP/affected.txt"
+          fi
+          scripts/fuzz.sh ${{ matrix.shard }} "$SHARDS"
 
   # The race build of the whole suite was 20 minutes in one job, the longest
-  # there is. Four jobs each take every fourth package. Like unit, it reads and
-  # writes the result cache on every run; nightly.yml runs it uncached.
+  # there is. main and the nightly split every package four ways by the race
+  # times main measured (test/race-costs.json), strict. A pull request runs the
+  # packages its diff can reach, in as many shards as they need, with -short:
+  # internal/racegate skips there the tests that parse large inputs on one
+  # goroutine, where the race detector costs ten to forty times as much and
+  # can find nothing. unit runs those on every pull request without race, and
+  # main runs them under it. A pull request's -short results are not main's, so
+  # they never come from main's race cache.
   race:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: ${{ fromJSON(needs.plan.outputs.race).shards }}
+    env:
+      SHARDS: ${{ fromJSON(needs.plan.outputs.race).count }}
+      PACKAGES: ${{ fromJSON(needs.plan.outputs.race).packages }}
     steps:
+      - name: skipped as unaffected
+        if: env.PACKAGES == '0'
+        run: echo "this change reaches no package"
       - uses: actions/checkout@v6
+        if: env.PACKAGES != '0'
         with:
           fetch-depth: 0
       - uses: ./.github/actions/go
+        if: env.PACKAGES != '0'
         with:
           cache: race
           mtimes: "true"
           save: ${{ matrix.shard == 0 }}
-      - name: race detector, shard ${{ matrix.shard }} of 4
-        run: set -o pipefail; make test-race RACE_SHARD=${{ matrix.shard }} RACE_SHARDS=4 2>&1 | tee -a ci-run.log
+      - name: race detector, shard ${{ matrix.shard }}
+        if: env.PACKAGES != '0'
+        env:
+          AFFECTED: ${{ needs.plan.outputs.packages }}
+        run: |
+          set -o pipefail
+          scope=()
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            printf '%s\n' "$AFFECTED" > "$RUNNER_TEMP/affected.txt"
+            scope=("RACE_PKGS=$RUNNER_TEMP/affected.txt" RACE_FLAGS=-short)
+          fi
+          make test-race RACE_SHARD=${{ matrix.shard }} RACE_SHARDS="$SHARDS" "${scope[@]}" 2>&1 | tee -a ci-run.log
       - name: known red triage
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PACKAGES != '0' }}
         run: make known-red RUN=ci-run.log
 
   # The Dockerfile and Dockerfile.release are built here and nowhere else before

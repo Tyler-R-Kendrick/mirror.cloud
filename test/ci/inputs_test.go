@@ -21,7 +21,7 @@ func repo(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	testinputs.Record(t, root, "scripts", "profiles", "Makefile", ".github/workflows", ".github/actions/go")
+	testinputs.Record(t, root, "scripts", "profiles", "Makefile", ".github/workflows", ".github/actions/go", "test/race-costs.json")
 	packagesOnce.Do(func() { testinputs.Packages(t, root, "./cmd/mirror", "./internal/clock", "./internal/idgen") })
 	return root
 }

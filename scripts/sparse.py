@@ -134,6 +134,10 @@ def main(argv):
         if d in dirs and d not in leave_out:
             include.append(d)
     exclude += leave_out
+    # A pack that is here only because another needs it is built, not tested:
+    # its tests import services the first one does not, and nobody runs them.
+    for k in sorted(need - requested):
+        exclude += [f"internal/services/{k}/**/*_test.go", f"internal/services/{k}/**/testdata"]
 
     patterns = ["/*", "!/internal/services/*/*/", "!/internal/generated/*/*/", "!/behavior/*/*/",
                 "!/internal/allservices/svc_*.go", "!/specs/*/", "!/test/behavior/*/"]

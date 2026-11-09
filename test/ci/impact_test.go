@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // shard.py must put every package in exactly one shard, whatever the costs say,
@@ -166,5 +168,85 @@ func TestRaceIsStrictOnMain(t *testing.T) {
 	makefile, _ := os.ReadFile(filepath.Join(root, "Makefile"))
 	if !regexp.MustCompile(`(?m)^RACE_FLAGS \?=\s*$`).Match(makefile) || !regexp.MustCompile(`(?m)^RACE_PKGS \?=\s*$`).Match(makefile) {
 		t.Error("the Makefile's race defaults are not empty: make test-race must be strict unless told otherwise")
+	}
+}
+
+// Every plan output a job reads is one the plan job declares, and every value
+// the plan job declares comes from a key its steps write: cmd/affected's gates
+// through scripts/ci-plan.py, and the mutation plan's shards and count. A
+// misspelt name reads as empty, and an empty gate must not read as unaffected.
+func TestPlanOutputsAreWhatThePlanEmits(t *testing.T) {
+	root := repo(t)
+	raw, err := os.ReadFile(filepath.Join(root, ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wf struct {
+		Jobs map[string]struct {
+			Outputs map[string]string `yaml:"outputs"`
+			Env     map[string]string `yaml:"env"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(raw, &wf); err != nil {
+		t.Fatal(err)
+	}
+	declared := wf.Jobs["plan"].Outputs
+	for _, m := range regexp.MustCompile(`needs\.plan\.outputs\.([A-Za-z0-9_-]+)`).FindAllStringSubmatch(string(raw), -1) {
+		if _, ok := declared[m[1]]; !ok {
+			t.Errorf("ci.yml reads needs.plan.outputs.%s, which the plan job does not declare", m[1])
+		}
+	}
+
+	out, err := runIn(root, "go", "run", "./cmd/affected", "-json", "-files", "/dev/null").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var affected struct {
+		Jobs map[string]bool `json:"jobs"`
+	}
+	if err := json.Unmarshal(out, &affected); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "a.json")
+	os.WriteFile(path, out, 0o644)
+	plan, err := run(t, root, nil, "python3", "-I", filepath.Join(root, "scripts", "ci-plan.py"), path)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, plan)
+	}
+	emitted := map[string]map[string]bool{"affected": {}, "mutation": {"shards": true, "count": true}}
+	for _, line := range strings.Split(plan, "\n") {
+		if k, _, ok := strings.Cut(line, "="); ok {
+			emitted["affected"][k] = true
+		} else if k, ok := strings.CutSuffix(line, "<<__AFFECTED__"); ok {
+			emitted["affected"][k] = true
+		}
+	}
+	for name, expr := range declared {
+		m := regexp.MustCompile(`^\$\{\{ steps\.(affected|mutation)\.outputs\.([A-Za-z0-9_-]+) \}\}$`).FindStringSubmatch(expr)
+		if m == nil || !emitted[m[1]][m[2]] {
+			t.Errorf("plan output %s is %q, which no step writes", name, expr)
+		}
+	}
+	// Each gate cmd/affected computes is a job that reads it as its GATE.
+	if len(affected.Jobs) == 0 {
+		t.Fatal("cmd/affected computes no gate")
+	}
+	for gate := range affected.Jobs {
+		if got := wf.Jobs[gate].Env["GATE"]; got != "${{ needs.plan.outputs."+gate+" }}" {
+			t.Errorf("job %s reads GATE=%q", gate, got)
+		}
+	}
+	for job, j := range wf.Jobs {
+		if _, gated := j.Env["GATE"]; gated {
+			if _, known := affected.Jobs[job]; !known {
+				t.Errorf("job %s has a GATE cmd/affected does not compute", job)
+			}
+		}
+	}
+	// Skipping is only ever on an explicit false or 0.
+	for _, bad := range []string{"env.GATE != 'true'\n        run: echo", "env.GATE == 'true'"} {
+		if strings.Contains(string(raw), bad) {
+			t.Errorf("ci.yml gates on %q, which reads a missing answer as unaffected", bad)
+		}
 	}
 }

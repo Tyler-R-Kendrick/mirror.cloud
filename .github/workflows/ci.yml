@@ -39,15 +39,17 @@ jobs:
       - name: what changed
         if: github.event_name == 'pull_request'
         run: |
-          git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed.txt"
-          git diff --unified=0 --no-color HEAD^1 HEAD > "$RUNNER_TEMP/pr.diff"
-          echo "$(wc -l < "$RUNNER_TEMP/changed.txt") files changed"
+          # NUL-separated and never renamed: every name exactly as it is, both
+          # sides of a move, and no quoting a name could hide behind.
+          git diff -z --name-only --no-renames HEAD^1 HEAD > "$RUNNER_TEMP/changed.z"
+          git -c core.quotePath=false diff --unified=0 --no-color --no-renames HEAD^1 HEAD > "$RUNNER_TEMP/pr.diff"
+          echo "$(tr -cd '\0' < "$RUNNER_TEMP/changed.z" | wc -c) files changed"
       - name: affected packages and gates
         id: affected
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = pull_request ]; then
-            go run ./cmd/affected -json -files "$RUNNER_TEMP/changed.txt" > "$RUNNER_TEMP/affected.json"
+            go run ./cmd/affected -json -z -files "$RUNNER_TEMP/changed.z" > "$RUNNER_TEMP/affected.json"
           else
             go run ./cmd/affected -json -all -files /dev/null > "$RUNNER_TEMP/affected.json"
           fi
@@ -183,6 +185,8 @@ jobs:
       - name: skipped as unaffected
         if: env.TARGETS == '0'
         run: echo "no fuzz target is in a package this change can reach"
+      - name: the plan sized this job
+        run: '[[ "$TARGETS" =~ ^[0-9]+$ ]] || { echo "::error::plan gave TARGETS=$TARGETS"; exit 1; }'
       - uses: actions/checkout@v6
         if: env.TARGETS != '0'
       - uses: ./.github/actions/go
@@ -226,6 +230,8 @@ jobs:
       - name: skipped as unaffected
         if: env.PACKAGES == '0'
         run: echo "this change reaches no package"
+      - name: the plan sized this job
+        run: '[[ "$PACKAGES" =~ ^[0-9]+$ ]] || { echo "::error::plan gave PACKAGES=$PACKAGES"; exit 1; }'
       - uses: actions/checkout@v6
         if: env.PACKAGES != '0'
         with:
@@ -270,26 +276,31 @@ jobs:
       GATE: ${{ needs.plan.outputs.image }}
     steps:
       - name: skipped as unaffected
-        if: env.GATE != 'true'
+        if: env.GATE == 'false'
         run: echo "nothing the image is built from changed"
+      - name: the plan named this gate
+        # Anything but true or false means the plan did not say; run nothing
+        # and fail, rather than read a missing answer as unaffected.
+        if: env.GATE != 'true' && env.GATE != 'false'
+        run: echo "::error::plan gave this gate '$GATE', not true or false" && exit 1
       - uses: actions/checkout@v6
-        if: env.GATE == 'true'
+        if: env.GATE != 'false'
       - uses: ./.github/actions/go
-        if: env.GATE == 'true'
+        if: env.GATE != 'false'
         with:
           cache: test
           save: "false"
       - name: build with a service list
-        if: env.GATE == 'true'
+        if: env.GATE != 'false'
         run: docker build --build-arg SERVICES=@profiles/core.txt -t mirror-core .
       - name: it serves exactly that list, from a scratch image
-        if: env.GATE == 'true'
+        if: env.GATE != 'false'
         run: |
           got=$(docker run --rm mirror-core services | cut -f1 | sort | tr '\n' ' ')
           want=$(grep -v '^#' profiles/core.txt | sort | tr '\n' ' ')
           [ "$got" = "$want" ] || { echo "::error::image serves: $got; profile lists: $want"; exit 1; }
       - name: the release image builds for both architectures
-        if: env.GATE == 'true'
+        if: env.GATE != 'false'
         run: |
           set -euo pipefail
           python3 -I scripts/slim-overlay.py "$RUNNER_TEMP/overlay.json" @profiles/core.txt
@@ -360,7 +371,7 @@ jobs:
       - name: the diff the mutants are chosen from
         if: github.event_name == 'pull_request'
         run: |
-          git diff --unified=0 --no-color HEAD^1 HEAD > "$RUNNER_TEMP/pr.diff"
+          git -c core.quotePath=false diff --unified=0 --no-color --no-renames HEAD^1 HEAD > "$RUNNER_TEMP/pr.diff"
           echo "MUTATION_DIFF=$RUNNER_TEMP/pr.diff" >> "$GITHUB_ENV"
       - name: mutation shard ${{ matrix.shard }} of ${{ needs.plan.outputs.mutation-count }}
         env:
@@ -387,22 +398,27 @@ jobs:
       GATE: ${{ needs.plan.outputs.generated-models }}
     steps:
       - name: skipped as unaffected
-        if: env.GATE != 'true'
+        if: env.GATE == 'false'
         run: echo "nothing the models are generated from changed"
+      - name: the plan named this gate
+        # Anything but true or false means the plan did not say; run nothing
+        # and fail, rather than read a missing answer as unaffected.
+        if: env.GATE != 'true' && env.GATE != 'false'
+        run: echo "::error::plan gave this gate '$GATE', not true or false" && exit 1
       - uses: actions/checkout@v6
-        if: env.GATE == 'true'
+        if: env.GATE != 'false'
       - uses: ./.github/actions/go
-        if: env.GATE == 'true'
+        if: env.GATE != 'false'
         with:
           cache: test
           save: "false"
       - name: regenerate from the pinned specs
-        if: env.GATE == 'true'
+        if: env.GATE != 'false'
         run: |
           make specs-sync
           make generate
       - name: models reproduce byte-for-byte
-        if: env.GATE == 'true'
+        if: env.GATE != 'false'
         # `make specs-sync` fetches exactly what the lock pins -- the AWS
         # models at the recorded commit, the committed Discovery document --
         # so this is deterministic. A diff means the committed models no
@@ -437,25 +453,30 @@ jobs:
       GATE: ${{ needs.plan.outputs.cloudflare-miniflare }}
     steps:
       - name: skipped as unaffected
-        if: env.GATE != 'true'
+        if: env.GATE == 'false'
         run: echo "nothing the miniflare suite builds or drives changed"
+      - name: the plan named this gate
+        # Anything but true or false means the plan did not say; run nothing
+        # and fail, rather than read a missing answer as unaffected.
+        if: env.GATE != 'true' && env.GATE != 'false'
+        run: echo "::error::plan gave this gate '$GATE', not true or false" && exit 1
       - uses: actions/checkout@v6
-        if: env.GATE == 'true'
+        if: env.GATE != 'false'
       - uses: ./.github/actions/go
-        if: env.GATE == 'true'
+        if: env.GATE != 'false'
         with:
           cache: test
           save: "false"
       - uses: actions/setup-node@v4
-        if: env.GATE == 'true'
+        if: env.GATE != 'false'
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: tools/cloudflare-runtime/package-lock.json
       - name: provision pinned miniflare/workerd
-        if: env.GATE == 'true'
+        if: env.GATE != 'false'
         run: npm ci --no-audit --no-fund
         working-directory: tools/cloudflare-runtime
       - name: live miniflare session suite
-        if: env.GATE == 'true'
+        if: env.GATE != 'false'
         run: set -o pipefail; make test-cloudflare-miniflare 2>&1 | tee -a ci-run.log

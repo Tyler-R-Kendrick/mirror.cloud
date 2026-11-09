@@ -39,12 +39,12 @@ type rule struct {
 	why     string
 }
 
-// machinery is how CI selects and runs the scoped jobs: the selector, the plan,
+// Machinery is how CI selects and runs the scoped jobs: the selector, the plan,
 // the shard tables and the targets list. A change to one of them can change what
 // every pull request runs, so it selects everything, and race, fuzz and the
 // mutation suite (internal/mutation select_test.go keeps the same list) run in
 // full on that pull request.
-var machinery = []string{
+var Machinery = []string{
 	"Makefile",
 	".github/workflows/ci.yml",
 	".github/actions/**",
@@ -106,8 +106,8 @@ var rules = append(machineryRules(), []rule{
 }...)
 
 func machineryRules() []rule {
-	out := make([]rule, len(machinery))
-	for i, m := range machinery {
+	out := make([]rule, len(Machinery))
+	for i, m := range Machinery {
 		out[i] = rule{pattern: m, all: true, why: "how CI selects and runs the scoped jobs"}
 	}
 	return out

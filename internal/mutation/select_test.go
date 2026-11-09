@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/affected"
 )
 
 // Which mutants a run selects, and how a selection is split across shards.
@@ -24,18 +26,21 @@ import (
 // request passes the files it changed (MUTATION_DIFF, from `git diff -U0`, or
 // MUTATION_FILES), and a mutant is selected when
 //
-//   - its file changed, so no mutant on a changed line is ever skipped;
-//   - any file of the package it runs changed (its source, tests, embedded
-//     files or testdata), or a test helper its tests import (a package only
-//     test files import, such as internal/spitest);
+//   - its file, or a file beside it, changed, so no mutant on a changed line
+//     is ever skipped;
+//   - the package whose tests must kill it is one internal/affected selects
+//     for the diff: its tests link changed code (a mutant whose file is in
+//     another package, a test helper such as internal/spitest), its own tests
+//     or testdata changed, or its tests read a changed file at run time (data
+//     outside testdata, such as internal/equivalence/traces);
 //   - its own entry in this table changed (needs MUTATION_DIFF for the lines;
 //     with MUTATION_FILES alone a change to this package selects everything);
-//   - or the diff touches what every mutant depends on: go.mod, go.sum, the CI
-//     machinery (machinery, below), a name the diff quotes or a header it
-//     cannot read, or a
-//     declaration of this package other than the table, an init that appends
-//     to it (which selects the entries it appends) and the imports: the
-//     harness.
+//   - or the diff touches what every mutant depends on: whatever makes
+//     internal/affected select everything (go.mod, go.sum, its Machinery list,
+//     a path it cannot place), a name the diff quotes or a header it cannot
+//     read, or a declaration of this package other than the table, an init
+//     that appends to it (which selects the entries it appends) and the
+//     imports: the harness.
 //
 // MUTATION_PKGS and MUTATION_NAMES select by package and by name, for running
 // part of the table locally. Filters add up; an empty selection under a filter
@@ -378,11 +383,6 @@ func selectMutants(root string, sel selection) ([]int, string, error) {
 	if sel.all {
 		return all(sel.reason)
 	}
-	for f := range sel.files {
-		if isMachinery(f) {
-			return all(f + " changed")
-		}
-	}
 	byEntry := map[string]bool{}
 	harnessFiles := false
 	for f := range sel.files {
@@ -403,134 +403,56 @@ func selectMutants(root string, sel selection) ([]int, string, error) {
 		}
 		byEntry = picked
 	}
-	// A change anywhere in a package (its source, its tests, what it embeds,
-	// its testdata) can move whether that package's tests still kill each of
-	// its mutants, so it selects all of them.
+	// The packages the diff can reach are the ones cmd/affected selects
+	// (internal/affected): every package whose test binary links changed code,
+	// a package whose own tests or testdata changed, and a package whose tests
+	// read a changed file at run time. A mutant runs when the package whose
+	// tests must kill it is one of them, which covers a mutant whose file is in
+	// another package, a test helper such as internal/spitest, and data a test
+	// reads from outside testdata. It also runs when its own file, or any file
+	// beside it, changed. Everything affected cannot rule out (go.mod, the CI
+	// machinery, a path it cannot place) is every mutant.
+	reached := map[string]bool{}
 	dirs := map[string]bool{}
-	for f := range sel.files {
-		dirs[pkgDir(f)] = true
-	}
-	// A test helper's change reaches the mutants of every package whose tests
-	// import it.
-	helped := map[string]bool{}
-	if len(dirs) > 0 {
-		helpers, err := testHelpers(root)
+	if len(sel.files) > 0 {
+		g, err := affectedGraph(root)
 		if err != nil {
 			return nil, "", err
 		}
-		for dir := range dirs {
-			for _, pkg := range helpers[dir] {
-				helped[pkg] = true
-			}
+		var changed []string
+		for f := range sel.files {
+			changed = append(changed, f)
+			dirs[path.Dir(f)] = true
+		}
+		sort.Strings(changed)
+		r := g.Select(changed)
+		if r.All {
+			return all(r.Reason)
+		}
+		for _, p := range r.Pkgs {
+			reached[p] = true
 		}
 	}
 	var out []int
 	for i, m := range mutants {
 		file := filepath.ToSlash(m.file)
-		dir := strings.TrimPrefix(m.pkg, "./")
-		if sel.files[file] || dirs[dir] || helped[m.pkg] || sel.pkgs[m.pkg] || sel.names[m.name] || byEntry[m.name] {
+		if sel.files[file] || dirs[path.Dir(file)] || reached[m.pkg] || sel.pkgs[m.pkg] || sel.names[m.name] || byEntry[m.name] {
 			out = append(out, i)
 		}
 	}
 	return out, "", nil
 }
 
-// machinery is what every mutant depends on beyond its package: the module's
-// requirements, and how CI selects and runs the scoped jobs (cmd/affected's
-// list of the same name). A change to any of it runs the whole table.
-var machinery = []string{
-	"go.mod",
-	"go.sum",
-	"Makefile",
-	".github/workflows/ci.yml",
-	".github/actions/**",
-	"scripts/fuzz.sh",
-	"scripts/fuzz-targets.txt",
-	"scripts/shard.py",
-	"scripts/ci-plan.py",
-	"test/race-costs.json",
-	"cmd/affected/**",
-	"internal/affected/**",
-}
-
-func isMachinery(f string) bool {
-	for _, m := range machinery {
-		if prefix, ok := strings.CutSuffix(m, "**"); ok && strings.HasPrefix(f, prefix) || f == m {
-			return true
-		}
-	}
-	return false
-}
-
-// pkgDir is the directory of the package a changed file belongs to: its own,
-// or for anything under testdata, the one that holds testdata.
-func pkgDir(f string) string {
-	if i := strings.Index("/"+f, "/testdata/"); i >= 0 {
-		if i == 0 {
-			return "."
-		}
-		return f[:i-1]
-	}
-	return path.Dir(f)
-}
-
 var (
-	helpersOnce sync.Once
-	helpersMap  map[string][]string
-	helpersErr  error
+	graphOnce sync.Once
+	graph     *affected.Graph
+	graphErr  error
 )
 
-// testHelpers maps the directory of each test helper (a module package that
-// only test files import, such as internal/spitest) to the packages, as ./dir,
-// whose tests import it.
-func testHelpers(root string) (map[string][]string, error) {
-	helpersOnce.Do(func() {
-		cmd := exec.Command("go", "list", "-e", "-f", "{{.ImportPath}}\t{{.Dir}}\t{{join .Imports \" \"}}\t{{join .TestImports \" \"}} {{join .XTestImports \" \"}}", "./...")
-		cmd.Dir = root
-		out, err := cmd.Output()
-		if err != nil {
-			helpersErr = fmt.Errorf("go list: %v", err)
-			return
-		}
-		modCmd := exec.Command("go", "list", "-m")
-		modCmd.Dir = root
-		mod, err := modCmd.Output()
-		if err != nil {
-			helpersErr = fmt.Errorf("go list -m: %v", err)
-			return
-		}
-		module := strings.TrimSpace(string(mod)) + "/"
-		type pkg struct{ dir, rel string }
-		byPath := map[string]pkg{}
-		imported := map[string]bool{}
-		testImports := map[string][]string{} // import path -> packages whose tests import it
-		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-			f := strings.Split(line, "\t")
-			if len(f) != 4 || !strings.HasPrefix(f[0], module) {
-				continue
-			}
-			rel := "./" + strings.TrimPrefix(f[0], module)
-			d, _ := filepath.Rel(root, f[1])
-			byPath[f[0]] = pkg{filepath.ToSlash(d), rel}
-			for _, ip := range strings.Fields(f[2]) {
-				imported[ip] = true
-			}
-			seen := map[string]bool{}
-			for _, ip := range strings.Fields(f[3]) {
-				if !seen[ip] { // a test and an external test can both import it
-					seen[ip] = true
-					testImports[ip] = append(testImports[ip], rel)
-				}
-			}
-		}
-		helpersMap = map[string][]string{}
-		for ip, users := range testImports {
-			if p, ok := byPath[ip]; ok && !imported[ip] {
-				helpersMap[p.dir] = users
-			}
-		}
-	})
-	return helpersMap, helpersErr
+// affectedGraph loads the module's package graph once per process.
+func affectedGraph(root string) (*affected.Graph, error) {
+	graphOnce.Do(func() { graph, graphErr = affected.Load(root) })
+	return graph, graphErr
 }
 
 // cost is the measured CPU seconds one mutant of pkg takes: the compile and
@@ -696,11 +618,19 @@ func TestNoMutantOnAChangedLineIsSkipped(t *testing.T) {
 
 func TestADiffSelectsWhatItTouches(t *testing.T) {
 	root := repoRoot(t)
-	if got, _ := selectDiff(t, root, hunk("docs/TESTING.md", 3)+hunk("README.md", 1)); len(got) != 0 {
-		t.Errorf("a documentation diff selected %d mutants", len(got))
+	if got, _ := selectDiff(t, root, hunk("README.md", 1)+hunk("CONTRIBUTING.md", 1)); len(got) != 0 {
+		t.Errorf("a root Markdown diff selected %d mutants", len(got))
+	}
+	// docs/ is read by a few packages' tests; it selects their mutants alone.
+	readers := map[string]bool{"./internal/check": true, "./internal/runtime": true, "./test/behavior/cloudflare": true, "./test/behavior/vercel": true}
+	got, _ := selectDiff(t, root, hunk("docs/TESTING.md", 3))
+	for _, i := range got {
+		if !readers[mutants[i].pkg] {
+			t.Errorf("docs/TESTING.md selected %s (%s)", mutants[i].name, mutants[i].pkg)
+		}
 	}
 	// A deleted Markdown rule inside a hunk is content, not a file header.
-	if got, _ := selectDiff(t, root, "diff --git a/docs/X.md b/docs/X.md\n--- a/docs/X.md\n+++ b/docs/X.md\n@@ -3,2 +3,0 @@\n---- a/internal/engine/page.go\n-x\n"); len(got) != 0 {
+	if got, _ := selectDiff(t, root, "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -3,2 +3,0 @@\n---- a/internal/engine/page.go\n-x\n"); len(got) != 0 {
 		t.Errorf("a deleted line read as a header selected %d mutants", len(got))
 	}
 	for _, f := range []string{"go.mod", "go.sum"} {
@@ -712,14 +642,15 @@ func TestADiffSelectsWhatItTouches(t *testing.T) {
 	if got, _ := selectDiff(t, root, "diff --git a/go.sum b/go.sum\nBinary files a/go.sum and b/go.sum differ\n"); len(got) != len(mutants) {
 		t.Errorf("a binary change to go.sum selected %d", len(got))
 	}
-	// A test file of a mutated package selects that package's mutants alone.
-	got, _ := selectDiff(t, root, hunk("internal/engine/page_test.go", 1))
+	// A test file of a mutated package selects the mutants its tests run and
+	// the mutants on files beside it, and no other package's tests.
+	got, _ = selectDiff(t, root, hunk("internal/engine/page_test.go", 1))
 	if len(got) == 0 {
 		t.Fatal("a test of internal/engine selected nothing")
 	}
 	for _, i := range got {
-		if mutants[i].pkg != "./internal/engine" {
-			t.Errorf("a test of internal/engine selected %s (%s)", mutants[i].name, mutants[i].pkg)
+		if m := mutants[i]; m.pkg != "./internal/engine" && filepath.ToSlash(filepath.Dir(m.file)) != "internal/engine" {
+			t.Errorf("a test of internal/engine selected %s (%s)", m.name, m.pkg)
 		}
 	}
 
@@ -798,56 +729,77 @@ func mustSelect(t *testing.T, root string, sel selection) ([]int, string) {
 	return got, reason
 }
 
-// A change anywhere in a mutated package selects every mutant of it, and a
-// test helper selects the mutants of every package whose tests import it.
-func TestAPackageChangeSelectsItsMutants(t *testing.T) {
+// The mutants a diff reaches through cmd/affected's selection: a change to a
+// package reaches every mutant whose tests link it, wherever the mutant's own
+// file is; data a test reads from outside testdata reaches that test's mutants.
+// These are the reviewer's cases.
+func TestADiffReachesTheMutantsWhoseTestsItReaches(t *testing.T) {
 	root := repoRoot(t)
-	of := func(pkg string) int {
-		n := 0
-		for _, m := range mutants {
-			if m.pkg == pkg {
-				n++
+	names := func(diff string) map[string]bool {
+		got, reason := selectDiff(t, root, diff)
+		if reason != "" {
+			t.Fatalf("%q selected everything: %s", diff, reason)
+		}
+		out := map[string]bool{}
+		for _, i := range got {
+			out[mutants[i].name] = true
+		}
+		return out
+	}
+	// The mutant's file is internal/edge/edge.go and its test runs in
+	// internal/spine, which links internal/edge.
+	if !names(hunk("internal/edge/resolve.go", 1))["edge-drop-fault-response-headers"] {
+		t.Error("internal/edge/resolve.go does not select edge-drop-fault-response-headers")
+	}
+	// Recorded traces, read by internal/equivalence's tests, kill these.
+	if got := names(hunk("internal/equivalence/traces/aws.account.json", 1)); !got["secretsmanager-reject-secret-arn"] || !got["secretsmanager-list-planned-deletion"] {
+		t.Error("a recorded trace does not select the secretsmanager mutants internal/equivalence kills")
+	}
+	// test/behavior/vercel/oracle is data its own package reads.
+	oracle := names(hunk("test/behavior/vercel/oracle/answers.json", 1))
+	n := 0
+	for _, m := range mutants {
+		if m.pkg == "./test/behavior/vercel" {
+			n++
+			if !oracle[m.name] {
+				t.Errorf("the Vercel oracle does not select %s", m.name)
 			}
 		}
-		return n
 	}
-	for _, f := range []string{"internal/engine/a_new_file.go", "internal/engine/testdata/x.json", "internal/engine/page_test.go"} {
-		got, _ := selectDiff(t, root, hunk(f, 1))
-		if len(got) != of("./internal/engine") {
-			t.Errorf("%s selected %d, want all %d of internal/engine's", f, len(got), of("./internal/engine"))
-		}
+	if n == 0 {
+		t.Error("no mutant runs in test/behavior/vercel; the case tests nothing")
 	}
-	helpers, err := testHelpers(root)
+	// A test helper reaches the mutants of every package whose tests link it.
+	g, err := affectedGraph(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	users := helpers["internal/spitest"]
-	if len(users) == 0 {
-		t.Fatal("internal/spitest is not found as a test helper")
+	reached := map[string]bool{}
+	for _, p := range g.Select([]string{"internal/spitest/spitest.go"}).Pkgs {
+		reached[p] = true
 	}
-	got, _ := selectDiff(t, root, hunk("internal/spitest/spitest.go", 1))
-	want := 0
-	for _, u := range users {
-		want += of(u)
+	spitest := names(hunk("internal/spitest/spitest.go", 1))
+	for _, m := range mutants {
+		if reached[m.pkg] && !spitest[m.name] {
+			t.Errorf("internal/spitest reaches %s but not %s", m.pkg, m.name)
+		}
 	}
-	if want == 0 || len(got) != want {
-		t.Errorf("internal/spitest selected %d mutants, want the %d of the packages whose tests import it", len(got), want)
-	}
-	// A production package imported by code is no helper.
-	if _, ok := helpers["internal/engine"]; ok {
-		t.Error("internal/engine counted as a test helper")
+	// A file beside a mutant's own selects it even when its tests run elsewhere.
+	if !names(hunk("internal/edge/new_file.txt", 1))["edge-drop-fault-response-headers"] {
+		t.Error("a file beside internal/edge/edge.go does not select its mutants")
 	}
 }
 
-// The machinery every mutant depends on selects them all, as cmd/affected
-// selects every package for the same list.
+// What every mutant depends on beyond its package selects them all: the
+// module's requirements and the CI machinery, from the one list in
+// internal/affected.
 func TestMachinerySelectsEveryMutant(t *testing.T) {
 	root := repoRoot(t)
-	for _, f := range []string{
-		"go.mod", "go.sum", "Makefile", ".github/workflows/ci.yml", ".github/actions/go/action.yml",
-		"scripts/fuzz.sh", "scripts/fuzz-targets.txt", "scripts/shard.py", "scripts/ci-plan.py",
-		"test/race-costs.json", "cmd/affected/affected.go",
-	} {
+	files := []string{"go.mod", "go.sum"}
+	for _, m := range affected.Machinery {
+		files = append(files, strings.TrimSuffix(m, "**")+map[bool]string{true: "x.go", false: ""}[strings.HasSuffix(m, "**")])
+	}
+	for _, f := range files {
 		if got, reason := selectDiff(t, root, hunk(f, 1)); len(got) != len(mutants) || reason == "" {
 			t.Errorf("%s selected %d of %d", f, len(got), len(mutants))
 		}
@@ -941,8 +893,15 @@ func TestRealDiffsSelectWhatTheyTouch(t *testing.T) {
 	os.WriteFile(filepath.Join(repo, "internal", "engine", "café.go"), []byte("package engine\n"), 0o644)
 	git("add", ".")
 	git("commit", "-qm", "non-ascii")
-	if got, reason := selectDiff(t, root, diff()); reason != "" || len(got) == 0 || mutants[got[0]].pkg != "./internal/engine" {
-		t.Errorf("a non-ASCII name in internal/engine selected %d (%s)", len(got), reason)
+	got, reason = selectDiff(t, root, diff())
+	engine := 0
+	for _, i := range got {
+		if mutants[i].pkg == "./internal/engine" {
+			engine++
+		}
+	}
+	if reason != "" || engine == 0 || len(got) == len(mutants) {
+		t.Errorf("a non-ASCII name in internal/engine selected %d, %d of them internal/engine's (%s)", len(got), engine, reason)
 	}
 
 	// A tab in a name: git quotes it whatever core.quotePath says, and a

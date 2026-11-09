@@ -3,6 +3,7 @@ package sns
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -147,13 +148,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "topics").Delete(ctx, name)
 		_ = p.col(req, "tags").Delete(ctx, arn)
 		_ = p.col(req, "dpp").Delete(ctx, arn)
-		kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
-		for _, kv := range kvs {
-			var sub map[string]any
-			if json.Unmarshal(kv.Value, &sub) == nil && str(sub["TopicArn"]) == arn {
-				_ = p.col(req, "subs").Delete(ctx, kv.Key)
-			}
-		}
+		p.dropSubscriptions(ctx, req, "TopicArn", arn)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "GetTopicAttributes":
 		arn := str(req.Input["TopicArn"])
@@ -1368,13 +1363,7 @@ func matchPolicy(pol map[string]any, attrs map[string]any) bool {
 
 func attrValue(v any) string {
 	m := spi.Object(v)
-	if s := str(m["Value"]); s != "" {
-		return s
-	}
-	if s := str(m["StringValue"]); s != "" {
-		return s
-	}
-	return str(v)
+	return cmp.Or(str(m["Value"]), str(m["StringValue"]), str(v))
 }
 
 func clauseMatch(want any, got string, present bool) bool {
@@ -1550,11 +1539,18 @@ func topicName(arn string) string {
 	return arn
 }
 
-func topicARN(in map[string]any) string {
-	if arn := str(in["TopicArn"]); arn != "" {
-		return arn
+// dropSubscriptions deletes every subscription whose member is arn: a deleted topic's, or endpoint's.
+func (p *Pack) dropSubscriptions(ctx context.Context, req *spi.Request, member, arn string) {
+	kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
+	for _, kv := range kvs {
+		if str(spi.JSONObject(kv.Value)[member]) == arn {
+			_ = p.col(req, "subs").Delete(ctx, kv.Key)
+		}
 	}
-	return str(in["TargetArn"])
+}
+
+func topicARN(in map[string]any) string {
+	return cmp.Or(str(in["TopicArn"]), str(in["TargetArn"]))
 }
 
 func topicResourceARN(arn string) bool {

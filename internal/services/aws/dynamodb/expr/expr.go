@@ -312,18 +312,15 @@ func eval(n node, item, values map[string]any) (any, error) {
 			raw = item[n.kids[0].val]
 		}
 		return attrType(raw) == fmt.Sprint(want), nil
-	case "+":
+	case "+", "-":
 		a, _ := eval(kid(0), item, values)
 		b, _ := eval(kid(1), item, values)
 		af, _ := toFloat(a)
 		bf, _ := toFloat(b)
+		if n.op == "-" {
+			return af - bf, nil
+		}
 		return af + bf, nil
-	case "-":
-		a, _ := eval(kid(0), item, values)
-		b, _ := eval(kid(1), item, values)
-		af, _ := toFloat(a)
-		bf, _ := toFloat(b)
-		return af - bf, nil
 	case "if_not_exists":
 		name := n.kids[0].val
 		if _, ok := item[name]; !ok {
@@ -409,18 +406,11 @@ func attrType(v any) string {
 func addAttr(cur, delta any) any {
 	if dm, ok := delta.(map[string]any); ok {
 		if ss, ok := dm["SS"].([]any); ok {
-			exist := map[string]bool{}
-			out := []any{}
+			exist, out, members := map[string]bool{}, []any{}, ss // the set's members, then the delta's, each once
 			if cm, ok := cur.(map[string]any); ok {
-				for _, x := range asList(cm) {
-					s := fmt.Sprint(unwrap(x))
-					if !exist[s] {
-						exist[s] = true
-						out = append(out, x)
-					}
-				}
+				members = append(asList(cm), ss...)
 			}
-			for _, x := range ss {
+			for _, x := range members {
 				s := fmt.Sprint(unwrap(x))
 				if !exist[s] {
 					exist[s] = true

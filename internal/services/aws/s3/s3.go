@@ -3,6 +3,7 @@ package s3
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/md5"
 	"crypto/sha1"
@@ -5369,10 +5370,7 @@ func applyCopySourceRange(body []byte, value string) ([]byte, error) {
 }
 
 func objectETag(meta map[string]any, md5sum string) string {
-	if etag := spi.Str(meta["etag"]); etag != "" {
-		return etag
-	}
-	return `"` + md5sum + `"`
+	return cmp.Or(spi.Str(meta["etag"]), `"`+md5sum+`"`)
 }
 
 var (

@@ -3,6 +3,7 @@ package events
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -304,10 +305,7 @@ func eventBusName(bus string) string {
 	if _, name, ok := strings.Cut(bus, ":event-bus/"); ok {
 		return name
 	}
-	if bus == "" {
-		return "default"
-	}
-	return bus
+	return cmp.Or(bus, "default")
 }
 
 func eventKey(bus, name string) string { return bus + "\x00" + name }

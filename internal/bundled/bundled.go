@@ -19,6 +19,7 @@ package bundled
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"sync"
 
@@ -32,6 +33,12 @@ import (
 )
 
 func init() {
+	// A fuzz worker is killed as hung when an input is slow, and its first input
+	// would pay for decoding every model (seconds, more on a loaded runner), which
+	// process start used to pay for it. So a worker pays it before it takes one.
+	if slices.Contains(os.Args[1:], "-test.fuzzworker") {
+		specboot.Bundle()
+	}
 	for _, id := range ServiceIDs() {
 		registry.Register(registry.Factory{
 			ServiceID: id,
@@ -102,19 +109,13 @@ func servedModel(id string) (*model.Service, error) {
 	return generated.Model(id)
 }
 
-// shadowOf reports a bundle's shadow reason. Loading is cheap enough to do
-// once per bundle at init, and a bundle that cannot load at all is caught by
-// the factory rather than silently treated as shadowed.
+// shadowOf reports a bundle's shadow reason from its header. It runs for every
+// bundle at process start, so it must not load or validate one: that parsed and
+// type-checked every expression of all of them, four seconds and 2.4 GB in every
+// binary that imports this package, to read one string. A bundle that cannot
+// load is caught by the factory, and TestEveryBundleLoads loads them all.
 func shadowOf(id string) (string, error) {
-	svc, err := servedModel(id)
-	if err != nil {
-		return "", err
-	}
-	ir, err := behaviors.Load(id, svc)
-	if err != nil {
-		return "", err
-	}
-	return ir.Shadow, nil
+	return behaviors.ShadowOf(id)
 }
 
 // built caches one compiled engine per service, so the second and later calls

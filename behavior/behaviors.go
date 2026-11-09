@@ -99,6 +99,13 @@ func Load(serviceID string, svc *model.Service) (*bir.Service, error) {
 	return bir.Load(files, Dir(serviceID), svc)
 }
 
+// ShadowOf reports a bundle's shadow reason ("" when it serves) from its header
+// alone. Unlike Load it validates nothing, so it is cheap enough for process
+// start; a bundle that does not load is caught where it is built.
+func ShadowOf(serviceID string) (string, error) {
+	return bir.ShadowOf(files, Dir(serviceID))
+}
+
 // Has reports whether a bundle exists for the service.
 func Has(serviceID string) bool {
 	dir := Dir(serviceID)

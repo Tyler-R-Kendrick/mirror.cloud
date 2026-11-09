@@ -1,8 +1,11 @@
 BIN := bin
 GO  := go
+# Whether the suites below may reuse a cached result. CI passes COUNT= on pull
+# requests, where main's cache is restored, and keeps the uncached default on main.
+COUNT ?= -count=1
 export CGO_ENABLED := 0
 
-.PHONY: all build test test-unit test-contract test-snapshot test-chaos test-bdd test-cicd-core test-cicd-process test-cicd-e2e cloudflare-evidence test-cloudflare-miniflare test-cloudflare-celld test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
+.PHONY: all build build-slim test test-unit test-contract test-snapshot test-chaos test-bdd test-cicd-core test-cicd-process test-cicd-e2e cloudflare-evidence test-cloudflare-miniflare test-cloudflare-celld test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
 
 all: build
 
@@ -11,6 +14,13 @@ build:
 	$(GO) build -o $(BIN)/mirror ./cmd/mirror
 	$(GO) build -o $(BIN)/awslocal ./cmd/awslocal
 	$(GO) build -o $(BIN)/gcslocal ./cmd/gcslocal
+
+# A build of only some services: make build-slim SERVICES=@profiles/core.txt, or
+# SERVICES="aws.s3 aws.sqs". See scripts/slim-overlay.py.
+build-slim:
+	mkdir -p $(BIN)
+	python3 scripts/slim-overlay.py $(BIN)/slim-overlay.json $(SERVICES)
+	$(GO) build -trimpath -ldflags '-s -w' -overlay $(BIN)/slim-overlay.json -o $(BIN)/mirror-slim ./cmd/mirror
 
 test: test-unit test-contract
 
@@ -23,23 +33,23 @@ test-unit:
 	$(GO) test ./internal/mutation -run '^TestMutantNeedlesExist$$' -count=1
 
 test-contract:
-	$(GO) test ./internal/conformance ./internal/proto/... -count=1
-	cd test/sdk/go && $(GO) test ./... -count=1
+	$(GO) test ./internal/conformance ./internal/proto/... $(COUNT)
+	cd test/sdk/go && $(GO) test ./... $(COUNT)
 
 test-snapshot:
-	$(GO) test ./internal/edge ./internal/identity ./internal/mock ./internal/proto/aws/restxml ./internal/runtime ./internal/specdiff -count=1
-	$(GO) test ./internal/services/aws/s3 -run 'Characterization$$|TestNamedBucketConfigurations$$|TestUploadPartCopyConditionsAndRange$$' -count=1
-	$(GO) test ./internal/services/aws/dynamodb -run 'Characterization$$' -count=1
-	$(GO) test ./test/behavior/aws -run 'Characterization$$' -count=1
-	$(GO) test ./internal/services/aws/states -run 'Characterization$$' -count=1
-	$(GO) test ./internal/services/gcp/gcs -run 'Characterization$$' -count=1
-	$(GO) test ./internal/bundled -run 'TestAzureBlobCharacterization$$' -count=1
+	$(GO) test ./internal/edge ./internal/identity ./internal/mock ./internal/proto/aws/restxml ./internal/runtime ./internal/specdiff $(COUNT)
+	$(GO) test ./internal/services/aws/s3 -run 'Characterization$$|TestNamedBucketConfigurations$$|TestUploadPartCopyConditionsAndRange$$' $(COUNT)
+	$(GO) test ./internal/services/aws/dynamodb -run 'Characterization$$' $(COUNT)
+	$(GO) test ./test/behavior/aws -run 'Characterization$$' $(COUNT)
+	$(GO) test ./internal/services/aws/states -run 'Characterization$$' $(COUNT)
+	$(GO) test ./internal/services/gcp/gcs -run 'Characterization$$' $(COUNT)
+	$(GO) test ./internal/bundled -run 'TestAzureBlobCharacterization$$' $(COUNT)
 
 test-chaos:
-	$(GO) test ./internal/chaos -count=1
+	$(GO) test ./internal/chaos $(COUNT)
 
 test-bdd:
-	$(GO) test ./test/behavior/... ./test/terraform -count=1
+	$(GO) test ./test/behavior/... ./test/terraform $(COUNT)
 
 test-cicd-core:
 	$(GO) test ./internal/execution/cicd/ ./internal/execution/cicd/lifecycle/ -count=1
@@ -67,136 +77,10 @@ test-cloudflare-celld:
 	$(GO) test -tags celld ./internal/execution/ -run 'TestCelld' -count=1 -v
 
 test-fuzz-seeds:
-	$(GO) test ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./test/behavior/aws ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/bundled ./internal/proto/aws/restjson ./internal/proto/aws/restxml ./internal/proto/graphql -count=1
+	$(GO) test ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./test/behavior/aws ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/bundled ./internal/proto/aws/restjson ./internal/proto/aws/restxml ./internal/proto/graphql $(COUNT)
 
 test-fuzz:
-	$(GO) test ./internal/edge -run '^$$' -fuzz '^FuzzDeframeAWSChunked$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/edge -run '^$$' -fuzz '^FuzzS3AWSChunkedContentEncoding$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/edge -run '^$$' -fuzz '^FuzzS3ResponseEnvelope$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/edge -run '^$$' -fuzz '^FuzzSignedGatewayHost$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzParse$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzLocalhostRegion$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzPresignedCredentialSyntax$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzS3AuthorizationTimeFault$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzS3AmzHeaderSigning$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzVerifyS3PresignedV4$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzVerifyS3AuthorizationV4$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzVerifyS3V4A$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzVerifyS3AuthorizationV2$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzVerifyS3PostPolicy$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzVerifyS3StreamingV4$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzVerifyS3StreamingTrailerV4$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzVerifyS3StreamingUnsignedTrailerV4$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzVerifyS3StreamingV4A$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzVerifyS3StreamingUnsignedTrailerV4A$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzVerifyS3PresignedV2$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/identity -run '^$$' -fuzz '^FuzzVerifyS3SessionToken$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/proto/aws/httpuri -run '^$$' -fuzz '^FuzzParseAndMatch$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/proto/aws/httpuri -run '^$$' -fuzz '^FuzzMatchAgainstARealService$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/proto/aws/restxml -run '^$$' -fuzz '^FuzzEmptyResponseHeaders$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/dynamodb/expr -run '^$$' -fuzz '^FuzzEvalBool$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/dynamodb/expr -run '^$$' -fuzz '^FuzzApplyUpdate$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzTableLifecycle$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBBinaryValues$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBTableClass$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBTableMetadata$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBDefaultSSE$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBBackupInsights$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBPartiQL$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBStreamRecords$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBKinesisDestination$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBGlobalTable$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/dynamodb -run '^$$' -fuzz '^FuzzDynamoDBTransactions$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzListQueuesPagination$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzQueueMetadataAttributeSelection$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzQueueDeletionWindow$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzSendReceiveMessageDigest$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzReceiveMessageMaxNumber$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzEmptyReceiveOmitsMessages$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzReceiveMessageWaitTime$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzMessagesRemainQueueScoped$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzSendMessageBatchBodies$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzSendMessageBatchEntryCount$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzMessageSizeBoundary$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./test/behavior/aws -run '^$$' -fuzz '^FuzzSendMessageBatchSizeBoundary$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/firehose -run '^$$' -fuzz '^FuzzKPLDeaggregation$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzArchiveRestore$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzStorageClassValidation$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzObjectKeyLength$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCreateBucketCollisions$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCreateBucketTags$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCreateBucketObjectOwnership$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketOwnershipControls$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzPublicAccessBlock$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketRequestPayment$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketAccelerateConfiguration$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketLogging$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketCors$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketCorsHTTP$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzLocalStackCORSOrigins$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketWebsite$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketLifecycle$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketPolicy$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketEncryption$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzNamedBucketConfigurations$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzACLConfigurations$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketNotifications$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzDeleteBucketEmptiness$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCreateBucketLocations$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCrossRegionBucketResolution$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketVersioningState$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzObjectLockDefaultRetention$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzBucketNames$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzAccountRegionalBucketNames$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzXXHashChecksums$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzListBucketsPagination$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzListObjectsPagination$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzListEncodingType$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzListObjectVersionsPagination$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzListMultipartUploadsMarkers$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzListPartsPagination$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzNoSuchUploadFaults$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzMultipartPartNumberFaults$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzMultipartCompletionFaults$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzUploadPartContentMD5$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzUploadPartChecksumFaults$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzUploadPartSSECustomerKeyFaults$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCompleteMultipartChecksumTypeFault$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCompleteMultipartPreconditionFaults$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzWritePreconditionFaults$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzWriteConditionFaultDetails$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzWriteIfMatchRequiresSingleETag$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCompleteMultipartConditionalConflicts$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzDeleteObjectVersionRestoration$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzDeleteObjectMissingKeyVersionIsIdempotent$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzDeleteObjectUnversionedMissingKeyVersions$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzDeleteObjectsVersionSemantics$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzReplicationVersions$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzReplicationConfigurationValidation$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzReplicationDestinations$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzPostObjectMultipart$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzPostObjectPolicy$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzPostObjectTagging$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzPostObjectExpires$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzPostObjectChecksums$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzObjectServerSideEncryption$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzGetObjectResponseOverrides$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzUserMetadataRFC2047$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzExplicitKMSKeyValidation$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzObjectSSECustomerKey$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzMultipartServerSideEncryption$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzMultipartSSECustomerKey$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCopySourcePreconditions$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/s3 -run '^$$' -fuzz '^FuzzCopyObjectSSECustomerKeys$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/aws/states -run '^$$' -fuzz '^FuzzJSONPath$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/gcp/gcs -run '^$$' -fuzz '^FuzzParsePath$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/services/gcp/gcs -run '^$$' -fuzz '^FuzzObjectBytes$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzVercelRoute$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzCloudflareRoute$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/proto/aws/restxml -run '^$$' -fuzz '^FuzzAzureRoute$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/bundled -run '^$$' -fuzz '^FuzzBlobBytes$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/proto/aws/restjson -run '^$$' -fuzz '^FuzzDigitalOceanRoute$$' -fuzztime=10000x -parallel=4
-	$(GO) test ./internal/proto/graphql -run '^$$' -fuzz '^FuzzCodec$$' -fuzztime=10000x -parallel=4
+	bash scripts/fuzz.sh
 
 # The timeout is set from measurement, not from hope. The suite runs every
 # mutant against the full pack surface, so its cost tracks the emulator's
@@ -220,8 +104,12 @@ test-mutation-shard:
 	MUTATION_SHARD=$(MUTATION_SHARD) MUTATION_SHARDS=$(MUTATION_SHARDS) \
 	  $(GO) test ./internal/mutation -count=1 -parallel 4 -timeout 1800s
 
+# RACE_SHARD of RACE_SHARDS takes every Nth package; CI runs four, because the
+# race build of this suite is the longest single job there is.
+RACE_SHARD ?= 0
+RACE_SHARDS ?= 1
 test-race:
-	CGO_ENABLED=1 $(GO) test -race $$($(GO) list ./... | grep -v '/internal/mutation$$')
+	CGO_ENABLED=1 $(GO) test -race $$($(GO) list ./... | grep -v '/internal/mutation$$' | awk -v s=$(RACE_SHARD) -v n=$(RACE_SHARDS) 'NR % n == s')
 
 # Say which of a run's failures were expected, by name, and which were not.
 #

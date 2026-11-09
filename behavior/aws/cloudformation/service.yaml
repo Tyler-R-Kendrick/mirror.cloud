@@ -313,6 +313,11 @@ operations:
       - cond: "size(bytes(string(input.TemplateBody))) <= 51200"
         error: Validation
         message: "1 validation error detected: Value at 'templateBody' failed to satisfy constraint: Member must have length less than or equal to 51200"
+      # A UsePreviousValue: "If you specify true, do not specify a parameter
+      # value" (API reference, Parameter); the wording is a reading.
+      - cond: "!('Parameters' in input) || !input.Parameters.exists(p, 'UsePreviousValue' in p && string(p.UsePreviousValue) in ['true', 'True', 'TRUE'] && 'ParameterValue' in p)"
+        error: Validation
+        message: "Invalid input for parameter: Cannot specify usePreviousValue as true and non empty value for a parameter"
       # NotificationARNs: "Maximum number of 5 items", as CreateStack's.
       - cond: "!('NotificationARNs' in input) || size(input.NotificationARNs) <= 5"
         error: Validation

@@ -346,6 +346,9 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 	var order []string
 	var refs map[string]string
 	if err == nil {
+		err = undeclared(req.Input, tpl)
+	}
+	if err == nil {
 		known := parameters(req.Input, tpl)
 		maps.Copy(known, pseudo(req, stack, id))
 		p.tpl, refs = tpl, conditions(tpl, known)
@@ -1448,10 +1451,31 @@ func previous(in map[string]any, cur stack) {
 		in["NotificationARNs"] = cur.NotificationARNs
 	}
 	for _, p := range spi.Slice(in["Parameters"]) {
-		if v, ok := cur.Refs[str(asMap(p)["ParameterKey"])]; ok && isTrue(asMap(p)["UsePreviousValue"]) {
+		_, valued := asMap(p)["ParameterValue"] // one given both is refused (undeclared)
+		if v, ok := cur.Refs[str(asMap(p)["ParameterKey"])]; ok && !valued && isTrue(asMap(p)["UsePreviousValue"]) {
 			asMap(p)["ParameterValue"] = v
+			delete(asMap(p), "UsePreviousValue") // taken
 		}
 	}
+}
+
+// undeclared is the error for a request's parameter its template does not declare, or one given both a
+// value and UsePreviousValue: "If you specify true, do not specify a parameter value" (API reference,
+// Parameter). The wordings are readings.
+func undeclared(in, tpl map[string]any) error {
+	var keys []string
+	for _, p := range spi.Slice(in["Parameters"]) {
+		k := str(asMap(p)["ParameterKey"])
+		if _, valued := asMap(p)["ParameterValue"]; valued && isTrue(asMap(p)["UsePreviousValue"]) {
+			return invalid("Invalid input for parameter key " + k + ". Cannot specify usePreviousValue as true and non empty value for a parameter")
+		} else if asMap(tpl["Parameters"])[k] == nil {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) > 0 {
+		return invalid("Parameters: [" + strings.Join(keys, ", ") + "] do not exist in the template")
+	}
+	return nil
 }
 
 func paramDecls(tpl map[string]any) []any {

@@ -197,3 +197,33 @@ func TestCloudFormationUsePreviousValue(t *testing.T) {
 		t.Errorf("an update with neither a value nor UsePreviousValue answered %v, want Parameters: [Key] must have values", err)
 	}
 }
+
+// A parameter the template does not declare is refused, "Parameters: [X] do
+// not exist in the template", UsePreviousValue or not, and so is one given
+// both a value and UsePreviousValue: "If you specify true, do not specify a
+// parameter value" (API reference, Parameter). Before, both were taken: the
+// undeclared one was ignored, and the value lost to the previous one.
+func TestCloudFormationRefusesAParameterItCannotTake(t *testing.T) {
+	h := newStacks(t)
+	body, _ := json.Marshal(map[string]any{"Parameters": map[string]any{"Key": map[string]any{"Type": "String"}},
+		"Resources": map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}}})
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "taken", "TemplateBody": string(body), "Parameters": givenParams("Key", "k", "Nope", "n")}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Parameters: [Nope] do not exist in the template") {
+		t.Errorf("CreateStack with an undeclared parameter answered %v, want ValidationError", err)
+	}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "taken", "TemplateBody": string(body), "Parameters": givenParams("Key", "k")}); err != nil {
+		t.Fatal(err)
+	}
+	for name, params := range map[string][]any{
+		"undeclared": {map[string]any{"ParameterKey": "Key", "UsePreviousValue": true}, map[string]any{"ParameterKey": "Gone", "UsePreviousValue": true}},
+		"both":       {map[string]any{"ParameterKey": "Key", "ParameterValue": "new", "UsePreviousValue": "true"}},
+	} {
+		want := map[string]string{"undeclared": "Parameters: [Gone] do not exist in the template", "both": "Cannot specify usePreviousValue as true and non empty value"}[name]
+		if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "taken", "TemplateBody": string(body), "Parameters": params}); code(err) != "ValidationError" || !strings.Contains(err.Error(), want) {
+			t.Errorf("UpdateStack with the %s parameter answered %v, want ValidationError: %s", name, err, want)
+		}
+	}
+	both := []any{map[string]any{"ParameterKey": "Key", "ParameterValue": "new", "UsePreviousValue": "true"}}
+	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "taken", "ChangeSetName": "both", "TemplateBody": string(body), "Parameters": both}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Cannot specify usePreviousValue as true and non empty value") {
+		t.Errorf("CreateChangeSet with both answered %v, want ValidationError", err)
+	}
+}

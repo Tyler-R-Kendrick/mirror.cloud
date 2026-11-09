@@ -39,16 +39,34 @@ func moduleGraph(t *testing.T) (*graph, string) {
 // is the cost a rule exists to name.
 func TestEveryTrackedFileMapsSomewhere(t *testing.T) {
 	g, root := moduleGraph(t)
-	cmd := exec.Command("git", "ls-files")
+	cmd := exec.Command("git", "ls-files", "-z")
 	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
 		t.Skipf("git ls-files: %v (not a git checkout)", err)
 	}
-	for _, p := range strings.Fields(string(out)) {
+	for _, p := range paths(out, true) {
 		c := g.classify(p)
 		if c.all && c.why == "no rule and no package owns it" {
 			t.Errorf("%s: no package owns it and no rule in affected.go names it, so a change to it runs everything; add a rule", p)
+		}
+		// A file that selects nothing has to say so: a rule marked none.
+		if !c.all && len(c.code)+len(c.self)+len(c.direct) == 0 {
+			marked := false
+			for _, r := range rules {
+				if r.matches(p) {
+					marked = r.none
+					break
+				}
+			}
+			if !marked {
+				t.Errorf("%s selects nothing, and no rule marked none says that is intended", p)
+			}
+		}
+	}
+	for _, r := range rules {
+		if !r.all && len(r.pkgs) == 0 && !r.none {
+			t.Errorf("rule %s selects nothing without saying so (none: true)", r.pattern)
 		}
 	}
 }
@@ -171,9 +189,9 @@ func TestGoldenSelections(t *testing.T) {
 	for name, files := range cases {
 		r := g.selectFor(files)
 		if r.all {
-			got[name] = map[string]any{"files": files, "all": r.reason, "jobs": r.gates(files)}
+			got[name] = map[string]any{"files": files, "all": r.reason, "jobs": g.gates(r, files)}
 		} else {
-			got[name] = map[string]any{"files": files, "packages": nonNil(r.pkgs), "linked": r.linkedList(), "jobs": r.gates(files)}
+			got[name] = map[string]any{"files": files, "packages": nonNil(r.pkgs), "linked": r.linkedList(), "jobs": g.gates(r, files)}
 		}
 	}
 	enc, _ := json.MarshalIndent(got, "", "  ")
@@ -269,25 +287,122 @@ func TestGatesOpenForTheirInputs(t *testing.T) {
 		"image":                {"profiles/core.txt"},
 		"cloudflare-miniflare": {"tools/cloudflare-runtime/package.json"},
 	} {
-		if !g.selectFor(files).gates(files)[name] {
+		if !func() map[string]bool { r := g.selectFor(files); return g.gates(r, files) }()[name] {
 			t.Errorf("%s stays shut for %v", name, files)
 		}
 	}
-	for _, files := range [][]string{{"README.md"}, {"docs/TESTING.md"}} {
-		for name, open := range g.selectFor(files).gates(files) {
-			if open {
-				t.Errorf("%v opens %s", files, name)
-			}
+	open := func(files ...string) map[string]bool { r := g.selectFor(files); return g.gates(r, files) }
+	for name, isOpen := range open("README.md") {
+		if isOpen {
+			t.Errorf("README.md opens %s", name)
 		}
 	}
-	for name, open := range g.selectFor([]string{"go.mod"}).gates([]string{"go.mod"}) {
+	// test/behavior/cloudflare reads docs/ at run time, so a docs change opens
+	// the gate of the suite that holds it, and only that one.
+	if jobs := open("docs/TESTING.md"); !jobs["cloudflare-miniflare"] || jobs["image"] || jobs["generated-models"] {
+		t.Errorf("docs/TESTING.md opens %v", jobs)
+	}
+	for name, open := range g.gates(g.selectFor([]string{"go.mod"}), []string{"go.mod"}) {
 		if !open {
 			t.Errorf("go.mod leaves %s shut", name)
 		}
 	}
-	for name, open := range g.selectFor([]string{"Makefile"}).gates([]string{"Makefile"}) {
+	for name, open := range g.gates(g.selectFor([]string{"Makefile"}), []string{"Makefile"}) {
 		if !open {
 			t.Errorf("the Makefile leaves %s shut", name)
 		}
+	}
+}
+
+// The reviewer's three scenarios: a change only to a package's tests must still
+// reach race, fuzz and the gates that compile it.
+func TestATestChangeReachesItsOwnPackage(t *testing.T) {
+	g, _ := moduleGraph(t)
+	linked := func(files ...string) (map[string]bool, map[string]bool) {
+		r := g.selectFor(files)
+		got := map[string]bool{}
+		for _, p := range r.linkedList() {
+			got[p] = true
+		}
+		return got, g.gates(r, files)
+	}
+	// A fuzz body edit: the fuzz target's package runs, and nothing that only
+	// imports it.
+	got, _ := linked("internal/proto/aws/httpuri/httpuri_fuzz_test.go")
+	if !got["./internal/proto/aws/httpuri"] || len(got) != 1 {
+		t.Errorf("a fuzz test edit links %v", got)
+	}
+	// A racy t.Parallel test added to a package: that package runs under race.
+	got, _ = linked("internal/engine/race_new_test.go")
+	if !got["./internal/engine"] {
+		t.Errorf("a new test in internal/engine links %v", got)
+	}
+	// The live miniflare test is built only with -tags miniflare.
+	got, jobs := linked("internal/execution/miniflare_live_test.go")
+	if !got["./internal/execution"] || !jobs["cloudflare-miniflare"] {
+		t.Errorf("miniflare_live_test.go links %v, gates %v", got, jobs)
+	}
+	if _, jobs := linked("test/behavior/cloudflare/testdata/x.json"); !jobs["cloudflare-miniflare"] {
+		t.Errorf("a cloudflare suite input left the miniflare gate shut")
+	}
+	// The gate compiles what -tags miniflare links, so it holds packages the
+	// plain graph links only through the tagged files too.
+	if !g.gate["cloudflare-miniflare"]["./internal/execution"] || len(g.gate["cloudflare-miniflare"]) < 5 {
+		t.Errorf("the miniflare gate compiles %d packages", len(g.gate["cloudflare-miniflare"]))
+	}
+}
+
+// The CI machinery selects everything, so race, fuzz and the gates run in
+// full on a pull request that changes how they are selected or run.
+func TestMachinerySelectsEverything(t *testing.T) {
+	g, _ := moduleGraph(t)
+	for _, p := range []string{
+		"Makefile", ".github/workflows/ci.yml", ".github/actions/go/action.yml",
+		"scripts/fuzz.sh", "scripts/fuzz-targets.txt", "scripts/shard.py", "scripts/ci-plan.py",
+		"test/race-costs.json", "cmd/affected/affected.go", "cmd/affected/testdata/golden.json",
+	} {
+		r := g.selectFor([]string{p})
+		if !r.all || len(r.linkedList()) != len(g.pkgs) {
+			t.Errorf("%s selected %d of %d (all=%v)", p, len(r.linkedList()), len(g.pkgs), r.all)
+		}
+		for name, open := range g.gates(r, []string{p}) {
+			if !open {
+				t.Errorf("%s leaves %s shut", p, name)
+			}
+		}
+	}
+}
+
+// A name git would quote is read exactly with -z, and a quoted one, from a
+// list without -z, cannot be placed, so it selects everything.
+func TestNamesAreReadExactly(t *testing.T) {
+	g, root := moduleGraph(t)
+	in := "internal/clock/caf\u00e9 notes.txt\x00docs/TESTING.md\x00"
+	got := paths([]byte(in), true)
+	if len(got) != 2 || got[0] != "internal/clock/caf\u00e9 notes.txt" {
+		t.Fatalf("-z read %q", got)
+	}
+	if r := g.selectFor(got); r.all || len(r.linkedList()) == 0 || r.linkedList()[0] == "" {
+		t.Errorf("a non-ASCII name in internal/clock selected %v (all=%v)", r.linkedList(), r.all)
+	}
+	if r := g.selectFor([]string{`"internal/clock/caf\303\251.txt"`}); !r.all {
+		t.Errorf("a quoted name selected %v", r.pkgs)
+	}
+	var out, errb bytes.Buffer
+	if err := run([]string{"-z", "-root", root}, strings.NewReader(in), &out, &errb); err != nil || !strings.Contains(out.String(), "./internal/clock\n") {
+		t.Errorf("-z: %v %q %q", err, out.String(), errb.String())
+	}
+}
+
+// internal/bundled replays internal/equivalence's traces.
+func TestTracesSelectBundled(t *testing.T) {
+	g, _ := moduleGraph(t)
+	r := g.selectFor([]string{"internal/equivalence/traces/aws.sqs.json"})
+	has := map[string]bool{}
+	for _, p := range r.pkgs {
+		has[p] = true
+	}
+	if !has["./internal/bundled"] || !has["./internal/equivalence"] {
+		t.Errorf("a trace selected %v", r.pkgs)
 	}
 }

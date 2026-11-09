@@ -16,11 +16,13 @@
       "internal/proto/aws/httpuri/httpuri_test.go"
     ],
     "jobs": {
-      "cloudflare-miniflare": false,
+      "cloudflare-miniflare": true,
       "generated-models": false,
-      "image": false
+      "image": true
     },
-    "linked": [],
+    "linked": [
+      "./internal/proto/aws/httpuri"
+    ],
     "packages": [
       "./internal/check",
       "./internal/mutation",
@@ -34,7 +36,7 @@
     "jobs": {
       "cloudflare-miniflare": false,
       "generated-models": true,
-      "image": false
+      "image": true
     },
     "linked": [],
     "packages": [
@@ -55,7 +57,9 @@
       "generated-models": false,
       "image": false
     },
-    "linked": [],
+    "linked": [
+      "./test/ci"
+    ],
     "packages": [
       "./internal/check",
       "./internal/mutation",
@@ -221,7 +225,7 @@
       "docs/TESTING.md"
     ],
     "jobs": {
-      "cloudflare-miniflare": false,
+      "cloudflare-miniflare": true,
       "generated-models": false,
       "image": false
     },
@@ -235,6 +239,7 @@
     ]
   },
   "the ci workflow": {
+    "all": ".github/workflows/ci.yml: how CI selects and runs the scoped jobs",
     "files": [
       ".github/workflows/ci.yml"
     ],
@@ -242,15 +247,7 @@
       "cloudflare-miniflare": true,
       "generated-models": true,
       "image": true
-    },
-    "linked": [],
-    "packages": [
-      "./internal/check",
-      "./internal/execution",
-      "./internal/mutation",
-      "./test/ci",
-      "./test/release"
-    ]
+    }
   },
   "the dockerfile": {
     "files": [

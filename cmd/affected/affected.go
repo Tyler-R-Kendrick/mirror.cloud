@@ -20,10 +20,35 @@ import (
 // everything: an input this table does not know about is an input it cannot
 // rule out.
 type rule struct {
-	pattern string   // a path, a "dir/**" prefix, or a "*.ext" at the root
+	pattern string   // a path, a "dir/**" prefix, a "*.ext" at the root, or a path.Match pattern
 	all     bool     // selects every package
 	pkgs    []string // selects these (and the readers of every change)
+	none    bool     // selects nothing, on purpose: no test reads it, or a job of its own does
 	why     string
+}
+
+// machinery is how CI selects and runs the scoped jobs: the selector, the plan,
+// the shard tables and the targets list. A change to one of them can change what
+// every pull request runs, so it selects everything, and race, fuzz and the
+// mutation suite (internal/mutation select_test.go keeps the same list) run in
+// full on that pull request.
+var machinery = []string{
+	"Makefile",
+	".github/workflows/ci.yml",
+	".github/actions/**",
+	"scripts/fuzz.sh",
+	"scripts/fuzz-targets.txt",
+	"scripts/shard.py",
+	"scripts/ci-plan.py",
+	"test/race-costs.json",
+	"cmd/affected/**",
+}
+
+// alsoRead adds to what a path's own package selects: packages whose tests read
+// a file inside another package's directory at run time. They are selected
+// alone, like any reader.
+var alsoRead = []rule{
+	{pattern: "internal/equivalence/traces/**", pkgs: []string{"./internal/bundled"}, why: "internal/bundled replays the recorded traces"},
 }
 
 // readers are the packages whose tests read the tree itself at run time
@@ -31,7 +56,7 @@ type rule struct {
 // documentation or editor file selects them.
 var readers = []string{"./internal/check", "./internal/mutation"}
 
-var rules = []rule{
+var rules = append(machineryRules(), []rule{
 	{pattern: "go.mod", all: true, why: "the module's requirements"},
 	{pattern: "go.sum", all: true, why: "the module's requirements"},
 
@@ -40,11 +65,8 @@ var rules = []rule{
 	{pattern: "docs/**", pkgs: []string{"./internal/check", "./internal/runtime", "./test/behavior/cloudflare", "./test/behavior/vercel"}, why: "read by tests"},
 	{pattern: "specs/**", pkgs: []string{"./cmd/mirror", "./cmd/mirrorgen", "./internal/check", "./internal/specboot", "./test/behavior/vercel"}, why: "read by tests and by mirrorgen"},
 	{pattern: "scripts/**", pkgs: []string{"./internal/check", "./test/behavior/vercel", "./test/ci", "./test/release"}, why: "scripts the tests run"},
-	{pattern: "Makefile", pkgs: []string{"./internal/check", "./test/ci"}, why: "read by tests"},
 	{pattern: ".github/workflows/**", pkgs: []string{"./internal/execution", "./test/ci", "./test/release"}, why: "read by tests"},
-	{pattern: ".github/actions/**", pkgs: []string{"./test/ci"}, why: "the CI action"},
 	{pattern: "test/tiers.json", pkgs: []string{"./test/ci"}, why: "read by test/ci"},
-	{pattern: "test/race-costs.json", pkgs: []string{"./test/ci"}, why: "read by test/ci"},
 	{pattern: "profiles/**", pkgs: []string{"./test/ci"}, why: "read by test/ci"},
 	{pattern: "ratchet.json", pkgs: []string{"./internal/check"}, why: "the ratchet baseline"},
 	{pattern: "known-red.json", pkgs: []string{"./internal/check"}, why: "the known-red declaration"},
@@ -55,19 +77,27 @@ var rules = []rule{
 	// Built and tested by jobs of their own, which the CI plan path-gates:
 	// test/sdk/go is a separate module (the unit job's sdk step), and the
 	// Dockerfiles are the image job's.
-	{pattern: "test/sdk/**", why: "its own module, run whole by the unit job"},
-	{pattern: "Dockerfile", why: "the image job's"},
-	{pattern: "Dockerfile.release", why: "the image job's"},
-	{pattern: ".dockerignore", why: "the image job's"},
+	{pattern: "test/sdk/**", none: true, why: "its own module, run whole by the unit job"},
+	{pattern: "Dockerfile", none: true, why: "the image job's (its gate)"},
+	{pattern: "Dockerfile.release", none: true, why: "the image job's (its gate)"},
+	{pattern: ".dockerignore", none: true, why: "the image job's (its gate)"},
 
 	// Read by no test.
-	{pattern: "*.md", why: "documentation at the root"},
-	{pattern: ".cursor/**", why: "editor configuration"},
-	{pattern: ".github/ISSUE_TEMPLATE/**", why: "GitHub metadata"},
-	{pattern: ".github/pull_request_template.md", why: "GitHub metadata"},
-	{pattern: ".github/CODEOWNERS", why: "GitHub metadata"},
-	{pattern: ".gitignore", why: "git metadata"},
-	{pattern: "oxlint.config.ts", why: "editor lint configuration"},
+	{pattern: "*.md", none: true, why: "documentation at the root"},
+	{pattern: ".cursor/**", none: true, why: "editor configuration"},
+	{pattern: ".github/ISSUE_TEMPLATE/**", none: true, why: "GitHub metadata"},
+	{pattern: ".github/pull_request_template.md", none: true, why: "GitHub metadata"},
+	{pattern: ".github/CODEOWNERS", none: true, why: "GitHub metadata"},
+	{pattern: ".gitignore", none: true, why: "git metadata"},
+	{pattern: "oxlint.config.ts", none: true, why: "editor lint configuration"},
+}...)
+
+func machineryRules() []rule {
+	out := make([]rule, len(machinery))
+	for i, m := range machinery {
+		out[i] = rule{pattern: m, all: true, why: "how CI selects and runs the scoped jobs"}
+	}
+	return out
 }
 
 func (r rule) matches(p string) bool {
@@ -76,6 +106,9 @@ func (r rule) matches(p string) bool {
 		return strings.HasPrefix(p, strings.TrimSuffix(r.pattern, "**"))
 	case strings.HasPrefix(r.pattern, "*"):
 		return !strings.Contains(p, "/") && strings.HasSuffix(p, r.pattern[1:])
+	case strings.Contains(r.pattern, "*"):
+		ok, _ := path.Match(r.pattern, p)
+		return ok
 	default:
 		return p == r.pattern
 	}
@@ -83,10 +116,11 @@ func (r rule) matches(p string) bool {
 
 // graph is the module as go list sees it with its tests.
 type graph struct {
-	pkgs []string            // every package, as "./dir", sorted
-	dirs map[string]string   // "dir" (slash, from the root; "" for the root) -> "./dir"
-	deps map[string][]string // "./dir" -> every module package its test binaries link
-	root string              // where to look for a path no package or rule places
+	pkgs []string                   // every package, as "./dir", sorted
+	dirs map[string]string          // "dir" (slash, from the root; "" for the root) -> "./dir"
+	deps map[string][]string        // "./dir" -> every module package its test binaries link
+	root string                     // where to look for a path no package or rule places
+	gate map[string]map[string]bool // gate name -> every module package its suite compiles, with its tags
 }
 
 // load runs go list in root. -test lists each package's test binary (p.test)
@@ -117,7 +151,37 @@ func load(root string) (*graph, error) {
 		return nil, fmt.Errorf("go list -m: %v", err)
 	}
 	module := strings.TrimSpace(string(mod))
-	return parse(module, root, out)
+	g, err := parse(module, root, out)
+	if err != nil {
+		return nil, err
+	}
+	// What each gated job compiles, with the build tags it uses: a file built
+	// only with -tags miniflare can import a package the plain graph never
+	// links.
+	g.gate = map[string]map[string]bool{}
+	for name, gt := range gates {
+		args := []string{"list", "-e", "-deps", "-test", "-tags", gt.tags, "-f", "{{.ImportPath}}"}
+		cmd := exec.Command("go", append(args, gt.pkgs...)...)
+		cmd.Dir = root
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
+		if err != nil {
+			return nil, fmt.Errorf("go list for %s: %v\n%s", name, err, stderr.String())
+		}
+		set := map[string]bool{}
+		for _, ip := range strings.Fields(string(out)) {
+			if strings.HasSuffix(ip, ".test") || strings.HasSuffix(ip, "]") {
+				continue
+			}
+			if ip == module {
+				set["."] = true
+			} else if strings.HasPrefix(ip, module+"/") {
+				set["./"+strings.TrimPrefix(ip, module+"/")] = true
+			}
+		}
+		g.gate[name] = set
+	}
+	return g, nil
 }
 
 func parse(module, root string, listing []byte) (*graph, error) {
@@ -193,14 +257,24 @@ func (g *graph) owner(p string) (string, bool) {
 // package the path is compiled into (its own files and embedded files), so
 // every package whose tests link it is selected too; direct is a package whose
 // tests read the path at run time, which selects that package alone.
+//
+// self is a package whose own test binary alone the path is in (a _test.go
+// file, testdata): its tests changed, so race and fuzz run it, but no other
+// package links it.
 type classification struct {
 	all    bool
 	code   []string
+	self   []string
 	direct []string
 	why    string
 }
 
 func (g *graph) classify(p string) classification {
+	// git quotes a name holding a byte it will not print; such a name is not
+	// a path here, so nothing can place it.
+	if strings.HasPrefix(p, "\"") {
+		return classification{all: true, why: "a quoted name, which cannot be placed"}
+	}
 	for _, r := range rules {
 		if r.matches(p) {
 			if r.all {
@@ -213,13 +287,19 @@ func (g *graph) classify(p string) classification {
 			return c
 		}
 	}
+	var also []string
+	for _, r := range alsoRead {
+		if r.matches(p) {
+			also = append(also, r.pkgs...)
+		}
+	}
 	if pkg, ok := g.owner(p); ok {
 		// A test file, and anything under testdata, is in that package's test
 		// binary alone: no other package can link it.
 		if strings.HasSuffix(p, "_test.go") || strings.Contains("/"+p, "/testdata/") {
-			return classification{direct: append([]string{pkg}, readers...), why: "a test input of " + pkg}
+			return classification{self: []string{pkg}, direct: append(also, readers...), why: "a test input of " + pkg}
 		}
-		return classification{code: []string{pkg}, direct: readers, why: "in " + pkg}
+		return classification{code: []string{pkg}, direct: append(also, readers...), why: "in " + pkg}
 	}
 	// A file that is gone and that no package holds now is not compiled into
 	// anything: a package that imported the package it was in has to change
@@ -235,14 +315,15 @@ func (g *graph) classify(p string) classification {
 
 // result is a selection: every package whose tests a change can reach.
 type result struct {
-	all    bool
-	reason string
-	pkgs   []string
-	linked map[string]bool // selected because their tests link changed code
+	all     bool
+	reason  string
+	pkgs    []string
+	linked  map[string]bool // selected because their tests link changed code, or are it
+	changed map[string]bool // packages whose own files changed: code and tests
 }
 
 func (g *graph) selectFor(changed []string) result {
-	code, direct := map[string]bool{}, map[string]bool{}
+	code, self, direct := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, p := range changed {
 		p = strings.TrimPrefix(path.Clean(p), "./")
 		if p == "" || p == "." {
@@ -255,6 +336,9 @@ func (g *graph) selectFor(changed []string) result {
 		for _, pkg := range c.code {
 			code[pkg] = true
 		}
+		for _, pkg := range c.self {
+			self[pkg] = true
+		}
 		for _, pkg := range c.direct {
 			direct[pkg] = true
 		}
@@ -264,16 +348,20 @@ func (g *graph) selectFor(changed []string) result {
 		known[p] = true
 	}
 	selected := map[string]bool{}
-	for _, set := range []map[string]bool{code, direct} {
+	for _, set := range []map[string]bool{code, self, direct} {
 		for p := range set {
 			if known[p] {
 				selected[p] = true
 			}
 		}
 	}
-	linked := map[string]bool{}
-	for p := range code {
-		linked[p] = true
+	linked, own := map[string]bool{}, map[string]bool{}
+	for _, set := range []map[string]bool{code, self} {
+		for p := range set {
+			if known[p] {
+				linked[p], own[p] = true, true
+			}
+		}
 	}
 	for p, deps := range g.deps {
 		for _, d := range deps {
@@ -288,19 +376,19 @@ func (g *graph) selectFor(changed []string) result {
 		out = append(out, p)
 	}
 	sort.Strings(out)
-	return result{pkgs: out, linked: linked}
+	return result{pkgs: out, linked: linked, changed: own}
 }
 
 // A gate is a CI job that runs only when its inputs change: paths it reads
-// itself, and packages it builds or tests, which count when changed code
-// reaches them. A selection of everything opens every gate.
+// itself; any package its suite compiles (go list -deps -test of pkgs, with
+// tags) whose own files changed; and pkgs themselves when anything selects
+// them, a test that reads a changed file included. A selection of everything,
+// and the CI machinery, open every gate.
 type gate struct {
 	paths []string
 	pkgs  []string
+	tags  string
 }
-
-// Every gate also opens for these: the files that say how CI runs it.
-var gateAlways = []string{"Makefile", ".github/workflows/ci.yml", ".github/actions/**"}
 
 var gates = map[string]gate{
 	// Regenerates internal/generated from the pinned specs and diffs it.
@@ -316,8 +404,9 @@ var gates = map[string]gate{
 	// The live miniflare suite: internal/execution and test/behavior/cloudflare
 	// built with -tags miniflare, against the pinned runtime under tools/.
 	"cloudflare-miniflare": {
-		paths: []string{"tools/cloudflare-runtime/**"},
+		paths: []string{"tools/cloudflare-runtime/**", "internal/execution/*miniflare*", "test/behavior/cloudflare/**"},
 		pkgs:  []string{"./internal/execution", "./test/behavior/cloudflare"},
+		tags:  "miniflare",
 	},
 }
 
@@ -333,15 +422,22 @@ func (r result) linkedList() []string {
 	return out
 }
 
-func (r result) gates(changed []string) map[string]bool {
+func (g *graph) gates(r result, changed []string) map[string]bool {
+	selected := map[string]bool{}
+	for _, p := range r.pkgs {
+		selected[p] = true
+	}
 	out := map[string]bool{}
-	for name, g := range gates {
+	for name, gt := range gates {
 		open := r.all
-		for _, p := range g.pkgs {
-			open = open || r.linked[p]
+		for _, p := range gt.pkgs {
+			open = open || selected[p]
+		}
+		for p := range r.changed {
+			open = open || g.gate[name][p]
 		}
 		for _, c := range changed {
-			for _, pattern := range append(append([]string(nil), gateAlways...), g.paths...) {
+			for _, pattern := range gt.paths {
 				open = open || rule{pattern: pattern}.matches(strings.TrimPrefix(path.Clean(c), "./"))
 			}
 		}

@@ -41,8 +41,10 @@ func init() {
 // Pack is the template engine behind the native operations.
 type Pack struct {
 	deps  spi.Deps
-	walks int            // resources whose properties order walked, which a test counts
-	tpl   map[string]any // the template an operation reads: its Mappings, which findInMap reads, and its parameters' types
+	walks int             // resources whose properties order walked, which a test counts
+	tpl   map[string]any  // the template an operation reads: its Mappings, which findInMap reads, and its parameters' types
+	skip  map[string]bool // the resources of the template read that the stack does not make (skipped)
+	body  string          // a change set's template, as it was read when the change set was made (templateBody)
 }
 
 // New constructs the template engine.
@@ -68,7 +70,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"Description": str(tpl["Description"]), "Parameters": paramDecls(tpl)}}, nil
 	case "CreateStack", "UpdateStack":
-		return p.upsert(ctx, req, name, req.Operation == "UpdateStack", "", "")
+		return p.upsert(ctx, req, name, req.Operation == "UpdateStack", "", changeSet{})
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
 	case "ContinueUpdateRollback":
@@ -132,13 +134,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		} else if err := executable(rec); err != nil && rec["Status"] == "FAILED" { // refused before its template is read again; any other, as it is claimed
 			return nil, err
 		}
-		for _, k := range append([]string{"TemplateBody"}, changeSetMembers...) {
+		for _, k := range changeSetMembers {
 			if rec[k] != nil {
 				req.Input[k] = rec[k]
 			}
 		}
-		_, err := p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE", str(rec["StackId"]), key) // claims it as it starts; an UPDATE change set's stack must exist
-		p.unsettled(ctx, req, key, "AVAILABLE", err)                                                   // a refusal leaves it as it was, and says why
+		p.body = str(rec["TemplateBody"])                                                                                                  // read again by no TemplateBody limit: a TemplateURL's is 1 MB
+		_, err := p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE", str(rec["StackId"]), changeSet{key, str(rec["ChangeSetId"])}) // claims this copy as it starts
+		p.unsettled(ctx, req, key, "AVAILABLE", err)                                                                                       // a refusal leaves it as it was, and says why
 		return &spi.Response{Output: map[string]any{}}, err
 	case "DeleteChangeSet": // not one being executed (the wording is a reading)
 		key, err := named(name)+":"+str(req.Input["ChangeSetName"]), error(nil)
@@ -174,8 +177,9 @@ var changeSetMembers = []string{"Parameters", "NotificationARNs", "Tags", "Capab
 // and their values used to create the change set" (DescribeChangeSet).
 func (p *Pack) createChangeSet(ctx context.Context, req *spi.Request, name string) (*spi.Response, error) {
 	csn, create := str(req.Input["ChangeSetName"]), req.Input["ChangeSetType"] == "CREATE"
-	body, err := p.templateBody(ctx, req) // TemplateBody, within the member's size, or the TemplateURL's object
-	tpl, parseErr := parseTemplate(body)  // one that does not parse names no parameters to check
+	body, err := p.templateBody(ctx, req)                          // TemplateBody, within the member's size, or the TemplateURL's object
+	p.body, err = body, cmp.Or(checkStackName(name, !create), err) // read once: template reads it again from p.body
+	tpl, parseErr := parseTemplate(body)                           // one that does not parse names no parameters to check
 	if err != nil {
 		return nil, err
 	} else if _, err := parameters(req.Input, tpl); err != nil && parseErr == nil {
@@ -249,7 +253,9 @@ func retire(name, key string) func(spi.Tx) error {
 		for _, kv := range kvs {
 			rec, err := spi.Decode[map[string]any](kv.Value), error(nil)
 			if kv.Key == key || key == "" && status(rec) == "AVAILABLE" {
-				rec["ExecutionStatus"] = map[bool]string{true: "EXECUTE_COMPLETE", false: "OBSOLETE"}[kv.Key == key]
+				if rec["ExecutionStatus"] = map[bool]string{true: "EXECUTE_COMPLETE", false: "OBSOLETE"}[kv.Key == key]; kv.Key == key {
+					delete(rec, "StatusReason") // a refusal's, before it was executed
+				}
 				err = tx.Put(kv.Key, []byte(spi.JSONText(rec)))
 			} else if key != "" {
 				err = tx.Delete(kv.Key)
@@ -283,7 +289,7 @@ type res struct {
 // upsert makes the stack named name, or updates it, a create under id when one is given (a CREATE change
 // set's, which it answered), as the execution of the change set under key when one is given: claimed in the
 // transaction that starts it, retired in the one that ends it.
-func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id, key string) (*spi.Response, error) {
+func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (*spi.Response, error) {
 	if err := checkStackName(name, update); err != nil {
 		return nil, err
 	}
@@ -304,7 +310,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	if err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
 		tx := stx.Collection("cfn")
 		raw, found, _ := tx.Get(name)
-		if err := claim(stx.Collection("cfn-cs"), key); err != nil { // a refusal below puts it back: nothing is written
+		if err := claim(stx.Collection("cfn-cs"), cs); err != nil { // a refusal below puts it back: nothing is written
 			return err
 		} else if _ = json.Unmarshal(raw, &old); old.Status == "DELETE_COMPLETE" || found && !update && old.Status == "REVIEW_IN_PROGRESS" && old.ID == id {
 			found, old = false, stack{} // a deleted stack's name is free; a CREATE change set's stack is made by its execution
@@ -336,7 +342,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		} else {
 			_ = p.rollback(ctx, req, read, old, st.Resources, changed, retains(tpl, "DeletionPolicy", "Retain"))
 		}
-		p.unsettled(ctx, req, key, "EXECUTE_IN_PROGRESS", err)
+		p.unsettled(ctx, req, cs.key, "EXECUTE_IN_PROGRESS", err)
 		return nil, err
 	}
 	planned := maps.Clone(st.Refs)
@@ -344,11 +350,11 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		rm := asMap(resources[logical])
 		typ, props := str(rm["Type"]), asMap(p.resolve(rm["Properties"], planned, req, name))
 		prev, how, n, err := p.next(ctx, req, st, old, logical, typ, props)
-		if planned[logical] = planID(req, typ, n, props); how == "" || how == "update" {
-			planned[logical] = prev.Physical
-		}
-		if attribute(planned, req, typ, logical, planned[logical]); err != nil {
+		if err != nil {
 			return fail(err)
+		} else if id := cmp.Or(map[bool]string{true: prev.Physical}[how == "" || how == "update"], planID(req, typ, n, props)); id != "" { // else its Ref is unknown (unmade)
+			planned[logical] = id
+			attribute(planned, req, typ, logical, id)
 		}
 	}
 	for _, logical := range order {
@@ -370,12 +376,13 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		}
 	}
 	for _, k := range slices.Sorted(maps.Keys(outs)) {
-		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": text(p.resolve(asMap(outs[k])["Value"], st.Refs, req, name))})
+		v := p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)
+		if err := selected(v); err != nil {
+			return fail(err)
+		}
+		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": text(v)})
 	}
-	if err := selected(st.Outputs); err != nil {
-		return fail(err)
-	}
-	if cur, wrote, err := p.settle(ctx, req, map[bool]stack{false: reserved, true: read}[update], st, retire(name, key)); err == nil && !wrote && !update {
+	if cur, wrote, err := p.settle(ctx, req, map[bool]stack{false: reserved, true: read}[update], st, retire(name, cs.key)); err == nil && !wrote && !update {
 		// A DeleteStack begun during the create ends here: what it made goes, and then the stack.
 		if cur.ID != id || cur.Status != "DELETE_IN_PROGRESS" {
 			cur = stack{} // the stack is another's now: nothing is recorded
@@ -394,7 +401,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		})
 		_ = p.unwind(ctx, req, stack{}, st, nil, made, nil, "", "", func(res) bool { return false })
 		err := invalid("Stack:" + id + " is in " + rival + " state and can not be updated.")
-		p.unsettled(ctx, req, key, "EXECUTE_IN_PROGRESS", err)
+		p.unsettled(ctx, req, cs.key, "EXECUTE_IN_PROGRESS", err)
 		return nil, err
 	}
 	// The update is done, so its cleanup deletes the old resources the stack no longer holds, replaced
@@ -414,18 +421,24 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	return &spi.Response{Output: map[string]any{"StackId": id}}, nil
 }
 
-// claim moves the change set under key (none for "") from AVAILABLE to EXECUTE_IN_PROGRESS: a change set
+// changeSet is the change set an execution executes: its key, and the id of the copy it read.
+type changeSet struct{ key, id string }
+
+// claim moves the change set cs (none for a zero cs), still the copy read, from AVAILABLE to
+// EXECUTE_IN_PROGRESS: a change set
 // executes once, and one executed, failed, obsolete or being executed is InvalidChangeSetStatus, "The
 // specified change set can't be used to update the stack" (the wording is a reading).
-func claim(tx spi.Tx, key string) error {
-	raw, _, _ := tx.Get(key)
-	if rec := spi.Decode[map[string]any](raw); key == "" {
+func claim(tx spi.Tx, cs changeSet) error {
+	raw, found, _ := tx.Get(cs.key)
+	if rec := spi.Decode[map[string]any](raw); cs.key == "" {
 		return nil
+	} else if !found || str(rec["ChangeSetId"]) != cs.id { // deleted, or made again, since it was read
+		return &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
 	} else if err := executable(rec); err != nil {
 		return err
 	} else {
 		rec["ExecutionStatus"] = "EXECUTE_IN_PROGRESS"
-		return tx.Put(key, []byte(spi.JSONText(rec)))
+		return tx.Put(cs.key, []byte(spi.JSONText(rec)))
 	}
 }
 
@@ -455,6 +468,7 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 	if err == nil {
 		p.tpl, refs = tpl, conditioned(tpl, known, req, stack, id)
 		order, err = p.order(tpl, refs)
+		p.skipped(order, refs)
 	}
 	if err == nil {
 		err = cmp.Or(p.sound(tpl, refs, req, stack), capable(tpl, req.Input, stack))
@@ -508,7 +522,7 @@ func conditioned(tpl map[string]any, refs map[string]string, req *spi.Request, s
 // as a Ref answers it: the stack's two only when it has them.
 func pseudo(req *spi.Request, stack, id string) map[string]string {
 	known := map[string]string{"AWS::AccountId": req.Identity.Account, "AWS::Region": req.Identity.Region, "AWS::StackName": stack,
-		"AWS::StackId": id, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com", "AWS::NoValue": noValue,
+		"AWS::StackId": id, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com",
 		"AWS::NotificationARNs": spi.JSONText(append([]any{}, spi.Slice(req.Input["NotificationARNs"])...))} // a list, as JSON: [] for none
 	maps.DeleteFunc(known, func(_, v string) bool { return v == "" })
 	return known
@@ -520,6 +534,8 @@ func pseudo(req *spi.Request, stack, id string) map[string]string {
 func (p *Pack) templateBody(ctx context.Context, req *spi.Request) (string, error) {
 	if len(spi.Slice(req.Input["NotificationARNs"])) > 5 { // its other member: "Maximum number of 5 items" (CreateStack, UpdateStack, CreateChangeSet)
 		return "", invalid("1 validation error detected: Value at 'notificationARNs' failed to satisfy constraint: Member must have length less than or equal to 5")
+	} else if p.body != "" { // checked against its own source's limit when its change set was made
+		return p.body, nil
 	} else if body := str(req.Input["TemplateBody"]); len(body) > 51_200 {
 		return "", invalid("1 validation error detected: Value at 'templateBody' failed to satisfy constraint: Member must have length less than or equal to 51200")
 	} else if body != "" {
@@ -790,14 +806,35 @@ func attribute(refs map[string]string, req *spi.Request, typ, logical, id string
 	}
 }
 
-// unknown stands for an id known only once its resource is made, and in order for one not yet ordered: what
-// a Ref to or a Fn::GetAtt of a resource not made yet answers, and any value holding it is. resolve has three
-// outcomes, a value, unselected (a Fn::Select of no element of a list it knows) or unknown.
-const unknown = "\uffff"
+// mark is what resolve answers that is no value a template holds: its own type, so no string a template
+// gives, whatever characters it has, is one (holds). resolve has three outcomes, a value, unselected (a
+// Fn::Select of no element of a list it knows) or unknown: what a Ref to or a Fn::GetAtt of a resource not
+// made yet answers, and a string built on one. noValue is what a Ref to AWS::NoValue answers, which resolve
+// drops from a map or a list; inValue a string built on it, which sound refuses, as it does unselected.
+type mark string
 
-// noValue is what a Ref to AWS::NoValue answers, and resolve drops; unselected is what a Fn::Select of no
-// element answers, which sound refuses.
-const noValue, unselected = "\ufffe", "\ufdd0Fn::Select"
+const unknown, unselected, noValue, inValue mark = "unknown", "Fn::Select", "AWS::NoValue", "AWS::NoValue in a value"
+
+// holds is whether v is the mark m or holds it.
+func holds(v any, m mark) bool {
+	switch t := v.(type) {
+	case map[string]any:
+		return slices.ContainsFunc(slices.Collect(maps.Values(t)), func(x any) bool { return holds(x, m) })
+	case []any:
+		return slices.ContainsFunc(t, func(x any) bool { return holds(x, m) })
+	}
+	return v == m
+}
+
+// marked is the mark a string built on vs is, an unknown before the others, and whether it is one.
+func marked(vs ...any) (any, bool) {
+	for _, m := range []mark{unknown, unselected, noValue} {
+		if holds(vs, m) {
+			return map[bool]mark{true: inValue, false: m}[m == noValue], true
+		}
+	}
+	return nil, false
+}
 
 // planID is the id a resource named n is made with, which a Ref to it answers: n in the form its
 // service gives it back. A queue's URL (its endpoint's business), a KMS key's id and a REST API's are
@@ -806,10 +843,10 @@ func planID(req *spi.Request, typ, n string, props map[string]any) string {
 	if bus := spi.LastSlash(str(props["EventBusName"])); typ == "AWS::Events::Rule" && bus != "" && bus != "default" {
 		n = bus + "|" + n // a rule's "event rule ID": <bus>|<name> on any bus but the default (a reading)
 	}
-	if f := kinds[typ].ref; f != "" && !strings.Contains(n, unknown) {
+	if f := kinds[typ].ref; f != "" && n != "" { // no name: one built on an id known only once made (claim)
 		return strings.NewReplacer("{r}", req.Identity.Region, "{a}", req.Identity.Account, "{n}", n).Replace(f)
 	}
-	return cmp.Or(str(props["ResourceArn"]), str(props["ResourceARN"]), unknown)
+	return cmp.Or(str(props["ResourceArn"]), str(props["ResourceARN"])) // none: known only once made
 }
 
 // order is the order a template's resources are made in: each after those its properties name, by Ref,
@@ -1039,7 +1076,9 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 	if v, set := props["FifoQueue"]; typ == "AWS::SQS::Queue" && set && !isBoolean(v) { // FifoQueue is a Boolean (Template Reference)
 		return "", invalid("Properties validation failed for resource " + logical + ": FifoQueue must be a Boolean, not " + spi.JSONText(v))
 	}
-	if n == "" || strings.Contains(n, unknown) || k.find == "" { // one built on an id known only once made is checked as it is made
+	if holds(props[k.member], unknown) { // one built on an id known only once made is checked as it is made:
+		return "", nil // its id is not planned (planID), and a Ref to it is unknown
+	} else if n == "" || k.find == "" {
 		return cmp.Or(n, physicalName(st.Name, logical, st.ID, typ, props)), nil
 	}
 	out, err := p.do(ctx, req, k.find, n, "", props)
@@ -1416,7 +1455,9 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 	case map[string]any:
 		if r, ok := t["Ref"]; ok {
 			v, _ := p.ref(str(r), refs, req, stack)
-			if p.unmade(str(r), refs) {
+			if str(r) == "AWS::NoValue" {
+				return noValue
+			} else if p.unmade(str(r), refs) {
 				return unknown
 			} else if str(r) == "AWS::NotificationARNs" {
 				arns := spi.Decode[[]any]([]byte(v))
@@ -1442,7 +1483,7 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 		if args, ok := t["Fn::Select"]; ok { // [index, listOfObjects]: "a single object from a list of objects by index"
 			args := append(spi.Slice(args), nil, nil)
 			index, list := p.resolve(args[0], refs, req, stack), p.resolve(args[1], refs, req, stack)
-			if i, isInt := coerce(index, "Integer"); strings.Contains(spi.JSONText([]any{index, list}), unknown) {
+			if i, isInt := coerce(index, "Integer"); holds([]any{index, list}, unknown) {
 				return unknown // of what is not made yet: checked as it is made, when it is known
 			} else if isInt && i.(int) >= 0 && i.(int) < len(spi.Slice(list)) {
 				return spi.Slice(list)[i.(int)]
@@ -1451,6 +1492,9 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 		}
 		if args, ok := t["Fn::Split"]; ok { // [delimiter, source string]: "A list of string values"
 			args, parts := append(spi.Slice(args), nil, nil), []any{}
+			if m, isMark := marked(p.resolve(args[1], refs, req, stack)); isMark {
+				return m
+			}
 			for _, part := range strings.Split(str(p.resolve(args[1], refs, req, stack)), str(args[0])) {
 				parts = append(parts, part)
 			}
@@ -1510,7 +1554,7 @@ func (p *Pack) ref(name string, refs map[string]string, req *spi.Request, stack 
 }
 
 // getAtt is a Fn::GetAtt's value: the attribute the resource's type has (attribute), or else its Ref's.
-func getAtt(g any, refs map[string]string) string {
+func getAtt(g any, refs map[string]string) any {
 	logical, attr, _ := strings.Cut(str(g), ".") // "A.B", or [A, B]
 	if t, ok := g.([]any); ok {
 		t = append(slices.Clip(t), nil, nil)
@@ -1543,25 +1587,42 @@ func (p *Pack) unmade(name string, refs map[string]string) bool {
 	return resource && !made
 }
 
+// skipped notes in p.skip each resource the stack does not make: "CloudFormation creates the resource only
+// when the condition evaluates to true", and "any resources that depend on that resource aren't created
+// either" (Template Reference, Condition attribute).
+func (p *Pack) skipped(order []string, refs map[string]string) {
+	resources := asMap(p.tpl["Resources"])
+	p.skip = map[string]bool{}
+	for _, l := range order {
+		p.skip[l] = off(resources[l], refs) || slices.ContainsFunc(referred(asMap(resources[l])["Properties"], refs), func(n string) bool { return p.skip[n] })
+	}
+}
+
+// off is whether the condition of a resource or an output v leaves it out: one not settled true.
+func off(v any, refs map[string]string) bool {
+	c := str(asMap(v)["Condition"])
+	return c != "" && refs["Condition::"+c] != "true"
+}
+
 // sound is the error for a template whose values cannot be made, found before anything is reserved or
 // made: AWS::NoValue "Removes the corresponding resource property" (User Guide, pseudo parameters), or a list
 // element, so it is never a value, and as part of one, a Fn::Join's separator, a Fn::Sub's string or
 // variable, an output's value, it is refused.
 func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Request, stack string) error {
 	var values []any
-	for _, r := range asMap(tpl["Resources"]) { // all its properties, when AWS::NoValue is the whole attribute (a reading)
-		if c := str(asMap(r)["Condition"]); c != "" && refs["Condition::"+c] == "false" {
-			continue // "CloudFormation creates the resource only when the condition evaluates to true"
-		} else if v := p.resolve(asMap(r)["Properties"], refs, req, stack); v != noValue {
+	for l, r := range asMap(tpl["Resources"]) { // all its properties, when AWS::NoValue is the whole attribute (a reading)
+		if v := p.resolve(asMap(r)["Properties"], refs, req, stack); v != noValue && !p.skip[l] { // what the stack makes (skipped)
 			values = append(values, v)
 		}
 	}
 	for _, o := range asMap(tpl["Outputs"]) {
-		values = append(values, p.resolve(asMap(o)["Value"], refs, req, stack))
+		if !off(o, refs) {
+			values = append(values, p.resolve(asMap(o)["Value"], refs, req, stack))
+		}
 	}
 	if err := selected(values); err != nil && stack != "" {
 		return err
-	} else if strings.Contains(spi.JSONText(values), noValue) {
+	} else if holds(values, noValue) || holds(values, inValue) {
 		return invalid("Template error: AWS::NoValue removes a property or a list element; it cannot be part of a value")
 	}
 	var err error // without a DefaultValue, "Fn::FindInMap raises an error when a key is not found"
@@ -1592,7 +1653,7 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 // selected is the error for a value holding a Fn::Select of no element of its list (the wording is a reading):
 // sound finds one in a list it knows whole, and a stack's resource or output, resolved, in any list.
 func selected(v any) error {
-	if strings.Contains(spi.JSONText(v), unselected) {
+	if holds(v, unselected) {
 		return invalid("Template error: Fn::Select cannot select nonexistent value")
 	}
 	return nil
@@ -1624,32 +1685,43 @@ func findInMap(args any, refs map[string]string, mappings map[string]any) (v any
 	return v, strings.Join(keys, "::"), found
 }
 
-func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack string) string {
-	arr, parts := append(spi.Slice(j), nil, nil), []string(nil)        // [separator, [values]]
-	for _, x := range spi.Slice(p.resolve(arr[1], refs, req, stack)) { // a list, from which AWS::NoValue removes its element
+func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack string) any {
+	arr, parts := append(spi.Slice(j), nil, nil), []string(nil) // [separator, [values]]
+	sep, list := p.resolve(arr[0], refs, req, stack), p.resolve(arr[1], refs, req, stack)
+	if m, isMark := marked(sep, list); isMark { // a list, from which AWS::NoValue removes its element
+		return m
+	}
+	for _, x := range spi.Slice(list) {
 		parts = append(parts, str(x))
 	}
-	return strings.Join(parts, str(p.resolve(arr[0], refs, req, stack)))
+	return strings.Join(parts, str(sep))
 }
 
 // fnSub is the Fn::Sub string with each ${...} substituted: ${!Literal} is the literal ${Literal}, a
 // variable its map defines is the variable's value, ${Name.Attribute} is Fn::GetAtt's and ${Name} a Ref's
 // (Template Reference, Fn::Sub). A name that is none of them is left as written.
-func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack string) string {
-	parts := append(spi.Slice(s), s, nil) // "text", or ["text", {variables}]
-	return subVariable.ReplaceAllStringFunc(str(parts[0]), func(m string) string {
-		name := m[2 : len(m)-1]
+func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack string) any {
+	parts, held := append(spi.Slice(s), s, nil), []any{} // "text", or ["text", {variables}]; held, what each ${} is
+	out := subVariable.ReplaceAllStringFunc(str(parts[0]), func(m string) string {
+		name, v := m[2:len(m)-1], any(nil)
 		if literal, ok := strings.CutPrefix(name, "!"); ok {
 			return "${" + literal + "}"
-		} else if v, ok := asMap(parts[1])[name]; ok {
-			return str(p.resolve(v, refs, req, stack))
+		} else if x, ok := asMap(parts[1])[name]; ok {
+			v = p.resolve(x, refs, req, stack)
 		} else if logical, attr, ok := strings.Cut(name, "."); ok {
-			return getAtt([]any{logical, attr}, refs)
-		} else if _, ok := p.ref(name, refs, req, stack); ok || p.unmade(name, refs) { // a list as its text, as Fn::Join's
-			return text(p.resolve(map[string]any{"Ref": name}, refs, req, stack))
+			v = getAtt([]any{logical, attr}, refs)
+		} else if _, ok := p.ref(name, refs, req, stack); ok || p.unmade(name, refs) || name == "AWS::NoValue" { // a list as its text, as Fn::Join's
+			v = p.resolve(map[string]any{"Ref": name}, refs, req, stack)
+		} else {
+			return m
 		}
-		return m
+		held = append(held, v)
+		return text(v)
 	})
+	if m, isMark := marked(held...); isMark { // a string built on a mark is one
+		return m
+	}
+	return out
 }
 
 func parseTemplate(body string) (map[string]any, error) {

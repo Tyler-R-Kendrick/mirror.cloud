@@ -4,6 +4,8 @@
     go run ./cmd/affected -json -files changed.txt > a.json
     scripts/ci-plan.py a.json >> "$GITHUB_OUTPUT"
 
+all        true when the selection is everything: the fuzz job then passes no
+           FUZZ_PKGS, so a stale package in its list fails rather than drops
 packages   the packages the race and fuzz jobs take: those whose test binaries
            link changed code (cmd/affected's "linked"), one per line. A
            package selected only because its tests read a changed file at run
@@ -63,7 +65,7 @@ def plan(affected, targets_file, costs_file):
         "race": {"shards": list(range(race_count)), "count": race_count, "packages": len(pkgs)},
         "fuzz": {"shards": list(range(fuzz_count)), "count": fuzz_count, "targets": fuzz_n},
     }
-    lines = ["packages<<__AFFECTED__", *linked, "__AFFECTED__"]
+    lines = ["packages<<__AFFECTED__", *linked, "__AFFECTED__", f"all={'true' if affected['all'] else 'false'}"]
     for name, value in out.items():
         lines.append(f"{name}={json.dumps(value)}")
     for gate, opened in sorted(affected.get("jobs", {}).items()):

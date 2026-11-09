@@ -20,6 +20,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       packages: ${{ steps.affected.outputs.packages }}
+      all: ${{ steps.affected.outputs.all }}
       race: ${{ steps.affected.outputs.race }}
       fuzz: ${{ steps.affected.outputs.fuzz }}
       mutation: ${{ steps.mutation.outputs.shards }}
@@ -198,8 +199,9 @@ jobs:
         if: env.TARGETS != '0'
         env:
           AFFECTED: ${{ needs.plan.outputs.packages }}
+          ALL: ${{ needs.plan.outputs.all }}
         run: |
-          if [ "${{ github.event_name }}" = pull_request ]; then
+          if [ "${{ github.event_name }}" = pull_request ] && [ "$ALL" != true ]; then
             printf '%s\n' "$AFFECTED" > "$RUNNER_TEMP/affected.txt"
             export FUZZ_PKGS="$RUNNER_TEMP/affected.txt"
           fi

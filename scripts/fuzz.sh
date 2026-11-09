@@ -20,6 +20,13 @@ cd "$(dirname "$0")/.."
 shard=${1:-0} shards=${2:-1}
 list=${FUZZ_TARGETS:-scripts/fuzz-targets.txt}
 pkgs=${FUZZ_PKGS:-}
+# Every listed package must be a package of this module, whatever FUZZ_PKGS
+# selects: a path that went stale would otherwise drop out of every pull
+# request's selection, and out of main's too once nothing names it.
+listed=$(awk '$1 != "" && $1 !~ /^#/ {print $1}' "$list" | sort -u)
+if [[ -n "$listed" ]] && ! bad=$(go list -e -f '{{if .Error}}{{.ImportPath}}: {{.Error}}{{end}}' $listed 2>&1) || [[ -n "$bad" ]]; then
+  echo "$bad"; echo "fuzz: $list names a package this module does not have" >&2; exit 1
+fi
 n=0 ran=0
 while read -r pkg name; do
   case "$pkg" in '' | '#'*) continue ;; esac

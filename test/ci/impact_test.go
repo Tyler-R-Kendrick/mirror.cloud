@@ -121,14 +121,14 @@ func TestCIPlanSizesTheMatrices(t *testing.T) {
 	if r, f := read(all["race"]), read(all["fuzz"]); r.Count != 4 || len(r.Shards) != 4 || f.Count != 6 || f.Targets < 100 {
 		t.Errorf("everything: race %+v fuzz %+v", r, f)
 	}
-	if all["image"] != "true" || all["packages"] != "./a\n./b" {
+	if all["image"] != "true" || all["packages"] != "./a\n./b" || all["all"] != "true" {
 		t.Errorf("everything: %v", all)
 	}
 	none := plan(`{"all": false, "reason": "", "packages": [], ` + jobs + `}`)
 	if r, f := read(none["race"]), read(none["fuzz"]); r.Count != 1 || r.Packages != 0 || f.Count != 1 || f.Targets != 0 {
 		t.Errorf("nothing: race %+v fuzz %+v", r, f)
 	}
-	if none["image"] != "false" || none["generated-models"] != "true" {
+	if none["image"] != "false" || none["generated-models"] != "true" || none["all"] != "false" {
 		t.Errorf("gates: %v", none)
 	}
 	some := plan(`{"all": false, "reason": "", "packages": ["./internal/services/aws/s3", "./internal/clock", "./internal/mutation", "./internal/check"], "linked": ["./internal/services/aws/s3", "./internal/clock", "./internal/mutation"], ` + jobs + `}`)
@@ -248,5 +248,58 @@ func TestPlanOutputsAreWhatThePlanEmits(t *testing.T) {
 		if strings.Contains(string(raw), bad) {
 			t.Errorf("ci.yml gates on %q, which reads a missing answer as unaffected", bad)
 		}
+	}
+}
+
+// Every line of scripts/fuzz-targets.txt names a package of the module and a
+// Fuzz function in it. fuzz.sh fails on either at run time; this says so on
+// every pull request that touches the list or a fuzz test, in seconds.
+func TestFuzzTargetsNameRealTargets(t *testing.T) {
+	root := repo(t)
+	raw, err := os.ReadFile(filepath.Join(root, "scripts", "fuzz-targets.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodies := map[string]string{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 || strings.HasPrefix(f[0], "#") {
+			continue
+		}
+		if len(f) != 2 {
+			t.Errorf("%q is not a package and a function", line)
+			continue
+		}
+		pkg, name := f[0], f[1]
+		body, ok := bodies[pkg]
+		if !ok {
+			files, _ := filepath.Glob(filepath.Join(root, filepath.FromSlash(pkg), "*_test.go"))
+			if len(files) == 0 {
+				t.Errorf("%s: no such package with tests", pkg)
+			}
+			for _, file := range files {
+				b, _ := os.ReadFile(file)
+				body += string(b)
+			}
+			bodies[pkg] = body
+		}
+		if !regexp.MustCompile(`(?m)^func ` + regexp.QuoteMeta(name) + `\(\w+ \*testing\.F\)`).MatchString(body) {
+			t.Errorf("%s has no func %s(*testing.F)", pkg, name)
+		}
+	}
+}
+
+// fuzz.sh refuses a list naming a package the module does not have, even when
+// FUZZ_PKGS would have filtered it out.
+func TestFuzzScriptRefusesAStalePackage(t *testing.T) {
+	root := repo(t)
+	dir := t.TempDir()
+	targets := filepath.Join(dir, "targets")
+	os.WriteFile(targets, []byte("./internal/no/such/package FuzzX\n./internal/clock FuzzNoSuchTarget\n"), 0o644)
+	pkgs := filepath.Join(dir, "pkgs")
+	os.WriteFile(pkgs, []byte("./internal/engine\n"), 0o644)
+	out, err := run(t, root, []string{"FUZZ_TARGETS=" + targets, "FUZZ_PKGS=" + pkgs}, "bash", filepath.Join(root, "scripts", "fuzz.sh"))
+	if err == nil || !strings.Contains(out, "does not have") {
+		t.Errorf("a stale package passed: err=%v\n%s", err, out)
 	}
 }

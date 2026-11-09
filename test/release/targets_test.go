@@ -2,12 +2,13 @@ package release
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/testinputs"
 )
 
 // releaseTargets reads the build matrix from release.yml as YAML, so every
@@ -61,8 +62,7 @@ func TestEveryReleaseTargetCompiles(t *testing.T) {
 		goos, goarch := tg[0], tg[1]
 		t.Run(goos+"/"+goarch, func(t *testing.T) {
 			t.Parallel()
-			cmd := exec.Command("go", "vet", "./cmd/mirror")
-			cmd.Dir = root
+			cmd := testinputs.Command(root, "go", "vet", "./cmd/mirror")
 			cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0", "GOFLAGS=")
 			if out, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("%s/%s does not compile: %v\n%s", goos, goarch, err, strings.TrimSpace(string(out)))

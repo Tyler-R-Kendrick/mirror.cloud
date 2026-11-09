@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	behaviors "github.com/tyler-r-kendrick/mirror.cloud/behavior"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/racegate"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 )
 
@@ -25,6 +26,7 @@ import (
 // extracts one of those four, and it closes the moment a bundle is built from
 // the model the runtime actually serves.
 func TestEveryServedServiceCouldBeABundle(t *testing.T) {
+	racegate.SkipUnderRaceOnPullRequest(t, "builds a bundle from every served model")
 	served := specboot.Bundle()
 	var unbuildable []string
 	for i := range served.Services {
@@ -69,6 +71,7 @@ func TestTheServedNamesResolve(t *testing.T) {
 // the bundle to read the same field. If a bundle's shadow can be written
 // somewhere the header read does not look, this is where it shows.
 func TestShadowFromTheHeaderAgreesWithTheFullLoad(t *testing.T) {
+	racegate.SkipUnderRaceOnPullRequest(t, "loads every bundle in full")
 	for _, id := range behaviors.ServiceIDs() {
 		svc, err := servedModel(id)
 		if err != nil {

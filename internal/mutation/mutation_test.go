@@ -3,6 +3,7 @@ package mutation
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -21007,12 +21009,37 @@ func TestMutantsAreKilled(t *testing.T) {
 		t.Logf("shard %d of %d", index, count)
 	}
 
-	ran := 0
-	for i, m := range mutants {
-		if i%count != index {
-			continue
-		}
-		ran++
+	sel := readSelection(t)
+	selected, reason, err := selectMutants(root, sel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reason != "" {
+		t.Logf("every mutant selected: %s", reason)
+	}
+	if len(selected) == 0 {
+		// Only a filter gets here: the diff changed no mutated file, no test of
+		// a mutated package and no entry of this table. main runs them all.
+		t.Skipf("the filters select none of the %d mutants", len(mutants))
+	}
+	mine := assign(selected, count)[index]
+	if len(mine) == 0 {
+		// A shard that matched nothing is a misconfiguration, not a fast pass:
+		// CI sizes the matrix from the selection so that none is empty.
+		t.Fatalf("shard %d of %d selected none of the %d mutants the run selected", index, count, len(selected))
+	}
+	if sel.filters {
+		t.Logf("%d of %d mutants selected; this shard runs %d", len(selected), len(mutants), len(mine))
+	}
+
+	var (
+		mu       sync.Mutex
+		timeouts []string
+		spent    = map[string][]float64{}
+	)
+	t.Cleanup(func() { report(t, len(mine), timeouts, spent) })
+	for _, i := range mine {
+		m := mutants[i]
 		t.Run(m.name, func(t *testing.T) {
 			t.Parallel()
 			src := filepath.Join(root, m.file)
@@ -21036,11 +21063,20 @@ func TestMutantsAreKilled(t *testing.T) {
 			}
 			// ponytail: a mutant that makes its test hang past 30s counts as killed, as in
 			// PIT; a hang is a change the test observed. The ceiling is a test that already
-			// runs near 30s unmutated, which would "kill" anything; the upgrade is timing the
-			// unmutated run and failing a timeout that lands within its margin.
-			cmd := exec.Command("go", "test", m.pkg, "-count=1", "-run", m.run, "-timeout", "30s", "-overlay", overlay)
+			// runs near 30s unmutated, which would "kill" anything, so each one is reported
+			// by name (report, below) rather than counted silently with the rest.
+			//
+			// -vet=off: vet runs in the check job on the real tree. On a mutant it costs a
+			// few percent of the run, and a vet complaint about the rewrite would read as
+			// a kill when no test noticed anything.
+			cmd := exec.Command("go", "test", m.pkg, "-count=1", "-vet=off", "-run", m.run, "-timeout", "30s", "-overlay", overlay)
 			cmd.Dir = root
 			out, err := cmd.CombinedOutput()
+			if st := cmd.ProcessState; st != nil {
+				mu.Lock()
+				spent[m.pkg] = append(spent[m.pkg], (st.UserTime() + st.SystemTime()).Seconds())
+				mu.Unlock()
+			}
 			if err == nil {
 				t.Fatalf("mutant survived (tests still passed)\n%s", out)
 			}
@@ -21048,11 +21084,48 @@ func TestMutantsAreKilled(t *testing.T) {
 			if bytes.Contains(out, []byte("[build failed]")) || bytes.Contains(out, []byte("[setup failed]")) {
 				t.Fatalf("mutant does not compile, so it proves nothing; rewrite it so the package still builds\n%s", out)
 			}
+			if bytes.Contains(out, []byte("panic: test timed out after")) {
+				t.Logf("killed by the 30s timeout, not by a failing assertion")
+				mu.Lock()
+				timeouts = append(timeouts, m.name)
+				mu.Unlock()
+			}
 		})
 	}
-	// A shard that matched nothing is a misconfiguration, not a fast pass.
-	if ran == 0 {
-		t.Fatalf("shard %d of %d selected none of the %d mutants", index, count, len(mutants))
+}
+
+// report says how many kills were timeouts, by name, and what each package's
+// mutants cost, in the log (-v) and in MUTATION_REPORT when that names a file
+// (CI appends it to the step summary). A timeout still counts as a kill; what
+// changes is that nobody has to guess how many of the kills were one.
+func report(t *testing.T, ran int, timeouts []string, spent map[string][]float64) {
+	sort.Strings(timeouts)
+	var b strings.Builder
+	fmt.Fprintf(&b, "mutation: %d mutants run, %d killed by the 30s timeout rather than an assertion\n", ran, len(timeouts))
+	for _, name := range timeouts {
+		fmt.Fprintf(&b, "  timeout: %s\n", name)
+	}
+	pkgs := make([]string, 0, len(spent))
+	for p := range spent {
+		pkgs = append(pkgs, p)
+	}
+	sort.Strings(pkgs)
+	for _, p := range pkgs {
+		total := 0.0
+		for _, s := range spent[p] {
+			total += s
+		}
+		fmt.Fprintf(&b, "  cost: %s %d mutants, %.1f s CPU each (table: %.1f)\n", p, len(spent[p]), total/float64(len(spent[p])), cost(p))
+	}
+	t.Log(b.String())
+	if path := os.Getenv("MUTATION_REPORT"); path != "" {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			t.Errorf("MUTATION_REPORT: %v", err)
+			return
+		}
+		defer f.Close()
+		fmt.Fprint(f, b.String())
 	}
 }
 
@@ -21176,56 +21249,76 @@ func TestMutantNeedlesExist(t *testing.T) {
 // dangerous one: a mutant that no shard runs is a mutant that cannot fail, and
 // every job still reports success.
 //
-// So this states the property directly, for every shard count CI might use:
-// the union of the shards is the whole suite and no mutant appears twice.
-// It costs microseconds and runs in the fast suite, where the expensive one
-// cannot.
+// So this states the property directly, for every shard count CI might use and
+// for the whole table as well as a diff-sized part of it: the union of the
+// shards is the selection and no mutant appears twice. It costs milliseconds
+// and runs in the fast suite, where the expensive one cannot.
 func TestShardingIsAPartition(t *testing.T) {
-	for count := 1; count <= 16; count++ {
-		seen := make([]int, len(mutants))
-		for index := 0; index < count; index++ {
-			for i := range mutants {
-				if i%count == index {
+	all := make([]int, len(mutants))
+	for i := range all {
+		all[i] = i
+	}
+	var some []int
+	for i, m := range mutants {
+		if m.pkg == "./internal/services/aws/sns" || m.pkg == "./internal/engine" {
+			some = append(some, i)
+		}
+	}
+	for _, selected := range [][]int{all, some} {
+		for count := 1; count <= 16; count++ {
+			seen := map[int]int{}
+			for _, shard := range assign(selected, count) {
+				for _, i := range shard {
 					seen[i]++
 				}
 			}
-		}
-		for i, n := range seen {
-			if n != 1 {
-				t.Fatalf("with %d shards, %s runs %d times", count, mutants[i].name, n)
+			for _, i := range selected {
+				if seen[i] != 1 {
+					t.Fatalf("with %d shards, %s runs %d times", count, mutants[i].name, seen[i])
+				}
+			}
+			if len(seen) != len(selected) {
+				t.Fatalf("with %d shards, %d mutants run of %d selected", count, len(seen), len(selected))
 			}
 		}
 	}
 }
 
 // TestEveryShardGetsWork checks the other half: a split that leaves a job with
-// nothing to do is a job whose green means nothing. Index-modulo keeps the
-// shards within one mutant of each other, which also balances their cost --
-// the three packages holding four fifths of the suite sit in contiguous runs,
-// so interleaving spreads their compile time evenly rather than handing one
-// shard all of S3.
+// nothing to do is a job whose green means nothing, and one that hands a job
+// far more than the rest is the job that times out. Shards are filled by
+// measured cost (costs_test.go), most expensive mutant first, so no shard may
+// carry more than the cheapest one plus the single most expensive mutant.
 func TestEveryShardGetsWork(t *testing.T) {
+	all := make([]int, len(mutants))
+	for i := range all {
+		all[i] = i
+	}
+	heaviest := 0.0
+	for _, m := range mutants {
+		if c := cost(m.pkg); c > heaviest {
+			heaviest = c
+		}
+	}
 	for count := 1; count <= 16; count++ {
-		low, high := len(mutants), 0
-		for index := 0; index < count; index++ {
-			n := 0
-			for i := range mutants {
-				if i%count == index {
-					n++
-				}
-			}
-			if n == 0 {
+		low, high := -1.0, 0.0
+		for index, shard := range assign(all, count) {
+			if len(shard) == 0 {
 				t.Fatalf("with %d shards, shard %d has no mutants", count, index)
 			}
-			if n < low {
-				low = n
+			load := 0.0
+			for _, i := range shard {
+				load += cost(mutants[i].pkg)
 			}
-			if n > high {
-				high = n
+			if low < 0 || load < low {
+				low = load
+			}
+			if load > high {
+				high = load
 			}
 		}
-		if high-low > 1 {
-			t.Errorf("with %d shards, sizes range %d..%d", count, low, high)
+		if high-low > heaviest {
+			t.Errorf("with %d shards, loads range %.0f..%.0f s, more apart than one mutant (%.0f s)", count, low, high, heaviest)
 		}
 	}
 }

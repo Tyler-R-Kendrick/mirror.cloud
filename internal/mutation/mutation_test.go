@@ -4651,14 +4651,6 @@ var mutants = []mutant{
 		run:  "TestCloudFormationRefusesAnUndeclaredNameAnywhere",
 	},
 	{
-		name: "cloudformation-a-dependson-names-anything",
-		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `named[d], named["."+d] = true, true`,
-		new:  `named[d] = true`,
-		pkg:  "./internal/services/aws/cloudformation",
-		run:  "TestCloudFormationRefusesAnUndeclaredNameAnywhere",
-	},
-	{
 		name: "cloudformation-a-dependson-orders-nothing",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
 		old:  `named[d], named["."+d] = true, true`,

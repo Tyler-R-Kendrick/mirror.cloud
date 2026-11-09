@@ -173,11 +173,10 @@ var changeSetMembers = []string{"Parameters", "NotificationARNs", "Tags", "Capab
 // the error message" (StatusReason). A UsePreviousValue is read now: its Parameters are "the input parameters
 // and their values used to create the change set" (DescribeChangeSet).
 func (p *Pack) createChangeSet(ctx context.Context, req *spi.Request, name string) (*spi.Response, error) {
-	csn, body, create := str(req.Input["ChangeSetName"]), str(req.Input["TemplateBody"]), req.Input["ChangeSetType"] == "CREATE"
-	tpl, parseErr := parseTemplate(body) // one that does not parse names no parameters to check
-	if body == "" {
-		return nil, invalid("TemplateBody required")
-	} else if _, err := p.templateBody(ctx, req); err != nil { // the member's size, as every operation's
+	csn, create := str(req.Input["ChangeSetName"]), req.Input["ChangeSetType"] == "CREATE"
+	body, err := p.templateBody(ctx, req) // TemplateBody, within the member's size, or the TemplateURL's object
+	tpl, parseErr := parseTemplate(body)  // one that does not parse names no parameters to check
+	if err != nil {
 		return nil, err
 	} else if _, err := parameters(req.Input, tpl); err != nil && parseErr == nil {
 		return nil, err
@@ -185,7 +184,7 @@ func (p *Pack) createChangeSet(ctx context.Context, req *spi.Request, name strin
 		return nil, err
 	}
 	prefix := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account
-	rec := map[string]any{"ChangeSetName": csn, "ChangeSetId": prefix + ":changeSet/" + csn + "/" + p.deps.Rand.Hex(8), "StackName": name, "TemplateBody": body,
+	rec := map[string]any{"ChangeSetName": csn, "ChangeSetId": prefix + ":changeSet/" + csn + "/" + p.deps.Rand.Hex(8), "StackName": name, "TemplateBody": body, // a TemplateURL's too
 		"ChangeSetType": cmp.Or(str(req.Input["ChangeSetType"]), "UPDATE"), "Status": "CREATE_COMPLETE", "ExecutionStatus": "AVAILABLE",
 		"StackId": prefix + ":stack/" + named(name) + "/" + p.deps.Rand.Hex(8)} // a CREATE change set's stack is made under the id minted here
 	for _, k := range changeSetMembers {
@@ -193,7 +192,7 @@ func (p *Pack) createChangeSet(ctx context.Context, req *spi.Request, name strin
 			rec[k] = v
 		}
 	}
-	err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
+	err = p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
 		raw, ok, _ := stx.Collection("cfn").Get(named(name))
 		st, loadErr := found(name, raw, ok)
 		review := create && st.Status == "REVIEW_IN_PROGRESS"                            // a CREATE change set's stack, which takes more of them

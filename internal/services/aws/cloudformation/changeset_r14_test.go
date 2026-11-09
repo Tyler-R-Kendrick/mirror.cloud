@@ -283,3 +283,23 @@ func TestCloudFormationAChangeSetWithoutAStatusIsAvailable(t *testing.T) {
 }
 
 func spiSlice(v any) []any { s, _ := v.([]any); return s }
+
+// A change set made from a TemplateURL keeps the template it read, and its
+// execution makes the stack from it: CreateChangeSet takes "TemplateBody or a
+// TemplateURL" (API reference, CreateChangeSet). Before, the native
+// CreateChangeSet kept only a TemplateBody given, so the execution of one made
+// from a TemplateURL had no template.
+func TestCloudFormationAChangeSetKeepsTheTemplateItRead(t *testing.T) {
+	h := newStacks(t)
+	body, _ := json.Marshal(map[string]any{"Resources": map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}}})
+	url := h.upload("cs.json", string(body))
+	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "u", "ChangeSetName": "c", "ChangeSetType": "CREATE", "TemplateURL": url}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "u", "ChangeSetName": "c"}); err != nil {
+		t.Errorf("ExecuteChangeSet of a change set made from a TemplateURL answered %v", err)
+	}
+	if status, _, _ := h.status("u"); status != "CREATE_COMPLETE" {
+		t.Errorf("the stack is %q, want CREATE_COMPLETE", status)
+	}
+}

@@ -1,23 +1,15 @@
 // Command affected prints the packages whose tests a set of changed files can
-// reach, so a pull request runs the race detector, the fuzzers and the
-// mutation suite on those and not on the whole module.
+// reach (internal/affected), so a pull request runs the race detector, the
+// fuzzers and the mutation suite on those and not on the whole module.
 //
 //	git diff -z --name-only --no-renames HEAD^1 HEAD | go run ./cmd/affected -z
-//
-// A changed .go file selects its package and every package whose test binary
-// links it (go list -test -deps). A file that is not Go selects the package
-// whose directory holds it (embedded files, testdata), or what a rule in
-// affected.go names for it (files tests read at run time, documentation that
-// nothing reads). A path that no rule and no package accounts for selects
-// every package, as do go.mod and go.sum: an input it cannot place is one it
-// cannot rule out.
 //
 // The output is one package per line, as ./dir. -json prints
 // {"all": bool, "reason": string, "packages": [...], "linked": [...],
 // "jobs": {...}}: linked is the part of packages whose test binaries link
-// changed code, leaving out the packages selected only because their tests
-// read a changed file at run time, and jobs says which path-gated CI jobs the
-// change opens (gates, in affected.go).
+// changed code or are its own tests, leaving out the packages selected only
+// because their tests read a changed file at run time, and jobs says which
+// path-gated CI jobs the change opens.
 package main
 
 import (
@@ -26,7 +18,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
+
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/affected"
 )
 
 func main() {
@@ -60,54 +53,28 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	changed := paths(raw, *nul)
-	g, err := load(*root)
+	changed := affected.Split(raw, *nul)
+	g, err := affected.Load(*root)
 	if err != nil {
 		return err
 	}
-	r := g.selectFor(changed)
 	if *all {
-		r = result{all: true, reason: "-all", pkgs: g.pkgs}
+		changed = []string{"go.mod"} // what selects everything
+	}
+	r := g.Select(changed)
+	if *all {
+		r.Reason = "-all"
 	}
 	if *asJSON {
-		enc := json.NewEncoder(stdout)
-		return enc.Encode(map[string]any{"all": r.all, "reason": r.reason, "packages": nonNil(r.pkgs), "linked": r.linkedList(), "jobs": g.gates(r, changed)})
+		return json.NewEncoder(stdout).Encode(map[string]any{"all": r.All, "reason": r.Reason, "packages": r.Pkgs, "linked": r.Linked, "jobs": r.Jobs})
 	}
-	if r.all {
-		fmt.Fprintf(stderr, "affected: every package (%s)\n", r.reason)
+	if r.All {
+		fmt.Fprintf(stderr, "affected: every package (%s)\n", r.Reason)
 	} else {
-		fmt.Fprintf(stderr, "affected: %d of %d packages\n", len(r.pkgs), len(g.pkgs))
+		fmt.Fprintf(stderr, "affected: %d of %d packages\n", len(r.Pkgs), len(g.Packages()))
 	}
-	for _, p := range r.pkgs {
+	for _, p := range r.Pkgs {
 		fmt.Fprintln(stdout, p)
 	}
 	return nil
-}
-
-// paths splits the changed-file list. With -z a name is taken exactly as git
-// wrote it, whatever bytes it holds; a line list is trimmed, and a name git
-// quoted there (it held a byte git would not print) is kept quoted, which no
-// package or rule places, so it selects everything rather than nothing.
-func paths(raw []byte, nul bool) []string {
-	sep := "\n"
-	if nul {
-		sep = "\x00"
-	}
-	var out []string
-	for _, p := range strings.Split(string(raw), sep) {
-		if !nul {
-			p = strings.TrimSpace(p)
-		}
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-func nonNil(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
 }

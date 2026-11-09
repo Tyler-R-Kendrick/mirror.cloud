@@ -1,4 +1,16 @@
-package main
+// Package affected says which packages a set of changed files can reach, for CI
+// to run the race detector, the fuzzers and the mutation suite on those and not
+// on the whole module. cmd/affected prints it; the mutation harness selects its
+// mutants with it.
+//
+// A changed .go file selects its package and every package whose test binary
+// links it (go list -test -deps). A test file or testdata selects its own
+// package alone. A file that is not Go selects the package whose directory
+// holds it (embedded files), or what a rule names for it (files tests read at
+// run time, documentation that nothing reads). A path that no rule and no
+// package accounts for selects every package, as do go.mod, go.sum and the CI
+// machinery: an input it cannot place is one it cannot rule out.
+package affected
 
 import (
 	"bufio"
@@ -42,6 +54,7 @@ var machinery = []string{
 	"scripts/ci-plan.py",
 	"test/race-costs.json",
 	"cmd/affected/**",
+	"internal/affected/**",
 }
 
 // alsoRead adds to what a path's own package selects: packages whose tests read
@@ -114,8 +127,8 @@ func (r rule) matches(p string) bool {
 	}
 }
 
-// graph is the module as go list sees it with its tests.
-type graph struct {
+// Graph is the module as go list sees it with its tests.
+type Graph struct {
 	pkgs []string                   // every package, as "./dir", sorted
 	dirs map[string]string          // "dir" (slash, from the root; "" for the root) -> "./dir"
 	deps map[string][]string        // "./dir" -> every module package its test binaries link
@@ -123,10 +136,10 @@ type graph struct {
 	gate map[string]map[string]bool // gate name -> every module package its suite compiles, with its tags
 }
 
-// load runs go list in root. -test lists each package's test binary (p.test)
+// Load runs go list in root. -test lists each package's test binary (p.test)
 // with everything it links, which is the set of packages whose change can
 // change that package's test result.
-func load(root string) (*graph, error) {
+func Load(root string) (*Graph, error) {
 	// go list prints absolute, symlink-free directories; root has to be the
 	// same kind of path for a file to find the package that holds it.
 	abs, err := filepath.Abs(root)
@@ -156,7 +169,7 @@ func load(root string) (*graph, error) {
 		return nil, err
 	}
 	// What each gated job compiles, with the build tags it uses: a file built
-	// only with -tags miniflare can import a package the plain graph never
+	// only with -tags miniflare can import a package the plain Graph never
 	// links.
 	g.gate = map[string]map[string]bool{}
 	for name, gt := range gates {
@@ -184,8 +197,8 @@ func load(root string) (*graph, error) {
 	return g, nil
 }
 
-func parse(module, root string, listing []byte) (*graph, error) {
-	g := &graph{dirs: map[string]string{}, deps: map[string][]string{}, root: root}
+func parse(module, root string, listing []byte) (*Graph, error) {
+	g := &Graph{dirs: map[string]string{}, deps: map[string][]string{}, root: root}
 	rel := func(importPath string) (string, bool) {
 		importPath, _, _ = strings.Cut(importPath, " ")
 		if importPath == module {
@@ -238,7 +251,7 @@ func parse(module, root string, listing []byte) (*graph, error) {
 // owner is the package whose directory holds p: its source, its embedded
 // files and its testdata all sit at or below it. The nearest such directory
 // wins, so a file of a nested package belongs to that package.
-func (g *graph) owner(p string) (string, bool) {
+func (g *Graph) owner(p string) (string, bool) {
 	for dir := path.Dir(p); ; dir = path.Dir(dir) {
 		key := dir
 		if key == "." {
@@ -269,7 +282,7 @@ type classification struct {
 	why    string
 }
 
-func (g *graph) classify(p string) classification {
+func (g *Graph) classify(p string) classification {
 	// git quotes a name holding a byte it will not print; such a name is not
 	// a path here, so nothing can place it.
 	if strings.HasPrefix(p, "\"") {
@@ -322,7 +335,7 @@ type result struct {
 	changed map[string]bool // packages whose own files changed: code and tests
 }
 
-func (g *graph) selectFor(changed []string) result {
+func (g *Graph) selectFor(changed []string) result {
 	code, self, direct := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, p := range changed {
 		p = strings.TrimPrefix(path.Clean(p), "./")
@@ -422,7 +435,7 @@ func (r result) linkedList() []string {
 	return out
 }
 
-func (g *graph) gates(r result, changed []string) map[string]bool {
+func (g *Graph) gates(r result, changed []string) map[string]bool {
 	selected := map[string]bool{}
 	for _, p := range r.pkgs {
 		selected[p] = true
@@ -444,4 +457,51 @@ func (g *graph) gates(r result, changed []string) map[string]bool {
 		out[name] = open
 	}
 	return out
+}
+
+// Result is what a set of changed files selects.
+type Result struct {
+	All    bool            // everything, for Reason
+	Reason string          // why everything
+	Pkgs   []string        // every selected package, as ./dir
+	Linked []string        // the selected packages whose tests link changed code or are it
+	Jobs   map[string]bool // which path-gated CI jobs the change opens
+}
+
+// Select is what changed selects. Names are module-relative paths, as git
+// diff --name-only prints them.
+func (g *Graph) Select(changed []string) Result {
+	r := g.selectFor(changed)
+	return Result{All: r.all, Reason: r.reason, Pkgs: nonNil(r.pkgs), Linked: r.linkedList(), Jobs: g.gates(r, changed)}
+}
+
+// Packages is every package of the module, as ./dir.
+func (g *Graph) Packages() []string { return g.pkgs }
+
+// Split reads a changed-file list. With nul, a name is taken exactly as git
+// wrote it (git diff -z), whatever bytes it holds; a line list is trimmed, and
+// a name git quoted there is kept quoted, which nothing places, so it selects
+// everything rather than nothing.
+func Split(raw []byte, nul bool) []string {
+	sep := "\n"
+	if nul {
+		sep = "\x00"
+	}
+	var out []string
+	for _, p := range strings.Split(string(raw), sep) {
+		if !nul {
+			p = strings.TrimSpace(p)
+		}
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }

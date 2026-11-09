@@ -450,6 +450,7 @@ var machinery = []string{
 	"scripts/ci-plan.py",
 	"test/race-costs.json",
 	"cmd/affected/**",
+	"internal/affected/**",
 }
 
 func isMachinery(f string) bool {

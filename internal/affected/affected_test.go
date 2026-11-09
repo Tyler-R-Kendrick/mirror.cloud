@@ -1,4 +1,4 @@
-package main
+package affected
 
 import (
 	"bytes"
@@ -16,17 +16,17 @@ var update = flag.Bool("update", false, "rewrite testdata/golden.json from the c
 
 var (
 	graphOnce sync.Once
-	theGraph  *graph
+	theGraph  *Graph
 	graphErr  error
 )
 
-func moduleGraph(t *testing.T) (*graph, string) {
+func moduleGraph(t *testing.T) (*Graph, string) {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
-	graphOnce.Do(func() { theGraph, graphErr = load(root) })
+	graphOnce.Do(func() { theGraph, graphErr = Load(root) })
 	if graphErr != nil {
 		t.Fatal(graphErr)
 	}
@@ -45,7 +45,7 @@ func TestEveryTrackedFileMapsSomewhere(t *testing.T) {
 	if err != nil {
 		t.Skipf("git ls-files: %v (not a git checkout)", err)
 	}
-	for _, p := range paths(out, true) {
+	for _, p := range Split(out, true) {
 		c := g.classify(p)
 		if c.all && c.why == "no rule and no package owns it" {
 			t.Errorf("%s: no package owns it and no rule in affected.go names it, so a change to it runs everything; add a rule", p)
@@ -76,7 +76,7 @@ func TestEveryTrackedFileMapsSomewhere(t *testing.T) {
 // selects nothing: nothing can compile it.
 func TestUnknownPathsSelectEverything(t *testing.T) {
 	shared, _ := moduleGraph(t)
-	// The same graph, looking for unplaced paths in a tree where these exist.
+	// The same Graph, looking for unplaced paths in a tree where these exist.
 	g := *shared
 	g.root = t.TempDir()
 	for _, p := range []string{"nowhere/new.bin", "a-new-root-file", ".github/new-thing.yml"} {
@@ -211,57 +211,6 @@ func TestGoldenSelections(t *testing.T) {
 	}
 }
 
-func TestRunPrintsPackagesAndJSON(t *testing.T) {
-	_, root := moduleGraph(t)
-	var out, errb bytes.Buffer
-	if err := run([]string{"-root", root}, strings.NewReader("internal/clock/clock.go\n\n"), &out, &errb); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), "./internal/clock\n") || !strings.Contains(errb.String(), "packages") {
-		t.Errorf("stdout %q stderr %q", out.String(), errb.String())
-	}
-	out.Reset()
-	errb.Reset()
-	if err := run([]string{"-root", root}, strings.NewReader("go.mod\n"), &out, &errb); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(errb.String(), "every package") {
-		t.Errorf("stderr %q", errb.String())
-	}
-	out.Reset()
-	list := filepath.Join(t.TempDir(), "changed")
-	os.WriteFile(list, []byte("README.md\n"), 0o644)
-	if err := run([]string{"-root", root, "-json", "-files", list}, nil, &out, &errb); err != nil {
-		t.Fatal(err)
-	}
-	var r struct {
-		All      bool     `json:"all"`
-		Packages []string `json:"packages"`
-	}
-	if err := json.Unmarshal(out.Bytes(), &r); err != nil || r.All || r.Packages == nil || len(r.Packages) != 0 {
-		t.Errorf("json %q: %v", out.String(), err)
-	}
-	// The default root is ".", a relative path, which is how CI runs it: a
-	// file must still find its package.
-	out.Reset()
-	errb.Reset()
-	if err := run([]string{"-root", filepath.Join("..", "..")}, strings.NewReader("internal/clock/clock.go\n"), &out, &errb); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), "./internal/clock\n") || strings.Contains(errb.String(), "every package") {
-		t.Errorf("a relative root: stdout %q stderr %q", out.String(), errb.String())
-	}
-	if err := run([]string{"-files", filepath.Join(t.TempDir(), "absent")}, nil, &out, &errb); err == nil {
-		t.Error("a missing -files was accepted")
-	}
-	if err := run([]string{"-nosuchflag"}, nil, &out, &errb); err == nil {
-		t.Error("an unknown flag was accepted")
-	}
-	if err := run([]string{"-root", t.TempDir()}, strings.NewReader(""), &out, &errb); err == nil {
-		t.Error("a directory with no module was accepted")
-	}
-}
-
 func TestParseRejectsMalformedListing(t *testing.T) {
 	if _, err := parse("m", "/r", []byte("one\ttwo\n")); err == nil {
 		t.Error("a short line was accepted")
@@ -346,7 +295,7 @@ func TestATestChangeReachesItsOwnPackage(t *testing.T) {
 		t.Errorf("a cloudflare suite input left the miniflare gate shut")
 	}
 	// The gate compiles what -tags miniflare links, so it holds packages the
-	// plain graph links only through the tagged files too.
+	// plain Graph links only through the tagged files too.
 	if !g.gate["cloudflare-miniflare"]["./internal/execution"] || len(g.gate["cloudflare-miniflare"]) < 5 {
 		t.Errorf("the miniflare gate compiles %d packages", len(g.gate["cloudflare-miniflare"]))
 	}
@@ -376,9 +325,9 @@ func TestMachinerySelectsEverything(t *testing.T) {
 // A name git would quote is read exactly with -z, and a quoted one, from a
 // list without -z, cannot be placed, so it selects everything.
 func TestNamesAreReadExactly(t *testing.T) {
-	g, root := moduleGraph(t)
+	g, _ := moduleGraph(t)
 	in := "internal/clock/caf\u00e9 notes.txt\x00docs/TESTING.md\x00"
-	got := paths([]byte(in), true)
+	got := Split([]byte(in), true)
 	if len(got) != 2 || got[0] != "internal/clock/caf\u00e9 notes.txt" {
 		t.Fatalf("-z read %q", got)
 	}
@@ -387,10 +336,6 @@ func TestNamesAreReadExactly(t *testing.T) {
 	}
 	if r := g.selectFor([]string{`"internal/clock/caf\303\251.txt"`}); !r.all {
 		t.Errorf("a quoted name selected %v", r.pkgs)
-	}
-	var out, errb bytes.Buffer
-	if err := run([]string{"-z", "-root", root}, strings.NewReader(in), &out, &errb); err != nil || !strings.Contains(out.String(), "./internal/clock\n") {
-		t.Errorf("-z: %v %q %q", err, out.String(), errb.String())
 	}
 }
 

@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"maps"
 	"net/url"
@@ -260,6 +259,7 @@ type stack struct {
 	Name, ID, Status, Template string
 	Reason                     string `json:",omitempty"` // StackStatusReason
 	Resources                  []res
+	Left                       []res `json:",omitempty"` // what a failed update made and could not delete
 	Outputs                    []any
 	Refs                       map[string]string
 	NotificationARNs, Tags     []any
@@ -276,7 +276,7 @@ type res struct {
 // upsert makes the stack named name, or updates it, a create under id when one is given (a CREATE change
 // set's, which it answered), as the execution of the change set under key when one is given: claimed in the
 // transaction that starts it, retired in the one that ends it.
-func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (out *spi.Response, err error) {
+func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (*spi.Response, error) {
 	if err := checkName(name, !update); err != nil {
 		return nil, err
 	} else if len(spi.Slice(req.Input["NotificationARNs"])) > 5 { // "Maximum number of 5 items" (API reference, CreateStack and UpdateStack)
@@ -284,6 +284,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}
 	id = cmp.Or(id, "arn:aws:cloudformation:"+req.Identity.Region+":"+req.Identity.Account+":stack/"+name+"/"+p.deps.Rand.Hex(8))
 	given, loaded := spi.Decode[map[string]any]([]byte(spi.JSONText(req.Input))), stack{}
+	rereads, _ := ctx.Value(staleKey{}).(int)
 	if cur, err := p.load(ctx, req, name); err == nil && update { // the id an update's AWS::StackId answers
 		id, loaded = cur.ID, cur
 		previous(req.Input, cur)
@@ -333,9 +334,11 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			return tx.Put(name, []byte(spi.JSONText(held)))
 		}
 		return tx.Put(name, []byte(spi.JSONText(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags})))
-	}); errors.Is(err, errStale) {
+	}); errors.Is(err, errStale) && rereads < 3 {
 		req.Input = given
-		return p.upsert(ctx, req, name, update, "", cs)
+		return p.upsert(context.WithValue(ctx, staleKey{}, rereads+1), req, name, update, "", cs)
+	} else if errors.Is(err, errStale) { // still changing: a caller it will not serve now, in the service's words
+		return nil, fault("Throttling", "Rate exceeded")
 	} else if err != nil {
 		return nil, err
 	}
@@ -346,28 +349,28 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			_ = p.unwind(ctx, req, st, "CREATE_IN_PROGRESS", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
 		} else { // what the update made that no stack's record holds goes, newest first; what cannot is left on
 			// the record (DELETE_FAILED), which it puts back as it found it, over its reservation only
-			owned, was := p.holders(ctx, req), stored(old.Template)
+			owned, was, unrestored := p.holders(ctx, req), stored(old.Template), []string{}
+			defer func() { _, _, _ = p.settle(ctx, req, name, as(held, old)) }() // the reservation ends whatever the put-back does
 			for _, r := range slices.Backward(st.Resources) {
 				if owned[r.Physical] == name && strings.Contains(" AWS::SecretsManager::Secret AWS::Events::Rule AWS::SSM::Parameter ", " "+r.Type+" ") {
 					p.tpl = was // one it changed in place takes its properties back, as a rollback does
-					_, _ = p.provision(ctx, req, r.Type, r.Logical, r.Name, asMap(p.resolve(asMap(asMap(was["Resources"])[r.Logical])["Properties"], old.Refs, req, name)), r.Physical, old.ID)
+					if _, perr := p.provision(ctx, req, r.Type, r.Logical, r.Name, asMap(p.resolve(asMap(asMap(was["Resources"])[r.Logical])["Properties"], old.Refs, req, name)), r.Physical, old.ID); perr != nil {
+						unrestored = append(unrestored, r.Logical)
+					}
 				} else if owned[r.Physical] != "" { // another stack's
 					continue
-				} else if derr := p.deprovision(ctx, req, r); derr != nil {
+				} else if derr := p.deprovision(ctx, req, r); derr != nil { // left apart from its resources: a logical id is listed once
 					r.Status, r.Reason = "DELETE_FAILED", derr.Error()
-					old.Resources = append(old.Resources, r)
+					old.Left = append(old.Left, r)
 				}
 			}
-			_, _, _ = p.settle(ctx, req, name, as(held, old))
+			if len(unrestored) > 0 { // the service's words for a resource a rollback could not update back
+				old.Reason = "The following resource(s) failed to update: [" + strings.Join(unrestored, ", ") + "]."
+			}
 		}
 		p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", err)
 		return nil, err
 	}
-	defer func() { // a panic between the reservation and the settle ends the reservation, as a failure does
-		if r := recover(); r != nil {
-			out, err = fail(&spi.Fault{Code: "InternalFailure", Message: fmt.Sprint(r), HTTPStatus: 500, Fault: "server"})
-		}
-	}()
 	planned := maps.Clone(st.Refs)
 	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
@@ -405,6 +408,11 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			return fail(err)
 		}
 		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": text(v)})
+	}
+	for _, r := range old.Left { // what a failed update left goes now, or is left again
+		if p.deprovision(ctx, req, r) != nil {
+			st.Left = append(st.Left, r)
+		}
 	}
 	if !update { // a DeleteStack begun during the create ends here: what it made goes, and then the stack
 		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS"), retire(name, cs)); err != nil {
@@ -462,8 +470,11 @@ func (p *Pack) holders(ctx context.Context, req *spi.Request) map[string]string 
 	return out
 }
 
-// errStale is an update's reservation finding the record changed since the update read it.
+// errStale is an update's reservation finding the record changed since the update read it, which it reads
+// again, as many times as staleKey counts in its context.
 var errStale = errors.New("stale")
+
+type staleKey struct{}
 
 // changeSet is the change set an execution executes: its key, and the id of the copy it read.
 type changeSet struct{ key, id string }
@@ -612,14 +623,16 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 // listed as DELETE_FAILED for the next DeleteStack to try again and the first error, which unwind answers,
 // its StackStatusReason. A create's rollback that finds a DeleteStack begun ends that delete instead.
 func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, was, done, failed string) error {
-	left, first := []res{}, error(nil) // left is never null: every read of the stack lists its resources
-	for _, r := range slices.Backward(st.Resources) {
-		if err := p.deprovision(ctx, req, r); err != nil {
+	left, first, owned := []res{}, error(nil), p.holders(ctx, req) // left is never null: every read of the stack lists its resources
+	for _, r := range slices.Backward(append(st.Left, st.Resources...)) {
+		if o := owned[r.Physical]; o != "" && o != st.Name { // another stack's
+			continue
+		} else if err := p.deprovision(ctx, req, r); err != nil {
 			r.Status, r.Reason, first = "DELETE_FAILED", err.Error(), cmp.Or(first, err)
 			left = append([]res{r}, left...)
 		}
 	}
-	st.Resources, st.Status = left, done
+	st.Resources, st.Status, st.Left = left, done, nil
 	if first != nil {
 		st.Status, st.Reason = failed, first.Error()
 	}
@@ -758,11 +771,19 @@ func (p *Pack) order(tpl map[string]any, refs map[string]string) ([]string, erro
 	for logical, r := range resources {
 		p.walks++
 		named := map[string]bool{}
-		names(asMap(r)["Properties"], named, refs)                                          // the order prunes what a settled Fn::If does not take
-		for _, d := range append(spi.Slice(asMap(r)["DependsOn"]), asMap(r)["DependsOn"]) { // "Resource B is created before resource A"
-			if d, ok := d.(string); ok && resources[d] != nil && !off(resources[d], refs) {
+		names(asMap(r)["Properties"], named, refs) // the order prunes what a settled Fn::If does not take
+		deps := asMap(r)["DependsOn"]              // "a string or a list of strings" (Template Reference, DependsOn attribute)
+		if d, ok := deps.(string); ok {
+			deps = []any{d}
+		}
+		if l, ok := deps.([]any); deps != nil && (!ok || slices.ContainsFunc(l, func(d any) bool { _, s := d.(string); return !s })) {
+			return nil, invalid("Template format error: DependsOn must be a string or a list of strings") // the wording is a reading
+		}
+		for _, d := range spi.Slice(deps) { // "Resource B is created before resource A"; a resource the stack makes, nothing else,
+			// unless this one is left out too; a template read alone settles no condition here, as ValidateTemplate evaluates none
+			if d := str(d); resources[d] != nil && (off(r, refs) || !off(resources[d], refs) || refs["AWS::StackName"] == "") {
 				named[d] = true
-			} else if ok { // a DependsOn names a resource the stack makes, nothing else
+			} else {
 				undeclared = append(undeclared, d)
 			}
 		}
@@ -1143,7 +1164,13 @@ func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) error {
 
 // call invokes another service the way the edge would: through whatever the registry serves it with, pack
 // or bundle. A pack that runs a worker is closed again, since this construction is per call.
-func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map[string]any) (map[string]any, error) {
+func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map[string]any) (out map[string]any, err error) {
+	defer func() { // a service that panics fails the call, as InternalFailure: the stack's rollback, or an update's
+		// put-back, goes on past it, and the stack's reservation ends as a failure ends it
+		if recover() != nil {
+			out, err = nil, internalFailure()
+		}
+	}()
 	for _, f := range registry.Factories() {
 		if f.ServiceID != id {
 			continue
@@ -1313,6 +1340,12 @@ var generateTypes = map[string]string{"PasswordLength": "Integer", "ExcludeChara
 	"ExcludePunctuation": "Boolean", "IncludeSpace": "Boolean", "RequireEachIncludedType": "Boolean"}
 
 func invalid(message string) *spi.Fault { return fault("ValidationError", message) }
+
+// internalFailure is the service's answer to a failure of its own, which says nothing of what failed (Common
+// Errors, API reference).
+func internalFailure() *spi.Fault {
+	return &spi.Fault{Code: "InternalFailure", Message: "The request processing has failed because of an unknown error, exception or failure.", HTTPStatus: 500, Fault: "server"}
+}
 
 func fault(code, message string) *spi.Fault {
 	return &spi.Fault{Code: code, Message: message, HTTPStatus: 400, Fault: "client"}

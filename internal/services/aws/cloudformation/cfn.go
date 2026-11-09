@@ -276,7 +276,7 @@ type res struct {
 // upsert makes the stack named name, or updates it, a create under id when one is given (a CREATE change
 // set's, which it answered), as the execution of the change set under key when one is given: claimed in the
 // transaction that starts it, retired in the one that ends it.
-func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (*spi.Response, error) {
+func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (out *spi.Response, err error) {
 	if err := checkName(name, !update); err != nil {
 		return nil, err
 	} else if len(spi.Slice(req.Input["NotificationARNs"])) > 5 { // "Maximum number of 5 items" (API reference, CreateStack and UpdateStack)
@@ -344,33 +344,40 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}
 	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: refs,
 		Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags} // never null: every read of a stack lists them
-	fail := func(err error) (*spi.Response, error) {
-		if st.Reason = err.Error(); !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
+	fail := func(cause error) (_ *spi.Response, err error) {
+		err, st.Reason = cause, cause.Error()
+		defer func() { // the reservation ends whatever the cleanup below does, a panic of its own included
+			_ = recover()
+			st.Status = "ROLLBACK_FAILED" // where a create's rollback that panicked leaves it; else unwind settled it
+			_, _, _ = p.settle(ctx, req, name, map[bool]func(stack) (stack, bool){false: from(st, "CREATE_IN_PROGRESS"), true: as(held, old)}[update])
+			p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", err)
+		}()
+		if !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, "CREATE_IN_PROGRESS", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
-		} else { // what the update made that no stack's record holds goes, newest first; what cannot is left on
-			// the record (DELETE_FAILED), which it puts back as it found it, over its reservation only
-			owned, was, unrestored := p.holders(ctx, req), stored(old.Template), []string{}
-			defer func() { _, _, _ = p.settle(ctx, req, name, as(held, old)) }() // the reservation ends whatever the put-back does
-			for _, r := range slices.Backward(st.Resources) {
-				if owned[r.Physical] == name && strings.Contains(" AWS::SecretsManager::Secret AWS::Events::Rule AWS::SSM::Parameter ", " "+r.Type+" ") {
-					p.tpl = was // one it changed in place takes its properties back, as a rollback does
-					if _, perr := p.provision(ctx, req, r.Type, r.Logical, r.Name, asMap(p.resolve(asMap(asMap(was["Resources"])[r.Logical])["Properties"], old.Refs, req, name)), r.Physical, old.ID); perr != nil {
-						unrestored = append(unrestored, r.Logical)
-					}
-				} else if owned[r.Physical] != "" { // another stack's
-					continue
-				} else if derr := p.deprovision(ctx, req, r); derr != nil { // left apart from its resources: a logical id is listed once
-					r.Status, r.Reason = "DELETE_FAILED", derr.Error()
-					old.Left = append(old.Left, r)
+			return nil, err
+		} // what the update made that no stack's record holds goes, newest first; what cannot is left on the
+		// record (DELETE_FAILED), which it puts back as it found it, over its reservation only
+		owned, was, unrestored := p.holders(ctx, req), stored(old.Template), []string{}
+		for _, r := range st.Resources {
+			if owned[r.Physical] == name && strings.Contains(" AWS::SecretsManager::Secret AWS::Events::Rule AWS::SSM::Parameter ", " "+r.Type+" ") {
+				p.tpl = was // one it changed in place takes its properties back, as a rollback does
+				if _, perr := p.provision(ctx, req, r.Type, r.Logical, r.Name, asMap(p.resolve(asMap(asMap(was["Resources"])[r.Logical])["Properties"], old.Refs, req, name)), r.Physical, old.ID); perr != nil {
+					unrestored = append(unrestored, r.Logical)
 				}
 			}
-			if len(unrestored) > 0 { // the service's words for a resource a rollback could not update back
-				old.Reason = "The following resource(s) failed to update: [" + strings.Join(unrestored, ", ") + "]."
-			}
+		} // what it cannot delete is left apart from its resources: a logical id is listed once
+		left, _ := p.remove(ctx, req, name, slices.DeleteFunc(slices.Clone(st.Resources), func(r res) bool { return owned[r.Physical] == name }))
+		old.Left = append(old.Left, left...)
+		if len(unrestored) > 0 { // the service's words for a resource a rollback could not update back
+			old.Reason = "The following resource(s) failed to update: [" + strings.Join(unrestored, ", ") + "]."
 		}
-		p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", err)
 		return nil, err
 	}
+	defer func() { // a panic of the engine's own, after the reservation, fails the operation as any failure does
+		if recover() != nil {
+			out, err = fail(internalFailure())
+		}
+	}()
 	planned := maps.Clone(st.Refs)
 	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
@@ -409,11 +416,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		}
 		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": text(v)})
 	}
-	for _, r := range old.Left { // what a failed update left goes now, or is left again
-		if p.deprovision(ctx, req, r) != nil {
-			st.Left = append(st.Left, r)
-		}
-	}
+	st.Left, _ = p.remove(ctx, req, name, slices.DeleteFunc(slices.Clone(old.Left), func(r res) bool { // what a failed update left goes now,
+		return slices.ContainsFunc(st.Resources, func(n res) bool { return n.Physical == r.Physical }) // or is left again; not one the stack holds again
+	}))
 	if !update { // a DeleteStack begun during the create ends here: what it made goes, and then the stack
 		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS"), retire(name, cs)); err != nil {
 			return fail(err) // the final write failed: an error, never success
@@ -434,27 +439,32 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 // settle answers the record it found and whether it wrote.
 func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take func(stack) (stack, bool), sets ...func(spi.Tx) error) (stack, bool, error) {
 	var cur stack
+	var err error
 	wrote := false
-	err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
-		tx, cs := stx.Collection("cfn"), stx.Collection("cfn-cs")
-		raw, _, _ := tx.Get(name)
-		cur = spi.Decode[stack](raw)
-		next, yes := take(cur)
-		if wrote = yes; !yes {
-			return nil
-		} else if next.Status == "DELETE_COMPLETE" { // its change sets go with it: retire, keyed by no change set
-			if err := retire(name, changeSet{key: name})(cs); err != nil {
-				return err
-			}
-			return tx.Delete(name)
-		}
-		for _, write := range sets {
-			if err := write(cs); err != nil {
-				return err
-			}
-		}
-		return tx.Put(name, []byte(spi.JSONText(next)))
-	})
+	for try := 0; try < 2 && (try == 0 || err != nil); try++ { // a store that failed, or panicked, is tried once more
+		err = recovered(func() error {
+			return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
+				tx, cs := stx.Collection("cfn"), stx.Collection("cfn-cs")
+				raw, _, _ := tx.Get(name)
+				cur = spi.Decode[stack](raw)
+				next, yes := take(cur)
+				if wrote = yes; !yes {
+					return nil
+				} else if next.Status == "DELETE_COMPLETE" { // its change sets go with it: retire, keyed by no change set
+					if err := retire(name, changeSet{key: name})(cs); err != nil {
+						return err
+					}
+					return tx.Delete(name)
+				}
+				for _, write := range sets {
+					if err := write(cs); err != nil {
+						return err
+					}
+				}
+				return tx.Put(name, []byte(spi.JSONText(next)))
+			})
+		})
+	}
 	return cur, wrote, err
 }
 
@@ -463,8 +473,11 @@ func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take f
 func (p *Pack) holders(ctx context.Context, req *spi.Request) map[string]string {
 	out := map[string]string{}
 	for _, kv := range spi.Entries(ctx, p.col(req, "cfn"), "", "", 0) {
-		for _, r := range spi.Decode[stack](kv.Value).Resources {
-			out[r.Physical] = kv.Key
+		rec := spi.Decode[stack](kv.Value)
+		for i, r := range append(rec.Resources, rec.Left...) { // what a failed update left, unless a stack holds it as a resource
+			if _, taken := out[r.Physical]; !taken || i < len(rec.Resources) {
+				out[r.Physical] = kv.Key
+			}
 		}
 	}
 	return out
@@ -529,8 +542,7 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 	}
 	tpl, err := parseTemplate(body)
 	var order []string
-	var refs map[string]string
-	var known map[string]string
+	var refs, known map[string]string
 	if err == nil {
 		known, err = parameters(req.Input, tpl)
 	}
@@ -611,7 +623,9 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 		if err = settleErr; err == nil && !started { // it changed since it was read
 			return p.drop(ctx, req, name)
 		} else if err == nil && was != "CREATE_IN_PROGRESS" {
-			err = p.unwind(ctx, req, del, "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED")
+			err = recovered(func() error { return p.unwind(ctx, req, del, "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED") })
+			del.Status, del.Reason = "DELETE_FAILED", cmp.Or(err, error(internalFailure())).Error() // where an unwind that panicked leaves it
+			_, _, _ = p.settle(ctx, req, name, from(del, "DELETE_IN_PROGRESS"))
 		}
 	}
 	return &spi.Response{Output: map[string]any{}}, err
@@ -623,16 +637,9 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 // listed as DELETE_FAILED for the next DeleteStack to try again and the first error, which unwind answers,
 // its StackStatusReason. A create's rollback that finds a DeleteStack begun ends that delete instead.
 func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, was, done, failed string) error {
-	left, first, owned := []res{}, error(nil), p.holders(ctx, req) // left is never null: every read of the stack lists its resources
-	for _, r := range slices.Backward(append(st.Left, st.Resources...)) {
-		if o := owned[r.Physical]; o != "" && o != st.Name { // another stack's
-			continue
-		} else if err := p.deprovision(ctx, req, r); err != nil {
-			r.Status, r.Reason, first = "DELETE_FAILED", err.Error(), cmp.Or(first, err)
-			left = append([]res{r}, left...)
-		}
-	}
-	st.Resources, st.Status, st.Left = left, done, nil
+	left, first := p.remove(ctx, req, st.Name, st.Resources)
+	kept, err := p.remove(ctx, req, st.Name, st.Left) // what a failed update left stays apart
+	st.Resources, st.Status, st.Left, first = left, done, kept, cmp.Or(first, err)
 	if first != nil {
 		st.Status, st.Reason = failed, first.Error()
 	}
@@ -642,6 +649,22 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, was, done
 		_, _, err = p.settle(ctx, req, st.Name, from(st, "DELETE_IN_PROGRESS"))
 	}
 	return cmp.Or(first, err)
+}
+
+// remove deletes rs, newest first, but what another stack's record holds, and answers those it could not
+// delete, DELETE_FAILED with the error as their reason (never null: every read of a stack lists them), and
+// the first error.
+func (p *Pack) remove(ctx context.Context, req *spi.Request, name string, rs []res) (left []res, first error) {
+	owned, left := p.holders(ctx, req), []res{}
+	for _, r := range slices.Backward(rs) {
+		if o := owned[r.Physical]; o != "" && o != name { // another stack's
+			continue
+		} else if err := p.deprovision(ctx, req, r); err != nil {
+			r.Status, r.Reason, first = "DELETE_FAILED", err.Error(), cmp.Or(first, err)
+			left = append([]res{r}, left...)
+		}
+	}
+	return left, first
 }
 
 func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, error) {
@@ -984,14 +1007,17 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 	}
 	if holds(props[k.member], unknown) { // one built on an id known only once made is checked as it is made:
 		return "", nil // its id is not planned (planID), and a Ref to it is unknown
-	} else if n == "" {
-		return physicalName(st.Name, logical, st.ID, typ, props), nil
+	} else if n == "" || k.find == "" {
+		return cmp.Or(n, physicalName(st.Name, logical, st.ID, typ, props)), nil
 	}
 	id := n
 	if k.by == "TopicArn" { // GetTopicAttributes finds a topic by its ARN
 		id = planID(req, typ, n, props)
 	}
 	out, err := p.call(ctx, req, k.svc, k.find, given(map[string]any{k.by: id}, props, "EventBusName"))
+	if err != nil && !gone(err) { // only the owner's not-found says the name is free
+		return "", err
+	}
 	groups, list := out["logGroups"].([]any) // DescribeLogGroups answers a list by prefix, never a fault
 	if err != nil || list && !slices.ContainsFunc(groups, func(g any) bool { return str(asMap(g)["logGroupName"]) == n }) ||
 		slices.ContainsFunc(old.Resources, func(r res) bool { // a record from before res.Name: by the physical id, which ends in the name
@@ -1154,23 +1180,21 @@ func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) error {
 	if del.svc == "" {
 		return nil
 	}
-	_, err := p.call(ctx, req, del.svc, del.del, del.out)
-	var f *spi.Fault
-	if errors.As(err, &f) && (strings.Contains(f.Code, "NotFound") || strings.Contains(f.Code, "NoSuch") || strings.Contains(f.Code, "NonExistent")) {
-		return nil
+	if _, err := p.call(ctx, req, del.svc, del.del, del.out); !gone(err) {
+		return err
 	}
-	return err
+	return nil
+}
+
+// gone is whether err is its service's not-found error.
+func gone(err error) bool {
+	var f *spi.Fault
+	return errors.As(err, &f) && (strings.Contains(f.Code, "NotFound") || strings.Contains(f.Code, "NoSuch") || strings.Contains(f.Code, "NonExistent"))
 }
 
 // call invokes another service the way the edge would: through whatever the registry serves it with, pack
 // or bundle. A pack that runs a worker is closed again, since this construction is per call.
-func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map[string]any) (out map[string]any, err error) {
-	defer func() { // a service that panics fails the call, as InternalFailure: the stack's rollback, or an update's
-		// put-back, goes on past it, and the stack's reservation ends as a failure ends it
-		if recover() != nil {
-			out, err = nil, internalFailure()
-		}
-	}()
+func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map[string]any) (map[string]any, error) {
 	for _, f := range registry.Factories() {
 		if f.ServiceID != id {
 			continue
@@ -1182,8 +1206,11 @@ func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map
 		if closer, ok := pack.(interface{ Close() error }); ok {
 			defer closer.Close()
 		}
-		resp, err := pack.Invoke(ctx, &spi.Request{Identity: req.Identity, AdvertiseURL: advertise(req), Operation: op, Input: input(id, op, in)})
-		if err != nil {
+		var resp *spi.Response // a service that panics fails the call, as InternalFailure: a rollback goes on past it
+		if err := recovered(func() error {
+			resp, err = pack.Invoke(ctx, &spi.Request{Identity: req.Identity, AdvertiseURL: advertise(req), Operation: op, Input: input(id, op, in)})
+			return err
+		}); err != nil {
 			return nil, err
 		}
 		return resp.Output, nil
@@ -1340,6 +1367,16 @@ var generateTypes = map[string]string{"PasswordLength": "Integer", "ExcludeChara
 	"ExcludePunctuation": "Boolean", "IncludeSpace": "Boolean", "RequireEachIncludedType": "Boolean"}
 
 func invalid(message string) *spi.Fault { return fault("ValidationError", message) }
+
+// recovered runs f and answers its error, or InternalFailure when f panics.
+func recovered(f func() error) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = internalFailure()
+		}
+	}()
+	return f()
+}
 
 // internalFailure is the service's answer to a failure of its own, which says nothing of what failed (Common
 // Errors, API reference).

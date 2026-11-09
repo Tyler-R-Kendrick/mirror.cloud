@@ -129,10 +129,10 @@ def main(argv):
                        for f in git("ls-tree", "--name-only", ref, d + "/").split())
         if not has_code and not deps <= need:
             leave_out.append(d)  # a suite that imports a service that is not here
-    for d in sorted(dirs):
-        m = re.fullmatch(r"test/behavior/([a-z0-9]+)", d)
-        if m and not (m.group(1) in whole and d not in leave_out):
-            leave_out.append(d)
+    for p in sorted(whole):
+        d = f"test/behavior/{p}"
+        if d in dirs and d not in leave_out:
+            include.append(d)
     exclude += leave_out
 
     patterns = ["/*", "!/internal/services/*/*/", "!/internal/generated/*/*/", "!/behavior/*/*/",

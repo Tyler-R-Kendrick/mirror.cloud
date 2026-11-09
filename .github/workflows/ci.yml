@@ -46,12 +46,6 @@ jobs:
       - name: anti-drift ratchet
         if: ${{ !cancelled() }}
         run: set -o pipefail; make ratchet 2>&1 | tee -a ci-run.log
-      - name: extraction equivalence
-        if: ${{ !cancelled() }}
-        # Named separately so it can be a required check: no pack may be
-        # deleted without its recording replaying green against the bundle
-        # that replaced it.
-        run: set -o pipefail; make equivalence 2>&1 | tee -a ci-run.log
       - name: known red triage
         if: ${{ !cancelled() }}
         run: make known-red RUN=ci-run.log
@@ -62,6 +56,10 @@ jobs:
   # used to pass -count=1 and clear the cache first, which left nothing to read
   # and made pull requests rerun everything. The uncached run of every test is
   # now the coverage job, which go test cannot cache, and nightly.yml.
+  #
+  # The snapshot, chaos, BDD, contract and fuzz-seed suites used to be steps of
+  # their own that ran these packages a second time; the table
+  # scripts/test-tiers.py prints at the end says how each of them did.
   unit:
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -73,41 +71,19 @@ jobs:
         with:
           cache: test
           mtimes: "true"
-      - name: unit
-        run: set -o pipefail; make test-unit 2>&1 | tee -a ci-run.log
-      - name: known red triage
+      - name: unit, by tier
+        run: set -o pipefail; make test-unit GOTESTFLAGS=-json 2>&1 | python3 -I scripts/test-tiers.py unit | tee -a ci-run.log
+      - name: extraction equivalence
         if: ${{ !cancelled() }}
-        run: make known-red RUN=ci-run.log
-
-  # The same packages the unit run covers, each under the name of what it
-  # asserts, so a failure says which kind of contract broke. They read the
-  # results main's unit job cached, except where a suite selects with -run.
-  suites:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: ./.github/actions/go
-        with:
-          cache: test
-          mtimes: "true"
-          save: "false"
-      - name: protocol contracts and aws sdk round-trip
-        run: set -o pipefail; make test-contract COUNT= 2>&1 | tee -a ci-run.log
-      - name: snapshots
+        # Named separately so it can be a required check: no pack may be
+        # deleted without its recording replaying green against the bundle
+        # that replaced it. The step above ran these packages with the same
+        # flags, so this reads its results from the cache.
+        run: set -o pipefail; make equivalence GOTESTFLAGS=-json COUNT= 2>&1 | python3 -I scripts/test-tiers.py equivalence | tee -a ci-run.log
+      - name: aws sdk round-trip
         if: ${{ !cancelled() }}
-        run: set -o pipefail; make test-snapshot COUNT= 2>&1 | tee -a ci-run.log
-      - name: chaos
-        if: ${{ !cancelled() }}
-        run: set -o pipefail; make test-chaos COUNT= 2>&1 | tee -a ci-run.log
-      - name: bdd and functional
-        if: ${{ !cancelled() }}
-        run: set -o pipefail; make test-bdd COUNT= 2>&1 | tee -a ci-run.log
-      - name: fuzz seeds
-        if: ${{ !cancelled() }}
-        run: set -o pipefail; make test-fuzz-seeds COUNT= 2>&1 | tee -a ci-run.log
+        # test/sdk/go is its own module, which `go list ./...` never reaches.
+        run: set -o pipefail; make test-sdk GOTESTFLAGS=-json COUNT= 2>&1 | python3 -I scripts/test-tiers.py 'aws sdk round-trip' | tee -a ci-run.log
       - name: known red triage
         if: ${{ !cancelled() }}
         run: make known-red RUN=ci-run.log
@@ -215,7 +191,7 @@ jobs:
   # Fails unless every job above passed. A job that is skipped or cancelled is
   # not a pass, and `needs` alone would skip this one with it.
   test:
-    needs: [check, unit, suites, coverage, fuzz, race, image]
+    needs: [check, unit, coverage, fuzz, race, image]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

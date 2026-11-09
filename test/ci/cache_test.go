@@ -36,4 +36,7 @@ func TestUnitResultsStayCacheable(t *testing.T) {
 			t.Errorf("test-unit passes %s, which stops go test caching its results:\n%s", flag, recipe[1])
 		}
 	}
+	if !strings.Contains(ci, "make test-unit GOTESTFLAGS=-json") {
+		t.Error("the unit job no longer runs make test-unit with -json; main and pull requests must pass the same flags")
+	}
 }

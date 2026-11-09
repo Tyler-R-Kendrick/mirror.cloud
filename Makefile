@@ -3,9 +3,13 @@ GO  := go
 # Whether the suites below may reuse a cached result. The local default reruns
 # them; CI passes COUNT= so they read the result cache main writes.
 COUNT ?= -count=1
+# Extra go test flags. CI passes GOTESTFLAGS=-json and pipes the stream through
+# scripts/test-tiers.py. A result cached with -json is not one cached without it,
+# so every CI run of a package passes the same flags.
+GOTESTFLAGS ?=
 export CGO_ENABLED := 0
 
-.PHONY: all build build-slim test test-unit test-contract test-snapshot test-chaos test-bdd test-cicd-core test-cicd-process test-cicd-e2e cloudflare-evidence test-cloudflare-miniflare test-cloudflare-celld test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
+.PHONY: all build build-slim test test-unit test-contract test-sdk test-snapshot test-chaos test-bdd test-cicd-core test-cicd-process test-cicd-e2e cloudflare-evidence test-cloudflare-miniflare test-cloudflare-celld test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
 
 all: build
 
@@ -30,14 +34,19 @@ test: test-unit test-contract
 # full suite reports half an hour late.
 #
 # No -count and no -cover, on purpose: either one stops go test caching the
-# result, and this is the run whose results CI caches.
+# result, and this is the run whose results CI caches. Every package the
+# snapshot, chaos, BDD, contract, fuzz-seed and equivalence targets below name is
+# in this list; those targets remain for running one tier on its own.
 test-unit:
-	$(GO) test $$($(GO) list ./... | grep -v '/internal/mutation$$')
-	$(GO) test ./internal/mutation -run '^TestMutantNeedlesExist$$'
+	$(GO) test $(GOTESTFLAGS) $$($(GO) list ./... | grep -v '/internal/mutation$$')
+	$(GO) test $(GOTESTFLAGS) ./internal/mutation -run '^TestMutantNeedlesExist$$'
 
-test-contract:
+test-contract: test-sdk
 	$(GO) test ./internal/conformance ./internal/proto/... $(COUNT)
-	cd test/sdk/go && $(GO) test ./... $(COUNT)
+
+# Its own module, so `go list ./...` and test-unit never reach it.
+test-sdk:
+	cd test/sdk/go && $(GO) test $(GOTESTFLAGS) ./... $(COUNT)
 
 test-snapshot:
 	$(GO) test ./internal/edge ./internal/identity ./internal/mock ./internal/proto/aws/restxml ./internal/runtime ./internal/specdiff $(COUNT)
@@ -156,7 +165,7 @@ ratchet-update:
 # checks that every bundle still builds and registers. A pack may only be
 # deleted with this green.
 equivalence:
-	$(GO) test ./internal/equivalence/ ./internal/bundled/ -count=1
+	$(GO) test $(GOTESTFLAGS) ./internal/equivalence/ ./internal/bundled/ $(COUNT)
 
 vet:
 	$(GO) vet ./...

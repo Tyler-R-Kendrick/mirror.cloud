@@ -35,6 +35,18 @@ v1 spine is in tree: frozen interfaces, edge + codecs, emulate-tier packs, mock 
 - **[SECURITY.md](SECURITY.md)** — private vulnerability reports.
 - **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)** — community conduct.
 
+## Install
+
+Take a [release](https://github.com/Tyler-R-Kendrick/mirror.cloud/releases) archive or a container image. Each comes as a **full** build (every service: 14 MB to download) and a **core** build of the 12 services most test suites use (8 MB, starting in under a second):
+
+```bash
+docker run --rm -p 127.0.0.1:4566:4566 ghcr.io/tyler-r-kendrick/mirror:0.0.1-alpha.1-core
+# or, from an archive:
+tar -xzf mirror_v0.0.1-alpha.1_linux_amd64_core.tar.gz && ./mirror up
+```
+
+[docs/USING.md](docs/USING.md) covers the rest: verifying a download, choosing services or building a binary of only the ones you name, every setting, keeping state between runs, pointing a client at it, and running it in CI.
+
 ## Quick start
 
 ```bash
@@ -46,7 +58,7 @@ aws --endpoint-url http://127.0.0.1:4566 s3 mb s3://demo
 aws --endpoint-url http://127.0.0.1:4566 s3 cp README.md s3://demo/README.md
 ```
 
-`mirror up` writes `mirror <version> listening on http://127.0.0.1:4566` to stderr once the port is bound, so a script or test runner that waits for that line can connect as soon as it appears. The line names the `--bind` address as given, so `--bind 127.0.0.1:0` prints port 0. A port that cannot be bound prints only the error, and `mirror up` exits 1.
+`mirror up` stops cleanly on Ctrl-C or SIGTERM, writing `--persist` state first. It writes `mirror <version> listening on http://127.0.0.1:4566` to stderr once the port is bound, so a script or test runner that waits for that line can connect as soon as it appears. The line names the `--bind` address as given, so `--bind 127.0.0.1:0` prints port 0. A port that cannot be bound prints only the error, and `mirror up` exits 1.
 
 Dummy credentials `test`/`test` work. By default, so does anything else: signatures are parsed but not verified. Set `MIRROR_S3_VALIDATE_PRESIGNED_SIGNATURES=true` to verify S3 SigV2 and SigV4 requests plus single-chunk SigV4A/ECDSA presigned queries and Authorization headers against `test`/`test` and deterministic IAM/STS credentials, including issued temporary session tokens and LocalStack gateway-port Host aliases. Signed hexadecimal payload hashes, SigV4 and SigV4A streaming chunk and trailer signature chains, and unsigned aws-chunked trailing checksums under either authorization algorithm are checked. Malformed object aws-chunked framing and decoded-length mismatches are rejected before service invocation; cancelled multipart part streams return InternalError without storing a part and may be retried. Accepted uploads strip the transport-only `aws-chunked` content encoding while preserving other encodings. Default listen: `http://127.0.0.1:4566`.
 
@@ -60,7 +72,7 @@ Hosted bind (`--bind 0.0.0.0:4566`) prints a banner: there is no authentication;
 
 `mirror up --tls-self-signed DIR` serves HTTPS for a client that will not speak plain HTTP (a Vercel client talks to `https://api.vercel.com`). It makes a throwaway CA and a leaf certificate for `api.vercel.com`, `localhost`, `127.0.0.1`, `::1` and the `--bind`/`--advertise-url` host, writes `ca.pem` and `server.pem` (mode 0644) and `server.key` (mode 0600) into `DIR` (created 0700), reuses them while they stay valid for another 24 hours, and prints `tls ca: <path>` on startup. Make the client trust `ca.pem` (`NODE_EXTRA_CA_CERTS` for Node, `AWS_CA_BUNDLE` for AWS SDKs). The CA's private key is never written: it signs that one leaf and is discarded, and the CA carries critical name constraints, so a client that trusts `ca.pem` accepts it only for those names (and subdomains of the DNS ones). A start reuses `DIR`'s files only when they are exactly a set it could have made, are yours and are writable by no one else; it replaces anything else. It refuses a `DIR` that another user owns, that group or others can write, or that is a symbolic link. It also applies ssh's StrictModes rule to every directory above `DIR`: each must belong to root or you, and must not be writable by group or others unless it is sticky. Anyone else who could write such a directory, or who owns it, could rename `DIR` away and put their own `ca.pem` in its place for clients that trust it by path. A sticky directory stops other users renaming your entries, but its owner can still rename them. On Linux, macOS and the BSDs it opens `DIR` once and checks and reads every file through that handle, so swapping `DIR` or a file mid-start changes nothing it serves. On other platforms (Windows, Solaris, illumos, AIX and others) it checks by path and cannot rule that out, nor check owners (or, on Windows, modes), so keep `DIR` private yourself. All of this protects against other users, not against code running as you. A `--bind`/`--advertise-url` host must be an address or an ASCII DNS name of letters, digits, hyphens and underscores (use the punycode `xn--` form), not a wildcard. An IPv6 zone is dropped (`fe80::1%eth0` is certified as `fe80::1`), but Go clients cannot verify a zoned literal, so dial it through a name. A name constraint also covers the name's subdomains, so a single-label host such as `mirror` vouches for `*.mirror` too. It cannot be combined with `--tls-cert`/`--tls-key`. Pass `mirror env` the same TLS flag as `mirror up` and it prints `https://` endpoints, plus, for `--tls-self-signed`, `NODE_EXTRA_CA_CERTS` and `AWS_CA_BUNDLE` set to that `ca.pem`.
 
-See [docs/SUPPORT.md](docs/SUPPORT.md) (generated; do not hand-edit), [docs/DAY2.md](docs/DAY2.md), [docs/EXTENDING.md](docs/EXTENDING.md), for deploying through the Vercel API, [docs/VERCEL.md](docs/VERCEL.md), and for release binaries and how to verify one, [docs/RELEASING.md](docs/RELEASING.md). Before release tags can be trusted, a maintainer must protect `refs/tags/v*` with a tag ruleset that blocks updates and deletions, or turn on immutable releases; that is a repository setting, described there.
+See [docs/SUPPORT.md](docs/SUPPORT.md) (generated; do not hand-edit), [docs/DAY2.md](docs/DAY2.md), [docs/EXTENDING.md](docs/EXTENDING.md), for deploying through the Vercel API, [docs/VERCEL.md](docs/VERCEL.md), for installing, running and configuring it, [docs/USING.md](docs/USING.md), and for how a release is made and how to verify one, [docs/RELEASING.md](docs/RELEASING.md). Before release tags can be trusted, a maintainer must protect `refs/tags/v*` with a tag ruleset that blocks updates and deletions, or turn on immutable releases; that is a repository setting, described there.
 
 ## Documents
 
@@ -94,4 +106,4 @@ make test-race        # race detector
 
 `gofmt` and `go vet` must be clean; CI enforces both. See [docs/TESTING.md](docs/TESTING.md) for the full suite map (snapshot, chaos, BDD, fuzz, mutation).
 
-Licensed under [Apache-2.0](LICENSE).
+Licensed under the [MIT License](LICENSE).

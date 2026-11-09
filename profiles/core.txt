@@ -1,0 +1,14 @@
+# The services most test suites reach for. `mirror up` with this set listens in
+# a fraction of the time and is about 40% smaller than the full build.
+aws.s3
+aws.sqs
+aws.sns
+aws.dynamodb
+aws.lambda
+aws.sts
+aws.iam
+aws.kms
+aws.secretsmanager
+aws.ssm
+aws.events
+aws.logs

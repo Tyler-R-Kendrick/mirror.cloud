@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"flag"
@@ -10,9 +11,12 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/clock"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
@@ -184,12 +188,34 @@ func serve(addr string, h http.Handler, pair *tls.Certificate, ready func()) err
 	if err != nil {
 		return err
 	}
+	// A stop is a return, not a kill, so cmdUp's deferred save and close run:
+	// without this `docker stop` (SIGTERM) and Ctrl-C ended the process with
+	// whatever --persist should have written still in memory. It is installed
+	// before ready() so a signal after the "listening" line is never lost.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		<-ctx.Done()
+		// Long-polling clients hold connections open; do not wait on them for good.
+		// Five seconds, so a stop finishes inside docker stop's ten.
+		grace, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(grace)
+	}()
 	ready()
 	if pair != nil {
 		srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{*pair}}
-		return srv.ServeTLS(ln, "", "")
+		err = srv.ServeTLS(ln, "", "")
+	} else {
+		err = srv.Serve(ln)
 	}
-	return srv.Serve(ln)
+	if errors.Is(err, http.ErrServerClosed) {
+		<-drained // Serve returns as Shutdown starts; the save waits for the requests in flight
+		return nil
+	}
+	return err
 }
 
 // listen is net.Listen; a test replaces it to learn which port a --bind of :0

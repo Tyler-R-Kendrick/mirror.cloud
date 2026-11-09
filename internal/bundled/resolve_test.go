@@ -4,6 +4,7 @@ import (
 	"sort"
 	"testing"
 
+	behaviors "github.com/tyler-r-kendrick/mirror.cloud/behavior"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 )
 
@@ -59,6 +60,27 @@ func TestTheServedNamesResolve(t *testing.T) {
 		if svc.ID != id {
 			t.Errorf("%s resolved to a model whose ID is %q; the bundle would be "+
 				"served under one name and built under another", id, svc.ID)
+		}
+	}
+}
+
+// TestShadowFromTheHeaderAgreesWithTheFullLoad pins the shortcut process start
+// takes: shadowOf reads a bundle's header, where it used to load and validate
+// the bundle to read the same field. If a bundle's shadow can be written
+// somewhere the header read does not look, this is where it shows.
+func TestShadowFromTheHeaderAgreesWithTheFullLoad(t *testing.T) {
+	for _, id := range behaviors.ServiceIDs() {
+		svc, err := servedModel(id)
+		if err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		ir, err := behaviors.Load(id, svc)
+		if err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+		got, err := shadowOf(id)
+		if err != nil || got != ir.Shadow {
+			t.Errorf("%s: shadowOf = %q, %v; the loaded bundle says %q", id, got, err, ir.Shadow)
 		}
 	}
 }

@@ -6,28 +6,37 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+permissions:
+  contents: read
+env:
+  # Pull requests let the suites reuse a result main's cache holds for an
+  # unchanged package; main runs everything. See .github/actions/go.
+  COUNT: ${{ github.ref == 'refs/heads/main' && '-count=1' || '' }}
 jobs:
-  test:
+  # What used to be one job was 69 minutes of independent checks run one after
+  # another, 41 of them native fuzzing. They are separate jobs now, so the run
+  # takes as long as the slowest and each failure names its own job.
+  #
+  # `test` at the bottom keeps the name that job had, for anything that requires
+  # it by name, and fails unless every one of these passed.
+  #
+  # Inside each job, every step still runs whatever the ones before it did, and
+  # the job still fails if any of them fail. Without that a step failure skips
+  # the rest, and one had been doing that for six merges: the ratchet sat third
+  # and nine checks after it never ran at all. A red gate that hides other gates
+  # reports less than no gate, because the silence reads as coverage.
+  check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
           # Full history: the ratchet's baseline guard compares ratchet.json
           # against the merge-base with main, and skips without it.
           fetch-depth: 0
-      - uses: actions/setup-go@v7
+      - uses: ./.github/actions/go
         with:
-          go-version: "1.24"
-          cache-dependency-path: test/sdk/go/go.sum
-      # Every check below runs whatever the ones before it did, and the job
-      # still fails if any of them fail.
-      #
-      # Without this a step failure skips the rest, and one had been doing that
-      # for six merges: the ratchet sits third and the nine checks after it --
-      # the equivalence gate, the unit suite, the protocol contracts, the SDK
-      # round-trips, snapshots, chaos, BDD, fuzzing and the race detector --
-      # never ran at all. A red gate that hides nine other gates reports less
-      # than no gate, because the silence reads as coverage.
+          cache: check
       - name: vet
         if: ${{ !cancelled() }}
         run: go vet ./...
@@ -43,16 +52,45 @@ jobs:
         # deleted without its recording replaying green against the bundle
         # that replaced it.
         run: set -o pipefail; make equivalence 2>&1 | tee -a ci-run.log
+      - name: known red triage
+        if: ${{ !cancelled() }}
+        run: make known-red RUN=ci-run.log
+
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/go
+        with:
+          cache: unit
+          mtimes: "true"
+      - name: drop cached results
+        if: ${{ github.ref == 'refs/heads/main' }}
+        run: go clean -testcache
       - name: unit and coverage floor
-        if: ${{ !cancelled() }}
         run: set -o pipefail; make test-coverage 2>&1 | tee -a ci-run.log
-      - name: protocol contracts
+      - name: known red triage
         if: ${{ !cancelled() }}
-        run: set -o pipefail; go test ./internal/conformance ./internal/proto/... -count=1 2>&1 | tee -a ci-run.log
-      - name: aws sdk round-trip
-        if: ${{ !cancelled() }}
-        working-directory: test/sdk/go
-        run: go test ./... -count=1
+        run: make known-red RUN=ci-run.log
+
+  # The same packages the coverage run covers, each under the name of what it
+  # asserts, so a failure says which kind of contract broke.
+  suites:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/go
+        with:
+          cache: suites
+          mtimes: "true"
+      - name: protocol contracts and aws sdk round-trip
+        run: set -o pipefail; make test-contract 2>&1 | tee -a ci-run.log
       - name: snapshots
         if: ${{ !cancelled() }}
         run: set -o pipefail; make test-snapshot 2>&1 | tee -a ci-run.log
@@ -64,51 +102,139 @@ jobs:
         run: set -o pipefail; make test-bdd 2>&1 | tee -a ci-run.log
       - name: fuzz seeds
         if: ${{ !cancelled() }}
-        run: make test-fuzz-seeds
-      - name: bounded native fuzzing
-        if: ${{ !cancelled() }}
-        run: make test-fuzz
-      - name: race detector
-        if: ${{ !cancelled() }}
-        run: set -o pipefail; make test-race 2>&1 | tee -a ci-run.log
-      # Last, and reporting only: it names which of this job's failures
-      # were expected and which were not. It suppresses nothing -- every
-      # step above has already reported its own verdict -- but a job red
-      # for the ratchet used to look identical whether or not something
-      # else had broken, and twice it was not identical.
+        run: set -o pipefail; make test-fuzz-seeds 2>&1 | tee -a ci-run.log
       - name: known red triage
         if: ${{ !cancelled() }}
         run: make known-red RUN=ci-run.log
+
+  # 127 native fuzz targets, 10000 executions each. Run in one job they were 41
+  # minutes; the split is by line of scripts/fuzz-targets.txt, so the 68 targets
+  # of one package spread across all six.
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/go
+        with:
+          cache: fuzz
+          save: ${{ matrix.shard == 0 }}
+      - name: fuzz shard ${{ matrix.shard }} of 6
+        run: scripts/fuzz.sh ${{ matrix.shard }} 6
+
+  # The race build of the whole suite was 20 minutes in one job, the longest
+  # there is. Four jobs each take every fourth package.
+  race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/go
+        with:
+          cache: race
+          mtimes: "true"
+          save: ${{ matrix.shard == 0 }}
+      - name: drop cached results
+        if: ${{ github.ref == 'refs/heads/main' }}
+        run: go clean -testcache
+      - name: race detector, shard ${{ matrix.shard }} of 4
+        run: set -o pipefail; make test-race RACE_SHARD=${{ matrix.shard }} RACE_SHARDS=4 2>&1 | tee -a ci-run.log
+      - name: known red triage
+        if: ${{ !cancelled() }}
+        run: make known-red RUN=ci-run.log
+
+  # The Dockerfile and Dockerfile.release are built here and nowhere else before
+  # a tag, so a change that breaks either shows up on the pull request and not in
+  # the first release that needs it. Dockerfile: only the slim build, the one
+  # with an argument to get wrong. Dockerfile.release: laid out and built the way
+  # release.yml does it, for both architectures, from binaries built here in
+  # place of the archives, and everything but the push.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/go
+        with:
+          cache: check
+          save: "false"
+      - name: build with a service list
+        run: docker build --build-arg SERVICES=@profiles/core.txt -t mirror-core .
+      - name: it serves exactly that list, from a scratch image
+        run: |
+          got=$(docker run --rm mirror-core services | cut -f1 | sort | tr '\n' ' ')
+          want=$(grep -v '^#' profiles/core.txt | sort | tr '\n' ' ')
+          [ "$got" = "$want" ] || { echo "::error::image serves: $got; profile lists: $want"; exit 1; }
+      - name: the release image builds for both architectures
+        run: |
+          set -euo pipefail
+          python3 -I scripts/slim-overlay.py "$RUNNER_TEMP/overlay.json" @profiles/core.txt
+          for arch in amd64 arm64; do
+            mkdir -p "ctx/linux_$arch"
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags '-s -w' \
+              -overlay "$RUNNER_TEMP/overlay.json" -o "ctx/linux_$arch/mirror" ./cmd/mirror
+          done
+          cp Dockerfile.release ctx/Dockerfile
+          docker buildx create --name ci --driver docker-container --use > /dev/null
+          docker buildx build --platform linux/amd64,linux/arm64 --output "type=oci,dest=$RUNNER_TEMP/image.tar" ctx
+          docker buildx build --platform linux/amd64 --load -t release-shaped ctx
+          got=$(docker run --rm release-shaped services | cut -f1 | sort | tr '\n' ' ')
+          want=$(grep -v '^#' profiles/core.txt | sort | tr '\n' ' ')
+          [ "$got" = "$want" ] || { echo "::error::release image serves: $got; profile lists: $want"; exit 1; }
+
+  # Fails unless every job above passed. A job that is skipped or cancelled is
+  # not a pass, and `needs` alone would skip this one with it.
+  test:
+    needs: [check, unit, suites, fuzz, race, image]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: every job passed
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}
+        run: |
+          echo "::error::a job did not pass: ${{ join(needs.*.result, ' ') }}"
+          exit 1
 
   # Separate matrix job: the mutation suite had grown to fifty-eight minutes
   # against a sixty-minute timeout, which meant the next mutant anyone added
   # would have turned CI red for time rather than for a defect -- a failure
   # that looks nothing like a surviving mutant and costs an hour to diagnose.
   #
-  # The per-mutant cost cannot come down much: a mutant is a distinct build of
-  # the mutated package, so it pays a full compile plus the test it runs. What
-  # can come down is how many one job runs. The shard count is the lever, and
-  # it moves when a shard crosses the timeout: four were added when one job
-  # outgrew sixty minutes, and this moves it to eight when a shard crossed
-  # thirty.
+  # The per-mutant cost is a compile of the mutated package plus the test it
+  # runs, and each used to include about four seconds of process start that
+  # loaded every bundle in the emulator (internal/bundled's init). What can come
+  # down now is how many one job runs; the shard count is the lever, and it
+  # moves when a shard crosses the timeout.
   #
   # TestShardingIsAPartition proves the split loses no mutant, and the harness
   # fails a shard that selects none -- because a shard that runs nothing still
   # reports success.
   mutation:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v7
+      - uses: ./.github/actions/go
         with:
-          go-version: "1.24"
-          cache-dependency-path: test/sdk/go/go.sum
-      - name: mutation shard ${{ matrix.shard }} of 8
-        run: set -o pipefail; make test-mutation-shard MUTATION_SHARD=${{ matrix.shard }} MUTATION_SHARDS=8 2>&1 | tee -a ci-run.log
+          cache: mutation
+          save: ${{ matrix.shard == 0 }}
+      - name: mutation shard ${{ matrix.shard }} of 12
+        run: set -o pipefail; make test-mutation-shard MUTATION_SHARD=${{ matrix.shard }} MUTATION_SHARDS=12 2>&1 | tee -a ci-run.log
       - name: known red triage
         if: ${{ !cancelled() }}
         run: make known-red RUN=ci-run.log
@@ -118,12 +244,13 @@ jobs:
   # workspace with the unit tests.
   generated-models:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v7
+      - uses: ./.github/actions/go
         with:
-          go-version: "1.24"
-          cache-dependency-path: go.sum
+          cache: check
+          save: "false"
       - name: regenerate from the pinned specs
         run: |
           make specs-sync
@@ -146,7 +273,7 @@ jobs:
           }
 
   # Required live Cloudflare runtime job: real node + real workerd through
-  # the pinned helper. Separate from `test` because it provisions an
+  # the pinned helper. Separate from the unit job because it provisions an
   # optional runtime the unit path must never require. This job FAILS when
   # the backend is absent -- the suite fatals instead of skipping, and npm
   # ci failure is a job failure, never a silent pass. Ordinary CI performs
@@ -154,12 +281,13 @@ jobs:
   # unrun (no credentials, by policy).
   cloudflare-miniflare:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v7
+      - uses: ./.github/actions/go
         with:
-          go-version: "1.24"
-          cache-dependency-path: go.sum
+          cache: check
+          save: "false"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

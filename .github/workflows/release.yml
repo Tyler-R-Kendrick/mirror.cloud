@@ -6,6 +6,10 @@ name: release
 # itself is scripts/release-archive.sh, which test/release exercises on every CI
 # run, so this file only wires it to runners.
 #
+# The same archives become two container images, ghcr.io/<owner>/mirror and its
+# -core variant, published for a tag and built and smoke-tested but not pushed
+# by hand. docs/RELEASING.md says what they are called.
+#
 # Run by hand (Actions > release > Run workflow) it is a dry run: it builds the
 # commit selected in "Use workflow from" under the version label given as `tag`,
 # and leaves the archives and SHA256SUMS as artifacts of the run. Nothing is
@@ -69,6 +73,9 @@ jobs:
           export SOURCE_DATE_EPOCH
           go version
           scripts/release-archive.sh archive "$TAG" "$TARGET_OS" "$TARGET_ARCH" dist
+          # The same build with only the services in profiles/core.txt: roughly
+          # half the download and a start measured in a fraction of a second.
+          MIRROR_PROFILE=core scripts/release-archive.sh archive "$TAG" "$TARGET_OS" "$TARGET_ARCH" dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: archive-${{ matrix.goos }}-${{ matrix.goarch }}
@@ -190,3 +197,95 @@ jobs:
             --title "$TAG" --notes-file notes.md "${prerelease[@]}"
           tag_unmoved
           gh release edit "$TAG" --draft=false
+
+  # Container images made from the archives, not from source: each image holds
+  # the binary SHA256SUMS covers, for linux/amd64 and linux/arm64. The archives
+  # are checked against SHA256SUMS first, and what is about to be pushed is run
+  # first (amd64 is the runner's own architecture): it must report the tag and
+  # serve the services its profile lists. A dry run does all of that and stops
+  # before logging in. A version tag that already exists in the registry is
+  # never pushed over.
+  #
+  # Only this job can write packages, and it uses the runner's Docker and no
+  # third-party action. A package ghcr creates is private until a repository
+  # admin makes it public (docs/RELEASING.md).
+  images:
+    name: container images
+    needs: checksums
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: dist
+      - name: build, test and push
+        env:
+          PUSH: ${{ github.event_name == 'push' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          (cd dist && sha256sum --check --ignore-missing --quiet SHA256SUMS)
+          # Registry names are lower case; the owner may not be.
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/mirror"
+          version="${TAG#v}"
+          stable=true
+          case "$TAG" in *-*) stable=false ;; esac
+          if [ "$PUSH" = true ]; then
+            echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+            # Both versions, before either is pushed: half a release is worse
+            # than none.
+            for t in "$version" "$version-core"; do
+              if docker buildx imagetools inspect "$image:$t" > /dev/null 2>&1; then
+                echo "::error::$image:$t is already published and is never overwritten"
+                exit 1
+              fi
+            done
+          fi
+          docker buildx create --name release --driver docker-container --use > /dev/null
+
+          for variant in full core; do
+            if [ "$variant" = core ]; then suffix=_core; tagsuffix=-core; floating=core
+            else suffix=; tagsuffix=; floating=latest; fi
+            ctx="ctx-$variant"
+            for arch in amd64 arm64; do
+              mkdir -p "$ctx/linux_$arch"
+              tar -xzf "dist/mirror_${TAG}_linux_${arch}${suffix}.tar.gz" -C "$ctx/linux_$arch" mirror
+            done
+            cp Dockerfile.release "$ctx/Dockerfile"
+            labels=(
+              --label "org.opencontainers.image.title=mirror${tagsuffix}"
+              --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}"
+              --label "org.opencontainers.image.version=${version}"
+              --label "org.opencontainers.image.revision=${GITHUB_SHA}"
+              --label "org.opencontainers.image.licenses=MIT"
+            )
+
+            docker buildx build --platform linux/amd64 --load -t "smoke-$variant" "${labels[@]}" "$ctx"
+            [ "$(docker run --rm "smoke-$variant" version)" = "$version" ] \
+              || { echo "::error::the $variant image does not report $version"; exit 1; }
+            got=$(docker run --rm "smoke-$variant" services | cut -f1 | sort | tr '\n' ' ')
+            if [ "$variant" = core ]; then
+              want=$(grep -v '^#' profiles/core.txt | sort | tr '\n' ' ')
+              [ "$got" = "$want" ] || { echo "::error::core image serves: $got; its profile lists: $want"; exit 1; }
+            else
+              [ "$(wc -w <<< "$got")" -gt 100 ] || { echo "::error::the full image serves only: $got"; exit 1; }
+            fi
+
+            [ "$PUSH" = true ] || continue
+            tags=(-t "$image:${version}${tagsuffix}")
+            if [ "$stable" = true ]; then tags+=(-t "$image:$floating"); fi
+            docker buildx build --platform linux/amd64,linux/arm64 --push "${tags[@]}" "${labels[@]}" "$ctx"
+            {
+              echo "### $image:${version}${tagsuffix}"
+              echo '```'
+              docker buildx imagetools inspect "$image:${version}${tagsuffix}"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done

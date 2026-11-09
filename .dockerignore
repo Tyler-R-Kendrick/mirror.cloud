@@ -1,0 +1,13 @@
+# The image is built from source, and only these paths are source it needs. The
+# rest of the tree (specs/ alone is 45 MB, .git 21 MB) is context that would be
+# sent to the daemon and invalidate the layer cache on every unrelated change.
+*
+!go.mod
+!go.sum
+!cmd
+!internal
+!behavior
+!profiles
+!scripts/slim-overlay.py
+**/*_test.go
+**/testdata

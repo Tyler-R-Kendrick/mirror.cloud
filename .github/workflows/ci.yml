@@ -349,8 +349,9 @@ jobs:
   # reports success.
   #
   # main runs every mutant in twelve shards, filled by measured cost
-  # (internal/mutation costs_test.go). A pull request runs the mutants on the
-  # files it changed, of the tests it changed, and whose own entries it changed
+  # (internal/mutation costs_test.go). A pull request runs the mutants whose
+  # tests are in a package internal/affected selects for its diff, those on or
+  # beside the files it changed, and those whose entries it changed
   # (select_test.go), in as many shards as their cost needs; with none, the job
   # is skipped. The report says how many kills were the 30s timeout.
   mutation:

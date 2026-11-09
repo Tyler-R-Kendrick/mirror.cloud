@@ -19,7 +19,7 @@
       "coverage": "full and uncached: the 80% floor",
       "race": "the affected packages whose tests link changed code or whose tests changed, -race -short (internal/racegate skips single-goroutine large-input tests)",
       "fuzz": "the targets in the packages race takes",
-      "mutation": "every mutant of a changed package or of the packages whose tests import a changed test helper, and those whose entries changed (internal/mutation select_test.go)",
+      "mutation": "every mutant whose tests are in a package internal/affected selects, whose file or a file beside it changed, or whose entry changed (internal/mutation select_test.go)",
       "image": "when cmd/mirror, a Dockerfile or a profile changes",
       "generated-models": "when specs, internal/generated or cmd/mirrorgen change",
       "cloudflare-miniflare": "when a package the -tags miniflare suite compiles, test/behavior/cloudflare or tools/cloudflare-runtime change",

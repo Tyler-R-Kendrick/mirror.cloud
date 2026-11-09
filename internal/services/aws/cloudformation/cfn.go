@@ -341,10 +341,12 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		rm := asMap(resources[logical])
 		typ, props := str(rm["Type"]), asMap(p.resolve(rm["Properties"], planned, req, name))
 		n, err := p.claim(ctx, req, st, old, logical, typ, props)
-		if planned[logical] = planID(req, typ, n, props); err != nil {
+		if err != nil {
 			return fail(err)
+		} else if id := planID(req, typ, n, props); id != "" { // else its Ref is unknown (unmade)
+			planned[logical] = id
+			attribute(planned, req, typ, logical, id)
 		}
-		attribute(planned, req, typ, logical, planned[logical])
 	}
 	for _, logical := range order {
 		rm := asMap(resources[logical]) // props is never nil: provision adds to it
@@ -366,10 +368,11 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		}
 	}
 	for _, k := range slices.Sorted(maps.Keys(outs)) {
-		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": text(p.resolve(asMap(outs[k])["Value"], st.Refs, req, name))})
-	}
-	if err := selected(st.Outputs); err != nil {
-		return fail(err)
+		v := p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)
+		if err := selected(v); err != nil {
+			return fail(err)
+		}
+		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": text(v)})
 	}
 	if !update { // a DeleteStack begun during the create ends here: what it made goes, and then the stack
 		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS"), retire(name, cs.key)); err == nil && !wrote {
@@ -477,7 +480,6 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 	if err == nil {
 		maps.Copy(known, pseudo(req, stack, id))
 		p.tpl, refs = tpl, conditions(tpl, known)
-		delete(refs, "AWS::NoValue") // ref answers it: no record holds the sentinel
 		order, err = p.order(tpl, refs)
 		p.skipped(order, refs)
 	}
@@ -491,7 +493,7 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 // as a Ref answers it: the stack's two only when it has them.
 func pseudo(req *spi.Request, stack, id string) map[string]string {
 	known := map[string]string{"AWS::AccountId": req.Identity.Account, "AWS::Region": req.Identity.Region, "AWS::StackName": stack,
-		"AWS::StackId": id, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com", "AWS::NoValue": noValue,
+		"AWS::StackId": id, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com",
 		"AWS::NotificationARNs": spi.JSONText(append([]any{}, spi.Slice(req.Input["NotificationARNs"])...))} // a list, as JSON: [] for none
 	maps.DeleteFunc(known, func(_, v string) bool { return v == "" })
 	return known
@@ -643,14 +645,35 @@ func attribute(refs map[string]string, req *spi.Request, typ, logical, id string
 	}
 }
 
-// unknown stands for an id known only once its resource is made, and in order for one not yet ordered: what
-// a Ref to or a Fn::GetAtt of a resource not made yet answers, and any value holding it is. resolve has three
-// outcomes, a value, unselected (a Fn::Select of no element of a list it knows) or unknown.
-const unknown = "\uffff"
+// mark is what resolve answers that is no value a template holds: its own type, so no string a template
+// gives, whatever characters it has, is one (holds). resolve has three outcomes, a value, unselected (a
+// Fn::Select of no element of a list it knows) or unknown: what a Ref to or a Fn::GetAtt of a resource not
+// made yet answers, and a string built on one. noValue is what a Ref to AWS::NoValue answers, which resolve
+// drops from a map or a list; inValue a string built on it, which sound refuses, as it does unselected.
+type mark string
 
-// noValue is what a Ref to AWS::NoValue answers, and resolve drops; unselected is what a Fn::Select of no
-// element answers, which sound refuses.
-const noValue, unselected = "\ufffe", "\ufdd0Fn::Select"
+const unknown, unselected, noValue, inValue mark = "unknown", "Fn::Select", "AWS::NoValue", "AWS::NoValue in a value"
+
+// holds is whether v is the mark m or holds it.
+func holds(v any, m mark) bool {
+	switch t := v.(type) {
+	case map[string]any:
+		return slices.ContainsFunc(slices.Collect(maps.Values(t)), func(x any) bool { return holds(x, m) })
+	case []any:
+		return slices.ContainsFunc(t, func(x any) bool { return holds(x, m) })
+	}
+	return v == m
+}
+
+// marked is the mark a string built on vs is, an unknown before the others, and whether it is one.
+func marked(vs ...any) (any, bool) {
+	for _, m := range []mark{unknown, unselected, noValue} {
+		if holds(vs, m) {
+			return map[bool]mark{true: inValue, false: m}[m == noValue], true
+		}
+	}
+	return nil, false
+}
 
 // planID is the id a resource named n is made with, which a Ref to it answers: n in the form its
 // service gives it back. A queue's URL (its endpoint's business), a KMS key's id and a REST API's are
@@ -659,10 +682,10 @@ func planID(req *spi.Request, typ, n string, props map[string]any) string {
 	if bus := spi.LastSlash(str(props["EventBusName"])); typ == "AWS::Events::Rule" && bus != "" && bus != "default" {
 		n = bus + "|" + n // a rule's "event rule ID": <bus>|<name> on any bus but the default (a reading)
 	}
-	if f := kinds[typ].ref; f != "" && !strings.Contains(n, unknown) {
+	if f := kinds[typ].ref; f != "" && n != "" { // no name: one built on an id known only once made (claim)
 		return strings.NewReplacer("{r}", req.Identity.Region, "{a}", req.Identity.Account, "{n}", n).Replace(f)
 	}
-	return cmp.Or(str(props["ResourceArn"]), str(props["ResourceARN"]), unknown)
+	return cmp.Or(str(props["ResourceArn"]), str(props["ResourceARN"])) // none: known only once made
 }
 
 // order is the order a template's resources are made in: each after those its properties name, by Ref,
@@ -854,8 +877,10 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 	if v, set := props["FifoQueue"]; typ == "AWS::SQS::Queue" && set && !isBoolean(v) { // FifoQueue is a Boolean (Template Reference)
 		return "", invalid("Properties validation failed for resource " + logical + ": FifoQueue must be a Boolean, not " + spi.JSONText(v))
 	}
-	if n == "" || strings.Contains(n, unknown) { // one built on an id known only once made is checked as it is made
-		return cmp.Or(n, physicalName(st.Name, logical, st.ID, typ, props)), nil
+	if holds(props[k.member], unknown) { // one built on an id known only once made is checked as it is made:
+		return "", nil // its id is not planned (planID), and a Ref to it is unknown
+	} else if n == "" {
+		return physicalName(st.Name, logical, st.ID, typ, props), nil
 	}
 	id := n
 	if k.in == "TopicArn" { // GetTopicAttributes finds a topic by its ARN
@@ -1230,7 +1255,9 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 	case map[string]any:
 		if r, ok := t["Ref"]; ok {
 			v, _ := p.ref(str(r), refs, req, stack)
-			if p.unmade(str(r), refs) {
+			if str(r) == "AWS::NoValue" {
+				return noValue
+			} else if p.unmade(str(r), refs) {
 				return unknown
 			} else if str(r) == "AWS::NotificationARNs" {
 				arns := spi.Decode[[]any]([]byte(v))
@@ -1256,7 +1283,7 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 		if args, ok := t["Fn::Select"]; ok { // [index, listOfObjects]: "a single object from a list of objects by index"
 			args := append(spi.Slice(args), nil, nil)
 			index, list := p.resolve(args[0], refs, req, stack), p.resolve(args[1], refs, req, stack)
-			if i, isInt := coerce(index, "Integer"); strings.Contains(spi.JSONText([]any{index, list}), unknown) {
+			if i, isInt := coerce(index, "Integer"); holds([]any{index, list}, unknown) {
 				return unknown // of what is not made yet: checked as it is made, when it is known
 			} else if isInt && i.(int) >= 0 && i.(int) < len(spi.Slice(list)) {
 				return spi.Slice(list)[i.(int)]
@@ -1265,6 +1292,9 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 		}
 		if args, ok := t["Fn::Split"]; ok { // [delimiter, source string]: "A list of string values"
 			args, parts := append(spi.Slice(args), nil, nil), []any{}
+			if m, isMark := marked(p.resolve(args[1], refs, req, stack)); isMark {
+				return m
+			}
 			for _, part := range strings.Split(str(p.resolve(args[1], refs, req, stack)), str(args[0])) {
 				parts = append(parts, part)
 			}
@@ -1316,7 +1346,7 @@ func (p *Pack) ref(name string, refs map[string]string, req *spi.Request, stack 
 }
 
 // getAtt is a Fn::GetAtt's value: the attribute the resource's type has (attribute), or else its Ref's.
-func getAtt(g any, refs map[string]string) string {
+func getAtt(g any, refs map[string]string) any {
 	logical, attr, _ := strings.Cut(str(g), ".") // "A.B", or [A, B]
 	if t, ok := g.([]any); ok {
 		t = append(slices.Clip(t), nil, nil)
@@ -1384,7 +1414,7 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 	}
 	if err := selected(values); err != nil && stack != "" {
 		return err
-	} else if strings.Contains(spi.JSONText(values), noValue) {
+	} else if holds(values, noValue) || holds(values, inValue) {
 		return invalid("Template error: AWS::NoValue removes a property or a list element; it cannot be part of a value")
 	}
 	var err error // without a DefaultValue, "Fn::FindInMap raises an error when a key is not found"
@@ -1415,7 +1445,7 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 // selected is the error for a value holding a Fn::Select of no element of its list (the wording is a reading):
 // sound finds one in a list it knows whole, and a stack's resource or output, resolved, in any list.
 func selected(v any) error {
-	if strings.Contains(spi.JSONText(v), unselected) {
+	if holds(v, unselected) {
 		return invalid("Template error: Fn::Select cannot select nonexistent value")
 	}
 	return nil
@@ -1447,32 +1477,43 @@ func findInMap(args any, refs map[string]string, mappings map[string]any) (v any
 	return v, strings.Join(keys, "::"), found
 }
 
-func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack string) string {
-	arr, parts := append(spi.Slice(j), nil, nil), []string(nil)        // [separator, [values]]
-	for _, x := range spi.Slice(p.resolve(arr[1], refs, req, stack)) { // a list, from which AWS::NoValue removes its element
+func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack string) any {
+	arr, parts := append(spi.Slice(j), nil, nil), []string(nil) // [separator, [values]]
+	sep, list := p.resolve(arr[0], refs, req, stack), p.resolve(arr[1], refs, req, stack)
+	if m, isMark := marked(sep, list); isMark { // a list, from which AWS::NoValue removes its element
+		return m
+	}
+	for _, x := range spi.Slice(list) {
 		parts = append(parts, str(x))
 	}
-	return strings.Join(parts, str(p.resolve(arr[0], refs, req, stack)))
+	return strings.Join(parts, str(sep))
 }
 
 // fnSub is the Fn::Sub string with each ${...} substituted: ${!Literal} is the literal ${Literal}, a
 // variable its map defines is the variable's value, ${Name.Attribute} is Fn::GetAtt's and ${Name} a Ref's
 // (Template Reference, Fn::Sub). A name that is none of them is left as written.
-func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack string) string {
-	parts := append(spi.Slice(s), s, nil) // "text", or ["text", {variables}]
-	return subVariable.ReplaceAllStringFunc(str(parts[0]), func(m string) string {
-		name := m[2 : len(m)-1]
+func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack string) any {
+	parts, held := append(spi.Slice(s), s, nil), []any{} // "text", or ["text", {variables}]; held, what each ${} is
+	out := subVariable.ReplaceAllStringFunc(str(parts[0]), func(m string) string {
+		name, v := m[2:len(m)-1], any(nil)
 		if literal, ok := strings.CutPrefix(name, "!"); ok {
 			return "${" + literal + "}"
-		} else if v, ok := asMap(parts[1])[name]; ok {
-			return str(p.resolve(v, refs, req, stack))
+		} else if x, ok := asMap(parts[1])[name]; ok {
+			v = p.resolve(x, refs, req, stack)
 		} else if logical, attr, ok := strings.Cut(name, "."); ok {
-			return getAtt([]any{logical, attr}, refs)
-		} else if _, ok := p.ref(name, refs, req, stack); ok || p.unmade(name, refs) { // a list as its text, as Fn::Join's
-			return text(p.resolve(map[string]any{"Ref": name}, refs, req, stack))
+			v = getAtt([]any{logical, attr}, refs)
+		} else if _, ok := p.ref(name, refs, req, stack); ok || p.unmade(name, refs) || name == "AWS::NoValue" { // a list as its text, as Fn::Join's
+			v = p.resolve(map[string]any{"Ref": name}, refs, req, stack)
+		} else {
+			return m
 		}
-		return m
+		held = append(held, v)
+		return text(v)
 	})
+	if m, isMark := marked(held...); isMark { // a string built on a mark is one
+		return m
+	}
+	return out
 }
 
 func parseTemplate(body string) (map[string]any, error) {

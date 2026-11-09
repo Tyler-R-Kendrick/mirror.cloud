@@ -746,7 +746,7 @@ func TestCloudFormationNoValueIsNeverAValue(t *testing.T) {
 	if got, err := h.service("aws.secretsmanager", "DescribeSecret", map[string]any{"SecretId": "nv-s"}); err != nil || got["Description"] != nil {
 		t.Errorf("the secret is %v (%v), want no Description", got, err)
 	}
-	if strings.Contains(spi.JSONText(h.record("nv")), noValue) {
+	if rec := h.record("nv"); strings.Contains(spi.JSONText([]any{rec["Outputs"], rec["Refs"], rec["Resources"]}), string(noValue)) {
 		t.Errorf("the stack record holds the sentinel: %v", h.record("nv"))
 	}
 	refused := map[string]string{

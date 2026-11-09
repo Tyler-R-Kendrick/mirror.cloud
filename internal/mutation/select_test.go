@@ -8,6 +8,8 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -23,11 +25,14 @@ import (
 // MUTATION_FILES), and a mutant is selected when
 //
 //   - its file changed, so no mutant on a changed line is ever skipped;
-//   - a _test.go file of the package it runs changed, since those are the tests
-//     that must still kill it;
+//   - any file of the package it runs changed (its source, tests, embedded
+//     files or testdata), or a test helper its tests import (a package only
+//     test files import, such as internal/spitest);
 //   - its own entry in this table changed (needs MUTATION_DIFF for the lines;
 //     with MUTATION_FILES alone a change to this package selects everything);
-//   - or the diff touches what every mutant depends on: go.mod, go.sum, or a
+//   - or the diff touches what every mutant depends on: go.mod, go.sum, the CI
+//     machinery (machinery, below), a name the diff quotes or a header it
+//     cannot read, or a
 //     declaration of this package other than the table, an init that appends
 //     to it (which selects the entries it appends) and the imports: the
 //     harness.
@@ -64,7 +69,9 @@ func readSelection(t *testing.T) selection {
 		files, lines, err := parseDiff(bufio.NewScanner(f))
 		f.Close()
 		if err != nil {
-			t.Fatalf("MUTATION_DIFF %s: %v", path, err)
+			// A diff this cannot read, or a name it cannot place, could hold
+			// any change: run everything rather than guess.
+			sel.all, sel.reason = true, fmt.Sprintf("MUTATION_DIFF: %v", err)
 		}
 		for _, name := range files {
 			sel.files[name] = true
@@ -152,19 +159,26 @@ func parseDiff(sc *bufio.Scanner) ([]string, map[string][][2]int, error) {
 		switch {
 		case strings.HasPrefix(line, "diff --git "):
 			current = ""
-			// Unquoted names hold no " b/" in practice; a quoted one is kept
-			// whole, which selects nothing it should not.
+			// git quotes a name holding a byte it will not print, even with
+			// core.quotePath=false (a tab, a newline, a quote). Such a name, or
+			// a header that does not split into a/X b/X, cannot be placed.
 			rest := strings.TrimPrefix(line, "diff --git ")
-			if i := strings.Index(rest, " b/"); strings.HasPrefix(rest, "a/") && i >= 0 {
-				add(rest[2:i])
-				add(rest[i+3:])
-			} else {
-				add(rest)
+			i := strings.Index(rest, " b/")
+			if strings.Contains(rest, `"`) || !strings.HasPrefix(rest, "a/") || i < 0 || strings.Count(rest, " b/") != 1 {
+				return nil, nil, fmt.Errorf("a file header this cannot place: %q", line)
 			}
-		case strings.HasPrefix(line, "--- "):
-			add(strings.TrimPrefix(strings.TrimPrefix(line, "--- "), "a/"))
-		case strings.HasPrefix(line, "+++ "):
-			name := strings.TrimPrefix(line, "+++ ")
+			add(rest[2:i])
+			add(rest[i+3:])
+		case strings.HasPrefix(line, "--- "), strings.HasPrefix(line, "+++ "):
+			// git ends a name holding a space with a tab here.
+			name := strings.TrimSuffix(line[4:], "\t")
+			if strings.HasPrefix(name, `"`) {
+				return nil, nil, fmt.Errorf("a quoted name this cannot place: %q", line)
+			}
+			if strings.HasPrefix(line, "--- ") {
+				add(strings.TrimPrefix(name, "a/"))
+				continue
+			}
 			current = ""
 			if name != "/dev/null" {
 				current = strings.TrimPrefix(name, "b/")
@@ -364,8 +378,8 @@ func selectMutants(root string, sel selection) ([]int, string, error) {
 	if sel.all {
 		return all(sel.reason)
 	}
-	for _, f := range []string{"go.mod", "go.sum"} {
-		if sel.files[f] {
+	for f := range sel.files {
+		if isMachinery(f) {
 			return all(f + " changed")
 		}
 	}
@@ -389,21 +403,133 @@ func selectMutants(root string, sel selection) ([]int, string, error) {
 		}
 		byEntry = picked
 	}
-	testDirs := map[string]bool{}
+	// A change anywhere in a package (its source, its tests, what it embeds,
+	// its testdata) can move whether that package's tests still kill each of
+	// its mutants, so it selects all of them.
+	dirs := map[string]bool{}
 	for f := range sel.files {
-		if strings.HasSuffix(f, "_test.go") {
-			testDirs[filepath.ToSlash(filepath.Dir(f))] = true
+		dirs[pkgDir(f)] = true
+	}
+	// A test helper's change reaches the mutants of every package whose tests
+	// import it.
+	helped := map[string]bool{}
+	if len(dirs) > 0 {
+		helpers, err := testHelpers(root)
+		if err != nil {
+			return nil, "", err
+		}
+		for dir := range dirs {
+			for _, pkg := range helpers[dir] {
+				helped[pkg] = true
+			}
 		}
 	}
 	var out []int
 	for i, m := range mutants {
 		file := filepath.ToSlash(m.file)
 		dir := strings.TrimPrefix(m.pkg, "./")
-		if sel.files[file] || testDirs[dir] || sel.pkgs[m.pkg] || sel.names[m.name] || byEntry[m.name] {
+		if sel.files[file] || dirs[dir] || helped[m.pkg] || sel.pkgs[m.pkg] || sel.names[m.name] || byEntry[m.name] {
 			out = append(out, i)
 		}
 	}
 	return out, "", nil
+}
+
+// machinery is what every mutant depends on beyond its package: the module's
+// requirements, and how CI selects and runs the scoped jobs (cmd/affected's
+// list of the same name). A change to any of it runs the whole table.
+var machinery = []string{
+	"go.mod",
+	"go.sum",
+	"Makefile",
+	".github/workflows/ci.yml",
+	".github/actions/**",
+	"scripts/fuzz.sh",
+	"scripts/fuzz-targets.txt",
+	"scripts/shard.py",
+	"scripts/ci-plan.py",
+	"test/race-costs.json",
+	"cmd/affected/**",
+}
+
+func isMachinery(f string) bool {
+	for _, m := range machinery {
+		if prefix, ok := strings.CutSuffix(m, "**"); ok && strings.HasPrefix(f, prefix) || f == m {
+			return true
+		}
+	}
+	return false
+}
+
+// pkgDir is the directory of the package a changed file belongs to: its own,
+// or for anything under testdata, the one that holds testdata.
+func pkgDir(f string) string {
+	if i := strings.Index("/"+f, "/testdata/"); i >= 0 {
+		if i == 0 {
+			return "."
+		}
+		return f[:i-1]
+	}
+	return path.Dir(f)
+}
+
+var (
+	helpersOnce sync.Once
+	helpersMap  map[string][]string
+	helpersErr  error
+)
+
+// testHelpers maps the directory of each test helper (a module package that
+// only test files import, such as internal/spitest) to the packages, as ./dir,
+// whose tests import it.
+func testHelpers(root string) (map[string][]string, error) {
+	helpersOnce.Do(func() {
+		cmd := exec.Command("go", "list", "-e", "-f", "{{.ImportPath}}\t{{.Dir}}\t{{join .Imports \" \"}}\t{{join .TestImports \" \"}} {{join .XTestImports \" \"}}", "./...")
+		cmd.Dir = root
+		out, err := cmd.Output()
+		if err != nil {
+			helpersErr = fmt.Errorf("go list: %v", err)
+			return
+		}
+		modCmd := exec.Command("go", "list", "-m")
+		modCmd.Dir = root
+		mod, err := modCmd.Output()
+		if err != nil {
+			helpersErr = fmt.Errorf("go list -m: %v", err)
+			return
+		}
+		module := strings.TrimSpace(string(mod)) + "/"
+		type pkg struct{ dir, rel string }
+		byPath := map[string]pkg{}
+		imported := map[string]bool{}
+		testImports := map[string][]string{} // import path -> packages whose tests import it
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			f := strings.Split(line, "\t")
+			if len(f) != 4 || !strings.HasPrefix(f[0], module) {
+				continue
+			}
+			rel := "./" + strings.TrimPrefix(f[0], module)
+			d, _ := filepath.Rel(root, f[1])
+			byPath[f[0]] = pkg{filepath.ToSlash(d), rel}
+			for _, ip := range strings.Fields(f[2]) {
+				imported[ip] = true
+			}
+			seen := map[string]bool{}
+			for _, ip := range strings.Fields(f[3]) {
+				if !seen[ip] { // a test and an external test can both import it
+					seen[ip] = true
+					testImports[ip] = append(testImports[ip], rel)
+				}
+			}
+		}
+		helpersMap = map[string][]string{}
+		for ip, users := range testImports {
+			if p, ok := byPath[ip]; ok && !imported[ip] {
+				helpersMap[p.dir] = users
+			}
+		}
+	})
+	return helpersMap, helpersErr
 }
 
 // cost is the measured CPU seconds one mutant of pkg takes: the compile and
@@ -669,4 +795,168 @@ func mustSelect(t *testing.T, root string, sel selection) ([]int, string) {
 		t.Fatal(err)
 	}
 	return got, reason
+}
+
+// A change anywhere in a mutated package selects every mutant of it, and a
+// test helper selects the mutants of every package whose tests import it.
+func TestAPackageChangeSelectsItsMutants(t *testing.T) {
+	root := repoRoot(t)
+	of := func(pkg string) int {
+		n := 0
+		for _, m := range mutants {
+			if m.pkg == pkg {
+				n++
+			}
+		}
+		return n
+	}
+	for _, f := range []string{"internal/engine/a_new_file.go", "internal/engine/testdata/x.json", "internal/engine/page_test.go"} {
+		got, _ := selectDiff(t, root, hunk(f, 1))
+		if len(got) != of("./internal/engine") {
+			t.Errorf("%s selected %d, want all %d of internal/engine's", f, len(got), of("./internal/engine"))
+		}
+	}
+	helpers, err := testHelpers(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := helpers["internal/spitest"]
+	if len(users) == 0 {
+		t.Fatal("internal/spitest is not found as a test helper")
+	}
+	got, _ := selectDiff(t, root, hunk("internal/spitest/spitest.go", 1))
+	want := 0
+	for _, u := range users {
+		want += of(u)
+	}
+	if want == 0 || len(got) != want {
+		t.Errorf("internal/spitest selected %d mutants, want the %d of the packages whose tests import it", len(got), want)
+	}
+	// A production package imported by code is no helper.
+	if _, ok := helpers["internal/engine"]; ok {
+		t.Error("internal/engine counted as a test helper")
+	}
+}
+
+// The machinery every mutant depends on selects them all, as cmd/affected
+// selects every package for the same list.
+func TestMachinerySelectsEveryMutant(t *testing.T) {
+	root := repoRoot(t)
+	for _, f := range []string{
+		"go.mod", "go.sum", "Makefile", ".github/workflows/ci.yml", ".github/actions/go/action.yml",
+		"scripts/fuzz.sh", "scripts/fuzz-targets.txt", "scripts/shard.py", "scripts/ci-plan.py",
+		"test/race-costs.json", "cmd/affected/affected.go",
+	} {
+		if got, reason := selectDiff(t, root, hunk(f, 1)); len(got) != len(mutants) || reason == "" {
+			t.Errorf("%s selected %d of %d", f, len(got), len(mutants))
+		}
+	}
+}
+
+// The same promises, read from what git itself writes, the way CI asks for it
+// (core.quotePath=false, --no-renames): an edit at needles, a move, a name git
+// still quotes, and a non-ASCII name.
+func TestRealDiffsSelectWhatTheyTouch(t *testing.T) {
+	root := repoRoot(t)
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-c", "core.quotePath=false", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"}, args...)...)
+		cmd.Dir = repo
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return string(out)
+	}
+	files := map[string]bool{}
+	for _, m := range mutants {
+		files[filepath.ToSlash(m.file)] = true
+	}
+	var names []string
+	for f := range files {
+		names = append(names, f)
+	}
+	sort.Strings(names)
+	for _, f := range names {
+		body, err := os.ReadFile(filepath.Join(root, f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.MkdirAll(filepath.Join(repo, filepath.Dir(f)), 0o755)
+		os.WriteFile(filepath.Join(repo, f), body, 0o644)
+	}
+	git("init", "-q")
+	git("add", ".")
+	git("commit", "-qm", "base")
+	diff := func() string { return git("diff", "--unified=0", "--no-color", "--no-renames", "HEAD~1", "HEAD") }
+
+	// Every other mutated file edited at its first mutant's needle.
+	edited := map[string]bool{}
+	for i, f := range names {
+		if i%2 != 0 {
+			continue
+		}
+		p := filepath.Join(repo, f)
+		body, _ := os.ReadFile(p)
+		for _, m := range mutants {
+			if filepath.ToSlash(m.file) == f {
+				first, _, _ := strings.Cut(m.old, "\n")
+				os.WriteFile(p, []byte(strings.Replace(string(body), first, first+" // edited", 1)), 0o644)
+				break
+			}
+		}
+		edited[f] = true
+	}
+	git("commit", "-qam", "edit needles")
+	got, reason := selectDiff(t, root, diff())
+	if reason != "" {
+		t.Fatalf("an edit at needles selected everything: %s", reason)
+	}
+	picked := map[int]bool{}
+	for _, i := range got {
+		picked[i] = true
+	}
+	for i, m := range mutants {
+		if edited[filepath.ToSlash(m.file)] && !picked[i] {
+			t.Errorf("%s: its file was edited, and it was not selected", m.name)
+		}
+	}
+
+	// A move: both sides are named, so the mutants of the old name run.
+	moved := names[1]
+	git("mv", moved, moved+".moved")
+	git("commit", "-qm", "move")
+	got, _ = selectDiff(t, root, diff())
+	found := false
+	for _, i := range got {
+		found = found || filepath.ToSlash(mutants[i].file) == moved
+	}
+	if !found {
+		t.Errorf("moving %s selected none of its mutants", moved)
+	}
+
+	// A non-ASCII name is printed as it is, and places in its package.
+	os.WriteFile(filepath.Join(repo, "internal", "engine", "café.go"), []byte("package engine\n"), 0o644)
+	git("add", ".")
+	git("commit", "-qm", "non-ascii")
+	if got, reason := selectDiff(t, root, diff()); reason != "" || len(got) == 0 || mutants[got[0]].pkg != "./internal/engine" {
+		t.Errorf("a non-ASCII name in internal/engine selected %d (%s)", len(got), reason)
+	}
+
+	// A tab in a name: git quotes it whatever core.quotePath says, and a
+	// quoted name selects everything.
+	os.WriteFile(filepath.Join(repo, "internal", "engine", "tab\tname.go"), []byte("package engine\n"), 0o644)
+	git("add", ".")
+	git("commit", "-qm", "quoted")
+	files2, _, err := parseDiff(bufio.NewScanner(strings.NewReader(diff())))
+	if err == nil {
+		t.Errorf("a quoted name was read as %v", files2)
+	}
+	path := filepath.Join(t.TempDir(), "pr.diff")
+	os.WriteFile(path, []byte(diff()), 0o644)
+	t.Setenv("MUTATION_DIFF", path)
+	if sel := readSelection(t); !sel.all || sel.reason == "" {
+		t.Errorf("MUTATION_DIFF with a quoted name did not select everything: %+v", sel.reason)
+	}
 }

@@ -262,7 +262,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 		}
 		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": dst, "TableStatus": "ACTIVE"}}}, nil
-	case "EnableKinesisStreamingDestination", "DisableKinesisStreamingDestination", "DescribeKinesisStreamingDestination":
+	case "EnableKinesisStreamingDestination", "DisableKinesisStreamingDestination", "DescribeKinesisStreamingDestination", "UpdateKinesisStreamingDestination":
 		return p.kinesisDestination(ctx, req)
 	case "BatchGetItem":
 		out := map[string]any{}
@@ -400,8 +400,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.restorePITR(ctx, req)
 	case "SearchVectors":
 		return p.searchVectors(ctx, req)
-	case "UpdateKinesisStreamingDestination":
-		return p.kinesisDestination(ctx, req)
 	case "ListStreams":
 		return p.listStreams(ctx, req)
 	case "DescribeStream":

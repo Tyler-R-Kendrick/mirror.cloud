@@ -261,7 +261,7 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.deleteBucket(ctx, req)
 	case "HeadBucket":
 		return p.headBucket(ctx, req)
-	case "ListBuckets":
+	case "ListBuckets", "ListDirectoryBuckets":
 		return p.listBuckets(ctx, req)
 	case "GetBucketLocation":
 		return p.getBucketLocation(ctx, req)
@@ -323,8 +323,6 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.renameObject(ctx, req)
 	case "SelectObjectContent":
 		return p.selectObject(ctx, req)
-	case "ListDirectoryBuckets":
-		return p.listBuckets(ctx, req)
 	case "WriteGetObjectResponse":
 		return p.writeGetObjectResponse(ctx, req)
 	case "UpdateObjectEncryption":

@@ -285,7 +285,7 @@ func TestCloudFormationARefAnswersWhatItsTypeDocuments(t *testing.T) {
 		}
 	}
 	body, _ := json.Marshal(map[string]any{"Resources": resources, "Outputs": outputs})
-	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "refs", "TemplateBody": string(body)}); err != nil {
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "refs", "TemplateBody": string(body), "Capabilities": []any{"CAPABILITY_NAMED_IAM"}}); err != nil {
 		t.Fatal(err)
 	}
 	physical := map[string]string{}

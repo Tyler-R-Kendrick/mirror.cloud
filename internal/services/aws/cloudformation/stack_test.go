@@ -82,9 +82,10 @@ func (h *stacks) invoke(op string, in map[string]any) (map[string]any, error) {
 	return out.Output, nil
 }
 
+// create makes the stack from resources, acknowledging any IAM resource they hold (CAPABILITY_NAMED_IAM).
 func (h *stacks) create(stack string, resources map[string]map[string]any) error {
 	tpl, _ := json.Marshal(map[string]any{"Resources": resources})
-	_, err := h.invoke("CreateStack", map[string]any{"StackName": stack, "TemplateBody": string(tpl)})
+	_, err := h.invoke("CreateStack", map[string]any{"StackName": stack, "TemplateBody": string(tpl), "Capabilities": []any{"CAPABILITY_NAMED_IAM"}})
 	return err
 }
 

@@ -227,3 +227,86 @@ func TestCloudFormationRefusesAParameterItCannotTake(t *testing.T) {
 		t.Errorf("CreateChangeSet with both answered %v, want ValidationError", err)
 	}
 }
+
+// A stack keeps its Tags, "Key-value pairs to associate with this stack":
+// DescribeStacks answers them, an UpdateStack without them keeps them ("If
+// you don't specify this parameter, CloudFormation doesn't modify the stack's
+// tags") and one with an empty list removes them (API reference,
+// UpdateStack), and a change set's execution sets them. Before, no stack
+// kept any.
+func TestCloudFormationAStackKeepsItsTags(t *testing.T) {
+	h := newStacks(t)
+	body, _ := json.Marshal(map[string]any{"Resources": map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}}})
+	tags := func(stack string) any {
+		out, _ := h.invoke("DescribeStacks", map[string]any{"StackName": stack})
+		return asMap(spi.Slice(out["Stacks"])[0])["Tags"]
+	}
+	team := []any{map[string]any{"Key": "team", "Value": "a"}}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "tagged", "TemplateBody": string(body), "Tags": team}); err != nil {
+		t.Fatal(err)
+	}
+	if got := tags("tagged"); !reflect.DeepEqual(got, team) {
+		t.Errorf("Tags = %v, want %v", got, team)
+	}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "tagged", "TemplateBody": string(body)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := tags("tagged"); !reflect.DeepEqual(got, team) {
+		t.Errorf("after an update without Tags, Tags = %v, want %v kept", got, team)
+	}
+	other := []any{map[string]any{"Key": "team", "Value": "b"}}
+	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "tagged", "ChangeSetName": "retag", "TemplateBody": string(body), "Tags": other}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "tagged", "ChangeSetName": "retag"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := tags("tagged"); !reflect.DeepEqual(got, other) {
+		t.Errorf("after the change set, Tags = %v, want %v", got, other)
+	}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "tagged", "TemplateBody": string(body), "Tags": []any{}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := tags("tagged"); !reflect.DeepEqual(got, []any{}) {
+		t.Errorf("after an update with no Tags, Tags = %v, want []", got)
+	}
+}
+
+// IAM resources need their Capabilities: "If you have IAM resources, you can
+// specify either capability. If you have IAM resources with custom names, you
+// must specify CAPABILITY_NAMED_IAM. If you don't specify either of these
+// capabilities, CloudFormation returns an InsufficientCapabilities error"
+// (API reference, CreateStack); a change set's are its own. Before, no
+// capability was asked for.
+func TestCloudFormationIAMResourcesNeedTheirCapabilities(t *testing.T) {
+	h := newStacks(t)
+	role := func(props map[string]any) string {
+		props["AssumeRolePolicyDocument"] = map[string]any{"Version": "2012-10-17", "Statement": []any{}}
+		body, _ := json.Marshal(map[string]any{"Resources": map[string]any{"R": map[string]any{"Type": "AWS::IAM::Role", "Properties": props}}})
+		return string(body)
+	}
+	for _, c := range []struct {
+		name, body string
+		caps       []any
+		want       string // "" when it is made
+	}{
+		{"none", role(map[string]any{}), nil, "Requires capabilities : [CAPABILITY_IAM]"},
+		{"iam", role(map[string]any{}), []any{"CAPABILITY_IAM"}, ""},
+		{"named-with-iam", role(map[string]any{"RoleName": "named-cap-role"}), []any{"CAPABILITY_IAM"}, "Requires capabilities : [CAPABILITY_NAMED_IAM]"},
+		{"named", role(map[string]any{"RoleName": "named-cap-role"}), []any{"CAPABILITY_NAMED_IAM"}, ""},
+	} {
+		_, err := h.invoke("CreateStack", map[string]any{"StackName": c.name, "TemplateBody": c.body, "Capabilities": c.caps})
+		if c.want == "" && err != nil || c.want != "" && (code(err) != "InsufficientCapabilitiesException" || !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("CreateStack %s answered %v, want %q", c.name, err, c.want)
+		}
+		if _, left := h.stored(c.name); c.want != "" && left {
+			t.Errorf("the refused stack %s was made", c.name)
+		}
+	}
+	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "cs", "ChangeSetName": "role", "ChangeSetType": "CREATE", "TemplateBody": role(map[string]any{})}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "cs", "ChangeSetName": "role"}); code(err) != "InsufficientCapabilitiesException" {
+		t.Errorf("ExecuteChangeSet of a change set without CAPABILITY_IAM answered %v, want InsufficientCapabilitiesException", err)
+	}
+}

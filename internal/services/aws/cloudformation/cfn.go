@@ -162,7 +162,7 @@ type stack struct {
 	Resources                  []res
 	Outputs                    []any
 	Refs                       map[string]string
-	NotificationARNs           []any
+	NotificationARNs, Tags     []any
 	Protect                    bool
 }
 
@@ -184,7 +184,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		id = cur.ID
 		previous(req.Input, cur)
 	}
-	arns := append([]any{}, spi.Slice(req.Input["NotificationARNs"])...)
+	arns, tags := append([]any{}, spi.Slice(req.Input["NotificationARNs"])...), append([]any{}, spi.Slice(req.Input["Tags"])...)
 	if len(arns) > 5 { // "Maximum number of 5 items" (API reference, CreateStack and UpdateStack)
 		return nil, invalid("1 validation error detected: Value at 'notificationARNs' failed to satisfy constraint: Member must have length less than or equal to 5")
 	}
@@ -228,13 +228,13 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		} else if id = cmp.Or(old.ID, id); found || update { // an update reserves nothing: it writes only over what it read
 			return nil
 		}
-		raw, _ = json.Marshal(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns})
+		raw, _ = json.Marshal(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags})
 		return tx.Put(name, raw)
 	}); err != nil {
 		return nil, err
 	}
 	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: refs,
-		Resources: []res{}, Outputs: []any{}, NotificationARNs: arns} // never null: every read of a stack lists them
+		Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags} // never null: every read of a stack lists them
 	fail := func(err error) (*spi.Response, error) {
 		if st.Reason = err.Error(); !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, "CREATE_IN_PROGRESS", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
@@ -345,18 +345,18 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 	tpl, err := parseTemplate(body)
 	var order []string
 	var refs map[string]string
+	var known map[string]string
 	if err == nil {
-		err = undeclared(req.Input, tpl)
+		known, err = parameters(req.Input, tpl)
 	}
 	if err == nil {
-		known := parameters(req.Input, tpl)
 		maps.Copy(known, pseudo(req, stack, id))
 		p.tpl, refs = tpl, conditions(tpl, known)
 		delete(refs, "AWS::NoValue") // ref answers it: no record holds the sentinel
 		order, err = p.order(tpl, refs)
 	}
 	if err == nil {
-		err = p.sound(tpl, refs, req, stack)
+		err = cmp.Or(p.sound(tpl, refs, req, stack), capable(tpl, req.Input, stack))
 	}
 	return body, tpl, order, refs, err
 }
@@ -1426,12 +1426,19 @@ func each(v any, fn func(map[string]any)) {
 }
 
 // parameters are the request's parameter values, the Parameters list the query protocol's decoder builds
-// (awsquery's unflatten), and each Default of a parameter it does not give.
-func parameters(in, tpl map[string]any) map[string]string {
-	out := map[string]string{}
+// (awsquery's unflatten), and each Default of a parameter it does not give; or the error for a parameter
+// the template does not declare, or one given both a value and UsePreviousValue: "If you specify true, do
+// not specify a parameter value" (API reference, Parameter). The wordings are readings.
+func parameters(in, tpl map[string]any) (map[string]string, error) {
+	out, undeclared := map[string]string{}, []string{}
 	for _, p := range spi.Slice(in["Parameters"]) {
-		if v, valued := asMap(p)["ParameterValue"]; valued {
-			out[str(asMap(p)["ParameterKey"])] = str(v)
+		k, v, valued := str(asMap(p)["ParameterKey"]), asMap(p)["ParameterValue"], asMap(p)["ParameterValue"] != nil
+		if valued && isTrue(asMap(p)["UsePreviousValue"]) {
+			return nil, invalid("Invalid input for parameter key " + k + ". Cannot specify usePreviousValue as true and non empty value for a parameter")
+		} else if asMap(tpl["Parameters"])[k] == nil {
+			undeclared = append(undeclared, k)
+		} else if valued {
+			out[k] = str(v)
 		}
 	}
 	for k, v := range asMap(tpl["Parameters"]) {
@@ -1439,7 +1446,10 @@ func parameters(in, tpl map[string]any) map[string]string {
 			out[k] = spi.JSONText(asMap(v)["Default"]) // a parameter "becomes a string": Default 16 is "16"
 		}
 	}
-	return out
+	if len(undeclared) > 0 {
+		return nil, invalid("Parameters: [" + strings.Join(undeclared, ", ") + "] do not exist in the template")
+	}
+	return out, nil
 }
 
 // previous puts in an update's request what it takes from the stack cur: its NotificationARNs when the
@@ -1447,8 +1457,10 @@ func parameters(in, tpl map[string]any) map[string]string {
 // API reference), and the value of each parameter whose UsePreviousValue is true, "the existing parameter
 // value that the stack is using for a given parameter key" (API reference, Parameter).
 func previous(in map[string]any, cur stack) {
-	if _, named := in["NotificationARNs"]; !named {
-		in["NotificationARNs"] = cur.NotificationARNs
+	for k, kept := range map[string][]any{"NotificationARNs": cur.NotificationARNs, "Tags": cur.Tags} {
+		if _, named := in[k]; !named { // "If you don't specify this parameter, CloudFormation doesn't modify the stack's tags"
+			in[k] = kept
+		}
 	}
 	for _, p := range spi.Slice(in["Parameters"]) {
 		_, valued := asMap(p)["ParameterValue"] // one given both is refused (undeclared)
@@ -1459,23 +1471,23 @@ func previous(in map[string]any, cur stack) {
 	}
 }
 
-// undeclared is the error for a request's parameter its template does not declare, or one given both a
-// value and UsePreviousValue: "If you specify true, do not specify a parameter value" (API reference,
-// Parameter). The wordings are readings.
-func undeclared(in, tpl map[string]any) error {
-	var keys []string
-	for _, p := range spi.Slice(in["Parameters"]) {
-		k := str(asMap(p)["ParameterKey"])
-		if _, valued := asMap(p)["ParameterValue"]; valued && isTrue(asMap(p)["UsePreviousValue"]) {
-			return invalid("Invalid input for parameter key " + k + ". Cannot specify usePreviousValue as true and non empty value for a parameter")
-		} else if asMap(tpl["Parameters"])[k] == nil {
-			keys = append(keys, k)
+// capable is the error for a template of IAM resources a stack's request does not acknowledge: "If you have IAM
+// resources, you can specify either capability. If you have IAM resources with custom names, you must specify
+// CAPABILITY_NAMED_IAM. If you don't specify either of these capabilities, CloudFormation returns an
+// InsufficientCapabilities error" (API reference, CreateStack). The wording is a reading.
+func capable(tpl, in map[string]any, stack string) error {
+	need, given := "", spi.Slice(in["Capabilities"])
+	for _, r := range asMap(tpl["Resources"]) {
+		if typ := str(asMap(r)["Type"]); strings.HasPrefix(typ, "AWS::IAM::") && asMap(asMap(r)["Properties"])[kinds[typ].member] != nil {
+			need = "CAPABILITY_NAMED_IAM"
+		} else if strings.HasPrefix(typ, "AWS::IAM::") {
+			need = cmp.Or(need, "CAPABILITY_IAM")
 		}
 	}
-	if len(keys) > 0 {
-		return invalid("Parameters: [" + strings.Join(keys, ", ") + "] do not exist in the template")
+	if need == "" || stack == "" || slices.Contains(given, any("CAPABILITY_NAMED_IAM")) || slices.Contains(given, any(need)) {
+		return nil
 	}
-	return nil
+	return fault("InsufficientCapabilitiesException", "Requires capabilities : ["+need+"]")
 }
 
 func paramDecls(tpl map[string]any) []any {

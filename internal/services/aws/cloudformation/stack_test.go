@@ -1184,7 +1184,7 @@ func TestCloudFormationPlansEveryIdBeforeMakingIt(t *testing.T) {
 	id := str(asMap(out["Stacks"].([]any)[0])["StackId"])
 	for _, r := range h.resources("every") {
 		props := asMap(all[r.Logical]["Properties"])
-		n := cmp.Or(str(props[kinds[r.Type].member]), physicalName("every", r.Logical, id, r.Type, props))
+		n := cmp.Or(str(props[calls(r.Type, "", "", "", nil).member]), physicalName("every", r.Logical, id, r.Type, props))
 		got, unknowable := planID(&spi.Request{Identity: h.id}, r.Type, n, props), r.Type == "AWS::SQS::Queue" || r.Type == "AWS::KMS::Key" || r.Type == "AWS::ApiGateway::RestApi"
 		if unknowable && got != "" || !unknowable && got != r.Physical {
 			t.Errorf("%s (%s) was planned as %q and made as %q", r.Logical, r.Type, got, r.Physical)

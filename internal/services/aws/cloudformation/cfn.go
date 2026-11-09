@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/url"
@@ -60,10 +61,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	switch req.Operation {
 	case "ValidateTemplate":
 		_, tpl, _, _, err := p.template(ctx, req, "", "")
-		if err != nil {
-			return nil, err
-		}
-		return &spi.Response{Output: map[string]any{"Description": str(tpl["Description"]), "Parameters": paramDecls(tpl)}}, nil
+		return &spi.Response{Output: map[string]any{"Description": str(tpl["Description"]), "Parameters": paramDecls(tpl)}}, err
 	case "CreateStack", "UpdateStack":
 		return p.upsert(ctx, req, name, req.Operation == "UpdateStack", "", changeSet{})
 	case "DeleteStack":
@@ -86,20 +84,16 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if st, loadErr := p.load(ctx, req, name); err != nil && name != "" && loadErr == nil && cmp.Or(str(req.Input["TemplateBody"]), str(req.Input["TemplateURL"])) == "" {
 			tpl, err = stored(st.Template), nil
 		}
-		if err != nil {
-			return nil, err
-		}
 		var types []any
 		for _, v := range asMap(tpl["Resources"]) {
 			if t := str(asMap(v)["Type"]); t != "" {
 				types = append(types, t)
 			}
 		}
-		return &spi.Response{Output: map[string]any{"Parameters": paramDecls(tpl), "ResourceTypes": types}}, nil
+		return &spi.Response{Output: map[string]any{"Parameters": paramDecls(tpl), "ResourceTypes": types}}, err
 	case "ListExports":
-		kvs, _, _ := p.col(req, "cfn").List(ctx, "", "", 0)
 		var ex []any
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, p.col(req, "cfn"), "", "", 0) {
 			st := spi.Decode[stack](kv.Value)
 			for _, o := range st.Outputs {
 				ex = append(ex, map[string]any{"Name": asMap(o)["OutputKey"], "Value": asMap(o)["OutputValue"], "ExportingStackId": st.ID})
@@ -282,15 +276,16 @@ type res struct {
 // upsert makes the stack named name, or updates it, a create under id when one is given (a CREATE change
 // set's, which it answered), as the execution of the change set under key when one is given: claimed in the
 // transaction that starts it, retired in the one that ends it.
-func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (*spi.Response, error) {
+func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (out *spi.Response, err error) {
 	if err := checkName(name, !update); err != nil {
 		return nil, err
 	} else if len(spi.Slice(req.Input["NotificationARNs"])) > 5 { // "Maximum number of 5 items" (API reference, CreateStack and UpdateStack)
 		return nil, invalid("1 validation error detected: Value at 'notificationARNs' failed to satisfy constraint: Member must have length less than or equal to 5")
 	}
 	id = cmp.Or(id, "arn:aws:cloudformation:"+req.Identity.Region+":"+req.Identity.Account+":stack/"+name+"/"+p.deps.Rand.Hex(8))
+	given, loaded := spi.Decode[map[string]any]([]byte(spi.JSONText(req.Input))), stack{}
 	if cur, err := p.load(ctx, req, name); err == nil && update { // the id an update's AWS::StackId answers
-		id = cur.ID
+		id, loaded = cur.ID, cur
 		previous(req.Input, cur)
 	} else if update { // "Stack [x] does not exist" before any template error; read again where it is written
 		return nil, err
@@ -326,6 +321,8 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			return err
 		} else if _ = json.Unmarshal(raw, &old); update && !found { // "Stack [x] does not exist": an update makes no stack
 			return invalid("Stack [" + name + "] does not exist")
+		} else if update && !reflect.DeepEqual(old, loaded) {
+			return errStale // changed since its previous values were read: read again
 		} else if found && !update && old.Status == "REVIEW_IN_PROGRESS" && old.ID == id {
 			found, old = false, stack{} // a CREATE change set's stack, which its execution makes
 		}
@@ -338,7 +335,10 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			return tx.Put(name, []byte(spi.JSONText(held)))
 		}
 		return tx.Put(name, []byte(spi.JSONText(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags})))
-	}); err != nil {
+	}); errors.Is(err, errStale) {
+		req.Input = given
+		return p.upsert(ctx, req, name, update, "", cs)
+	} else if err != nil {
 		return nil, err
 	}
 	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: refs,
@@ -346,18 +346,30 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	fail := func(err error) (*spi.Response, error) {
 		if st.Reason = err.Error(); !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, "CREATE_IN_PROGRESS", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
-		} else { // a failed update's reservation ends: the record as it found it, over its reservation only, and
-			// what the update made that the record, put back or another's, does not hold goes
-			cur, wrote, _ := p.settle(ctx, req, name, as(held, old))
-			keep := map[bool][]res{true: old.Resources, false: cur.Resources}[wrote]
-			st.Resources = slices.DeleteFunc(st.Resources, func(r res) bool {
-				return slices.ContainsFunc(keep, func(c res) bool { return c.Physical == r.Physical })
-			})
-			_ = p.unwind(ctx, req, st, "", "", "")
+		} else { // what the update made that no stack's record holds goes, newest first; what cannot is left on
+			// the record (DELETE_FAILED), which it puts back as it found it, over its reservation only
+			owned, was := p.holders(ctx, req), stored(old.Template)
+			for _, r := range slices.Backward(st.Resources) {
+				if owned[r.Physical] == name && strings.Contains(" AWS::SecretsManager::Secret AWS::Events::Rule AWS::SSM::Parameter ", " "+r.Type+" ") {
+					p.tpl = was // one it changed in place takes its properties back, as a rollback does
+					_, _ = p.provision(ctx, req, r.Type, r.Logical, r.Name, asMap(p.resolve(asMap(asMap(was["Resources"])[r.Logical])["Properties"], old.Refs, req, name)), r.Physical, old.ID)
+				} else if owned[r.Physical] != "" { // another stack's
+					continue
+				} else if derr := p.deprovision(ctx, req, r); derr != nil {
+					r.Status, r.Reason = "DELETE_FAILED", derr.Error()
+					old.Resources = append(old.Resources, r)
+				}
+			}
+			_, _, _ = p.settle(ctx, req, name, as(held, old))
 		}
 		p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", err)
 		return nil, err
 	}
+	defer func() { // a panic between the reservation and the settle ends the reservation, as a failure does
+		if r := recover(); r != nil {
+			out, err = fail(&spi.Fault{Code: "InternalFailure", Message: fmt.Sprint(r), HTTPStatus: 500, Fault: "server"})
+		}
+	}()
 	planned := maps.Clone(st.Refs)
 	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
@@ -439,6 +451,21 @@ func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take f
 	})
 	return cur, wrote, err
 }
+
+// holders maps each physical id a stack's record holds to the stack: what a failed update must not delete,
+// and what a resource whose id is another's (a Kinesis resource policy's, its stream's ARN) must not take.
+func (p *Pack) holders(ctx context.Context, req *spi.Request) map[string]string {
+	out := map[string]string{}
+	for _, kv := range spi.Entries(ctx, p.col(req, "cfn"), "", "", 0) {
+		for _, r := range spi.Decode[stack](kv.Value).Resources {
+			out[r.Physical] = kv.Key
+		}
+	}
+	return out
+}
+
+// errStale is an update's reservation finding the record changed since the update read it.
+var errStale = errors.New("stale")
 
 // changeSet is the change set an execution executes: its key, and the id of the copy it read.
 type changeSet struct{ key, id string }
@@ -613,28 +640,6 @@ func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, 
 	return stack{}, invalid("Stack [" + name + "] does not exist")
 }
 
-// kinds are the types provision names: the property that names one, the longest name its service takes (API
-// Gateway sets none for a REST API, nor holds a name to one; 1024 only bounds it), a read that finds one by
-// name, the service's error for a name taken (SNS's CreateTopic "is idempotent": CloudFormation's), its id.
-var kinds = map[string]struct {
-	member                 string
-	max                    int
-	svc, op, in, code, ref string
-}{
-	"AWS::S3::Bucket":             {"BucketName", 63, "aws.s3", "HeadBucket", "Bucket", "BucketAlreadyOwnedByYou", "{n}"},
-	"AWS::SQS::Queue":             {"QueueName", 80, "aws.sqs", "GetQueueUrl", "QueueName", "QueueAlreadyExists", ""},
-	"AWS::SNS::Topic":             {"TopicName", 256, "aws.sns", "GetTopicAttributes", "TopicArn", "AlreadyExistsException", "arn:aws:sns:{r}:{a}:{n}"},
-	"AWS::DynamoDB::Table":        {"TableName", 255, "aws.dynamodb", "DescribeTable", "TableName", "ResourceInUseException", "{n}"},
-	"AWS::IAM::Role":              {"RoleName", 64, "aws.iam", "GetRole", "RoleName", "EntityAlreadyExists", "{n}"},
-	"AWS::SSM::Parameter":         {"Name", 2048, "aws.ssm", "GetParameter", "Name", "ParameterAlreadyExists", "{n}"},
-	"AWS::SecretsManager::Secret": {"Name", 512, "aws.secretsmanager", "DescribeSecret", "SecretId", "ResourceExistsException", "arn:aws:secretsmanager:{r}:{a}:secret:{n}"},
-	"AWS::Logs::LogGroup":         {"LogGroupName", 512, "aws.logs", "DescribeLogGroups", "logGroupNamePrefix", "ResourceAlreadyExistsException", "{n}"},
-	"AWS::Events::Rule":           {"Name", 64, "aws.events", "DescribeRule", "Name", "ResourceAlreadyExistsException", "{n}"},
-	"AWS::Lambda::Function":       {"FunctionName", 64, "aws.lambda", "GetFunction", "FunctionName", "ResourceConflictException", "{n}"},
-	"AWS::Kinesis::Stream":        {"Name", 128, "aws.kinesis", "DescribeStreamSummary", "StreamName", "ResourceInUseException", "{n}"},
-	"AWS::ApiGateway::RestApi":    {"Name", 1024, "", "", "", "", ""},
-}
-
 // attributes are each type's Fn::GetAtt attributes, from the id its Ref answers, as its Template Reference
 // page lists them: {id/} is the id's last path segment, {id:} its last colon-separated one, {rule} a rule's
 // name and {bus/} the bus before it, and {param} a parameter's name without a leading slash.
@@ -727,7 +732,7 @@ func planID(req *spi.Request, typ, n string, props map[string]any) string {
 	if bus := spi.LastSlash(str(props["EventBusName"])); typ == "AWS::Events::Rule" && bus != "" && bus != "default" {
 		n = bus + "|" + n // a rule's "event rule ID": <bus>|<name> on any bus but the default (a reading)
 	}
-	if f := kinds[typ].ref; f != "" && n != "" { // no name: one built on an id known only once made (claim)
+	if f := calls(typ, "", "", "", nil).ref; f != "" && n != "" { // no name: one built on an id known only once made (claim)
 		return strings.NewReplacer("{r}", req.Identity.Region, "{a}", req.Identity.Account, "{n}", n).Replace(f)
 	}
 	return cmp.Or(str(props["ResourceArn"]), str(props["ResourceARN"])) // none: known only once made
@@ -755,7 +760,14 @@ func (p *Pack) order(tpl map[string]any, refs map[string]string) ([]string, erro
 	for logical, r := range resources {
 		p.walks++
 		named := map[string]bool{}
-		names(r, named, refs) // its properties and its DependsOn; the order prunes what a settled Fn::If does not take
+		names(asMap(r)["Properties"], named, refs)                                          // the order prunes what a settled Fn::If does not take
+		for _, d := range append(spi.Slice(asMap(r)["DependsOn"]), asMap(r)["DependsOn"]) { // "Resource B is created before resource A"
+			if d, ok := d.(string); ok && resources[d] != nil && !off(resources[d], refs) {
+				named[d] = true
+			} else if ok { // a DependsOn names a resource the stack makes, nothing else
+				undeclared = append(undeclared, d)
+			}
+		}
 		for n := range named {
 			if _, ok := resources[n]; ok {
 				waiting[logical], users[n] = waiting[logical]+1, append(users[n], logical)
@@ -865,12 +877,6 @@ func names(v any, named map[string]bool, refs map[string]string) {
 					}
 				}
 				names(parts[1], named, refs)
-			case "DependsOn": // "Resource B is created before resource A": a string or a list of them, each a resource
-				for _, d := range append(spi.Slice(x), x) {
-					if d, ok := d.(string); ok {
-						named[d], named["."+d] = true, true
-					}
-				}
 			case "Fn::If": // [condition, then, else]
 				branches := append(spi.Slice(x), nil, nil, nil)
 				if yes, settled := refs["Condition::"+str(branches[0])]; settled {
@@ -951,8 +957,10 @@ var subVariable, subName = regexp.MustCompile(`\$\{([^}]*)\}`), regexp.MustCompi
 // that a resource the stack did not make under it holds is the service's error for a name taken: several
 // services answer such a create with what they hold, which a rollback or DeleteStack would then delete.
 func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logical, typ string, props map[string]any) (string, error) {
-	k, n := kinds[typ], str(props[kinds[typ].member])
-	if v, set := props["FifoQueue"]; typ == "AWS::SQS::Queue" && set && !isBoolean(v) { // FifoQueue is a Boolean (Template Reference)
+	k, n := calls(typ, "", "", "", nil), str(props[calls(typ, "", "", "", nil).member])
+	if arn := planID(req, typ, "", props); typ == "AWS::Kinesis::ResourcePolicy" && cmp.Or(p.holders(ctx, req)[arn], st.Name) != st.Name { // another stack's
+		return "", fault("AlreadyExistsException", "Resource of type '"+typ+"' with identifier '"+arn+"' already exists.") // the wording is a reading
+	} else if v, set := props["FifoQueue"]; typ == "AWS::SQS::Queue" && set && !isBoolean(v) { // FifoQueue is a Boolean (Template Reference)
 		return "", invalid("Properties validation failed for resource " + logical + ": FifoQueue must be a Boolean, not " + spi.JSONText(v))
 	}
 	if holds(props[k.member], unknown) { // one built on an id known only once made is checked as it is made:
@@ -961,10 +969,10 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 		return physicalName(st.Name, logical, st.ID, typ, props), nil
 	}
 	id := n
-	if k.in == "TopicArn" { // GetTopicAttributes finds a topic by its ARN
+	if k.by == "TopicArn" { // GetTopicAttributes finds a topic by its ARN
 		id = planID(req, typ, n, props)
 	}
-	out, err := p.call(ctx, req, k.svc, k.op, given(map[string]any{k.in: id}, props, "EventBusName"))
+	out, err := p.call(ctx, req, k.svc, k.find, given(map[string]any{k.by: id}, props, "EventBusName"))
 	groups, list := out["logGroups"].([]any) // DescribeLogGroups answers a list by prefix, never a fault
 	if err != nil || list && !slices.ContainsFunc(groups, func(g any) bool { return str(asMap(g)["logGroupName"]) == n }) ||
 		slices.ContainsFunc(old.Resources, func(r res) bool { // a record from before res.Name: by the physical id, which ends in the name
@@ -990,8 +998,8 @@ func isBoolean(v any) bool { _, ok := coerce(v, "Boolean"); return ok }
 // create made. Only letters, digits and hyphens are kept; a bucket's name is lower case and a FIFO
 // queue's ends in .fifo; the stack name and logical id, never the suffix, are cut to the longest name.
 func physicalName(stack, logical, stackID, typ string, props map[string]any) string {
-	k, named := kinds[typ]
-	if !named {
+	k := calls(typ, "", "", "", nil)
+	if k.max == 0 {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(stackID + "/" + logical))
@@ -1011,6 +1019,13 @@ func physicalName(stack, logical, stackID, typ string, props map[string]any) str
 // provision creates a resource through the service that owns it, and answers the resource's physical id.
 // Going through the owner's API keeps its store layout, validation and cascades that service's business.
 func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n string, props map[string]any, existing, stackID string) (string, error) {
+	n = cmp.Or(n, planID(req, typ, "", props))                                                   // a resource policy's id is its stream's ARN
+	if c := calls(typ, n, "", existing, props); typ == "AWS::DynamoDB::Table" && existing == n { // an update keeps the table it made (UpdateTable is not taken: a reading)
+		return n, nil
+	} else if c.create != "" {
+		out, err := p.call(ctx, req, c.svc, c.create, c.in)
+		return cmp.Or(str(out[c.id]), map[bool]string{true: n}[c.id == "" && err == nil]), err // none when it made nothing
+	}
 	switch typ {
 	case "AWS::S3::Bucket":
 		if _, err := p.call(ctx, req, "aws.s3", "CreateBucket", map[string]any{"Bucket": n}); err != nil {
@@ -1024,20 +1039,6 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		}
 		out, err := p.call(ctx, req, "aws.sqs", "CreateQueue", in)
 		return str(out["QueueUrl"]), err
-	case "AWS::SNS::Topic":
-		out, err := p.call(ctx, req, "aws.sns", "CreateTopic", map[string]any{"Name": n})
-		return str(out["TopicArn"]), err
-	case "AWS::DynamoDB::Table":
-		in := maps.Clone(props)
-		in["TableName"] = n
-		_, err := p.call(ctx, req, "aws.dynamodb", "CreateTable", in)
-		return made(n, err)
-	case "AWS::IAM::Role":
-		_, err := p.call(ctx, req, "aws.iam", "CreateRole", map[string]any{"RoleName": n, "AssumeRolePolicyDocument": spi.JSONText(props["AssumeRolePolicyDocument"])})
-		return made(n, err)
-	case "AWS::SSM::Parameter":
-		_, err := p.call(ctx, req, "aws.ssm", "PutParameter", map[string]any{"Name": n, "Value": str(props["Value"]), "Type": cmp.Or(str(props["Type"]), "String")})
-		return made(n, err)
 	case "AWS::SecretsManager::Secret":
 		// existing is what an update finds; a second CreateSecret of its name is ResourceExistsException.
 		op, in := "CreateSecret", map[string]any{"Name": n}
@@ -1056,9 +1057,6 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	case "AWS::KMS::Key":
 		out, err := p.call(ctx, req, "aws.kms", "CreateKey", map[string]any{"Description": str(props["Description"])})
 		return str(asMap(out["KeyMetadata"])["KeyId"]), err
-	case "AWS::Logs::LogGroup":
-		_, err := p.call(ctx, req, "aws.logs", "CreateLogGroup", map[string]any{"logGroupName": n})
-		return made(n, err)
 	case "AWS::Events::Rule":
 		in := given(map[string]any{"Name": n}, props, "ScheduleExpression", "State", "Description", "EventBusName")
 		if pattern, ok := props["EventPattern"]; ok {
@@ -1072,25 +1070,6 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 			return "", err
 		}
 		return planID(req, typ, n, props), err
-	case "AWS::Lambda::Function":
-		in := maps.Clone(props)
-		in["FunctionName"] = n
-		_, err := p.call(ctx, req, "aws.lambda", "CreateFunction", in)
-		return made(n, err)
-	case "AWS::Kinesis::Stream":
-		_, err := p.call(ctx, req, "aws.kinesis", "CreateStream", map[string]any{"StreamName": n})
-		return made(n, err)
-	case "AWS::Kinesis::ResourcePolicy":
-		arn := cmp.Or(str(props["ResourceArn"]), str(props["ResourceARN"]))
-		policy := props["ResourcePolicy"]
-		if policy == nil {
-			policy = props["Policy"]
-		}
-		_, err := p.call(ctx, req, "aws.kinesis", "PutResourcePolicy", map[string]any{"ResourceARN": arn, "Policy": spi.JSONText(policy)})
-		return made(arn, err)
-	case "AWS::ApiGateway::RestApi":
-		out, err := p.call(ctx, req, "aws.apigateway", "CreateRestApi", map[string]any{"name": n})
-		return str(out["id"]), err
 	default:
 		return "", invalid("unsupported resource type " + typ)
 	}
@@ -1106,41 +1085,57 @@ func ruleBus(id string) string {
 	return path[:max(strings.LastIndex(path, "/"), 0)]
 }
 
-// made answers the id of what a create made: none when it failed.
-func made(id string, err error) (string, error) {
-	if err != nil {
-		id = ""
+// calls are how the engine makes and deletes each type it knows through its owner: the service, the call
+// that makes one named n in one call (its input, and the output member that holds the made resource's id,
+// else its name; none for a type provision makes otherwise), and the call that deletes the one of id; and
+// for a type provision names, the property that names one, the longest name its service takes (API Gateway
+// sets none for a REST API, nor holds a name to one; 1024 only bounds it), a read that finds one by name
+// (find, by), the service's error for a name taken (SNS's CreateTopic "is idempotent": CloudFormation's), its id.
+type typeCalls struct {
+	svc, create, id, del string
+	in, out              map[string]any
+	member               string
+	max                  int
+	find, by, code, ref  string
+}
+
+func calls(typ, n, id, existing string, props map[string]any) typeCalls {
+	whole := func(member string) map[string]any {
+		in := map[string]any{}
+		maps.Copy(in, props)
+		in[member] = n
+		return in
+	} // its properties, named
+	policy := props["ResourcePolicy"]
+	if policy == nil {
+		policy = props["Policy"]
 	}
-	return id, err
+	return map[string]typeCalls{
+		"AWS::S3::Bucket":              {"aws.s3", "", "", "DeleteBucket", nil, map[string]any{"Bucket": id}, "BucketName", 63, "HeadBucket", "Bucket", "BucketAlreadyOwnedByYou", "{n}"},
+		"AWS::SQS::Queue":              {"aws.sqs", "", "", "DeleteQueue", nil, map[string]any{"QueueUrl": id}, "QueueName", 80, "GetQueueUrl", "QueueName", "QueueAlreadyExists", ""},
+		"AWS::SNS::Topic":              {"aws.sns", "CreateTopic", "TopicArn", "DeleteTopic", map[string]any{"Name": n}, map[string]any{"TopicArn": id}, "TopicName", 256, "GetTopicAttributes", "TopicArn", "AlreadyExistsException", "arn:aws:sns:{r}:{a}:{n}"},
+		"AWS::DynamoDB::Table":         {"aws.dynamodb", "CreateTable", "", "DeleteTable", whole("TableName"), map[string]any{"TableName": id}, "TableName", 255, "DescribeTable", "TableName", "ResourceInUseException", "{n}"},
+		"AWS::IAM::Role":               {"aws.iam", "CreateRole", "", "DeleteRole", map[string]any{"RoleName": n, "AssumeRolePolicyDocument": spi.JSONText(props["AssumeRolePolicyDocument"])}, map[string]any{"RoleName": spi.LastSlash(id)}, "RoleName", 64, "GetRole", "RoleName", "EntityAlreadyExists", "{n}"},
+		"AWS::SSM::Parameter":          {"aws.ssm", "PutParameter", "", "DeleteParameter", map[string]any{"Name": n, "Value": str(props["Value"]), "Type": cmp.Or(str(props["Type"]), "String"), "Overwrite": existing == n}, map[string]any{"Name": id}, "Name", 2048, "GetParameter", "Name", "ParameterAlreadyExists", "{n}"},
+		"AWS::SecretsManager::Secret":  {"aws.secretsmanager", "", "", "DeleteSecret", nil, map[string]any{"SecretId": id, "ForceDeleteWithoutRecovery": true}, "Name", 512, "DescribeSecret", "SecretId", "ResourceExistsException", "arn:aws:secretsmanager:{r}:{a}:secret:{n}"},
+		"AWS::KMS::Key":                {"aws.kms", "", "", "ScheduleKeyDeletion", nil, map[string]any{"KeyId": id, "PendingWindowInDays": 7}, "", 0, "", "", "", ""},
+		"AWS::Logs::LogGroup":          {"aws.logs", "CreateLogGroup", "", "DeleteLogGroup", map[string]any{"logGroupName": n}, map[string]any{"logGroupName": id}, "LogGroupName", 512, "DescribeLogGroups", "logGroupNamePrefix", "ResourceAlreadyExistsException", "{n}"},
+		"AWS::Events::Rule":            {"aws.events", "", "", "DeleteRule", nil, map[string]any{"Name": spi.LastSlash(id[strings.Index(id, "|")+1:]), "Force": true, "EventBusName": ruleBus(id)}, "Name", 64, "DescribeRule", "Name", "ResourceAlreadyExistsException", "{n}"},
+		"AWS::Lambda::Function":        {"aws.lambda", "CreateFunction", "", "DeleteFunction", whole("FunctionName"), map[string]any{"FunctionName": lastColon(id)}, "FunctionName", 64, "GetFunction", "FunctionName", "ResourceConflictException", "{n}"},
+		"AWS::Kinesis::Stream":         {"aws.kinesis", "CreateStream", "", "DeleteStream", map[string]any{"StreamName": n}, map[string]any{"StreamName": id}, "Name", 128, "DescribeStreamSummary", "StreamName", "ResourceInUseException", "{n}"},
+		"AWS::Kinesis::ResourcePolicy": {"aws.kinesis", "PutResourcePolicy", "", "DeleteResourcePolicy", map[string]any{"ResourceARN": n, "Policy": spi.JSONText(policy)}, map[string]any{"ResourceARN": id}, "", 0, "", "", "", ""},
+		"AWS::ApiGateway::RestApi":     {"aws.apigateway", "CreateRestApi", "id", "DeleteRestApi", map[string]any{"name": n}, map[string]any{"restApiId": id}, "Name", 1024, "", "", "", ""},
+	}[typ]
 }
 
 // deprovision deletes a resource through its owner. One already gone (the
 // owner's not-found error) counts as deleted, as a stack delete proceeds past it.
 func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) error {
-	id := r.Physical
-	del := map[string]struct {
-		svc, op string
-		in      map[string]any
-	}{
-		"AWS::S3::Bucket":              {"aws.s3", "DeleteBucket", map[string]any{"Bucket": id}},
-		"AWS::SQS::Queue":              {"aws.sqs", "DeleteQueue", map[string]any{"QueueUrl": id}},
-		"AWS::SNS::Topic":              {"aws.sns", "DeleteTopic", map[string]any{"TopicArn": id}},
-		"AWS::DynamoDB::Table":         {"aws.dynamodb", "DeleteTable", map[string]any{"TableName": id}},
-		"AWS::IAM::Role":               {"aws.iam", "DeleteRole", map[string]any{"RoleName": spi.LastSlash(id)}},
-		"AWS::SSM::Parameter":          {"aws.ssm", "DeleteParameter", map[string]any{"Name": id}},
-		"AWS::SecretsManager::Secret":  {"aws.secretsmanager", "DeleteSecret", map[string]any{"SecretId": id, "ForceDeleteWithoutRecovery": true}},
-		"AWS::KMS::Key":                {"aws.kms", "ScheduleKeyDeletion", map[string]any{"KeyId": id, "PendingWindowInDays": 7}},
-		"AWS::Logs::LogGroup":          {"aws.logs", "DeleteLogGroup", map[string]any{"logGroupName": id}},
-		"AWS::Events::Rule":            {"aws.events", "DeleteRule", map[string]any{"Name": spi.LastSlash(id[strings.Index(id, "|")+1:]), "Force": true, "EventBusName": ruleBus(id)}},
-		"AWS::Lambda::Function":        {"aws.lambda", "DeleteFunction", map[string]any{"FunctionName": lastColon(id)}},
-		"AWS::Kinesis::Stream":         {"aws.kinesis", "DeleteStream", map[string]any{"StreamName": id}},
-		"AWS::Kinesis::ResourcePolicy": {"aws.kinesis", "DeleteResourcePolicy", map[string]any{"ResourceARN": id}},
-		"AWS::ApiGateway::RestApi":     {"aws.apigateway", "DeleteRestApi", map[string]any{"restApiId": id}},
-	}[r.Type]
+	del := calls(r.Type, "", r.Physical, "", nil)
 	if del.svc == "" {
 		return nil
 	}
-	_, err := p.call(ctx, req, del.svc, del.op, del.in)
+	_, err := p.call(ctx, req, del.svc, del.del, del.out)
 	var f *spi.Fault
 	if errors.As(err, &f) && (strings.Contains(f.Code, "NotFound") || strings.Contains(f.Code, "NoSuch") || strings.Contains(f.Code, "NonExistent")) {
 		return nil
@@ -1774,7 +1769,7 @@ func previous(in map[string]any, cur stack) {
 func capable(tpl, in map[string]any, stack string) error {
 	need, given := "", spi.Slice(in["Capabilities"])
 	for _, r := range asMap(tpl["Resources"]) {
-		if typ := str(asMap(r)["Type"]); strings.HasPrefix(typ, "AWS::IAM::") && asMap(asMap(r)["Properties"])[kinds[typ].member] != nil {
+		if typ := str(asMap(r)["Type"]); strings.HasPrefix(typ, "AWS::IAM::") && asMap(asMap(r)["Properties"])[calls(typ, "", "", "", nil).member] != nil {
 			need = "CAPABILITY_NAMED_IAM"
 		} else if strings.HasPrefix(typ, "AWS::IAM::") {
 			need = cmp.Or(need, "CAPABILITY_IAM")

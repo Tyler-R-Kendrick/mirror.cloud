@@ -304,13 +304,14 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}
 	// The update is done, so its cleanup deletes the old resources the stack no longer holds, replaced
 	// ("creating a new one and deleting the old one") or dropped; one it cannot delete stays listed. A
-	// replaced one the template's UpdateReplacePolicy retains, a dropped one the old DeletionPolicy.
+	// replaced one (the stack still holds its logical id) the template's UpdateReplacePolicy retains; a
+	// dropped one, or one its condition now leaves out, the old DeletionPolicy.
 	stale := slices.DeleteFunc(slices.Clone(old.Resources), func(r res) bool {
 		return slices.ContainsFunc(st.Resources, func(n res) bool { return n.Physical == r.Physical })
 	})
 	oldTpl, _ := parseTemplate(old.Template)
 	_ = p.unwind(ctx, req, st, st, st.Resources, stale, nil, st.Status, st.Status, func(r res) bool {
-		if _, replaced := resources[r.Logical]; replaced {
+		if replaced := slices.ContainsFunc(st.Resources, func(n res) bool { return n.Logical == r.Logical }); replaced { // still the stack's
 			return retains(tpl, "UpdateReplacePolicy", "Retain")(r)
 		}
 		return retains(oldTpl, "DeletionPolicy", "Retain", "RetainExceptOnCreate")(r)

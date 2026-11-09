@@ -582,7 +582,9 @@ The oracle is AWS's documentation as it ships in the vendored model
     Reference gives them (the model's `TemplateConfiguration` names the same
     `DELETE` and `RETAIN`). `Retain` "keeps the resource without deleting the
     resource or its contents": on `DeleteStack`, on an update that drops the
-    resource ("it's deleted from CloudFormation's scope"), and on the rollback
+    resource ("it's deleted from CloudFormation's scope"), or whose
+    condition it turns off (round 10 read such a resource, still declared,
+    as replaced and took its `UpdateReplacePolicy`), and on the rollback
     of the create, or of the update, that made it, since
     `RetainExceptOnCreate` is the one that "deletes the resource" when "the
     stack operation that created the resource is rolled back" and otherwise

@@ -2119,3 +2119,40 @@ func TestCloudFormationAnOldRecordSettlesItsConditions(t *testing.T) {
 		t.Errorf("the unchanged parameter is %v (%v), want e at version 1", got, err)
 	}
 }
+
+// A resource an update's condition leaves out leaves the stack as a dropped
+// one does, so its DeletionPolicy, not its UpdateReplacePolicy, decides what
+// becomes of it: Retain "keeps the resource without deleting the resource or
+// its contents" (Template Reference, DeletionPolicy attribute), listed
+// DELETE_SKIPPED, and Delete deletes it. (DeletionPolicy Snapshot is for types
+// the engine does not make, so it is refused.) Before, the cleanup took a
+// resource still declared in the template for a replaced one, read its
+// UpdateReplacePolicy, and deleted the Retain queue.
+func TestCloudFormationAConditionFlippedOffKeepsItsDeletionPolicy(t *testing.T) {
+	h := newStacks(t)
+	queue := func(name, policy string) map[string]any {
+		return map[string]any{"Type": "AWS::SQS::Queue", "Condition": "On", "DeletionPolicy": policy, "UpdateReplacePolicy": "Delete",
+			"Properties": map[string]any{"QueueName": name}}
+	}
+	template, _ := json.Marshal(map[string]any{"Parameters": map[string]any{"Make": map[string]any{"Type": "String", "Default": "yes"}},
+		"Conditions": map[string]any{"On": map[string]any{"Fn::Equals": []any{map[string]any{"Ref": "Make"}, "yes"}}},
+		"Resources":  map[string]any{"R": queue("flip-r", "Retain"), "D": queue("flip-d", "Delete"), "K": map[string]any{"Type": "AWS::SQS::Queue"}}})
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "flip", "TemplateBody": string(template)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "flip", "TemplateBody": string(template),
+		"Parameters.member.1.ParameterKey": "Make", "Parameters.member.1.ParameterValue": "no"}); err != nil {
+		t.Fatalf("UpdateStack turning On off: %v", err)
+	}
+	alive := func(name string) bool {
+		_, err := h.service("aws.sqs", "GetQueueUrl", map[string]any{"QueueName": name})
+		return err == nil
+	}
+	out, _ := h.invoke("DescribeStackEvents", map[string]any{"StackName": "flip"})
+	skipped := slices.ContainsFunc(spi.Slice(out["StackEvents"]), func(e any) bool {
+		return asMap(e)["LogicalResourceId"] == "R" && asMap(e)["ResourceStatus"] == "DELETE_SKIPPED"
+	})
+	if !alive("flip-r") || !skipped || alive("flip-d") || !slices.Equal(slices.Sorted(maps.Keys(h.statuses("flip"))), []string{"K"}) {
+		t.Errorf("after On turned off: Retain alive %v, DELETE_SKIPPED %v; Delete alive %v; the stack holds %v", alive("flip-r"), skipped, alive("flip-d"), h.statuses("flip"))
+	}
+}

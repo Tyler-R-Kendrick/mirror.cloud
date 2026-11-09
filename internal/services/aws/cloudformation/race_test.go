@@ -229,32 +229,42 @@ func TestCloudFormationADeleteDuringACreateEndsIt(t *testing.T) {
 	}
 }
 
-// A stack in any _IN_PROGRESS state takes no update: UpdateStack, the
-// change sets made for it and ExecuteChangeSet are ValidationError, "Stack:<id>
-// is in CREATE_IN_PROGRESS state and can not be updated.", the words
-// CloudFormation answers a ROLLBACK_COMPLETE stack with. The create goes on
-// and makes exactly its own template, which GetTemplate and GetTemplateSummary
-// read mid-create. Before, UpdateStack of a stack being created went ahead
-// beside the create, and the reservation held no template.
+// A stack in any _IN_PROGRESS state takes no update: UpdateStack and the
+// change sets made for it are ValidationError, "Stack:<id> is in
+// CREATE_IN_PROGRESS state and can not be updated.", the words CloudFormation
+// answers a ROLLBACK_COMPLETE stack with, and the change set being executed
+// is InvalidChangeSetStatus, "the change set status might be
+// CREATE_IN_PROGRESS, or the stack status might be UPDATE_IN_PROGRESS" (API
+// reference, ExecuteChangeSet). The create, here a CREATE change set's, goes
+// on and makes exactly its own template, which GetTemplate and
+// GetTemplateSummary read mid-create. Before, UpdateStack of a stack being
+// created went ahead beside the create, and the reservation held no template.
 func TestCloudFormationNothingUpdatesAStackBeingCreated(t *testing.T) {
 	h, g := gated(t)
 	other, _ := json.Marshal(map[string]any{"Resources": map[string]any{"Other": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "other", "Type": "String", "Value": "v"}}}})
-	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "busy", "ChangeSetName": "early", "TemplateBody": string(other)}); err != nil {
+	busy, _ := json.Marshal(map[string]any{"Resources": paused(2)})
+	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "busy", "ChangeSetName": "early", "ChangeSetType": "CREATE", "TemplateBody": string(busy)}); err != nil {
 		t.Fatal(err)
 	}
 	created := make(chan error, 1)
-	go func() { created <- h.create("busy", paused(2)) }()
+	go func() {
+		_, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "busy", "ChangeSetName": "early"})
+		created <- err
+	}()
 	within(t, g.reached, "the create reaching its bucket")
 	for _, op := range []string{"GetTemplate", "GetTemplateSummary"} { // the reservation holds the template
 		if out, err := h.invoke(op, map[string]any{"StackName": "busy"}); err != nil || !strings.Contains(fmt.Sprint(out), "AWS::S3::Bucket") {
 			t.Errorf("%s mid-create answered %v, %v, want the create's template", op, out, err)
 		}
 	}
-	for _, c := range []struct{ op, changeSet string }{{"UpdateStack", ""}, {"CreateChangeSet", "late"}, {"ExecuteChangeSet", "early"}} {
+	for _, c := range []struct{ op, changeSet string }{{"UpdateStack", ""}, {"CreateChangeSet", "late"}} {
 		_, err := h.invoke(c.op, map[string]any{"StackName": "busy", "ChangeSetName": c.changeSet, "TemplateBody": string(other)})
 		if code(err) != "ValidationError" || !strings.Contains(err.Error(), "is in CREATE_IN_PROGRESS state and can not be updated.") {
 			t.Errorf("%s of a stack being created answered %v, want ValidationError: CREATE_IN_PROGRESS", c.op, err)
 		}
+	}
+	if _, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "busy", "ChangeSetName": "early"}); code(err) != "InvalidChangeSetStatus" {
+		t.Errorf("ExecuteChangeSet of the change set being executed answered %v, want InvalidChangeSetStatus", err)
 	}
 	close(g.release)
 	if err := within(t, created, "the create"); err != nil {

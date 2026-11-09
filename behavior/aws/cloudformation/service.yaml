@@ -120,6 +120,10 @@ errors:
     code: ChangeSetNotFound
     http: 404
     fault: client
+  AlreadyExists:
+    code: AlreadyExistsException
+    http: 400
+    fault: client
 
 operations:
   # --- stacks --------------------------------------------------------------
@@ -290,9 +294,20 @@ operations:
     require:
       - cond: "'TemplateBody' in input && string(input.TemplateBody) != ''"
         error: Validation
-      - cond: "!s_found || !(string(s.Status).endsWith('_IN_PROGRESS') || string(s.Status).startsWith('ROLLBACK_') || s.Status == 'DELETE_FAILED')"
+      # "You can't use the UPDATE type to create a change set for a new stack
+      # or the CREATE type to create a change set for an existing stack"
+      # (API reference, CreateChangeSet, ChangeSetType); a CREATE change set's
+      # stack, REVIEW_IN_PROGRESS, takes more CREATE change sets. The two
+      # wordings are readings.
+      - cond: "!s_found || ('ChangeSetType' in input && input.ChangeSetType == 'CREATE' && s.Status == 'REVIEW_IN_PROGRESS') || !(string(s.Status).endsWith('_IN_PROGRESS') || string(s.Status).startsWith('ROLLBACK_') || s.Status == 'DELETE_FAILED')"
         error: Validation
         message_expr: "'Stack:' + string(s.ID) + ' is in ' + string(s.Status) + ' state and can not be updated.'"
+      - cond: "s_found || 'ChangeSetType' in input && input.ChangeSetType == 'CREATE'"
+        error: Validation
+        message_expr: "'Stack [' + string(input.StackName) + '] does not exist'"
+      - cond: "!s_found || !('ChangeSetType' in input && input.ChangeSetType == 'CREATE') || s.Status == 'REVIEW_IN_PROGRESS'"
+        error: AlreadyExists
+        message_expr: "'Stack [' + string(input.StackName) + '] already exists and cannot be created again with the changeSet [' + string(input.ChangeSetName) + '].'"
       # TemplateBody is "a maximum length of 51,200 bytes" (API reference,
       # CreateChangeSet), as the pack holds every operation's.
       - cond: "size(bytes(string(input.TemplateBody))) <= 51200"
@@ -305,6 +320,23 @@ operations:
     effects:
       - generate: { bind: csid, kind: hex, bytes: 8 }
       - generate: { bind: sid, kind: hex, bytes: 8 }
+      # "If you create a change set for a new stack, CloudFormation creates a
+      # stack with a unique stack ID, but no template or resources. The stack
+      # will be in the REVIEW_IN_PROGRESS state until you execute the change
+      # set" (API reference, CreateChangeSet, ChangeSetType).
+      - put:
+          resource: stack
+          when: "!s_found"
+          record:
+            Name: string(input.StackName)
+            ID: >-
+              'arn:aws:cloudformation:' + identity.region + ':'
+              + identity.account + ':stack/' + string(input.StackName) + '/' + fx.sid
+            Status: "'REVIEW_IN_PROGRESS'"
+            Template: "''"
+            Resources: "[]"
+            Outputs: "[]"
+            NotificationARNs: "[]"
       # The change set holds what CreateChangeSet takes that CreateStack and
       # UpdateStack take, and ExecuteChangeSet makes or updates the stack with
       # it: its parameters, NotificationARNs, tags and capabilities, and the

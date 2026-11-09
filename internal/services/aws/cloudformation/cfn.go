@@ -218,7 +218,10 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	var old stack // what an update finds; a create reserves the name, CREATE_IN_PROGRESS, in the same transaction
 	if err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
 		raw, found, _ := tx.Get(name)
-		if _ = json.Unmarshal(raw, &old); found && !update {
+		if _ = json.Unmarshal(raw, &old); found && !update && old.Status == "REVIEW_IN_PROGRESS" && old.ID == id {
+			found, old = false, stack{} // a CREATE change set's stack, which its execution makes
+		}
+		if found && !update {
 			return fault("AlreadyExistsException", "Stack ["+name+"] already exists")
 		} else if found && (strings.HasPrefix(old.Status, "ROLLBACK_") || strings.HasSuffix(old.Status, "_IN_PROGRESS") || old.Status == "DELETE_FAILED") {
 			return invalid("Stack:" + old.ID + " is in " + old.Status + " state and can not be updated.")

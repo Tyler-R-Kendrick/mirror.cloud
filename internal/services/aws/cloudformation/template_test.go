@@ -86,7 +86,7 @@ func TestCloudFormationBoundsATemplateBySize(t *testing.T) {
 	} {
 		for i, op := range []string{"ValidateTemplate", "GetTemplateSummary", "CreateStack", "UpdateStack", "CreateChangeSet"} {
 			stack := map[string]string{"UpdateStack": "big"}[op] // an update of the stack made above
-			in := map[string]any{"StackName": cmp.Or(stack, fmt.Sprintf("s%d-%d", j, i)), "ChangeSetName": "cs", "TemplateBody": c.body}
+			in := map[string]any{"StackName": cmp.Or(stack, fmt.Sprintf("s%d-%d", j, i)), "ChangeSetName": "cs", "ChangeSetType": "CREATE", "TemplateBody": c.body}
 			_, err := h.invoke(op, in)
 			if c.ok && err != nil {
 				t.Errorf("%s of %s answered %v", op, c.name, err)

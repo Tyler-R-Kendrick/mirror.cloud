@@ -180,6 +180,6 @@ services:
 
 `depends_on` here waits for the container to start, not to be ready; a client that retries its first connection, or a wait on `/_mirror/health`, covers the second.
 
-## Packages that are private
+## If a pull is refused
 
-The registry creates a package private. Until a maintainer makes `ghcr.io/tyler-r-kendrick/mirror` public, `docker pull` needs a login (`docker login ghcr.io` with a token that can read packages), and a service container needs `credentials:` in the workflow.
+The packages of `v0.0.1-alpha.1` are public and need no login. If a later package is private, `docker pull` needs `docker login ghcr.io` with a token that can read packages, and a GitHub Actions service container needs `credentials:` in the workflow.

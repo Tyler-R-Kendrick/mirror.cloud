@@ -48,8 +48,10 @@ func ApplyUpdate(expr string, item, names, values map[string]any) ([]string, err
 				delete(item, name)
 				touch(name)
 			}
-		case strings.HasPrefix(part, "ADD "):
-			for _, pair := range splitArgs(strings.TrimPrefix(part, "ADD ")) {
+		case strings.HasPrefix(part, "ADD "), strings.HasPrefix(part, "DELETE "): // ADD adds to a number or set, DELETE takes from a set
+			verb, pairs, _ := strings.Cut(part, " ")
+			apply := map[string]func(cur, delta any) any{"ADD": addAttr, "DELETE": deleteFromSet}[verb]
+			for _, pair := range splitArgs(pairs) {
 				fs := strings.Fields(strings.TrimSpace(pair))
 				if len(fs) < 2 {
 					continue
@@ -59,21 +61,7 @@ func ApplyUpdate(expr string, item, names, values map[string]any) ([]string, err
 				if err != nil {
 					return nil, err
 				}
-				item[name] = addAttr(item[name], delta)
-				touch(name)
-			}
-		case strings.HasPrefix(part, "DELETE "):
-			for _, pair := range splitArgs(strings.TrimPrefix(part, "DELETE ")) {
-				fs := strings.Fields(strings.TrimSpace(pair))
-				if len(fs) < 2 {
-					continue
-				}
-				name, rhs := fs[0], strings.Join(fs[1:], " ")
-				delta, err := eval(parse(rhs), item, values)
-				if err != nil {
-					return nil, err
-				}
-				item[name] = deleteFromSet(item[name], delta)
+				item[name] = apply(item[name], delta)
 				touch(name)
 			}
 		}

@@ -1829,19 +1829,8 @@ func validateHTTPEndpointDestination(destination map[string]any, region string) 
 		}
 	}
 	if raw, exists := destination["BufferingHints"]; exists {
-		hints, ok := raw.(map[string]any)
-		_, hasInterval := hints["IntervalInSeconds"]
-		_, hasSize := hints["SizeInMBs"]
-		if !ok || hasInterval != hasSize {
-			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-		}
-		if hasInterval {
-			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
-				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-			}
-			if _, valid := inputInteger(hints["SizeInMBs"], 1, 64); !valid {
-				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-			}
+		if err := validHints(raw, 64); err != nil {
+			return err
 		}
 	}
 	if raw, exists := destination["RetryOptions"]; exists {
@@ -1928,19 +1917,8 @@ func validateS3Configuration(destination map[string]any, region string, processi
 		}
 	}
 	if raw, exists := destination["BufferingHints"]; exists {
-		hints, ok := raw.(map[string]any)
-		_, hasInterval := hints["IntervalInSeconds"]
-		_, hasSize := hints["SizeInMBs"]
-		if !ok || hasInterval != hasSize {
-			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-		}
-		if hasInterval {
-			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
-				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-			}
-			if _, valid := inputInteger(hints["SizeInMBs"], 1, 128); !valid {
-				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-			}
+		if err := validHints(raw, 128); err != nil {
+			return err
 		}
 	}
 	if raw, exists := destination["EncryptionConfiguration"]; exists {
@@ -2603,7 +2581,7 @@ func (p *Pack) deliverRedshiftRecords(ctx context.Context, req *spi.Request, des
 	})
 	if err != nil {
 		p.logDeliveryError(ctx, req, destination, stream, err.Error(), now)
-		p.scheduleRedshiftRetry(ctx, req, stream, copied, err.Error(), now, redshiftRetryDuration(destination))
+		p.scheduleRedshiftRetry(ctx, req, stream, copied, err.Error(), now, retryDuration(destination, 3600))
 	}
 }
 
@@ -2883,76 +2861,64 @@ func persistedSearchDestinationKey(value string) string {
 	return value
 }
 
-func httpRetryDuration(destination map[string]any) time.Duration {
+// retryDuration is a destination's RetryOptions.DurationInSeconds, 0 to 7200, or else fallback seconds.
+func retryDuration(destination map[string]any, fallback int) time.Duration {
 	retry, _ := destination["RetryOptions"].(map[string]any)
 	seconds, ok := inputInteger(retry["DurationInSeconds"], 0, 7200)
 	if !ok {
-		seconds = 300
+		seconds = fallback
 	}
 	return time.Duration(seconds) * time.Second
 }
 
-func redshiftRetryDuration(destination map[string]any) time.Duration {
-	retry, _ := destination["RetryOptions"].(map[string]any)
-	seconds, ok := inputInteger(retry["DurationInSeconds"], 0, 7200)
-	if !ok {
-		seconds = 3600
-	}
-	return time.Duration(seconds) * time.Second
-}
-
-func httpBufferingHints(destination map[string]any) (time.Duration, int) {
+// bufferingHints are a destination's BufferingHints, IntervalInSeconds from 0 to maxInterval and SizeInMBs
+// from 1 to maxSize, as a duration and bytes; or, unless both are given, interval and size.
+func bufferingHints(destination map[string]any, maxInterval, maxSize int, interval time.Duration, size int) (time.Duration, int) {
 	hints, _ := destination["BufferingHints"].(map[string]any)
-	interval, intervalOK := inputInteger(hints["IntervalInSeconds"], 0, 900)
-	size, sizeOK := inputInteger(hints["SizeInMBs"], 1, 64)
+	seconds, intervalOK := inputInteger(hints["IntervalInSeconds"], 0, maxInterval)
+	mb, sizeOK := inputInteger(hints["SizeInMBs"], 1, maxSize)
 	if !intervalOK || !sizeOK {
-		return 300 * time.Second, 5 * 1024 * 1024
+		return interval, size
 	}
-	return time.Duration(interval) * time.Second, size * 1024 * 1024
+	return time.Duration(seconds) * time.Second, mb * 1024 * 1024
 }
 
 func endpointBufferingHints(destinationKey string, destination map[string]any) (time.Duration, int) {
-	if destinationKey == "SnowflakeDestinationConfiguration" {
-		hints, _ := destination["BufferingHints"].(map[string]any)
-		interval, intervalOK := inputInteger(hints["IntervalInSeconds"], 0, 900)
-		size, sizeOK := inputInteger(hints["SizeInMBs"], 1, 128)
-		if !intervalOK || !sizeOK {
-			return 0, 128 * 1024 * 1024
-		}
-		return time.Duration(interval) * time.Second, size * 1024 * 1024
+	switch destinationKey {
+	case "SnowflakeDestinationConfiguration":
+		return bufferingHints(destination, 900, 128, 0, 128*1024*1024)
+	case "SplunkDestinationConfiguration":
+		return bufferingHints(destination, 60, 5, 60*time.Second, 5*1024*1024)
 	}
-	if destinationKey != "SplunkDestinationConfiguration" {
-		return httpBufferingHints(destination)
-	}
-	hints, _ := destination["BufferingHints"].(map[string]any)
-	interval, intervalOK := inputInteger(hints["IntervalInSeconds"], 0, 60)
-	size, sizeOK := inputInteger(hints["SizeInMBs"], 1, 5)
-	if !intervalOK || !sizeOK {
-		return 60 * time.Second, 5 * 1024 * 1024
-	}
-	return time.Duration(interval) * time.Second, size * 1024 * 1024
+	return bufferingHints(destination, 900, 64, 300*time.Second, 5*1024*1024)
 }
 
-func endpointRetryDuration(destinationKey string, destination map[string]any) time.Duration {
-	if destinationKey != "SnowflakeDestinationConfiguration" {
-		return httpRetryDuration(destination)
+// validHints is InvalidArgumentException for BufferingHints that are no object, that give one of
+// IntervalInSeconds and SizeInMBs without the other, or an interval outside 0 to 900 or a size outside 1 to
+// maxSize; nil for any other.
+func validHints(raw any, maxSize int) error {
+	hints, ok := raw.(map[string]any)
+	_, hasInterval := hints["IntervalInSeconds"]
+	_, hasSize := hints["SizeInMBs"]
+	if !ok || hasInterval != hasSize {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	} else if _, interval := inputInteger(hints["IntervalInSeconds"], 0, 900); hasInterval && !interval {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	} else if _, size := inputInteger(hints["SizeInMBs"], 1, maxSize); hasInterval && !size {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	retry, _ := destination["RetryOptions"].(map[string]any)
-	seconds, ok := inputInteger(retry["DurationInSeconds"], 0, 7200)
-	if !ok {
-		seconds = 60
-	}
-	return time.Duration(seconds) * time.Second
+	return nil
 }
 
 func searchBufferingHints(destination map[string]any) (time.Duration, int) {
-	hints, _ := destination["BufferingHints"].(map[string]any)
-	interval, intervalOK := inputInteger(hints["IntervalInSeconds"], 0, 900)
-	size, sizeOK := inputInteger(hints["SizeInMBs"], 1, 100)
-	if !intervalOK || !sizeOK {
-		return 300 * time.Second, 5 * 1024 * 1024
+	return bufferingHints(destination, 900, 100, 300*time.Second, 5*1024*1024)
+}
+
+func endpointRetryDuration(destinationKey string, destination map[string]any) time.Duration {
+	if destinationKey == "SnowflakeDestinationConfiguration" {
+		return retryDuration(destination, 60)
 	}
-	return time.Duration(interval) * time.Second, size * 1024 * 1024
+	return retryDuration(destination, 300)
 }
 
 func validSearchPayload(payload searchPayload) bool {
@@ -3184,7 +3150,7 @@ func (p *Pack) retryOrBackupSearch(ctx context.Context, req *spi.Request, stream
 	if !validSearchPayload(payload) {
 		return
 	}
-	duration := httpRetryDuration(destination)
+	duration := retryDuration(destination, 300)
 	if duration > 0 {
 		key, dataKey, ok := p.putSearchBlob(ctx, req, name, payload)
 		if !ok {

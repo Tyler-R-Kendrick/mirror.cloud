@@ -10639,7 +10639,7 @@ var mutants = []mutant{
 	{
 		name: "firehose-skip-redshift-retry-scheduling",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `p.scheduleRedshiftRetry(ctx, req, stream, copied, err.Error(), now, redshiftRetryDuration(destination))`,
+		old:  `p.scheduleRedshiftRetry(ctx, req, stream, copied, err.Error(), now, retryDuration(destination, 3600))`,
 		new:  `p.scheduleRedshiftRetry(ctx, req, stream, copied, err.Error(), now, 0)`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseRedshiftPersistentRetry",
@@ -10891,8 +10891,8 @@ var mutants = []mutant{
 	{
 		name: "firehose-change-snowflake-retry-default",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `seconds = 60`,
-		new:  `seconds = 300`,
+		old:  `return retryDuration(destination, 60)`,
+		new:  `return retryDuration(destination, 300)`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestSnowflakeDestinationValidationAndDescription",
 	},
@@ -11096,88 +11096,32 @@ var mutants = []mutant{
 	{
 		name: "firehose-accept-malformed-buffering-hints",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old: `			return err
-		}
-	}
-	if raw, exists := destination["BufferingHints"]; exists {
-		hints, ok := raw.(map[string]any)
-		_, hasInterval := hints["IntervalInSeconds"]
-		_, hasSize := hints["SizeInMBs"]
-		if !ok || hasInterval != hasSize {
-			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-		}
-		if hasInterval {
-			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
-				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-			}
-			if _, valid := inputInteger(hints["SizeInMBs"], 1, 64); !valid {`,
-		new: `			return err
-		}
-	}
-	if raw, exists := destination["BufferingHints"]; exists {
-		hints, ok := raw.(map[string]any)
-		_, hasInterval := hints["IntervalInSeconds"]
-		_, hasSize := hints["SizeInMBs"]
-		if (false && !ok) || hasInterval != hasSize {
-			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-		}
-		if hasInterval {
-			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
-				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-			}
-			if _, valid := inputInteger(hints["SizeInMBs"], 1, 64); !valid {`,
-		pkg: "./internal/services/aws/firehose",
-		run: "TestFirehoseHTTPEndpointValidation",
+		old:  `if !ok || hasInterval != hasSize {`,
+		new:  `if (false && !ok) || hasInterval != hasSize {`,
+		pkg:  "./internal/services/aws/firehose",
+		run:  "TestFirehoseHTTPEndpointValidation",
 	},
 	{
 		name: "firehose-accept-unpaired-buffering-hints",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old: `			return err
-		}
-	}
-	if raw, exists := destination["BufferingHints"]; exists {
-		hints, ok := raw.(map[string]any)
-		_, hasInterval := hints["IntervalInSeconds"]
-		_, hasSize := hints["SizeInMBs"]
-		if !ok || hasInterval != hasSize {
-			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-		}
-		if hasInterval {
-			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
-				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-			}
-			if _, valid := inputInteger(hints["SizeInMBs"], 1, 64); !valid {`,
-		new: `			return err
-		}
-	}
-	if raw, exists := destination["BufferingHints"]; exists {
-		hints, ok := raw.(map[string]any)
-		_, hasInterval := hints["IntervalInSeconds"]
-		_, hasSize := hints["SizeInMBs"]
-		if !ok || (false && hasInterval != hasSize) {
-			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-		}
-		if hasInterval {
-			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
-				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-			}
-			if _, valid := inputInteger(hints["SizeInMBs"], 1, 64); !valid {`,
-		pkg: "./internal/services/aws/firehose",
-		run: "TestFirehoseHTTPEndpointValidation",
+		old:  `if !ok || hasInterval != hasSize {`,
+		new:  `if !ok || (false && hasInterval != hasSize) {`,
+		pkg:  "./internal/services/aws/firehose",
+		run:  "TestFirehoseHTTPEndpointValidation",
 	},
 	{
 		name: "firehose-accept-invalid-buffer-interval",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  "if _, valid := inputInteger(hints[\"IntervalInSeconds\"], 0, 900); !valid {\n\t\t\t\treturn &spi.Fault{Code: \"InvalidArgumentException\", HTTPStatus: 400, Fault: \"client\"}\n\t\t\t}\n\t\t\tif _, valid := inputInteger(hints[\"SizeInMBs\"], 1, 128); !valid {",
-		new:  "if false {\n\t\t\t\treturn &spi.Fault{Code: \"InvalidArgumentException\", HTTPStatus: 400, Fault: \"client\"}\n\t\t\t}\n\t\t\tif _, valid := inputInteger(hints[\"SizeInMBs\"], 1, 128); !valid {",
+		old:  `} else if _, interval := inputInteger(hints["IntervalInSeconds"], 0, 900); hasInterval && !interval {`,
+		new:  `} else if _, interval := inputInteger(hints["IntervalInSeconds"], 0, 900); false && hasInterval && !interval {`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseBufferingHints",
 	},
 	{
 		name: "firehose-accept-invalid-buffer-size",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
-		old:  `if _, valid := inputInteger(hints["SizeInMBs"], 1, 128); !valid {`,
-		new:  `if false {`,
+		old:  `} else if _, size := inputInteger(hints["SizeInMBs"], 1, maxSize); hasInterval && !size {`,
+		new:  `} else if _, size := inputInteger(hints["SizeInMBs"], 1, maxSize); false && hasInterval && !size {`,
 		pkg:  "./internal/services/aws/firehose",
 		run:  "TestFirehoseBufferingHints",
 	},

@@ -340,7 +340,7 @@ type result struct {
 	reason  string
 	pkgs    []string
 	linked  map[string]bool // selected because their tests link changed code, or are it
-	changed map[string]bool // packages whose own files changed: code and tests
+	changed map[string]bool // packages whose compiled code changed (not only their tests)
 }
 
 func (g *Graph) selectFor(changed []string) result {
@@ -380,8 +380,13 @@ func (g *Graph) selectFor(changed []string) result {
 	for _, set := range []map[string]bool{code, self} {
 		for p := range set {
 			if known[p] {
-				linked[p], own[p] = true, true
+				linked[p] = true
 			}
+		}
+	}
+	for p := range code {
+		if known[p] {
+			own[p] = true
 		}
 	}
 	for p, deps := range g.deps {
@@ -402,7 +407,7 @@ func (g *Graph) selectFor(changed []string) result {
 
 // A gate is a CI job that runs only when its inputs change: paths it reads
 // itself; any package its suite compiles (go list -deps -test of pkgs, with
-// tags) whose own files changed; and pkgs themselves when anything selects
+// tags) whose compiled code changed; and pkgs themselves when anything selects
 // them, a test that reads a changed file included. A selection of everything,
 // and the CI machinery, open every gate.
 type gate struct {

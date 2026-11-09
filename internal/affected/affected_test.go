@@ -1,9 +1,6 @@
 package affected
 
 import (
-	"bytes"
-	"encoding/json"
-	"flag"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,8 +8,6 @@ import (
 	"sync"
 	"testing"
 )
-
-var update = flag.Bool("update", false, "rewrite testdata/golden.json from the current tree")
 
 var (
 	graphOnce sync.Once
@@ -167,47 +162,61 @@ func TestAChangeSelectsItsReverseTestDependencies(t *testing.T) {
 	}
 }
 
-// The selections for a few representative changes, recorded. A diff here is a
-// change in what pull requests run; rerun with -update and review it.
-func TestGoldenSelections(t *testing.T) {
+// What representative changes select, by what must be in the selection rather
+// than the whole list: the reverse dependencies of a leaf change as packages
+// are added, and a recorded list would fail for that alone. Every case also
+// says which gated jobs it opens.
+func TestRepresentativeSelections(t *testing.T) {
 	g, _ := moduleGraph(t)
-	cases := map[string][]string{
-		"root markdown":         {"README.md", "AGENTS.md"},
-		"testing docs":          {"docs/TESTING.md"},
-		"one leaf package":      {"internal/services/aws/scheduleexpr/scheduleexpr.go"},
-		"a test file":           {"test/ci/cache_test.go"},
-		"the ci workflow":       {".github/workflows/ci.yml"},
-		"a pinned spec":         {"specs/mirror.lock"},
-		"the sdk module":        {"test/sdk/go/go.mod"},
-		"the module file":       {"go.mod"},
-		"a deleted root file":   {"RELEASE"},
-		"a fuzz target's tests": {"internal/proto/aws/httpuri/httpuri_test.go"},
-		"the dockerfile":        {"Dockerfile"},
-		"the miniflare runtime": {"tools/cloudflare-runtime/package-lock.json"},
-	}
-	got := map[string]any{}
-	for name, files := range cases {
-		r := g.selectFor(files)
-		if r.all {
-			got[name] = map[string]any{"files": files, "all": r.reason, "jobs": g.gates(r, files)}
-		} else {
-			got[name] = map[string]any{"files": files, "packages": nonNil(r.pkgs), "linked": r.linkedList(), "jobs": g.gates(r, files)}
+	for name, c := range map[string]struct {
+		files  []string
+		all    bool
+		linked []string // must be in Linked
+		only   []string // when set, Pkgs is exactly this
+		jobs   []string // the gates it opens
+	}{
+		"root markdown":         {files: []string{"README.md", "AGENTS.md"}, only: []string{}},
+		"testing docs":          {files: []string{"docs/TESTING.md"}, only: []string{"./internal/check", "./internal/mutation", "./internal/runtime", "./test/behavior/cloudflare", "./test/behavior/vercel"}, jobs: []string{"cloudflare-miniflare"}},
+		"one leaf package":      {files: []string{"internal/services/aws/scheduleexpr/scheduleexpr.go"}, linked: []string{"./internal/services/aws/scheduleexpr", "./internal/services/aws/scheduler", "./cmd/mirror", "./internal/allservices"}, jobs: []string{"cloudflare-miniflare", "image"}},
+		"a test file":           {files: []string{"test/ci/cache_test.go"}, linked: []string{"./test/ci"}, only: []string{"./internal/check", "./internal/mutation", "./test/ci"}},
+		"a fuzz target's tests": {files: []string{"internal/proto/aws/httpuri/httpuri_fuzz_test.go"}, linked: []string{"./internal/proto/aws/httpuri"}, only: []string{"./internal/check", "./internal/mutation", "./internal/proto/aws/httpuri"}},
+		"a pinned spec":         {files: []string{"specs/mirror.lock"}, only: []string{"./cmd/mirror", "./cmd/mirrorgen", "./internal/check", "./internal/mutation", "./internal/specboot", "./test/behavior/vercel"}, jobs: []string{"generated-models", "image"}},
+		"the sdk module":        {files: []string{"test/sdk/go/go.mod"}, only: []string{}},
+		"a deleted root file":   {files: []string{"RELEASE"}, only: []string{}},
+		"the dockerfile":        {files: []string{"Dockerfile"}, only: []string{}, jobs: []string{"image"}},
+		"the miniflare runtime": {files: []string{"tools/cloudflare-runtime/package-lock.json"}, jobs: []string{"cloudflare-miniflare"}},
+		"the ci workflow":       {files: []string{".github/workflows/ci.yml"}, all: true},
+		"the module file":       {files: []string{"go.mod"}, all: true},
+	} {
+		r := g.Select(c.files)
+		if r.All != c.all {
+			t.Errorf("%s: all=%v (%s)", name, r.All, r.Reason)
+			continue
 		}
-	}
-	enc, _ := json.MarshalIndent(got, "", "  ")
-	enc = append(enc, '\n')
-	path := filepath.Join("testdata", "golden.json")
-	if *update {
-		if err := os.WriteFile(path, enc, 0o644); err != nil {
-			t.Fatal(err)
+		if c.all {
+			continue
 		}
-	}
-	want, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("%v (run go test ./cmd/affected -update)", err)
-	}
-	if !bytes.Equal(want, enc) {
-		t.Errorf("selections differ from %s; review and rerun with -update:\n%s", path, enc)
+		linked := map[string]bool{}
+		for _, p := range r.Linked {
+			linked[p] = true
+		}
+		for _, p := range c.linked {
+			if !linked[p] {
+				t.Errorf("%s: %s is not linked; linked %v", name, p, r.Linked)
+			}
+		}
+		if c.only != nil && strings.Join(r.Pkgs, " ") != strings.Join(c.only, " ") {
+			t.Errorf("%s: selected %v, want %v", name, r.Pkgs, c.only)
+		}
+		want := map[string]bool{}
+		for _, j := range c.jobs {
+			want[j] = true
+		}
+		for j, open := range r.Jobs {
+			if open != want[j] {
+				t.Errorf("%s: %s open=%v", name, j, open)
+			}
+		}
 	}
 }
 

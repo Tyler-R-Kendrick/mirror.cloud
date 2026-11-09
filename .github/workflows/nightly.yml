@@ -1,0 +1,108 @@
+name: nightly
+# What ci.yml no longer does on every push to main: run every test with nothing
+# read from go test's result cache. A test that depends on something go test
+# does not track (the clock, the network, a port, a race the scheduler only
+# sometimes shows) can keep reporting main's cached pass; this is where it gets
+# run again. Coverage runs here too, so the floor is checked against a tree
+# nobody pushed to that day.
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      # Applies to every go test the Makefile runs, and to no other go command.
+      GOFLAGS: -count=1
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The ratchet's baseline guard in internal/check skips without history.
+          fetch-depth: 0
+      - uses: ./.github/actions/go
+        with:
+          cache: test
+          # A scheduled run is on main, which would otherwise save.
+          save: "false"
+      - name: unit, uncached, by tier
+        run: set -o pipefail; make test-unit GOTESTFLAGS=-json 2>&1 | python3 -I scripts/test-tiers.py unit | tee -a "$RUNNER_TEMP/ci-run.log"
+      - name: aws sdk round-trip, uncached
+        if: ${{ !cancelled() }}
+        run: set -o pipefail; make test-sdk 2>&1 | tee -a "$RUNNER_TEMP/ci-run.log"
+      - name: known red triage
+        if: ${{ !cancelled() }}
+        run: make known-red RUN="$RUNNER_TEMP/ci-run.log"
+
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/go
+        with:
+          cache: coverage
+          save: "false"
+      - name: coverage floor
+        run: set -o pipefail; make test-coverage 2>&1 | tee -a ci-run.log
+      - name: known red triage
+        if: ${{ !cancelled() }}
+        run: make known-red RUN=ci-run.log
+
+  race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GOFLAGS: -count=1
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/go
+        with:
+          cache: race
+          save: "false"
+      - name: race detector, uncached, shard ${{ matrix.shard }} of 4
+        run: set -o pipefail; make test-race RACE_SHARD=${{ matrix.shard }} RACE_SHARDS=4 2>&1 | tee -a ci-run.log
+      - name: known red triage
+        if: ${{ !cancelled() }}
+        run: make known-red RUN=ci-run.log
+
+  # A scheduled run that fails tells nobody by itself. This keeps one open issue
+  # titled "nightly failed" and adds each failing run to it.
+  report:
+    needs: [unit, coverage, race]
+    # A job that times out ends `cancelled` and is reported; a run someone
+    # cancelled makes cancelled() true and is not.
+    if: ${{ !cancelled() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: open or update the nightly failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RESULTS: unit ${{ needs.unit.result }}, coverage ${{ needs.coverage.result }}, race ${{ needs.race.result }}
+        run: |
+          set -euo pipefail
+          body="$RUN failed on $(date -u +%F): $RESULTS."
+          n=$(gh issue list --state open --search 'in:title "nightly failed"' --json number,title \
+                --jq '[.[] | select(.title == "nightly failed")][0].number // empty')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body "$body"
+          else
+            gh issue create --title "nightly failed" --body "$body"
+          fi

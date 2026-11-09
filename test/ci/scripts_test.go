@@ -310,3 +310,29 @@ esac
 		}
 	}
 }
+
+// A service pack is a directory a developer can leave out of a sparse checkout
+// (scripts/sparse.sh), so nothing the binary is built from may import one except
+// the list that names them, allservices, and other packs, which sparse.sh follows.
+// A core package that reached into a pack would stop building the moment the
+// pack was absent.
+func TestNoCorePackageImportsAServicePack(t *testing.T) {
+	root, _ := filepath.Abs("../..")
+	out, err := run(t, root, nil, "go", "list", "-f", "{{.ImportPath}} {{join .Imports \" \"}}", "./...")
+	if err != nil {
+		t.Skipf("go list: %v", err) // a sparse tree may not build everything
+	}
+	const mod = "github.com/tyler-r-kendrick/mirror.cloud/"
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		f := strings.Fields(line)
+		pkg := strings.TrimPrefix(f[0], mod)
+		if strings.HasPrefix(pkg, "internal/services/") || pkg == "internal/allservices" {
+			continue
+		}
+		for _, imp := range f[1:] {
+			if strings.HasPrefix(imp, mod+"internal/services/") {
+				t.Errorf("%s imports %s: core must not import a service pack (use a hook in internal/spi)", pkg, strings.TrimPrefix(imp, mod))
+			}
+		}
+	}
+}

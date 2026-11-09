@@ -3,7 +3,7 @@ package scheduler
 import (
 	"time"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/scheduleexpr"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/scheduleexpr"
 )
 
 type scheduleExpression struct{ scheduleexpr.Expression }

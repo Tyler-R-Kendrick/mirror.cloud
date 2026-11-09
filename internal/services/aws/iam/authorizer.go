@@ -10,6 +10,8 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
+func init() { spi.NewPolicyAuthorizer = NewAuthorizer }
+
 // NewAuthorizer evaluates user, group, and role policies: explicit Deny wins, then Allow.
 // No policies still allows (drop-in for unsigned local clients).
 func NewAuthorizer(st spi.Store) spi.Authorizer {

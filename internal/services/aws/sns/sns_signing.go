@@ -3,17 +3,17 @@ package sns
 import (
 	"strings"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns/cert"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/snscert"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
-func signingCertificate() []byte { return cert.Certificate() }
+func signingCertificate() []byte { return snscert.Certificate() }
 
 // SigningCertificate returns the certificate used by SNS notification signatures.
 func SigningCertificate() []byte { return signingCertificate() }
 
 func signNotification(values map[string]any, version string) string {
-	return cert.Sign(values, version, str)
+	return snscert.Sign(values, version, str)
 }
 
 func snsCertificateURL(req *spi.Request) string {

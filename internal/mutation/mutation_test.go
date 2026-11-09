@@ -12764,18 +12764,18 @@ var mutants = []mutant{
 	},
 	{
 		name: "scheduler-last-day-never-matches",
-		file: filepath.Join("internal", "services", "aws", "scheduleexpr", "expression.go"),
+		file: filepath.Join("internal", "scheduleexpr", "expression.go"),
 		old:  "return t.Day() == lastDay",
 		new:  "return t.Day() != lastDay",
-		pkg:  "./internal/services/aws/scheduleexpr",
+		pkg:  "./internal/scheduleexpr",
 		run:  "TestScheduleExpressions",
 	},
 	{
 		name: "scheduleexpr-reject-wrapped-hour-range",
-		file: filepath.Join("internal", "services", "aws", "scheduleexpr", "expression.go"),
+		file: filepath.Join("internal", "scheduleexpr", "expression.go"),
 		old:  `lo > hi && (min != 0 || max != 23)`,
 		new:  `lo > hi`,
-		pkg:  "./internal/services/aws/scheduleexpr",
+		pkg:  "./internal/scheduleexpr",
 		run:  "TestScheduleExpressions",
 	},
 	{

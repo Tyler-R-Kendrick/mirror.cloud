@@ -5,7 +5,7 @@ GO  := go
 COUNT ?= -count=1
 export CGO_ENABLED := 0
 
-.PHONY: all build build-slim test test-unit test-contract test-snapshot test-chaos test-bdd test-cicd-core test-cicd-process test-cicd-e2e cloudflare-evidence test-cloudflare-miniflare test-cloudflare-celld test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
+.PHONY: all build build-slim test-service graph test test-unit test-contract test-snapshot test-chaos test-bdd test-cicd-core test-cicd-process test-cicd-e2e cloudflare-evidence test-cloudflare-miniflare test-cloudflare-celld test-fuzz-seeds test-fuzz test-mutation test-mutation-shard test-race test-coverage vet fmt generate specs-sync specs-refresh ratchet ratchet-update equivalence known-red
 
 all: build
 
@@ -21,6 +21,18 @@ build-slim:
 	mkdir -p $(BIN)
 	python3 scripts/slim-overlay.py $(BIN)/slim-overlay.json $(SERVICES)
 	$(GO) build -trimpath -ldflags '-s -w' -overlay $(BIN)/slim-overlay.json -o $(BIN)/mirror-slim ./cmd/mirror
+
+# The tests of the services you are working on and nothing else, in any tree:
+#   make test-service SERVICES="aws.s3 vercel.*"
+# A sparse checkout (scripts/sparse.py) holds those and what they need and no
+# more. docs/TESTING.md says what this does not cover.
+test-service:
+	@test -n "$(SERVICES)" || { echo 'make test-service SERVICES="aws.s3 aws.sqs"  (PROVIDER.* for a whole provider)'; exit 2; }
+	$(GO) test $(COUNT) $$(python3 scripts/sparse.py --packages $(SERVICES))
+
+# profiles/graph.txt, which says what each pack needs; commit the result.
+graph:
+	python3 scripts/service-graph.py > profiles/graph.txt
 
 test: test-unit test-contract
 

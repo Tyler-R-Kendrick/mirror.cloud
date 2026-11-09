@@ -26,6 +26,9 @@ out leaves nothing dangling. `go test` reports a package whose tests need a
 service that is not here as "setup failed"; `make test-present` runs the rest.
 
     scripts/sparse.py --list aws.s3     show what would be checked out, change nothing
+    scripts/sparse.py --packages aws.s3 the `go test` arguments for those services' own
+                                        packs (and test/behavior/P for P.*): what
+                                        `make test-service SERVICES=...` runs
     scripts/sparse.py --all             back to the whole tree
 
 Everything is read from the commit (--ref, default HEAD), never from the files
@@ -51,7 +54,7 @@ def key_of(service_id):
 
 
 def main(argv):
-    ref, listing, wanted = "HEAD", False, []
+    ref, listing, packages, wanted = "HEAD", False, False, []
     it = iter(argv)
     for a in it:
         if a == "--all":
@@ -59,6 +62,8 @@ def main(argv):
             return
         elif a == "--list":
             listing = True
+        elif a == "--packages":
+            packages = True
         elif a == "--ref":
             ref = next(it)
         elif a in ("-h", "--help") or not argv:
@@ -93,8 +98,11 @@ def main(argv):
     if whole - {k.split("/")[0] for k in requested}:
         sys.exit(f"sparse: no provider {sorted(whole - {k.split('/')[0] for k in requested})} in {ref}")
 
-    prod, test = {}, {}
+    prod, test, alias = {}, {}, {}
     for line in git("show", f"{ref}:profiles/graph.txt").splitlines():
+        m = re.fullmatch(r"(\S+) => (\S+)", line)
+        if m:
+            alias[m.group(1)] = m.group(2)
         m = re.fullmatch(r"([^ :]+)( \[test\])?: (.*)", line)
         if m:
             (test if m.group(2) else prod).setdefault(m.group(1), set()).update(m.group(3).split())
@@ -108,8 +116,16 @@ def main(argv):
         if k in need:
             continue
         need.add(k)
+        if k in alias:  # served by a pack of another name
+            todo.append(alias[k])
         d = f"internal/services/{k}"
         todo += prod.get(d, set()) | (test.get(d, set()) if k in requested else set())
+
+    if packages:
+        own = sorted({alias.get(k, k) for k in requested})
+        print(" ".join([f"./internal/services/{k}/..." for k in own if f"internal/services/{k}" in dirs]
+                       + [f"./test/behavior/{p}/..." for p in sorted(whole) if f"test/behavior/{p}" in dirs]))
+        return
 
     exclude = ["internal/specboot/complete.go"]  # the tree is not complete
     include = ["behavior/none/placeholder"]  # keeps behavior's //go:embed pattern matching

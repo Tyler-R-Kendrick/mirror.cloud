@@ -114,12 +114,10 @@ func readTiers(t *testing.T, root string) tiersFile {
 func TestTiersPartitionPackages(t *testing.T) {
 	root := repo(t)
 	f := readTiers(t, root)
-	out, err := testinputs.Command(root, "go", "list", "./...").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
+	// PackageSet records the package directories and the ones above them, so a
+	// package added or removed reruns this rather than reading a cached pass.
 	pkgs := []string{"test/sdk/go"} // its own module, run by make test-sdk
-	for _, p := range strings.Fields(string(out)) {
+	for _, p := range testinputs.PackageSet(t, root) {
 		pkgs = append(pkgs, strings.TrimPrefix(strings.TrimPrefix(p, strings.TrimSuffix(mod, "/")), "/"))
 	}
 	type rule struct {

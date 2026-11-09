@@ -75,4 +75,8 @@ func TestRecordsARealTree(t *testing.T) {
 	root, _ := filepath.Abs(filepath.Join("..", ".."))
 	Record(t, root, "LICENSE", "scripts")
 	Packages(t, root, "./internal/clock")
+	pkgs := PackageSet(t, root)
+	if len(pkgs) < 50 {
+		t.Errorf("PackageSet found %d packages", len(pkgs))
+	}
 }

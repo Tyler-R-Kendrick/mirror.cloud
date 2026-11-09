@@ -76,6 +76,35 @@ func Packages(t testing.TB, root string, patterns ...string) {
 	Record(t, root, paths...)
 }
 
+// PackageSet returns the module's packages, as go list ./... prints them, and
+// records what that list is read from: every package directory, so a package
+// that goes away is noticed, and the directories above them up to the root
+// (not the root, whose listing changes with every commit), so a package that
+// appears beside them is. A new top-level directory is the one addition this
+// does not see.
+func PackageSet(t testing.TB, root string) []string {
+	t.Helper()
+	cmd := Command(root, "go", "list", "-f", "{{.ImportPath}}\t{{.Dir}}", "./...")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("testinputs: go list: %v\n%s", err, stderr.String())
+	}
+	var pkgs, dirs []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		ip, dir, _ := strings.Cut(line, "\t")
+		pkgs = append(pkgs, ip)
+		for rel, err := filepath.Rel(root, dir); err == nil && rel != "." && !seen[rel]; rel = filepath.Dir(rel) {
+			seen[rel] = true
+			dirs = append(dirs, filepath.ToSlash(rel))
+		}
+	}
+	Record(t, root, append(dirs, "go.mod")...)
+	return pkgs
+}
+
 // Command is exec.Command run in dir. Setting SysProcAttr keeps
 // os.StartProcess from stat'ing dir first, which go test would record: for the
 // repository root that stat changes with every commit. Whatever the command

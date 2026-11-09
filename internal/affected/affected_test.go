@@ -351,3 +351,44 @@ func TestTracesSelectBundled(t *testing.T) {
 		t.Errorf("a trace selected %v", r.pkgs)
 	}
 }
+
+// A directory rule must not hide a package: a Go file in a package is code of
+// that package whatever rule covers its directory, and a package directory a
+// non-all rule covers has to be listed here, so its other files' rule is a
+// choice someone made.
+var packagesUnderARule = map[string]bool{}
+
+func TestRulesDoNotShadowPackages(t *testing.T) {
+	g, _ := moduleGraph(t)
+	for dir, pkg := range g.dirs {
+		probe := dir + "/probe.go"
+		if dir == "" {
+			probe = "probe.go"
+		}
+		for _, r := range rules {
+			if r.all || !r.matches(dir+"/probe.txt") && !r.matches(probe) {
+				continue
+			}
+			if !packagesUnderARule[pkg] {
+				t.Errorf("rule %s covers package %s; list it in packagesUnderARule if that is meant", r.pattern, pkg)
+			}
+		}
+		c := g.classify(probe)
+		if !c.all && (len(c.code) != 1 || c.code[0] != pkg) {
+			t.Errorf("%s is not code of %s: %+v", probe, pkg, c)
+		}
+	}
+}
+
+func TestAGoFileUnderARuleIsCodeOfItsPackage(t *testing.T) {
+	g, err := parse("m", "/r", []byte("m/tools/x\t/r/tools/x\tm\t\nm/tools/x.test\t/r/tools/x\tm\tm/tools/x\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := g.classify("tools/x/main.go"); len(c.code) != 1 || c.code[0] != "./tools/x" {
+		t.Errorf("a Go file under tools/ classed as %+v", c)
+	}
+	if c := g.classify("tools/x/package.json"); len(c.code) != 0 || len(c.direct) == 0 {
+		t.Errorf("a non-Go file under tools/ classed as %+v, want the tools/** rule", c)
+	}
+}

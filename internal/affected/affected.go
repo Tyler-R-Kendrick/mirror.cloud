@@ -288,17 +288,25 @@ func (g *Graph) classify(p string) classification {
 	if strings.HasPrefix(p, "\"") {
 		return classification{all: true, why: "a quoted name, which cannot be placed"}
 	}
-	for _, r := range rules {
-		if r.matches(p) {
-			if r.all {
-				return classification{all: true, why: r.why}
-			}
-			c := classification{why: r.why}
-			if len(r.pkgs) > 0 {
-				c.direct = append(append([]string(nil), r.pkgs...), readers...)
-			}
-			return c
+	var matched *rule
+	for i := range rules {
+		if rules[i].matches(p) {
+			matched = &rules[i]
+			break
 		}
+	}
+	if matched != nil && matched.all {
+		return classification{all: true, why: matched.why}
+	}
+	// A Go file is code of the package that holds it, whatever directory rule
+	// would otherwise name it: a package under tools/ or docs/ is still built.
+	_, owned := g.owner(p)
+	if matched != nil && !(owned && strings.HasSuffix(p, ".go")) {
+		c := classification{why: matched.why}
+		if len(matched.pkgs) > 0 {
+			c.direct = append(append([]string(nil), matched.pkgs...), readers...)
+		}
+		return c
 	}
 	var also []string
 	for _, r := range alsoRead {

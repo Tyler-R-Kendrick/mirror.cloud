@@ -480,7 +480,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     (below); nothing is made. Before, such a `Ref` answered its own text.
   - A change set's template is parsed and validated when `CreateChangeSet`
     makes it, as CloudFormation does: the call answers the change set's `Id`,
-    and a template that is wrong leaves the change set `FAILED` with the
+    and a template that is wrong, by every check its execution would make
+    (a parameter or condition without a value, an output naming a resource
+    its condition leaves out, round 10 checked the parse alone), leaves the
+    change set `FAILED` with the
     error as its `StatusReason` ("if your attempt to create a change set
     failed, CloudFormation shows the error message"), which
     `DescribeChangeSet` and `ListChangeSets` answer. `ExecuteChangeSet` of a

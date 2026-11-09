@@ -2187,3 +2187,39 @@ func TestCloudFormationAStoredTemplateIsReadAsStored(t *testing.T) {
 		t.Errorf("DeleteStack deleted the Retain queue of a stored template today's checks refuse: %v", err)
 	}
 }
+
+// A change set is FAILED, "CloudFormation shows the error message", for every
+// template its ExecuteChangeSet would refuse, not only those the parse
+// refuses: a parameter without a value, a condition the engine cannot
+// evaluate, and an output naming a resource its condition leaves out. A change
+// set whose condition is on the stack's own id settles it as ExecuteChangeSet
+// would. Before, each of these change sets was CREATE_COMPLETE, and its
+// ExecuteChangeSet refused it.
+func TestCloudFormationAChangeSetFailsAsItsExecutionWould(t *testing.T) {
+	h := newStacks(t)
+	h.mustCreate("csf", map[string]map[string]any{"Q": nameable()["Queue"]})
+	param := func(cond string) map[string]any {
+		r := map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": "v"}}
+		if cond != "" {
+			r["Condition"] = cond
+		}
+		return r
+	}
+	for name, tpl := range map[string]map[string]any{
+		"unvalued":  {"Parameters": map[string]any{"Key": map[string]any{"Type": "String"}}, "Resources": map[string]any{"P": param("")}},
+		"unsettled": {"Conditions": map[string]any{"C": map[string]any{"Fn::Equals": []any{map[string]any{"Fn::Select": []any{0, []any{"x"}}}, "x"}}}, "Resources": map[string]any{"P": param("C")}},
+		"output": {"Conditions": map[string]any{"No": map[string]any{"Fn::Equals": []any{"a", "b"}}}, "Resources": map[string]any{"P": param("No"), "R": param("")},
+			"Outputs": map[string]any{"O": map[string]any{"Value": map[string]any{"Ref": "P"}}}},
+		"mine": {"Conditions": map[string]any{"Mine": map[string]any{"Fn::Not": []any{map[string]any{"Fn::Equals": []any{map[string]any{"Ref": "AWS::StackId"}, "x"}}}}},
+			"Resources": map[string]any{"P": param("Mine")}},
+	} {
+		body, _ := json.Marshal(tpl)
+		if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "csf", "ChangeSetName": name, "TemplateBody": string(body)}); err != nil {
+			t.Fatal(err)
+		}
+		described, _ := h.invoke("DescribeChangeSet", map[string]any{"StackName": "csf", "ChangeSetName": name})
+		if want := map[bool]string{true: "CREATE_COMPLETE", false: "FAILED"}[name == "mine"]; described["Status"] != want {
+			t.Errorf("the %s change set is %v / %v, want %s", name, described["Status"], described["StatusReason"], want)
+		}
+	}
+}

@@ -122,23 +122,25 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return &spi.Response{Output: map[string]any{"Exports": ex}}, nil
 	case "CreateChangeSet": // the template is read now: "if your attempt to create a change set failed, CloudFormation shows the error message" (StatusReason)
 		csn, body := str(req.Input["ChangeSetName"]), str(req.Input["TemplateBody"])
+		st, _ := p.load(ctx, req, name)
+		stackID := cmp.Or(st.ID, "arn:aws:cloudformation:"+req.Identity.Region+":"+req.Identity.Account+":stack/"+name)
 		if body == "" {
 			return nil, invalid("TemplateBody required")
-		} else if st, _ := p.load(ctx, req, name); !updatable(st) { // as UpdateStack refuses one
+		} else if !updatable(st) { // as UpdateStack refuses one
 			return nil, invalid("Stack:" + st.ID + " is in " + st.Status + " state and can not be updated.")
 		} else if _, err := p.templateBody(ctx, req); err != nil { // the member's size, as every operation's
 			return nil, err
 		}
 		rec := map[string]any{"ChangeSetName": csn, "ChangeSetId": "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":changeSet/" + csn + "/" + p.deps.Rand.Hex(8),
 			"StackName": name, "ChangeSetType": cmp.Or(str(req.Input["ChangeSetType"]), "UPDATE"), "Status": "CREATE_COMPLETE", "TemplateBody": body}
-		if _, _, _, _, err := p.template(ctx, req, named(name), ""); err != nil {
+		if _, _, _, _, err := p.template(ctx, req, named(name), stackID); err != nil { // every check its execution makes
 			rec["Status"], rec["StatusReason"] = "FAILED", err.Error()
 		}
 		raw, _ := json.Marshal(rec)
 		if err := p.col(req, "cfn-cs").Put(ctx, named(name)+":"+csn, raw); err != nil {
 			return nil, err
 		}
-		return &spi.Response{Output: map[string]any{"Id": rec["ChangeSetId"], "StackId": "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name}}, nil
+		return &spi.Response{Output: map[string]any{"Id": rec["ChangeSetId"], "StackId": stackID}}, nil
 	case "ExecuteChangeSet":
 		csn := str(req.Input["ChangeSetName"])
 		b, ok, _ := p.col(req, "cfn-cs").Get(ctx, named(name)+":"+csn)
@@ -186,32 +188,10 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		id = cur.ID
 	}
 	body, tpl, order, refs, err := p.template(ctx, req, name, id)
-	missing := func(section, prefix string) []string { // what a section declares that refs holds no value of
-		return slices.DeleteFunc(slices.Sorted(maps.Keys(asMap(tpl[section]))), func(k string) bool { _, ok := refs[prefix+k]; return ok })
-	}
-	if unvalued := missing("Parameters", ""); len(unvalued) > 0 && err == nil { // for parameters without default values (User Guide)
-		err = invalid("Parameters: [" + strings.Join(unvalued, ", ") + "] must have values")
-	} else if unsettled := missing("Conditions", "Condition::"); len(unsettled) > 0 && err == nil { // a stack is made only with every condition settled
-		err = invalid("Template error: the condition " + unsettled[0] + " cannot be evaluated") // a function the engine does not evaluate
-	}
 	if err != nil {
 		return nil, err
 	}
-	// "CloudFormation creates the resource only when the condition evaluates to true", and "any resources that
-	// depend on that resource aren't created either" (Template Reference, Condition attribute): those skip.
 	resources, outs := asMap(tpl["Resources"]), asMap(tpl["Outputs"])
-	off := func(v any) bool { c := str(asMap(v)["Condition"]); return c != "" && refs["Condition::"+c] != "true" }
-	skip := map[string]bool{}
-	for _, l := range order {
-		skip[l] = off(resources[l]) || slices.ContainsFunc(append(referred(asMap(resources[l])["Properties"], refs), dependsOn(resources[l])...), func(n string) bool { return skip[n] })
-	}
-	maps.DeleteFunc(outs, func(_ string, o any) bool { return off(o) }) // "CloudFormation creates the output only when the associated condition evaluates to true"
-	for _, o := range outs {
-		if gone := slices.DeleteFunc(referred(asMap(o)["Value"], refs), func(n string) bool { return !skip[n] }); len(gone) > 0 {
-			return nil, invalid("Template format error: Unresolved resource dependencies [" + strings.Join(gone, ", ") + "] in the Outputs block of the template")
-		}
-	}
-	order = slices.DeleteFunc(order, func(l string) bool { return skip[l] })
 	var old stack // what an update finds; a create reserves the name, CREATE_IN_PROGRESS, in the same transaction
 	reserved := stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}}
 	if err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
@@ -337,7 +317,39 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 	if err == nil {
 		err = p.sound(tpl, refs, req, stack)
 	}
+	if err == nil && stack != "" { // a stack, or a change set to one, is made from it
+		order, err = made(tpl, order, refs)
+	}
 	return body, tpl, order, refs, err
+}
+
+// made is the resources of order a stack makes from tpl, and the error for a template no stack can be made
+// from: a parameter or condition without a value, or an output naming a resource the stack does not make.
+// The outputs tpl answers are left in it.
+func made(tpl map[string]any, order []string, refs map[string]string) ([]string, error) {
+	missing := func(section, prefix string) []string { // what a section declares that refs holds no value of
+		return slices.DeleteFunc(slices.Sorted(maps.Keys(asMap(tpl[section]))), func(k string) bool { _, ok := refs[prefix+k]; return ok })
+	}
+	if unvalued := missing("Parameters", ""); len(unvalued) > 0 { // for parameters without default values (User Guide)
+		return nil, invalid("Parameters: [" + strings.Join(unvalued, ", ") + "] must have values")
+	} else if unsettled := missing("Conditions", "Condition::"); len(unsettled) > 0 { // a stack is made only with every condition settled
+		return nil, invalid("Template error: the condition " + unsettled[0] + " cannot be evaluated") // a function the engine does not evaluate
+	}
+	// "CloudFormation creates the resource only when the condition evaluates to true", and "any resources that
+	// depend on that resource aren't created either" (Template Reference, Condition attribute): those skip.
+	resources, outs := asMap(tpl["Resources"]), asMap(tpl["Outputs"])
+	off := func(v any) bool { c := str(asMap(v)["Condition"]); return c != "" && refs["Condition::"+c] != "true" }
+	skip := map[string]bool{}
+	for _, l := range order {
+		skip[l] = off(resources[l]) || slices.ContainsFunc(append(referred(asMap(resources[l])["Properties"], refs), dependsOn(resources[l])...), func(n string) bool { return skip[n] })
+	}
+	maps.DeleteFunc(outs, func(_ string, o any) bool { return off(o) }) // "CloudFormation creates the output only when the associated condition evaluates to true"
+	for _, o := range outs {
+		if gone := slices.DeleteFunc(referred(asMap(o)["Value"], refs), func(n string) bool { return !skip[n] }); len(gone) > 0 {
+			return nil, invalid("Template format error: Unresolved resource dependencies [" + strings.Join(gone, ", ") + "] in the Outputs block of the template")
+		}
+	}
+	return slices.DeleteFunc(order, func(l string) bool { return skip[l] }), nil
 }
 
 // conditioned is refs, what a Ref reads, with the pseudo parameters of the stack named stack, of id id, but

@@ -4479,8 +4479,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-make-a-stack-with-an-unsettled-condition",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `} else if unsettled := missing("Conditions", "Condition::"); len(unsettled) > 0 && err == nil {`,
-		new:  `} else if unsettled := missing("Conditions", "Condition::"); len(unsettled) < 0 && err == nil {`,
+		old:  `} else if unsettled := missing("Conditions", "Condition::"); len(unsettled) > 0 {`,
+		new:  `} else if unsettled := missing("Conditions", "Condition::"); len(unsettled) < 0 {`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationSettlesConditionsOnPseudoParameters",
 	},
@@ -4559,8 +4559,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-make-a-stack-without-parameter-values",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `if unvalued := missing("Parameters", ""); len(unvalued) > 0 && err == nil {`,
-		new:  `if unvalued := missing("Parameters", ""); len(unvalued) < 0 && err == nil {`,
+		old:  `if unvalued := missing("Parameters", ""); len(unvalued) > 0 {`,
+		new:  `if unvalued := missing("Parameters", ""); len(unvalued) < 0 {`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationAParameterMustHaveAValue",
 	},

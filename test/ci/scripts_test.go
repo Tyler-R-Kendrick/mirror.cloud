@@ -131,9 +131,10 @@ func TestSlimBuildServesExactlyTheServicesItWasGiven(t *testing.T) {
 }
 
 // cut-release.sh is the one script that creates a tag, so what makes it decline
-// matters as much as what makes it act. Each case is a real origin and checkout,
-// and a stand-in gh that records what it is asked to create.
-func TestCutReleaseTagsOnlyWhatRELEASEAsksForAndNothingElse(t *testing.T) {
+// matters as much as what makes it act. Each case is a real origin and checkout
+// holding the given commit messages (oldest first), with the given tags on the
+// commits they name, and a stand-in gh that records what it is asked to create.
+func TestCutReleaseDerivesTheNextVersionFromTheCommitsSinceTheLastTag(t *testing.T) {
 	root, _ := filepath.Abs("../..")
 	script := filepath.Join(root, "scripts", "cut-release.sh")
 
@@ -141,10 +142,10 @@ func TestCutReleaseTagsOnlyWhatRELEASEAsksForAndNothingElse(t *testing.T) {
 		out, tag, ghCalls string
 		err               error
 	}
-	// setup makes origin with main at a commit whose RELEASE is `release`, plus any
-	// existing tags, then runs the script in a clone of it. `advance` leaves main
-	// one commit ahead of the clone.
-	run1 := func(t *testing.T, release string, existing []string, advance bool) result {
+	// tags maps a tag to the number of commits that precede it, so
+	// {"v1.0.0": 1} tags the first. `advance` leaves main one commit ahead of
+	// the checkout the script runs in.
+	run1 := func(t *testing.T, commits []string, tags map[string]int, advance bool) result {
 		t.Helper()
 		dir := t.TempDir()
 		origin, work := filepath.Join(dir, "origin.git"), filepath.Join(dir, "work")
@@ -157,18 +158,19 @@ func TestCutReleaseTagsOnlyWhatRELEASEAsksForAndNothingElse(t *testing.T) {
 		}
 		must(dir, "init", "-q", "--bare", "-b", "main", origin)
 		must(dir, "clone", "-q", origin, work)
-		os.WriteFile(filepath.Join(work, "RELEASE"), []byte(release), 0o644)
-		must(work, "add", "RELEASE")
-		must(work, "commit", "-qm", "release")
-		must(work, "push", "-q", "origin", "HEAD:main")
-		for _, tag := range existing {
-			must(work, "tag", tag)
-			must(work, "push", "-q", "origin", tag)
+		for i, msg := range commits {
+			must(work, "commit", "-q", "--allow-empty", "-m", msg)
+			for tag, n := range tags {
+				if n == i+1 {
+					must(work, "tag", "-a", "-m", tag, tag)
+				}
+			}
 		}
+		must(work, "push", "-q", "origin", "HEAD:main", "--tags")
 		if advance {
 			other := filepath.Join(dir, "other")
 			must(dir, "clone", "-q", origin, other)
-			must(other, "commit", "-q", "--allow-empty", "-m", "later")
+			must(other, "commit", "-q", "--allow-empty", "-m", "fix: later")
 			must(other, "push", "-q", "origin", "HEAD:main")
 		}
 		bin := filepath.Join(dir, "bin")
@@ -182,41 +184,129 @@ func TestCutReleaseTagsOnlyWhatRELEASEAsksForAndNothingElse(t *testing.T) {
 		return result{out: out, tag: strings.TrimSpace(strings.TrimPrefix(string(got), "tag=")), ghCalls: string(calls), err: err}
 	}
 
-	t.Run("a version that does not exist is tagged, at this commit", func(t *testing.T) {
-		r := run1(t, "# next\nv1.2.3-alpha.1\n", nil, false)
-		if r.err != nil || r.tag != "v1.2.3-alpha.1" {
-			t.Fatalf("tag %q, err %v\n%s", r.tag, r.err, r.out)
-		}
-		if strings.Count(r.ghCalls, "\n") != 2 || !strings.Contains(r.ghCalls, "git/tags") || !strings.Contains(r.ghCalls, "refs/tags/v1.2.3-alpha.1") {
-			t.Errorf("expected a tag object and a ref to be created, got:\n%s", r.ghCalls)
-		}
-	})
 	for name, c := range map[string]struct {
-		release  string
-		existing []string
-		advance  bool
+		commits []string
+		tags    map[string]int
+		want    string // "" is no release
 	}{
-		"nothing is asked for":               {release: "# no release pending\n"},
-		"the tag already exists":             {release: "v1.2.3\n", existing: []string{"v1.2.3"}},
-		"main has moved on past this commit": {release: "v1.2.3\n", advance: true},
+		"nothing since the tag":               {[]string{"fix: a"}, map[string]int{"v0.0.1-alpha.1": 1}, ""},
+		"fix after an alpha":                  {[]string{"chore: base", "fix: a"}, map[string]int{"v0.0.1-alpha.1": 1}, "v0.0.1-alpha.2"},
+		"alpha.9 goes to alpha.10, not alpha": {[]string{"chore: base", "feat: a"}, map[string]int{"v0.0.1-alpha.9": 1}, "v0.0.1-alpha.10"},
+		"rc1 goes to rc2":                     {[]string{"chore: base", "perf: a"}, map[string]int{"v1.0.0-rc1": 1}, "v1.0.0-rc2"},
+		"fix after a stable 1.x":              {[]string{"chore: base", "fix(api): a"}, map[string]int{"v1.2.3": 1}, "v1.2.4"},
+		"feat after a stable 1.x":             {[]string{"chore: base", "fix: a", "feat: b"}, map[string]int{"v1.2.3": 1}, "v1.3.0"},
+		"breaking after a stable 1.x":         {[]string{"chore: base", "feat!: a", "fix: b"}, map[string]int{"v1.2.3": 1}, "v2.0.0"},
+		"breaking in the body":                {[]string{"chore: base", "fix: a\n\nBREAKING CHANGE: gone"}, map[string]int{"v1.2.3": 1}, "v2.0.0"},
+		"breaking in 0.x is a minor":          {[]string{"chore: base", "refactor(x)!: a"}, map[string]int{"v0.4.2": 1}, "v0.5.0"},
+		"feat in 0.x is a patch":              {[]string{"chore: base", "feat: a"}, map[string]int{"v0.4.2": 1}, "v0.4.3"},
+		"Release-As leaves a prerelease":      {[]string{"chore: base", "fix: a", "docs: b\n\nRelease-As: 0.1.0"}, map[string]int{"v0.0.1-alpha.1": 1}, "v0.1.0"},
+		"the newest Release-As wins":          {[]string{"chore: base", "docs: a\n\nRelease-As: 1.0.0", "docs: b\n\nRelease-As: v1.0.1"}, map[string]int{"v0.9.0": 1}, "v1.0.1"},
+		"no tag yet":                          {[]string{"chore: a", "fix: b"}, nil, "v0.0.1"},
+		"docs, ci and chore release nothing":  {[]string{"chore: base", "docs: a", "ci: b", "chore(deps): c", "test: d"}, map[string]int{"v1.2.3": 1}, ""},
+		"a Release-As that already exists":    {[]string{"chore: base", "docs: a\n\nRelease-As: 1.0.0"}, map[string]int{"v1.0.0": 1, "v0.9.0": 0}, ""},
 	} {
-		t.Run("no tag when "+name, func(t *testing.T) {
-			r := run1(t, c.release, c.existing, c.advance)
-			if r.err != nil || r.tag != "" || r.ghCalls != "" {
-				t.Errorf("tag %q, gh called with %q, err %v\n%s", r.tag, r.ghCalls, r.err, r.out)
+		t.Run(name, func(t *testing.T) {
+			r := run1(t, c.commits, c.tags, false)
+			if r.err != nil || r.tag != c.want {
+				t.Fatalf("tag %q, want %q, err %v\n%s", r.tag, c.want, r.err, r.out)
+			}
+			if c.want == "" && r.ghCalls != "" {
+				t.Errorf("no release, but gh was called:\n%s", r.ghCalls)
+			}
+			if c.want != "" && (strings.Count(r.ghCalls, "\n") != 2 || !strings.Contains(r.ghCalls, "refs/tags/"+c.want)) {
+				t.Errorf("expected a tag object and a ref for %s, got:\n%s", c.want, r.ghCalls)
 			}
 		})
 	}
-	for name, release := range map[string]string{
-		"not a version tag": "1.2.3\n",
-		"a path":            "v1/../x\n",
-		"two versions":      "v1.2.3\nv1.2.4\n",
+
+	t.Run("no tag when main has moved on past this commit", func(t *testing.T) {
+		r := run1(t, []string{"chore: base", "fix: a"}, map[string]int{"v1.2.3": 1}, true)
+		if r.err != nil || r.tag != "" || r.ghCalls != "" {
+			t.Errorf("tag %q, gh called with %q, err %v\n%s", r.tag, r.ghCalls, r.err, r.out)
+		}
+	})
+	for name, commits := range map[string][]string{
+		"a name with a plus": {"chore: base", "docs: a\n\nRelease-As: 1.0.0+build"},
 	} {
-		t.Run("an error when RELEASE is "+name, func(t *testing.T) {
-			r := run1(t, release, nil, false)
+		t.Run("an error when Release-As is "+name, func(t *testing.T) {
+			r := run1(t, commits, map[string]int{"v0.9.0": 1}, false)
 			if r.err == nil || r.ghCalls != "" {
-				t.Errorf("accepted %q: err %v, gh %q\n%s", release, r.err, r.ghCalls, r.out)
+				t.Errorf("accepted %q: err %v, gh %q\n%s", commits, r.err, r.ghCalls, r.out)
 			}
 		})
+	}
+}
+
+// image-check.sh is what stands between a pushed image and a release, so each way
+// an image can be wrong must stop it. docker is a stand-in that answers for one
+// image: its version, its services and the binary it holds.
+func TestImageCheckStopsAnImageThatIsNotWhatTheReleaseSays(t *testing.T) {
+	root, _ := filepath.Abs("../..")
+	script := filepath.Join(root, "scripts", "image-check.sh")
+	profile, err := os.ReadFile(filepath.Join(root, "profiles", "core.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var core []string
+	for _, l := range strings.Split(string(profile), "\n") {
+		if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
+			core = append(core, l)
+		}
+	}
+	var full []string
+	for i := 0; i < 101; i++ {
+		full = append(full, "aws.svc"+strings.Repeat("x", i))
+	}
+
+	check := func(t *testing.T, variant, version, imageVersion string, services []string, binary string) error {
+		t.Helper()
+		dir := t.TempDir()
+		bin := filepath.Join(dir, "bin")
+		os.MkdirAll(bin, 0o755)
+		os.WriteFile(filepath.Join(dir, "mirror"), []byte("the binary"), 0o755)
+		archive := filepath.Join(dir, "a.tar.gz")
+		if out, err := run(t, dir, nil, "tar", "-czf", archive, "mirror"); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		imageDir := filepath.Join(dir, "image")
+		os.MkdirAll(imageDir, 0o755)
+		os.WriteFile(filepath.Join(imageDir, "mirror"), []byte(binary), 0o755)
+		os.WriteFile(filepath.Join(bin, "docker"), []byte(`#!/bin/sh
+case "$1" in
+  run) case "$*" in
+         *version) echo "$IMAGE_VERSION" ;;
+         *services) for s in $IMAGE_SERVICES; do printf '%s\ttier\n' "$s"; done ;;
+       esac ;;
+  create) echo cid ;;
+  cp) tar -cf - -C "$IMAGE_DIR" mirror ;;
+esac
+`), 0o755)
+		_, err := run(t, root, []string{
+			"PATH=" + bin + ":" + os.Getenv("PATH"), "IMAGE_VERSION=" + imageVersion,
+			"IMAGE_SERVICES=" + strings.Join(services, " "), "IMAGE_DIR=" + imageDir,
+		}, "bash", script, "img", variant, version, archive)
+		return err
+	}
+
+	if err := check(t, "core", "1.2.3", "1.2.3", core, "the binary"); err != nil {
+		t.Errorf("a correct core image was refused: %v", err)
+	}
+	if err := check(t, "full", "1.2.3", "1.2.3", full, "the binary"); err != nil {
+		t.Errorf("a correct full image was refused: %v", err)
+	}
+	for name, c := range map[string]struct {
+		variant, imageVersion string
+		services              []string
+		binary                string
+	}{
+		"the wrong version":                  {"core", "1.2.2", core, "the binary"},
+		"a core image missing a service":     {"core", "1.2.3", core[1:], "the binary"},
+		"a core image with an extra one":     {"core", "1.2.3", append([]string{"aws.extra"}, core...), "the binary"},
+		"a full image with too few":          {"full", "1.2.3", full[:100], "the binary"},
+		"a binary that is not the archive's": {"core", "1.2.3", core, "another binary"},
+	} {
+		if err := check(t, c.variant, "1.2.3", c.imageVersion, c.services, c.binary); err == nil {
+			t.Errorf("accepted %s", name)
+		}
 	}
 }

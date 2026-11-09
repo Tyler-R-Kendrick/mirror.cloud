@@ -7,12 +7,15 @@ name: release
 # run, so this file only wires it to runners.
 #
 # The same archives become two container images, ghcr.io/<owner>/mirror and its
-# -core variant, published for a tag and built and smoke-tested but not pushed
-# by hand. docs/RELEASING.md says what they are called.
+# -core variant. A release is built once and promoted through three environments:
+# edge builds and pushes the images under a candidate tag, staging pulls those
+# back and checks them against the archives, and production, the gate, lets the
+# same digests be tagged with the version and the same archives be published.
+# docs/RELEASING.md says what they are called and where to put reviewers.
 #
-# A tag reaches it two ways. A maintainer pushes one, or a change to RELEASE merges
-# and cut-release.yml makes the tag and calls this workflow with `publish`: a tag
-# made with the workflow token starts no workflow of its own.
+# A tag reaches it two ways. A maintainer pushes one, or a merge to main makes one:
+# cut-release.yml picks the version from the commits and calls this workflow with
+# `publish`, because a tag made with the workflow token starts no workflow of its own.
 #
 # Run by hand (Actions > release > Run workflow) it is a dry run: it builds the
 # commit selected in "Use workflow from" under the version label given as `tag`,
@@ -169,7 +172,7 @@ jobs:
   publish:
     name: publish release
     if: ${{ inputs.publish || github.event_name == 'push' }}
-    needs: checksums
+    needs: [checksums, production]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -221,25 +224,32 @@ jobs:
           tag_unmoved
           gh release edit "$TAG" --draft=false
 
-  # Container images made from the archives, not from source: each image holds
-  # the binary SHA256SUMS covers, for linux/amd64 and linux/arm64. The archives
-  # are checked against SHA256SUMS first, and what is about to be pushed is run
-  # first (amd64 is the runner's own architecture): it must report the tag and
-  # serve the services its profile lists. A dry run does all of that and stops
-  # before logging in. A version tag that already exists in the registry is
-  # never pushed over.
+  # Container images made from the archives, not from source: each holds the
+  # binary SHA256SUMS covers, for linux/amd64 and linux/arm64. They are built and
+  # pushed once, here, under a candidate tag (sha-<commit>) that no consumer
+  # follows, and promoted below by digest: the bytes released are the bytes tested.
+  # What is about to be pushed is run first (scripts/image-check.sh; amd64 is the
+  # runner's own architecture). A dry run does all of that and stops before logging
+  # in.
   #
-  # Only this job can write packages, and it uses the runner's Docker and no
-  # third-party action. Whether a new package is public is the registry's
-  # decision, so check it after a release (docs/RELEASING.md).
-  images:
-    name: container images
+  # `edge`, `staging` and `production` are GitHub environments: used here they
+  # exist with no rules and the pipeline runs straight through; a repository admin
+  # can add required reviewers or a wait timer to any of them (docs/RELEASING.md).
+  # Only this job and `promote` can write packages, and they use the runner's Docker
+  # and no third-party action.
+  edge:
+    name: edge, build the images
     needs: checksums
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: edge
     permissions:
       contents: read
       packages: write
+    outputs:
+      image: ${{ steps.images.outputs.image }}
+      full: ${{ steps.images.outputs.full }}
+      core: ${{ steps.images.outputs.core }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -250,6 +260,7 @@ jobs:
           name: release-files
           path: dist
       - name: build, test and push
+        id: images
         env:
           PUSH: ${{ inputs.publish || github.event_name == 'push' }}
           GH_TOKEN: ${{ github.token }}
@@ -260,24 +271,16 @@ jobs:
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/mirror"
           version="${TAG#v}"
           revision=$(git rev-parse HEAD)
-          stable=true
-          case "$TAG" in *-*) stable=false ;; esac
+          candidate="sha-${revision:0:12}"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
           if [ "$PUSH" = true ]; then
             echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-            # Both versions, before either is pushed: half a release is worse
-            # than none.
-            for t in "$version" "$version-core"; do
-              if docker buildx imagetools inspect "$image:$t" > /dev/null 2>&1; then
-                echo "::error::$image:$t is already published and is never overwritten"
-                exit 1
-              fi
-            done
           fi
           docker buildx create --name release --driver docker-container --use > /dev/null
 
           for variant in full core; do
-            if [ "$variant" = core ]; then suffix=_core; tagsuffix=-core; floating=core
-            else suffix=; tagsuffix=; floating=latest; fi
+            if [ "$variant" = core ]; then suffix=_core; tagsuffix=-core
+            else suffix=; tagsuffix=; fi
             ctx="ctx-$variant"
             for arch in amd64 arm64; do
               mkdir -p "$ctx/linux_$arch"
@@ -293,24 +296,106 @@ jobs:
             )
 
             docker buildx build --platform linux/amd64 --load -t "smoke-$variant" "${labels[@]}" "$ctx"
-            [ "$(docker run --rm "smoke-$variant" version)" = "$version" ] \
-              || { echo "::error::the $variant image does not report $version"; exit 1; }
-            got=$(docker run --rm "smoke-$variant" services | cut -f1 | sort | tr '\n' ' ')
-            if [ "$variant" = core ]; then
-              want=$(grep -v '^#' profiles/core.txt | sort | tr '\n' ' ')
-              [ "$got" = "$want" ] || { echo "::error::core image serves: $got; its profile lists: $want"; exit 1; }
-            else
-              [ "$(wc -w <<< "$got")" -gt 100 ] || { echo "::error::the full image serves only: $got"; exit 1; }
-            fi
+            scripts/image-check.sh "smoke-$variant" "$variant" "$version" "dist/mirror_${TAG}_linux_amd64${suffix}.tar.gz"
 
             [ "$PUSH" = true ] || continue
-            tags=(-t "$image:${version}${tagsuffix}")
-            if [ "$stable" = true ]; then tags+=(-t "$image:$floating"); fi
-            docker buildx build --platform linux/amd64,linux/arm64 --push "${tags[@]}" "${labels[@]}" "$ctx"
+            docker buildx build --platform linux/amd64,linux/arm64 --push --metadata-file "md-$variant" \
+              -t "$image:${candidate}${tagsuffix}" "${labels[@]}" "$ctx"
+            echo "$variant=$(jq -r '."containerimage.digest"' "md-$variant")" >> "$GITHUB_OUTPUT"
+          done
+
+  # The copies the registry now holds, pulled back by digest and checked again
+  # against the archives: what `edge` pushed is what is about to be released.
+  staging:
+    name: staging, check what was pushed
+    if: ${{ inputs.publish || github.event_name == 'push' }}
+    needs: edge
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-files
+          path: dist
+      - name: pull and check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ needs.edge.outputs.image }}
+          FULL: ${{ needs.edge.outputs.full }}
+          CORE: ${{ needs.edge.outputs.core }}
+        run: |
+          set -euo pipefail
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for variant in full core; do
+            digest=$FULL suffix=
+            if [ "$variant" = core ]; then digest=$CORE suffix=_core; fi
+            case "$digest" in sha256:*) ;; *) echo "::error::edge pushed no $variant image"; exit 1 ;; esac
+            docker pull --quiet "$IMAGE@$digest"
+            scripts/image-check.sh "$IMAGE@$digest" "$variant" "${TAG#v}" "dist/mirror_${TAG}_linux_amd64${suffix}.tar.gz"
+          done
+
+  # The gate. Nothing below runs until this job does, so this is the one place to
+  # put a required reviewer or a wait timer on the environment.
+  production:
+    name: production, go
+    needs: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    permissions: {}
+    steps:
+      - run: echo "$TAG passed edge and staging; releasing it"
+
+  # The candidates become the release: the same digests, under the version tags,
+  # and under `latest` and `core` unless this is a prerelease. Nothing is built.
+  # A version tag that already exists in the registry is never pushed over, and
+  # neither is tagged if either exists.
+  promote:
+    name: promote the images
+    if: ${{ inputs.publish || github.event_name == 'push' }}
+    needs: [edge, production]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - name: retag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ needs.edge.outputs.image }}
+          FULL: ${{ needs.edge.outputs.full }}
+          CORE: ${{ needs.edge.outputs.core }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          stable=true
+          case "$TAG" in *-*) stable=false ;; esac
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          # Both versions, before either is tagged: half a release is worse than none.
+          for t in "$version" "$version-core"; do
+            if docker buildx imagetools inspect "$IMAGE:$t" > /dev/null 2>&1; then
+              echo "::error::$IMAGE:$t is already published and is never overwritten"
+              exit 1
+            fi
+          done
+          for variant in full core; do
+            digest=$FULL tagsuffix= floating=latest
+            if [ "$variant" = core ]; then digest=$CORE tagsuffix=-core floating=core; fi
+            tags=(-t "$IMAGE:${version}${tagsuffix}")
+            if [ "$stable" = true ]; then tags+=(-t "$IMAGE:$floating"); fi
+            docker buildx imagetools create "${tags[@]}" "$IMAGE@$digest"
             {
-              echo "### $image:${version}${tagsuffix}"
+              echo "### $IMAGE:${version}${tagsuffix}"
               echo '```'
-              docker buildx imagetools inspect "$image:${version}${tagsuffix}"
+              docker buildx imagetools inspect "$IMAGE:${version}${tagsuffix}"
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           done

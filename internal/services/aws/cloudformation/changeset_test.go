@@ -61,3 +61,76 @@ func TestCloudFormationAChangeSetIsExecutedWithItsRequest(t *testing.T) {
 		t.Errorf("after the UPDATE change set the stack is %s, want UPDATE_COMPLETE", status)
 	}
 }
+
+// A change set executes once. "When you execute a change set, CloudFormation
+// deletes all other change sets associated with the stack because they
+// aren't valid for the updated stack" (API reference, ExecuteChangeSet), and
+// one executed is InvalidChangeSetStatus, "The specified change set can't be
+// used to update the stack". DescribeChangeSet answers its ExecutionStatus,
+// AVAILABLE and then EXECUTE_COMPLETE, or OBSOLETE "because the stack was
+// already updated" (DescribeChangeSet). A UsePreviousValue is read when the
+// change set is made: its Parameters are "the input parameters and their
+// values used to create the change set" (DescribeChangeSet). Before, a
+// second change set executed after the first reverted it, one change set
+// executed any number of times, and one made before an UpdateStack undid it.
+func TestCloudFormationAChangeSetExecutesOnce(t *testing.T) {
+	h := newStacks(t)
+	body, _ := json.Marshal(map[string]any{"Parameters": map[string]any{"Key": map[string]any{"Type": "String"}},
+		"Resources": map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}}, "Outputs": map[string]any{"K": map[string]any{"Value": map[string]any{"Ref": "Key"}}}})
+	create := func(cs string, params []any) {
+		t.Helper()
+		if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "once", "ChangeSetName": cs, "TemplateBody": string(body), "Parameters": params}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	status := func(cs string) any {
+		out, err := h.invoke("DescribeChangeSet", map[string]any{"StackName": "once", "ChangeSetName": cs})
+		if err != nil {
+			return err
+		}
+		return out["ExecutionStatus"]
+	}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "once", "TemplateBody": string(body), "Parameters": givenParams("Key", "first")}); err != nil {
+		t.Fatal(err)
+	}
+	create("a", givenParams("Key", "a"))
+	create("b", givenParams("Key", "b"))
+	create("prev", []any{map[string]any{"ParameterKey": "Key", "UsePreviousValue": "true"}})
+	if got := status("a"); got != "AVAILABLE" {
+		t.Errorf("a's ExecutionStatus = %v, want AVAILABLE", got)
+	}
+	desc, _ := h.invoke("DescribeChangeSet", map[string]any{"StackName": "once", "ChangeSetName": "prev"})
+	if want := givenParams("Key", "first"); !reflect.DeepEqual(desc["Parameters"], want) {
+		t.Errorf("prev's Parameters = %v, want %v, the value read when it was made", desc["Parameters"], want)
+	}
+	if _, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "once", "ChangeSetName": "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := status("b"); got != "EXECUTE_COMPLETE" {
+		t.Errorf("b's ExecutionStatus = %v, want EXECUTE_COMPLETE", got)
+	}
+	for _, cs := range []string{"a", "prev"} {
+		if _, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "once", "ChangeSetName": cs}); code(err) != "ChangeSetNotFound" {
+			t.Errorf("ExecuteChangeSet of %s after b answered %v, want ChangeSetNotFound: it was deleted", cs, err)
+		}
+	}
+	if _, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "once", "ChangeSetName": "b"}); code(err) != "InvalidChangeSetStatus" {
+		t.Errorf("a second ExecuteChangeSet of b answered %v, want InvalidChangeSetStatus", err)
+	}
+	if got := h.outputs("once")["K"]; got != "b" {
+		t.Errorf("K = %v, want b", got)
+	}
+	create("later", []any{map[string]any{"ParameterKey": "Key", "UsePreviousValue": true}})
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "once", "TemplateBody": string(body), "Parameters": givenParams("Key", "c")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := status("later"); got != "OBSOLETE" {
+		t.Errorf("after an UpdateStack, later's ExecutionStatus = %v, want OBSOLETE", got)
+	}
+	if _, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "once", "ChangeSetName": "later"}); code(err) != "InvalidChangeSetStatus" {
+		t.Errorf("ExecuteChangeSet of an obsolete change set answered %v, want InvalidChangeSetStatus", err)
+	}
+	if got := h.outputs("once")["K"]; got != "c" {
+		t.Errorf("K = %v, want c, the update's", got)
+	}
+}

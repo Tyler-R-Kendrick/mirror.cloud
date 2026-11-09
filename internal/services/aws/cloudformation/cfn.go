@@ -63,7 +63,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"Description": str(tpl["Description"]), "Parameters": paramDecls(tpl)}}, nil
 	case "CreateStack", "UpdateStack":
-		return p.upsert(ctx, req, name, req.Operation == "UpdateStack", "")
+		out, err := p.upsert(ctx, req, name, req.Operation == "UpdateStack", "")
+		for _, kv := range spi.Entries(ctx, p.col(req, "cfn-cs"), name+":", "", 0) { // a change set is "OBSOLETE ... because the stack was already updated" (DescribeChangeSet)
+			if rec := spi.Decode[map[string]any](kv.Value); err == nil && rec["ExecutionStatus"] == "AVAILABLE" {
+				rec["ExecutionStatus"] = "OBSOLETE"
+				_ = p.col(req, "cfn-cs").Put(ctx, kv.Key, []byte(spi.JSONText(rec)))
+			}
+		}
+		return out, err
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
 	case "UpdateTerminationProtection": // in one transaction, as every write of the record is (settle)
@@ -108,25 +115,45 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"Exports": ex}}, nil
 	case "ExecuteChangeSet":
-		csn := str(req.Input["ChangeSetName"])
-		b, ok, _ := p.col(req, "cfn-cs").Get(ctx, name+":"+csn)
-		if !ok {
-			return nil, &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
+		key, sets := name+":"+str(req.Input["ChangeSetName"]), p.col(req, "cfn-cs")
+		rec, err := p.claimChangeSet(ctx, sets, key) // what CreateChangeSet took that CreateStack and UpdateStack take (the bundle's record)
+		if err != nil {
+			return nil, err
 		}
-		var rec map[string]any // what CreateChangeSet took that CreateStack and UpdateStack take (the bundle's record)
-		_ = json.Unmarshal(b, &rec)
 		for _, k := range []string{"TemplateBody", "Parameters", "NotificationARNs", "Tags", "Capabilities"} {
 			if rec[k] != nil {
 				req.Input[k] = rec[k]
 			}
 		}
-		if _, err := p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE", str(rec["StackId"])); err != nil {
-			return nil, err
+		_, err = p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE", str(rec["StackId"]))
+		if rec["ExecutionStatus"] = "EXECUTE_FAILED"; err == nil { // "CloudFormation deletes all other change sets associated with the stack"
+			for _, kv := range spi.Entries(ctx, sets, name+":", "", 0) {
+				_ = sets.Delete(ctx, kv.Key)
+			}
+			rec["ExecutionStatus"] = "EXECUTE_COMPLETE"
 		}
-		return &spi.Response{Output: map[string]any{}}, nil
+		_ = sets.Put(ctx, key, []byte(spi.JSONText(rec)))
+		return &spi.Response{Output: map[string]any{}}, err
 	default:
 		return nil, spi.NotImplemented("aws.cloudformation", req.Operation, "emulate")
 	}
+}
+
+// claimChangeSet answers the change set stored under key, which it marks EXECUTE_IN_PROGRESS in the
+// transaction that finds it AVAILABLE: a change set executes once, and one executed, failed or being
+// executed is InvalidChangeSetStatus, "The specified change set can't be used to update the stack".
+func (p *Pack) claimChangeSet(ctx context.Context, sets spi.Collection, key string) (rec map[string]any, err error) {
+	err = sets.Txn(ctx, func(tx spi.Tx) error {
+		raw, ok, _ := tx.Get(key)
+		if rec = spi.Decode[map[string]any](raw); !ok {
+			return &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
+		} else if status := str(rec["ExecutionStatus"]); status != "AVAILABLE" { // the wording is a reading
+			return fault("InvalidChangeSetStatus", "ChangeSet ["+str(rec["ChangeSetId"])+"] cannot be executed in its current execution status of ["+status+"]")
+		}
+		rec["ExecutionStatus"] = "EXECUTE_IN_PROGRESS"
+		return tx.Put(key, []byte(spi.JSONText(rec)))
+	})
+	return rec, err
 }
 
 type stack struct {

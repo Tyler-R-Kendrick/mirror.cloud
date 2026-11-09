@@ -503,11 +503,12 @@
             "StackName": "rem",
             "Status": "CREATE_COMPLETE",
             "TemplateBody": "{\"AWSTemplateFormatVersion\":\"2010-09-09\",\"Resources\":{}}",
-            "StackId": "arn:aws:cloudformation:us-east-1:000000000000:stack/rem/5f59f223"
+            "StackId": "arn:aws:cloudformation:us-east-1:000000000000:stack/rem/5f59f223",
+            "ExecutionStatus": "AVAILABLE"
           }
         ]
       },
-      "recut": "ChangeSetSummary declares StackId, \"The ID of the stack with which the change set is associated\" (API reference): the change set's record holds the id minted at CreateChangeSet (step 24).",
+      "recut": "ChangeSetSummary declares StackId, \"The ID of the stack with which the change set is associated\" (API reference): the change set's record holds the id minted at CreateChangeSet (step 24). ChangeSetSummary declares ExecutionStatus, \"If the change set execution status is AVAILABLE, you can execute the change set\" (API reference): cs1 has not been executed.",
       "superseded_members": {
         "Summaries[0].ChangeSetType": "The change set's record keeps its ChangeSetType for ExecuteChangeSet; ChangeSetSummary does not declare it, so the wire drops it, and the pack recorded no such member."
       }

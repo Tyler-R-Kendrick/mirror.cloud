@@ -1340,10 +1340,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if tagFault != "" {
 			return nil, &spi.Fault{Code: tagFault, HTTPStatus: 400, Fault: "client"}
 		}
-		var tags []any
-		if b, ok, _ := p.col(req, "tag").Get(ctx, arn); ok {
-			_ = json.Unmarshal(b, &tags)
-		}
+		b, _, _ := p.col(req, "tag").Get(ctx, arn)
+		tags := spi.Decode[[]any](b)
 		indexes := map[string]int{}
 		for i, tag := range tags {
 			m, _ := tag.(map[string]any)
@@ -1362,7 +1360,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(tags) > 50 {
 			return nil, &spi.Fault{Code: "TooManyTags", HTTPStatus: 400, Fault: "client"}
 		}
-		b, _ := json.Marshal(tags)
+		b, _ = json.Marshal(tags)
 		_ = p.col(req, "tag").Put(ctx, arn, b)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "UntagResource":
@@ -1374,10 +1372,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !validKeys || len(keys) == 0 {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
-		var tags []any
-		if b, ok, _ := p.col(req, "tag").Get(ctx, arn); ok {
-			_ = json.Unmarshal(b, &tags)
-		}
+		b, _, _ := p.col(req, "tag").Get(ctx, arn)
+		tags := spi.Decode[[]any](b)
 		drop := map[string]bool{}
 		for _, key := range keys {
 			value := fmt.Sprint(key)
@@ -1393,7 +1389,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				kept = append(kept, tag)
 			}
 		}
-		b, _ := json.Marshal(kept)
+		b, _ = json.Marshal(kept)
 		_ = p.col(req, "tag").Put(ctx, arn, b)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "ListTagsForResource":

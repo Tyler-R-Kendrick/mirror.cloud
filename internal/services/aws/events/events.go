@@ -289,8 +289,7 @@ func (p *Pack) targetsFor(ctx context.Context, identity spi.Identity, key string
 	if !ok {
 		return []any{}
 	}
-	var rec struct{ Targets []any }
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.Decode[struct{ Targets []any }](b)
 	if rec.Targets == nil {
 		return []any{}
 	}

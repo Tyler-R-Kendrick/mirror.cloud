@@ -223,8 +223,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 					return &spi.Fault{Code: "ValidationException", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
 				}
 			}
-			raw, _ := json.Marshal(item)
-			return tx.Put(key, raw)
+			return tx.Put(key, []byte(spi.JSONText(item)))
 		}); err != nil {
 			return nil, err
 		}

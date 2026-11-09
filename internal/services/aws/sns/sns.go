@@ -722,10 +722,8 @@ func (p *Pack) publishOne(ctx context.Context, req *spi.Request, body string, ms
 	mid := p.deps.Rand.Hex(16)
 	out := map[string]any{"MessageId": mid}
 	if fifo { // a SequenceNumber "continues to increase" (API_Publish): one counter per topic, 20 digits wide
-		var n int64
-		if b, found, _ := p.col(req, "snsseq").Get(ctx, arn); found {
-			_ = json.Unmarshal(b, &n)
-		}
+		b, _, _ := p.col(req, "snsseq").Get(ctx, arn)
+		n := spi.Decode[int64](b)
 		_ = p.col(req, "snsseq").Put(ctx, arn, mustJSON(n+1))
 		out["SequenceNumber"] = fmt.Sprintf("1%019d", n+1)
 	}
@@ -1206,10 +1204,8 @@ func (p *Pack) topicSignatureVersion(ctx context.Context, req *spi.Request, topi
 
 // topicAttr is one of a topic's attributes, and "" when the topic or the attribute is absent.
 func (p *Pack) topicAttr(ctx context.Context, req *spi.Request, topicARN, name string) string {
-	var topic map[string]any
-	if b, found, _ := p.col(req, "topics").Get(ctx, topicName(topicARN)); found {
-		_ = json.Unmarshal(b, &topic)
-	}
+	b, _, _ := p.col(req, "topics").Get(ctx, topicName(topicARN))
+	topic := spi.Decode[map[string]any](b)
 	return str(spi.Object(topic["attrs"])[name])
 }
 

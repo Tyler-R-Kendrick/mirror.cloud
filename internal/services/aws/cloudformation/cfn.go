@@ -228,8 +228,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		} else if id = cmp.Or(old.ID, id); found || update { // an update reserves nothing: it writes only over what it read
 			return nil
 		}
-		raw, _ = json.Marshal(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags})
-		return tx.Put(name, raw)
+		return tx.Put(name, []byte(spi.JSONText(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags})))
 	}); err != nil {
 		return nil, err
 	}
@@ -311,8 +310,7 @@ func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take f
 		} else if next.Status == "DELETE_COMPLETE" {
 			return tx.Delete(name)
 		}
-		raw, _ = json.Marshal(next)
-		return tx.Put(name, raw)
+		return tx.Put(name, []byte(spi.JSONText(next)))
 	})
 	return cur, wrote, err
 }

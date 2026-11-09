@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
@@ -149,6 +150,10 @@ func cmdUp(args []string) error {
 			fmt.Fprintln(os.Stderr, "WARNING: no authentication. Do not expose this process to untrusted networks. Isolation is network-level and account+region namespacing. An auth token will never be added.")
 		}
 		fmt.Fprintf(os.Stderr, "mirror %s listening on %s://%s\n", runtime.Version, tlsScheme(cfg.TLSCert), addr)
+		// Starting decoded every model on every core and left the garbage of that
+		// behind, a third of the resident set of a full build; hand it back
+		// now that the port is bound, without making the start wait for it.
+		go debug.FreeOSMemory()
 		if len(cfg.Services) == 0 {
 			fmt.Fprintln(os.Stderr, "services: all")
 		} else {

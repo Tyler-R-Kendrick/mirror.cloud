@@ -12,7 +12,7 @@ Pick one. All of them are the same program.
 | the 12 services most test suites use ([`profiles/core.txt`](../profiles/core.txt)) | `…_core` archive, or image `mirror:<version>-core` | 8 MB | 21 MB |
 | exactly the services you name | build it yourself, below | smaller still | smaller still |
 
-Sizes are linux/amd64. The core build also starts in under a second and uses about 60 MB of memory, against about 5 seconds and 415 MB for the full one, because it does not decode the models of services you will not call. If you do not know that you need the rest, take core.
+Sizes are linux/amd64. The core build also starts in under a second and uses about 60 MB of memory, against about 3 seconds and 340 MB for the full one, because it does not decode the models of services you will not call. If you do not know that you need the rest, take core.
 
 ### A release archive
 

@@ -4525,6 +4525,22 @@ var mutants = []mutant{
 		run:  "TestCloudFormationACycleNamesOnlyItsMembers",
 	},
 	{
+		name: "cloudformation-an-output-holds-a-list",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `"OutputValue": text(p.resolve(asMap(outs[k])["Value"], st.Refs, req, name))`,
+		new:  `"OutputValue": p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationAnOutputIsText",
+	},
+	{
+		name: "cloudformation-a-list-text-keeps-its-brackets",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `return strings.Join(parts, ",")`,
+		new:  `return "[" + strings.Join(parts, ",") + "]"`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationAnOutputIsText",
+	},
+	{
 		name: "cloudformation-select-of-an-unmade-list-is-known",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
 		old:  `if i, isInt := coerce(index, "Integer"); strings.Contains(spi.JSONText([]any{index, list}), unknown) {`,
@@ -4551,8 +4567,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-a-sub-of-an-unmade-resource-is-its-text",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `} else if p.unmade(name, refs) {`,
-		new:  `} else if false {`,
+		old:  `ok || p.unmade(name, refs) { // a list as its text, as Fn::Join's`,
+		new:  `ok || false { // a list as its text, as Fn::Join's`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationSelectsByWhatItKnows",
 	},

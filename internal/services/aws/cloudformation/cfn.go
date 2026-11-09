@@ -270,7 +270,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		}
 	}
 	for _, k := range slices.Sorted(maps.Keys(outs)) {
-		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)})
+		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": text(p.resolve(asMap(outs[k])["Value"], st.Refs, req, name))})
 	}
 	if err := selected(st.Outputs); err != nil {
 		return fail(err)
@@ -1204,6 +1204,19 @@ func getAtt(g any, refs map[string]string) string {
 	return cmp.Or(refs[logical+"."+attr], refs[logical])
 }
 
+// text is a value as a String holds it, an output's OutputValue (the model's String) or a ${Name} in a
+// Fn::Sub: a list's members comma-joined, as a CommaDelimitedList is written, anything else its text.
+func text(v any) string {
+	if list, isList := v.([]any); isList {
+		parts := []string{}
+		for _, x := range list {
+			parts = append(parts, str(x))
+		}
+		return strings.Join(parts, ",")
+	}
+	return spi.JSONText(v)
+}
+
 // unmade is whether name is a resource of the template read whose id refs does not hold yet: what reads it
 // is unknown until it is made (unknown).
 func (p *Pack) unmade(name string, refs map[string]string) bool {
@@ -1314,10 +1327,8 @@ func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack stri
 			return str(p.resolve(v, refs, req, stack))
 		} else if logical, attr, ok := strings.Cut(name, "."); ok {
 			return getAtt([]any{logical, attr}, refs)
-		} else if p.unmade(name, refs) {
-			return unknown
-		} else if v, ok := p.ref(name, refs, req, stack); ok {
-			return v
+		} else if _, ok := p.ref(name, refs, req, stack); ok || p.unmade(name, refs) { // a list as its text, as Fn::Join's
+			return text(p.resolve(map[string]any{"Ref": name}, refs, req, stack))
 		}
 		return m
 	})

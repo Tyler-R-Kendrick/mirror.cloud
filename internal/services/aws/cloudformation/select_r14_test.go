@@ -85,3 +85,25 @@ func TestCloudFormationChecksOnlyWhatItMakes(t *testing.T) {
 		t.Errorf("CreateStack with the Fn::Select in a resource its condition leaves out answered %v", err)
 	}
 }
+
+// An output's OutputValue is a String (the model's Output shape): a Ref to a
+// list, a CommaDelimitedList or AWS::NotificationARNs, answers its members
+// comma-joined, as a CommaDelimitedList is written, and so does a ${Name} of
+// one in a Fn::Sub, as a Fn::Join of it does. Every DescribeStacks answer the
+// tests read is held to the model's shapes (conforms). Before, the output
+// held the list, which no String shape can, and the Fn::Sub the parameter's
+// text as given, spaces and all.
+func TestCloudFormationAnOutputIsText(t *testing.T) {
+	h := newStacks(t)
+	ref := func(n string) any { return map[string]any{"Ref": n} }
+	body, _ := json.Marshal(map[string]any{"Parameters": map[string]any{"L": map[string]any{"Type": "CommaDelimitedList", "Default": "a, b ,c"}},
+		"Resources": map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}},
+		"Outputs": map[string]any{"L": map[string]any{"Value": ref("L")}, "N": map[string]any{"Value": ref("AWS::NotificationARNs")},
+			"S": map[string]any{"Value": map[string]any{"Fn::Sub": "<${L}>"}}, "J": map[string]any{"Value": map[string]any{"Fn::Join": []any{",", ref("L")}}}}})
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "texts", "TemplateBody": string(body), "NotificationARNs": []any{"arn:a", "arn:b"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.outputs("texts"); got["L"] != "a,b,c" || got["N"] != "arn:a,arn:b" || got["S"] != "<a,b,c>" || got["J"] != "a,b,c" {
+		t.Errorf("outputs = %v, want L a,b,c, N arn:a,arn:b, S <a,b,c> and J a,b,c", got)
+	}
+}

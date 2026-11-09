@@ -319,10 +319,8 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		raw, found, _ := tx.Get(name)
 		if err := claim(stx.Collection("cfn-cs"), cs); err != nil { // a refusal below puts it back: nothing is written
 			return err
-		} else if _ = json.Unmarshal(raw, &old); update && !found { // "Stack [x] does not exist": an update makes no stack
-			return invalid("Stack [" + name + "] does not exist")
-		} else if update && !reflect.DeepEqual(old, loaded) {
-			return errStale // changed since its previous values were read: read again
+		} else if _ = json.Unmarshal(raw, &old); update && !reflect.DeepEqual(old, loaded) {
+			return errStale // changed, or deleted, since its previous values were read: read again ("does not exist")
 		} else if found && !update && old.Status == "REVIEW_IN_PROGRESS" && old.ID == id {
 			found, old = false, stack{} // a CREATE change set's stack, which its execution makes
 		}

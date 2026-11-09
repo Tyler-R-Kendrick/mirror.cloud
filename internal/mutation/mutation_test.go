@@ -4851,10 +4851,10 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-an-update-of-a-deleted-stack-makes-it",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `} else if _ = json.Unmarshal(raw, &old); update && !found {`,
-		new:  `} else if _ = json.Unmarshal(raw, &old); false {`,
+		old:  `} else if _ = json.Unmarshal(raw, &old); update && !reflect.DeepEqual(old, loaded) {`,
+		new:  `} else if _ = json.Unmarshal(raw, &old); update && !reflect.DeepEqual(old, loaded) && found {`,
 		pkg:  "./internal/services/aws/cloudformation",
-		run:  "TestRV14UpdateVsDeleteResurrects|TestCloudFormationAnUpdateMakesNoStack",
+		run:  "TestRV14UpdateVsDeleteResurrects|TestCloudFormationAnUpdateMakesNoStack|TestRV15UpdateMissingPrecedence",
 	},
 	{
 		name: "cloudformation-claim-a-deleted-change-set",
@@ -4977,12 +4977,12 @@ var mutants = []mutant{
 		run:  "TestCloudFormationACreateChangeSetMakesAStackInReview|TestCloudFormationAStackInReviewIsReserved",
 	},
 	{
-		name: "cloudformation-an-update-makes-its-stack",
+		name: "cloudformation-a-stale-update-keeps-what-it-read",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `} else if _ = json.Unmarshal(raw, &old); update && !found {`,
-		new:  `} else if _ = json.Unmarshal(raw, &old); !update && !found {`,
+		old:  "\t\treq.Input = given\n",
+		new:  "\t\t_ = given\n",
 		pkg:  "./internal/services/aws/cloudformation",
-		run:  "TestCloudFormationAnUpdateMakesNoStack|TestRV15UpdateMissingPrecedence|TestRV14UpdateVsDeleteResurrects",
+		run:  "TestCloudFormationAnUpdateReadsPreviousValuesFromTheRecordItReserves",
 	},
 	{
 		name: "cloudformation-an-output-holds-a-list",

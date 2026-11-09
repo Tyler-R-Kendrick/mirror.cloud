@@ -23,6 +23,9 @@ jobs:
       GOFLAGS: -count=1
     steps:
       - uses: actions/checkout@v6
+        with:
+          # The ratchet's baseline guard in internal/check skips without history.
+          fetch-depth: 0
       - uses: ./.github/actions/go
         with:
           cache: test
@@ -42,6 +45,8 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: ./.github/actions/go
         with:
           cache: coverage
@@ -72,3 +77,30 @@ jobs:
       - name: known red triage
         if: ${{ !cancelled() }}
         run: make known-red RUN=ci-run.log
+
+  # A scheduled run that fails tells nobody by itself. This keeps one open issue
+  # titled "nightly failed" and adds each failing run to it.
+  report:
+    needs: [unit, coverage, race]
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: open or update the nightly failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RESULTS: unit ${{ needs.unit.result }}, coverage ${{ needs.coverage.result }}, race ${{ needs.race.result }}
+        run: |
+          set -euo pipefail
+          body="$RUN failed on $(date -u +%F): $RESULTS."
+          n=$(gh issue list --state open --search 'in:title "nightly failed"' --json number,title \
+                --jq '[.[] | select(.title == "nightly failed")][0].number // empty')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body "$body"
+          else
+            gh issue create --title "nightly failed" --body "$body"
+          fi

@@ -140,14 +140,15 @@ test-race:
 known-red:
 	@python3 scripts/known-red.py $(RUN)
 
-# One pass: every package test-unit runs, each test binary covering the whole
+# One pass: every package test-unit runs (the same `go list` line, which
+# test/ci pins), each test binary covering the whole
 # module (-coverpkg=./...), so a block counts as covered when any test reaches
 # it. That is a superset of what the two passes this replaced measured -- each
 # package's own tests over itself, plus 25 integration packages over the module
 # -- and it runs each of those 25 once instead of twice. A covered run is never
 # cached, so this is also an uncached run of every test, on every CI run.
 test-coverage:
-	@packages="$$($(GO) list ./... | grep -v '/internal/mutation$$' | grep -v '/internal/generated/')"; $(GO) test $$packages -coverpkg=./... -covermode=atomic -coverprofile=coverage-all.out
+	$(GO) test $$($(GO) list ./... | grep -v '/internal/mutation$$') -coverpkg=./... -covermode=atomic -coverprofile=coverage-all.out
 	@# internal/generated is mirrorgen output pinned by specs/mirror.lock; its
 	@# correctness is asserted by regeneration byte-identity and the
 	@# internal/check gates, not by covering generated accessors. Every test

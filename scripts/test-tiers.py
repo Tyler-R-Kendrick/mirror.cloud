@@ -33,7 +33,9 @@ TIERS = [
     ("chaos", r"^internal/chaos$", r".*"),
     ("bdd", r"^test/behavior(/.*)?$|^test/terraform$", r".*"),
     ("contract", r"^internal/conformance$|^internal/proto(/.*)?$|^test/sdk/go(/.*)?$", r".*"),
-    ("equivalence", r"^internal/equivalence$|^internal/bundled$", r".*"),
+    ("equivalence", r"^internal/equivalence$", r".*"),
+    # What `make equivalence` runs of internal/bundled; the rest of it is unit.
+    ("equivalence", r"^internal/bundled$", r"^(TestEveryBundleBuilds|TestBundlesAreRegistered|TestShadowBundlesAreStillGated)$"),
     ("snapshot", r"^internal/(edge|identity|mock|runtime|specdiff)$", r".*"),
     ("unit", r".*", r".*"),
 ]

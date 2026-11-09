@@ -486,8 +486,9 @@ func attribute(refs map[string]string, req *spi.Request, typ, logical, id string
 // unknown stands for an id known only once its resource is made, and in order for one not yet ordered.
 const unknown = "\uffff"
 
-// noValue is what a Ref to AWS::NoValue answers, and resolve drops.
-const noValue = "\ufffe"
+// noValue is what a Ref to AWS::NoValue answers, and resolve drops; unselected is what a Fn::Select of no
+// element answers, which sound refuses.
+const noValue, unselected = "\ufffe", "\uffffFn::Select"
 
 // planID is the id a resource named n is made with, which a Ref to it answers: n in the form its
 // service gives it back. A queue's URL (its endpoint's business), a KMS key's id and a REST API's are
@@ -1083,6 +1084,25 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 		if s, ok := t["Fn::Sub"]; ok {
 			return p.fnSub(s, refs, req, stack)
 		}
+		if args, ok := t["Fn::Select"]; ok { // [index, listOfObjects]: "a single object from a list of objects by index"
+			args := append(spi.Slice(args), nil, nil)
+			i, isInt := coerce(p.resolve(args[0], refs, req, stack), "Integer")
+			if list := spi.Slice(p.resolve(args[1], refs, req, stack)); isInt && i.(int) >= 0 && i.(int) < len(list) {
+				return list[i.(int)]
+			}
+			return unselected // "doesn't check ... if the index is out of bounds": the stack's error (sound)
+		}
+		if args, ok := t["Fn::Split"]; ok { // [delimiter, source string]: "A list of string values"
+			args, parts := append(spi.Slice(args), nil, nil), []any{}
+			for _, part := range strings.Split(str(p.resolve(args[1], refs, req, stack)), str(args[0])) {
+				parts = append(parts, part)
+			}
+			return parts
+		}
+		if region, ok := t["Fn::GetAZs"]; ok { // "" is the stack's Region; three zones, a reading
+			r := cmp.Or(str(p.resolve(region, refs, req, stack)), req.Identity.Region)
+			return []any{r + "a", r + "b", r + "c"}
+		}
 		if f, ok := t["Fn::FindInMap"]; ok {
 			if v, _, found := findInMap(f, refs, p.mappings); found {
 				return v
@@ -1148,7 +1168,9 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 	for _, o := range asMap(tpl["Outputs"]) {
 		values = append(values, p.resolve(asMap(o)["Value"], refs, req, stack))
 	}
-	if strings.Contains(spi.JSONText(values), noValue) {
+	if text := spi.JSONText(values); strings.Contains(text, unselected) && stack != "" { // the wording is a reading
+		return invalid("Template error: Fn::Select cannot select nonexistent value")
+	} else if strings.Contains(text, noValue) {
 		return invalid("Template error: AWS::NoValue removes a property or a list element; it cannot be part of a value")
 	}
 	var err error // without a DefaultValue, "Fn::FindInMap raises an error when a key is not found"

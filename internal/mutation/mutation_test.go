@@ -4431,8 +4431,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-make-a-stack-with-an-unsettled-condition",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `if _, settled := refs["Condition::"+c]; err == nil && !settled {`,
-		new:  `if _, settled := refs["Condition::"+c]; err == nil && !settled && false {`,
+		old:  `} else if unsettled := missing("Conditions", "Condition::"); len(unsettled) > 0 && err == nil {`,
+		new:  `} else if unsettled := missing("Conditions", "Condition::"); len(unsettled) < 0 && err == nil {`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationSettlesConditionsOnPseudoParameters",
 	},

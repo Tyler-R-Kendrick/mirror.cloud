@@ -2699,20 +2699,13 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if value := spi.Integer(req.Input["MaxParts"]); value != 0 {
 		maxParts = value
 	}
-	if req.HTTP != nil {
-		if raw := spi.Str(req.Input["PartNumberMarker"]); raw != "" {
-			var err error
-			marker, err = strconv.Atoi(raw)
+	for member, into := range map[string]*int{"PartNumberMarker": &marker, "MaxParts": &maxParts} { // a REST request's text
+		if raw := spi.Str(req.Input[member]); raw != "" && req.HTTP != nil {
+			n, err := strconv.Atoi(raw)
 			if err != nil {
 				return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 			}
-		}
-		if raw := spi.Str(req.Input["MaxParts"]); raw != "" {
-			var err error
-			maxParts, err = strconv.Atoi(raw)
-			if err != nil {
-				return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
+			*into = n
 		}
 	}
 	if maxParts == 0 {

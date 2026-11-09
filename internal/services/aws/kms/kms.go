@@ -128,33 +128,24 @@ func (p *crypto) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 			out["PrivateKeyPlaintext"] = priv
 		}
 		return &spi.Response{Output: out}, nil
-	case "GenerateMac":
+	case "GenerateMac", "VerifyMac", "Sign", "Verify":
+		// ponytail: Sign and Verify are HMAC-SHA256 over Message, not RSA/ECDSA. Upgrade if SigningAlgorithm is RSASSA_*.
 		mac, err := p.hmacMsg(ctx, req)
 		if err != nil {
 			return nil, err
 		}
-		return &spi.Response{Output: map[string]any{"Mac": mac, "KeyId": p.resolve(ctx, req, spi.Str(req.Input["KeyId"]))}}, nil
-	case "VerifyMac":
-		mac, err := p.hmacMsg(ctx, req)
-		if err != nil {
-			return nil, err
+		out := map[string]any{"KeyId": p.resolve(ctx, req, spi.Str(req.Input["KeyId"]))}
+		switch req.Operation {
+		case "GenerateMac":
+			out["Mac"] = mac
+		case "VerifyMac":
+			out["MacValid"] = hmac.Equal(mac, blob(req.Input["Mac"]))
+		case "Sign":
+			out["Signature"], out["SigningAlgorithm"] = mac, spi.First(req.Input, "SigningAlgorithm")
+		case "Verify":
+			out["SignatureValid"] = hmac.Equal(mac, blob(req.Input["Signature"]))
 		}
-		want := blob(req.Input["Mac"])
-		return &spi.Response{Output: map[string]any{"MacValid": hmac.Equal(mac, want), "KeyId": p.resolve(ctx, req, spi.Str(req.Input["KeyId"]))}}, nil
-	case "Sign":
-		// ponytail: HMAC-SHA256 over Message, not RSA/ECDSA. Upgrade if SigningAlgorithm is RSASSA_*.
-		mac, err := p.hmacMsg(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		return &spi.Response{Output: map[string]any{"Signature": mac, "KeyId": p.resolve(ctx, req, spi.Str(req.Input["KeyId"])), "SigningAlgorithm": spi.First(req.Input, "SigningAlgorithm")}}, nil
-	case "Verify":
-		mac, err := p.hmacMsg(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		sig := blob(req.Input["Signature"])
-		return &spi.Response{Output: map[string]any{"SignatureValid": hmac.Equal(mac, sig), "KeyId": p.resolve(ctx, req, spi.Str(req.Input["KeyId"]))}}, nil
+		return &spi.Response{Output: out}, nil
 	case "GetParametersForImport":
 		return &spi.Response{Output: map[string]any{
 			"KeyId":             p.resolve(ctx, req, spi.Str(req.Input["KeyId"])),

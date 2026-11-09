@@ -158,7 +158,7 @@ func (p *Pack) createChangeSet(ctx context.Context, req *spi.Request, name strin
 		return nil, err
 	}
 	prefix := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account
-	rec := map[string]any{"ChangeSetName": csn, "ChangeSetId": prefix + ":changeSet/" + csn + "/" + p.deps.Rand.Hex(8), "StackName": name,
+	rec := map[string]any{"ChangeSetName": csn, "ChangeSetId": prefix + ":changeSet/" + csn + "/" + p.deps.Rand.Hex(8), "StackName": name, "TemplateBody": body, // a TemplateURL's too
 		"ChangeSetType": cmp.Or(str(req.Input["ChangeSetType"]), "UPDATE"), "Status": "CREATE_COMPLETE", "ExecutionStatus": "AVAILABLE",
 		"StackId": prefix + ":stack/" + name + "/" + p.deps.Rand.Hex(8)}
 	for _, k := range changeSetMembers {

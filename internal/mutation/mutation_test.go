@@ -4525,6 +4525,14 @@ var mutants = []mutant{
 		run:  "TestCloudFormationACycleNamesOnlyItsMembers",
 	},
 	{
+		name: "cloudformation-a-change-set-forgets-the-template-it-read",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `"StackName": name, "TemplateBody": body, // a TemplateURL's too`,
+		new:  `"StackName": name, // a TemplateURL's too`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationAChangeSetKeepsTheTemplateItRead",
+	},
+	{
 		name: "cloudformation-a-change-set-summary-is-the-whole-record",
 		file: filepath.Join("behavior", "aws", "cloudformation", "service.yaml"),
 		old:  "Summaries: >-\n        items.map(c, merge({'ChangeSetId'",

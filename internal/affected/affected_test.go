@@ -313,11 +313,28 @@ func TestATestChangeReachesItsOwnPackage(t *testing.T) {
 // The CI machinery selects everything, so race, fuzz and the gates run in
 // full on a pull request that changes how they are selected or run.
 func TestMachinerySelectsEverything(t *testing.T) {
+	// The whole list, pinned: dropping an entry is a change to what pull
+	// requests run, and has to be made here as well.
+	want := []string{
+		"Makefile",
+		".github/workflows/ci.yml",
+		".github/actions/**",
+		"scripts/fuzz.sh",
+		"scripts/fuzz-targets.txt",
+		"scripts/shard.py",
+		"scripts/ci-plan.py",
+		"test/race-costs.json",
+		"cmd/affected/**",
+		"internal/affected/**",
+	}
+	if strings.Join(Machinery, "\n") != strings.Join(want, "\n") {
+		t.Errorf("Machinery is\n%q\nwant\n%q", Machinery, want)
+	}
 	g, _ := moduleGraph(t)
 	for _, p := range []string{
 		"Makefile", ".github/workflows/ci.yml", ".github/actions/go/action.yml",
 		"scripts/fuzz.sh", "scripts/fuzz-targets.txt", "scripts/shard.py", "scripts/ci-plan.py",
-		"test/race-costs.json", "cmd/affected/affected.go", "cmd/affected/testdata/golden.json",
+		"test/race-costs.json", "cmd/affected/main.go", "internal/affected/affected.go",
 	} {
 		r := g.selectFor([]string{p})
 		if !r.all || len(r.linkedList()) != len(g.pkgs) {

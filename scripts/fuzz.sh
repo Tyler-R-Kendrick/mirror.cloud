@@ -31,7 +31,9 @@ if [[ -n "$listed" ]]; then
   found=$(go list -e -f '{{.ImportPath}}{{if .Error}} ERR {{.Error}}{{end}}' $listed) || {
     echo "fuzz: go list failed on the packages $list names" >&2; exit 1
   }
-  if grep ' ERR ' <<<"$found" || (( $(wc -l <<<"$found") != $(wc -l <<<"$listed") )); then
+  # grep -c . counts non-empty lines: an empty stdout (a pattern that matched
+  # no package) is 0, where wc -l would count the here-string's newline as 1.
+  if grep ' ERR ' <<<"$found" || (( $(grep -c . <<<"$found") != $(grep -c . <<<"$listed") )); then
     echo "fuzz: $list names a package this module does not have" >&2; exit 1
   fi
 fi

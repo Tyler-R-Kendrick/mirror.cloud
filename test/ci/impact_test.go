@@ -327,6 +327,13 @@ func TestFuzzScriptCheckIgnoresGoStderr(t *testing.T) {
 	if err != nil || !strings.Contains(out, "hold no fuzz target") || !strings.Contains(out, "go: downloading") {
 		t.Errorf("the check failed on real packages with go: downloading on stderr: err=%v\n%s", err, out)
 	}
+	// A pattern that matches no package prints nothing on stdout; that is a
+	// package the list names and the module does not have.
+	none := filepath.Join(dir, "none")
+	os.WriteFile(none, []byte("./profiles/... FuzzX\n"), 0o644)
+	if out, err := run(t, root, append(env, "FUZZ_TARGETS="+none), "bash", filepath.Join(root, "scripts", "fuzz.sh")); err == nil || !strings.Contains(out, "does not have") {
+		t.Errorf("a pattern matching no package passed: err=%v\n%s", err, out)
+	}
 	// And a stale package still fails through the same noise.
 	targets := filepath.Join(dir, "targets")
 	os.WriteFile(targets, []byte("./internal/no/such/package FuzzX\n"), 0o644)

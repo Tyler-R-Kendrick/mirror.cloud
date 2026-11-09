@@ -457,8 +457,9 @@
       },
       "output": {
         "Id": "arn:aws:cloudformation:us-east-1:000000000000:changeSet/cs1/7c589129",
-        "StackId": "arn:aws:cloudformation:us-east-1:000000000000:stack/rem"
-      }
+        "StackId": "arn:aws:cloudformation:us-east-1:000000000000:stack/rem/5f59f223"
+      },
+      "recut": "CreateChangeSet answers \"The unique ID of the stack\" (API reference, CreateChangeSetOutput), a stack id, arn:aws:cloudformation:<region>:<account>:stack/<name>/<id>: rem does not exist, so the id is minted with the change set, and its execution makes the stack under it. The pack answered arn:...:stack/rem, which is no stack's id."
     },
     {
       "operation": "DescribeChangeSet",
@@ -501,9 +502,14 @@
             "ChangeSetName": "cs1",
             "StackName": "rem",
             "Status": "CREATE_COMPLETE",
-            "TemplateBody": "{\"AWSTemplateFormatVersion\":\"2010-09-09\",\"Resources\":{}}"
+            "TemplateBody": "{\"AWSTemplateFormatVersion\":\"2010-09-09\",\"Resources\":{}}",
+            "StackId": "arn:aws:cloudformation:us-east-1:000000000000:stack/rem/5f59f223"
           }
         ]
+      },
+      "recut": "ChangeSetSummary declares StackId, \"The ID of the stack with which the change set is associated\" (API reference): the change set's record holds the id minted at CreateChangeSet (step 24).",
+      "superseded_members": {
+        "Summaries[0].ChangeSetType": "The change set's record keeps its ChangeSetType for ExecuteChangeSet; ChangeSetSummary does not declare it, so the wire drops it, and the pack recorded no such member."
       }
     },
     {

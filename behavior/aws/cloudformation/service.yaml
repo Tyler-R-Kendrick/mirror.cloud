@@ -298,8 +298,17 @@ operations:
       - cond: "size(bytes(string(input.TemplateBody))) <= 51200"
         error: Validation
         message: "1 validation error detected: Value at 'templateBody' failed to satisfy constraint: Member must have length less than or equal to 51200"
+      # NotificationARNs: "Maximum number of 5 items", as CreateStack's.
+      - cond: "!('NotificationARNs' in input) || size(input.NotificationARNs) <= 5"
+        error: Validation
+        message: "1 validation error detected: Value at 'notificationARNs' failed to satisfy constraint: Member must have length less than or equal to 5"
     effects:
       - generate: { bind: csid, kind: hex, bytes: 8 }
+      - generate: { bind: sid, kind: hex, bytes: 8 }
+      # The change set holds what CreateChangeSet takes that CreateStack and
+      # UpdateStack take, and ExecuteChangeSet makes or updates the stack with
+      # it: its parameters, NotificationARNs, tags and capabilities, and the
+      # id of the stack, minted here for a CREATE change set.
       - create:
           resource: changeset
           record:
@@ -308,14 +317,20 @@ operations:
               'arn:aws:cloudformation:' + identity.region + ':'
               + identity.account + ':changeSet/' + string(input.ChangeSetName)
               + '/' + fx.csid
+            ChangeSetType: "'ChangeSetType' in input ? string(input.ChangeSetType) : 'UPDATE'"
             StackName: string(input.StackName)
+            StackId: >-
+              s_found ? string(s.ID) : 'arn:aws:cloudformation:' + identity.region + ':'
+              + identity.account + ':stack/' + string(input.StackName) + '/' + fx.sid
             Status: "'CREATE_COMPLETE'"
             TemplateBody: string(input.TemplateBody)
+            Parameters: "'Parameters' in input ? input.Parameters : []"
+            NotificationARNs: "'NotificationARNs' in input ? input.NotificationARNs : null"
+            Tags: "'Tags' in input ? input.Tags : []"
+            Capabilities: "'Capabilities' in input ? input.Capabilities : []"
     output:
       Id: rec.ChangeSetId
-      StackId: >-
-        'arn:aws:cloudformation:' + identity.region + ':' + identity.account
-        + ':stack/' + string(input.StackName)
+      StackId: rec.StackId
 
   # The pack answers the whole stored record, TemplateBody included; the
   # response shape does not declare TemplateBody, so the bundle answers the
@@ -329,7 +344,12 @@ operations:
       ChangeSetId: cs.ChangeSetId
       ChangeSetName: cs.ChangeSetName
       StackName: cs.StackName
+      StackId: "'StackId' in cs ? cs.StackId : null"
       Status: cs.Status
+      Parameters: "'Parameters' in cs ? cs.Parameters : []"
+      NotificationARNs: "'NotificationARNs' in cs && cs.NotificationARNs != null ? cs.NotificationARNs : []"
+      Tags: "'Tags' in cs ? cs.Tags : []"
+      Capabilities: "'Capabilities' in cs ? cs.Capabilities : []"
 
   ListChangeSets:
     list:

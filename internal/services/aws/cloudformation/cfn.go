@@ -62,7 +62,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"Description": str(tpl["Description"]), "Parameters": paramDecls(tpl)}}, nil
 	case "CreateStack", "UpdateStack":
-		return p.upsert(ctx, req, name, req.Operation == "UpdateStack")
+		return p.upsert(ctx, req, name, req.Operation == "UpdateStack", "")
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
 	case "UpdateTerminationProtection": // in one transaction, as every write of the record is (settle)
@@ -113,10 +113,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
 		}
-		var rec map[string]any
+		var rec map[string]any // what CreateChangeSet took that CreateStack and UpdateStack take (the bundle's record)
 		_ = json.Unmarshal(b, &rec)
-		req.Input["TemplateBody"] = rec["TemplateBody"]
-		if _, err := p.upsert(ctx, req, name, true); err != nil {
+		for _, k := range []string{"TemplateBody", "Parameters", "NotificationARNs", "Tags", "Capabilities"} {
+			if rec[k] != nil {
+				req.Input[k] = rec[k]
+			}
+		}
+		if _, err := p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE", str(rec["StackId"])); err != nil {
 			return nil, err
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -142,11 +146,13 @@ type res struct {
 	Name, Status, Reason    string `json:",omitempty"`
 }
 
-func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool) (*spi.Response, error) {
+// upsert makes the stack named name, or updates it, a create under id when one is given (a CREATE change
+// set's, which it answered).
+func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string) (*spi.Response, error) {
 	if name == "" {
 		return nil, invalid("StackName required")
 	}
-	id := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name + "/" + p.deps.Rand.Hex(8)
+	id = cmp.Or(id, "arn:aws:cloudformation:"+req.Identity.Region+":"+req.Identity.Account+":stack/"+name+"/"+p.deps.Rand.Hex(8))
 	if cur, err := p.load(ctx, req, name); err == nil && update { // the id an update's AWS::StackId answers
 		id = cur.ID
 		previous(req.Input, cur)

@@ -2078,3 +2078,44 @@ func TestCloudFormationAChangeSetIsValidatedWhenCreated(t *testing.T) {
 		t.Errorf("ExecuteChangeSet of the good change set: %v, resources %v", err, h.statuses("cs"))
 	}
 }
+
+// A record written before conditions were settled into the stack's Refs (round
+// 9) holds none, so the previous template's Fn::If read as written, and an
+// update that changes nothing about the resource saw a change to it: the
+// parameter below was overwritten, and one whose replacing property took a
+// Fn::If would have been replaced. The conditions are settled for the
+// previous template too, from the record's parameters and the stack's pseudo
+// parameters, so the unchanged parameter is not called (its version stays 1).
+func TestCloudFormationAnOldRecordSettlesItsConditions(t *testing.T) {
+	h := newStacks(t)
+	template := func(extra bool) string {
+		resources := map[string]any{"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "oldc-p", "Type": "String",
+			"Value": map[string]any{"Fn::If": []any{"East", "e", "w"}}}}}
+		if extra {
+			resources["Q"] = nameable()["Queue"]
+		}
+		body, _ := json.Marshal(map[string]any{"Conditions": map[string]any{"East": map[string]any{"Fn::Equals": []any{map[string]any{"Ref": "AWS::Region"}, "us-east-1"}}},
+			"Resources": resources})
+		return string(body)
+	}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "oldc", "TemplateBody": template(false)}); err != nil {
+		t.Fatal(err)
+	}
+	record := h.record("oldc") // the shape before round 9: no Condition::* and no AWS::StackId in Refs
+	refs := asMap(record["Refs"])
+	for k := range refs {
+		if strings.HasPrefix(k, "Condition::") || k == "AWS::StackId" {
+			delete(refs, k)
+		}
+	}
+	raw, _ := json.Marshal(record)
+	if err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "oldc", raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "oldc", "TemplateBody": template(true)}); err != nil {
+		t.Fatalf("UpdateStack of an old record: %v", err)
+	}
+	if got, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": "oldc-p"}); err != nil || str(asMap(got["Parameter"])["Value"]) != "e" || spi.JSONText(asMap(got["Parameter"])["Version"]) != "1" {
+		t.Errorf("the unchanged parameter is %v (%v), want e at version 1", got, err)
+	}
+}

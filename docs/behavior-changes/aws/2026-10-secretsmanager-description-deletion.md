@@ -583,7 +583,12 @@ The oracle is AWS's documentation as it ships in the vendored model
     `Outputs` `[]` (round 9 left them null); by its name it does not exist,
     and the name is free. Nothing changes it: `UpdateTerminationProtection`
     by its stack id is "does not exist" (round 9 protected the deleted
-    record). Before, neither attribute
+    record).
+  - An update settles the previous template's conditions again, from the
+    record's parameters and the stack's pseudo parameters, before it
+    compares: a record written before round 9 holds none in its `Refs`, so
+    its `Fn::If` read as written and an unchanged resource was updated (or,
+    on a replacing property, replaced). Before, neither attribute
     was read, every resource was deleted, and a deleted stack was gone.
   - A finished `UpdateStack` cleans up. "CloudFormation will replace the
     resource by creating a new one and deleting the old one"

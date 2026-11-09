@@ -232,6 +232,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}
 	read := old // the record as the update read it, which its writes go over (a rollback changes old's resources)
 	read.Resources = slices.Clone(old.Resources)
+	if prev, err := parseTemplate(old.Template); err == nil && update { // settled again: a record before round 9 holds no conditions
+		old.Refs = conditioned(prev, old.Refs, req, name, old.ID)
+	}
 	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: refs,
 		Resources: []res{}, Outputs: []any{}} // never null: every read of a stack lists both
 	changed := map[string]bool{} // what the update changed in place, which a rollback changes back
@@ -330,13 +333,20 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 	var order []string
 	var refs map[string]string
 	if err == nil {
-		known, pseudos := parameters(req.Input, tpl), pseudo(req, stack, id)
-		maps.Copy(known, pseudos)
-		refs = conditions(tpl, known) // which keep, of the pseudo parameters, the stack id alone: ref answers the rest
-		maps.DeleteFunc(refs, func(k, _ string) bool { return pseudos[k] != "" && k != "AWS::StackId" })
+		refs = conditioned(tpl, parameters(req.Input, tpl), req, stack, id)
 		order, err = p.order(tpl, refs)
 	}
 	return body, tpl, order, refs, err
+}
+
+// conditioned is refs, what a Ref reads, with the conditions of tpl that they and the pseudo parameters of
+// the stack named stack, of id id, settle; of the pseudo parameters it keeps the stack id: ref answers the rest.
+func conditioned(tpl map[string]any, refs map[string]string, req *spi.Request, stack, id string) map[string]string {
+	known, pseudos := maps.Clone(refs), pseudo(req, stack, id)
+	maps.Copy(known, pseudos)
+	known = conditions(tpl, known)
+	maps.DeleteFunc(known, func(k, _ string) bool { return pseudos[k] != "" && k != "AWS::StackId" })
+	return known
 }
 
 // pseudo are the pseudo parameters (User Guide, pseudo parameters) of the stack named stack, of id id, each

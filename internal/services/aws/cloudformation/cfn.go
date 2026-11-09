@@ -40,9 +40,9 @@ func init() {
 
 // Pack is the template engine behind the native operations.
 type Pack struct {
-	deps     spi.Deps
-	walks    int            // resources whose properties order walked, which a test counts
-	mappings map[string]any // the template's Mappings, which findInMap reads, set once an operation's template is parsed
+	deps  spi.Deps
+	walks int            // resources whose properties order walked, which a test counts
+	tpl   map[string]any // the template an operation reads: its Mappings, which findInMap reads, and its parameters' types
 }
 
 // New constructs the template engine.
@@ -224,8 +224,11 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	for _, logical := range order {
 		rm := asMap(resources[logical]) // props is never nil: provision adds to it
 		typ, props := str(rm["Type"]), maps.Collect(maps.All(asMap(p.resolve(rm["Properties"], st.Refs, req, name))))
-		phys, n, err := "", "", error(nil)
-		if n, err = p.claim(ctx, req, st, old, logical, typ, props); err == nil { // again: a name may come from a resource made before it
+		phys, n, err := "", "", selected(props)
+		if err == nil {
+			n, err = p.claim(ctx, req, st, old, logical, typ, props) // again: a name may come from a resource made before it
+		}
+		if err == nil {
 			phys, err = p.provision(ctx, req, typ, logical, n, props, old.Refs[logical], id)
 		}
 		if phys != "" { // recorded once it exists, so a rollback finds a half-made one too
@@ -239,6 +242,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}
 	for _, k := range slices.Sorted(maps.Keys(outs)) {
 		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)})
+	}
+	if err := selected(st.Outputs); err != nil {
+		return fail(err)
 	}
 	if !update { // a DeleteStack begun during the create ends here: what it made goes, and then the stack
 		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS")); err == nil && !wrote {
@@ -312,7 +318,7 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 	if err == nil {
 		known := parameters(req.Input, tpl)
 		maps.Copy(known, pseudo(req, stack, id))
-		p.mappings, refs = asMap(tpl["Mappings"]), conditions(tpl, known)
+		p.tpl, refs = tpl, conditions(tpl, known)
 		delete(refs, "AWS::NoValue") // ref answers it: no record holds the sentinel
 		order, err = p.order(tpl, refs)
 	}
@@ -1070,6 +1076,12 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 			if str(r) == "AWS::NotificationARNs" {
 				arns := spi.Decode[[]any]([]byte(v))
 				return arns
+			} else if typ := str(asMap(asMap(p.tpl["Parameters"])[str(r)])["Type"]); typ == "CommaDelimitedList" || strings.HasPrefix(typ, "List<") {
+				items := []any{} // "a Ref would result in ["test","dev","prod"]": "each member string is space trimmed"
+				for _, item := range strings.Split(v, ",") {
+					items = append(items, strings.TrimSpace(item))
+				}
+				return items
 			}
 			return v
 		}
@@ -1087,8 +1099,10 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 			i, isInt := coerce(p.resolve(args[0], refs, req, stack), "Integer")
 			if list := spi.Slice(p.resolve(args[1], refs, req, stack)); isInt && i.(int) >= 0 && i.(int) < len(list) {
 				return list[i.(int)]
+			} else if slices.ContainsFunc(referred(t, refs), func(n string) bool { _, known := refs[n]; return !known }) {
+				return "" // a list of what is not made yet, checked once it is
 			}
-			return unselected // "doesn't check ... if the index is out of bounds": the stack's error (sound)
+			return unselected // "doesn't check ... if the index is out of bounds": the stack's error (selected)
 		}
 		if args, ok := t["Fn::Split"]; ok { // [delimiter, source string]: "A list of string values"
 			args, parts := append(spi.Slice(args), nil, nil), []any{}
@@ -1102,7 +1116,7 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 			return []any{r + "a", r + "b", r + "c"}
 		}
 		if f, ok := t["Fn::FindInMap"]; ok {
-			if v, _, found := findInMap(f, refs, p.mappings); found {
+			if v, _, found := findInMap(f, refs, asMap(p.tpl["Mappings"])); found {
 				return v
 			}
 		}
@@ -1166,9 +1180,9 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 	for _, o := range asMap(tpl["Outputs"]) {
 		values = append(values, p.resolve(asMap(o)["Value"], refs, req, stack))
 	}
-	if text := spi.JSONText(values); strings.Contains(text, unselected) && stack != "" { // the wording is a reading
-		return invalid("Template error: Fn::Select cannot select nonexistent value")
-	} else if strings.Contains(text, noValue) {
+	if err := selected(values); err != nil && stack != "" {
+		return err
+	} else if strings.Contains(spi.JSONText(values), noValue) {
 		return invalid("Template error: AWS::NoValue removes a property or a list element; it cannot be part of a value")
 	}
 	var err error // without a DefaultValue, "Fn::FindInMap raises an error when a key is not found"
@@ -1179,12 +1193,12 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 			_, ok := coerce(a, "String")
 			literal += map[bool]int{true: 1}[ok]
 		}
-		_, key, found := findInMap(f, refs, p.mappings)
+		_, key, found := findInMap(f, refs, asMap(tpl["Mappings"]))
 		switch _, ok := coerce(args[0], "String"); {
 		case !mapped || err != nil || found:
 		case len(args) != 4: // "Fn::FindInMap: [ MapName, TopLevelKey, SecondLevelKey ]" (Template Reference); the wordings are readings
 			err = invalid("Template error: every Fn::FindInMap object requires three parameters, the map name, map key and the attribute for return value")
-		case ok && p.mappings[str(args[0])] == nil:
+		case ok && asMap(tpl["Mappings"])[str(args[0])] == nil:
 			err = invalid("Template error: Mapping named '" + str(args[0]) + "' is not present in the 'Mappings' section of template.")
 		case stack == "" && literal < 3: // a template read alone checks only what literals name
 		case key != "":
@@ -1194,6 +1208,15 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 		}
 	})
 	return err
+}
+
+// selected is the error for a value holding a Fn::Select of no element of its list (the wording is a reading):
+// sound finds one in a list it knows whole, and a stack's resource or output, resolved, in any list.
+func selected(v any) error {
+	if strings.Contains(spi.JSONText(v), unselected) {
+		return invalid("Template error: Fn::Select cannot select nonexistent value")
+	}
+	return nil
 }
 
 // findInMap is the value a Fn::FindInMap names, "the value corresponding to keys in a two-level map that's

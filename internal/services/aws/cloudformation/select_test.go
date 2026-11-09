@@ -59,3 +59,50 @@ func TestCloudFormationSelectsAndSplits(t *testing.T) {
 		}
 	}
 }
+
+// A Fn::Select's list may hold what only exists once a resource is made: a
+// queue's URL (its Ref), split at "/", or its ARN, split at ":". Its index is
+// checked against that list once it is made, not before, when a Ref to the
+// queue is still its logical id; an index out of that list is the stack's
+// ValidationError then, and the stack rolls back. A CommaDelimitedList
+// parameter is a list: "a Ref would result in ["test","dev","prod"]", "each
+// member string is space trimmed" (User Guide, Parameters), so a Fn::Select
+// or a Fn::Join of it reads its members. Before, all three were refused
+// before anything was made: "Fn::Select cannot select nonexistent value".
+func TestCloudFormationSelectsFromWhatIsMade(t *testing.T) {
+	h := newStacks(t)
+	sel := func(i int, list any) any { return map[string]any{"Fn::Select": []any{i, list}} }
+	split := func(d string, s any) any { return map[string]any{"Fn::Split": []any{d, s}} }
+	template := func(index int, queue string) string {
+		body, _ := json.Marshal(map[string]any{
+			"Parameters": map[string]any{"L": map[string]any{"Type": "CommaDelimitedList", "Default": "a, b ,c"}},
+			"Resources": map[string]any{"Q": map[string]any{"Type": "AWS::SQS::Queue", "Properties": map[string]any{"QueueName": queue}},
+				"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": queue + "-p", "Type": "String", "Value": sel(index, split("/", map[string]any{"Ref": "Q"}))}}},
+			"Outputs": map[string]any{"Name": map[string]any{"Value": sel(5, split(":", map[string]any{"Fn::GetAtt": []any{"Q", "Arn"}}))},
+				"Member": map[string]any{"Value": sel(1, map[string]any{"Ref": "L"})},
+				"Joined": map[string]any{"Value": map[string]any{"Fn::Join": []any{"+", map[string]any{"Ref": "L"}}}}}})
+		return string(body)
+	}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "made", "TemplateBody": template(4, "selected-q")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.outputs("made"); got["Name"] != "selected-q" || got["Member"] != "b" || got["Joined"] != "a+b+c" {
+		t.Errorf("outputs = %v, want Name selected-q, Member b, Joined a+b+c", got)
+	}
+	got, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": "selected-q-p"})
+	if v := str(asMap(got["Parameter"])["Value"]); err != nil || v != "selected-q" {
+		t.Errorf("the parameter holds %q (%v), want the queue's name, selected-q", v, err)
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "made"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "beyond", "TemplateBody": template(9, "beyond-q")}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Fn::Select cannot select nonexistent value") {
+		t.Errorf("CreateStack selecting index 9 of the queue's URL answered %v, want ValidationError", err)
+	}
+	if status, _, _ := h.status("beyond"); status != "ROLLBACK_COMPLETE" || len(h.resources("beyond")) != 0 {
+		t.Errorf("the refused stack is %s holding %v, want ROLLBACK_COMPLETE holding nothing", status, h.resources("beyond"))
+	}
+	if _, err := h.service("aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "beyond-q"}); err == nil {
+		t.Errorf("the rolled-back stack left its queue")
+	}
+}

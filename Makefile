@@ -118,12 +118,25 @@ test-mutation-shard:
 	MUTATION_SHARD=$(MUTATION_SHARD) MUTATION_SHARDS=$(MUTATION_SHARDS) \
 	  $(GO) test ./internal/mutation -count=1 -parallel 4 -timeout 1800s
 
-# RACE_SHARD of RACE_SHARDS takes every Nth package; CI runs four, because the
-# race build of this suite is the longest single job there is.
+# RACE_SHARD of RACE_SHARDS is one part of the packages, filled by the race
+# times main measured (test/race-costs.json, scripts/shard.py), so no shard
+# carries the slow ones together. RACE_PKGS names a file listing the packages
+# to shard instead of all of them: a pull request passes the ones its diff can
+# reach (cmd/affected) and RACE_FLAGS=-short, which skips the tests that parse
+# large inputs on one goroutine (internal/racegate). Unset, it is every
+# package, strict: what main and the nightly run.
 RACE_SHARD ?= 0
 RACE_SHARDS ?= 1
+RACE_PKGS ?=
+RACE_FLAGS ?=
 test-race:
-	CGO_ENABLED=1 $(GO) test -race $$($(GO) list ./... | grep -v '/internal/mutation$$' | awk -v s=$(RACE_SHARD) -v n=$(RACE_SHARDS) 'NR % n == s')
+	@pkgs=$$( { if [ -n "$(RACE_PKGS)" ]; then cat "$(RACE_PKGS)"; else $(GO) list ./...; fi; } | grep -v '/internal/mutation$$' | python3 -I scripts/shard.py test/race-costs.json $(RACE_SHARD) $(RACE_SHARDS)) || exit 1; \
+	if [ -z "$$pkgs" ]; then \
+	  if [ -n "$(RACE_PKGS)" ]; then echo "race: shard $(RACE_SHARD) of $(RACE_SHARDS) holds none of the affected packages"; exit 0; fi; \
+	  echo "race: shard $(RACE_SHARD) of $(RACE_SHARDS) selected no package" >&2; exit 1; \
+	fi; \
+	echo "race: shard $(RACE_SHARD) of $(RACE_SHARDS):" $$pkgs; \
+	CGO_ENABLED=1 $(GO) test -race $(RACE_FLAGS) $$pkgs
 
 # Say which of a run's failures were expected, by name, and which were not.
 #

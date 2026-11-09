@@ -3,12 +3,13 @@
 
     git clone --filter=blob:none --no-checkout URL mirror.cloud && cd mirror.cloud
     git show HEAD:scripts/sparse.py | python3 - aws.s3 aws.sqs       # first time
-    scripts/sparse.py aws.s3 aws.sqs @profiles/core.txt vercel.*     # later
+    scripts/sparse.py aws.s3 aws.sqs @profiles/core.txt 'vercel.*'   # later
 
 Each argument is a service ID (`mirror services` lists them), @FILE (one ID per
-line, # comments; profiles/core.txt), or PROVIDER.* for every service of one
-provider. The checkout then holds everything that is not a service, plus, for
-each service asked for:
+line, # comments; profiles/core.txt), or 'PROVIDER.*' for every service of one
+provider (quote it: zsh refuses an unquoted glob that matches nothing). The
+checkout then holds everything that is not a service, plus, for each service
+asked for:
 
   - its hand-written pack (internal/services), its model (internal/generated)
     and its bundle (behavior), and the one file that links the pack into the
@@ -19,11 +20,12 @@ each service asked for:
   - for PROVIDER.* only, that provider's vendored specs and behavior suite.
 
 A whole-repository suite whose tests import a service that was not brought
-(internal/chaos, internal/conformance, test/behavior/aws, ...) is left out. The
-tree then builds and tests with plain `go build ./...` and `go test ./...`: the
-parts that name a service are one file or one directory each, so leaving it
-out leaves nothing dangling. `go test` reports a package whose tests need a
-service that is not here as "setup failed"; `make test-present` runs the rest.
+(internal/chaos, internal/conformance, test/behavior/aws, ...) is left out, and
+so are the tests of a package that names a service that is not here. The tree
+then builds and tests with plain `go build ./...` and `go test ./...`: the parts
+that name a service are one file or one directory each, so leaving it out leaves
+nothing dangling. This prints which packages lost their tests; CI runs them on
+the full tree.
 
     scripts/sparse.py --list aws.s3     show what would be checked out, change nothing
     scripts/sparse.py --packages aws.s3 the `go test` arguments for those services' own
@@ -35,6 +37,7 @@ Everything is read from the commit (--ref, default HEAD), never from the files
 on disk, so it runs before anything is checked out and fetches no file it
 leaves out.
 """
+import os
 import re
 import subprocess
 import sys
@@ -66,7 +69,7 @@ def main(argv):
             packages = True
         elif a == "--ref":
             ref = next(it)
-        elif a in ("-h", "--help") or not argv:
+        elif a in ("-h", "--help"):
             sys.exit(__doc__)
         elif a.startswith("@"):
             try:
@@ -79,12 +82,22 @@ def main(argv):
     if not wanted:
         sys.exit(__doc__)
 
-    dirs = set(git("ls-tree", "-r", "-d", "--name-only", ref).split())
-    modeled = {}  # provider/service -> True, for what has a model or a bundle
+    # One listing of the commit's tree answers every question about what exists.
+    files = git("ls-tree", "-r", "--name-only", ref).splitlines()
+    dirs = set()
+    for f in files:
+        d = os.path.dirname(f)
+        while d and d not in dirs:
+            dirs.add(d)
+            d = os.path.dirname(d)
+    code_dirs = {os.path.dirname(f) for f in files if f.endswith(".go") and not f.endswith("_test.go")}
+    svc_files = {os.path.basename(f): f for f in files if os.path.dirname(f) == "internal/allservices"}
+
+    modeled = set()  # provider/service, for what has a model or a bundle
     for d in dirs:
         m = re.fullmatch(r"(?:internal/generated|behavior)/([a-z0-9]+)/([a-z0-9]+)", d)
         if m and m.group(1) != "none":
-            modeled[f"{m.group(1)}/{m.group(2)}"] = True
+            modeled.add(f"{m.group(1)}/{m.group(2)}")
 
     requested, whole = set(), set()
     for w in wanted:
@@ -95,8 +108,9 @@ def main(argv):
             requested.add(key_of(w))
         else:
             sys.exit(f"sparse: no service {w!r} in {ref} (looked for internal/generated/{key_of(w)}); `mirror services` lists them")
-    if whole - {k.split("/")[0] for k in requested}:
-        sys.exit(f"sparse: no provider {sorted(whole - {k.split('/')[0] for k in requested})} in {ref}")
+    unknown = whole - {k.split("/")[0] for k in requested}
+    if unknown:
+        sys.exit(f"sparse: no provider {sorted(unknown)} in {ref}")
 
     prod, test, alias = {}, {}, {}
     for line in git("show", f"{ref}:profiles/graph.txt").splitlines():
@@ -107,44 +121,44 @@ def main(argv):
         if m:
             (test if m.group(2) else prod).setdefault(m.group(1), set()).update(m.group(3).split())
 
+    # The pack of a service is its own directory, or the one that serves it under
+    # another name (gcp.storage is in gcp/gcs).
+    own = {alias.get(k, k) for k in requested} | requested
+
+    if packages:
+        print(" ".join([f"./internal/services/{k}/..." for k in sorted(own) if f"internal/services/{k}" in dirs]
+                       + [f"./test/behavior/{p}/..." for p in sorted(whole) if f"test/behavior/{p}" in dirs]))
+        return
+
     # What S needs: its production imports and, because its tests are to run, its
     # test imports; for each of those, production imports only (its own tests do
     # not run here).
-    need, todo = set(), list(requested)
+    need, todo = set(), list(own)
     while todo:
         k = todo.pop()
         if k in need:
             continue
         need.add(k)
-        if k in alias:  # served by a pack of another name
+        if k in alias:
             todo.append(alias[k])
         d = f"internal/services/{k}"
-        todo += prod.get(d, set()) | (test.get(d, set()) if k in requested else set())
-
-    if packages:
-        own = sorted({alias.get(k, k) for k in requested})
-        print(" ".join([f"./internal/services/{k}/..." for k in own if f"internal/services/{k}" in dirs]
-                       + [f"./test/behavior/{p}/..." for p in sorted(whole) if f"test/behavior/{p}" in dirs]))
-        return
+        todo += prod.get(d, set()) | (test.get(d, set()) if k in own else set())
 
     exclude = ["internal/specboot/complete.go"]  # the tree is not complete
     include = ["behavior/none/placeholder"]  # keeps behavior's //go:embed pattern matching
     for k in sorted(need):
         include += [f"{base}/{k}" for base in ("internal/services", "internal/generated", "behavior") if f"{base}/{k}" in dirs]
-    svc_files = git("ls-tree", "--name-only", ref, "internal/allservices/").split()
-    include += [f for f in svc_files if f.rsplit("/", 1)[-1] in {f"svc_{k.replace('/', '_')}.go" for k in need}]
-    providers = {k.split("/")[0] for k in need if k in modeled}
+        include += [svc_files[n] for n in (f"svc_{k.replace('/', '_')}.go",) if n in svc_files]
     for p in sorted(whole):
         include += [d for d in (f"specs/{p}",) if d in dirs]
+
     leave_out, tests_out = [], []
     for d in sorted(set(prod) | set(test)):
         if d.startswith("internal/services/") or (prod.get(d, set()) | test.get(d, set())) <= need:
             continue
         # It names a service that is not here. Its tests cannot run; a package
         # with code that something else builds keeps that code.
-        has_code = any(f.endswith(".go") and not f.endswith("_test.go")
-                       for f in git("ls-tree", "--name-only", ref, d + "/").split())
-        (tests_out if has_code else leave_out).append(d)
+        (tests_out if d in code_dirs else leave_out).append(d)
     for p in sorted(whole):
         d = f"test/behavior/{p}"
         if d in dirs and d not in leave_out:
@@ -152,7 +166,7 @@ def main(argv):
     exclude += leave_out + [f"{d}/*_test.go" for d in tests_out] + [f"{d}/testdata" for d in tests_out if f"{d}/testdata" in dirs]
     # A pack that is here only because another needs it is built, not tested:
     # its tests import services the first one does not, and nobody runs them.
-    for k in sorted(need - requested):
+    for k in sorted(need - own):
         exclude += [f"internal/services/{k}/**/*_test.go", f"internal/services/{k}/**/testdata"]
 
     patterns = ["/*", "!/internal/services/*/*/", "!/internal/generated/*/*/", "!/behavior/*/*/",
@@ -161,9 +175,9 @@ def main(argv):
     patterns += [f"/{i}" + ("/" if i in dirs else "") for i in include]
 
     sys.stderr.write(
-        f"sparse: {len(requested)} services asked for, {len(need - requested)} brought along "
-        f"({', '.join(sorted(need - requested)) or 'none'}); left out: "
-        f"{', '.join(leave_out) or 'no suite'}; tests left out of {len(tests_out)} packages that name a service not here\n")
+        f"sparse: {len(requested)} services asked for, {len(need - own)} brought along "
+        f"({', '.join(sorted(need - own)) or 'none'}); suites left out: {', '.join(leave_out) or 'none'}; "
+        f"tests left out of packages that name a service not here: {', '.join(tests_out) or 'none'}\n")
     if listing:
         print("\n".join(patterns))
         return
@@ -172,7 +186,7 @@ def main(argv):
     if p.returncode:
         sys.exit(f"sparse: {p.stderr.strip()}")
     if not git("ls-files", "-s", ok=True).strip() or not git("ls-files", "--sparse", "--", "go.mod", ok=True).strip():
-        git("checkout", "-q", ref, ok=True)
+        git("checkout", "-q", ref, ok=True)  # a clone made with --no-checkout has nothing yet
 
 
 main(sys.argv[1:])

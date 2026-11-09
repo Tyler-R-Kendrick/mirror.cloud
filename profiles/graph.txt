@@ -5,11 +5,11 @@ cmd/mirrorgen [test]: aws/lambda aws/s3
 internal/bir [test]: aws/dms aws/transcribe aws/workspaces
 internal/bundled [test]: aws/apiecr aws/elasticloadbalancing aws/monitoring aws/sqs aws/sts aws/tagging azure/blobs azure/queue azure/table fly/machines hetzner/v1 hostinger/api stripe/api vercel/api
 internal/chaos [test]: aws/dynamodb aws/kinesis aws/kms aws/s3 aws/sqs aws/states azure/blobs cloudflare/api digitalocean/v2 fly/machines gcp/gcs gcp/storage hetzner/v1 hostinger/api railway/graphql vercel/api vercel/blob vercel/kv
-internal/check [test]: aws/apigatewayv2 gcp/storage hostinger/api railway/graphql stripe/api vercel/api vercel/kv
+internal/check [test]: aws/apigatewayv2 gcp/storage railway/graphql stripe/api vercel/api vercel/kv
 internal/conformance [test]: aws/dynamodb aws/iam aws/kinesis aws/s3 aws/secretsmanager aws/sns aws/sqs aws/ssm aws/states gcp/gcs
 internal/edge [test]: aws/accessanalyzer aws/account aws/acmpca aws/amplify aws/apiecr aws/apigateway aws/apigatewayv2 aws/appmesh aws/apprunner aws/appsync aws/athena aws/autoscaling aws/bedrock aws/ce aws/cloudcontrol aws/cloudformation aws/cloudfront aws/cloudhsmv2 aws/cloudtrail aws/codeartifact aws/codecommit aws/codeconnections aws/codedeploy aws/codepipeline aws/cognitoidp aws/comprehend aws/comprehendmedical aws/config aws/connect aws/dax aws/directconnect aws/dms aws/docdb aws/ds aws/dsql aws/dynamodb aws/ec2 aws/elasticache aws/elasticbeanstalk aws/elasticfilesystem aws/elasticloadbalancing aws/elasticsearch aws/elastictranscoder aws/es aws/fis aws/forecast aws/frauddetector aws/fsx aws/gamelift aws/glacier aws/glue aws/guardduty aws/healthlake aws/iam aws/identitystore aws/inspector aws/iot aws/iotdata aws/iotwireless aws/kendra aws/keyspaces aws/kinesisanalytics aws/kinesisanalyticsv2 aws/kms aws/lakeformation aws/lambda aws/lexmodels aws/lightsail aws/location aws/lookoutmetrics aws/macie2 aws/managedblockchain aws/mediaconnect aws/mediaconvert aws/medialive aws/mediapackage aws/mediastore aws/memorydb aws/monitoring aws/mq aws/mwaa aws/neptune aws/organizations aws/personalize aws/pinpoint aws/pipes aws/polly aws/proton aws/qldb aws/quicksight aws/ram aws/rds aws/redshift aws/rekognition aws/resiliencehub aws/resourceexplorer2 aws/resourcegroups aws/route53 aws/route53resolver aws/rum aws/s3 aws/s3control aws/s3tables aws/sagemaker aws/schemas aws/securityhub aws/serverlessrepo aws/servicecatalog aws/servicediscovery aws/ses aws/sesv2 aws/shield aws/sns aws/sqs aws/ssoadmin aws/storagegateway aws/sts aws/support aws/swf aws/synthetics aws/textract aws/timestream aws/transcribe aws/translate aws/verifiedpermissions aws/waf aws/wafv2 aws/workmail aws/workspaces aws/xray azure/blobs cloudflare/api digitalocean/v2 fly/machines gcp/storage hetzner/v1 hostinger/api railway/graphql vercel/api vercel/blob vercel/kv
 internal/engine [test]: aws/amplify aws/codecommit aws/codedeploy aws/comprehend aws/config aws/ds aws/ec2 aws/elasticmapreduce aws/guardduty aws/memorydb aws/secretsmanager aws/shield aws/sqs aws/ssoadmin aws/transfer hetzner/v1 vercel/api
-internal/equivalence [test]: aws/shield aws/sqs
+internal/equivalence [test]: aws/shield
 internal/execution/cicd/amplify [test]: aws/amplify
 internal/execution/cicd/awsdelivery [test]: aws/codebuild aws/codedeploy aws/codepipeline
 internal/execution/cicd/codebuild [test]: aws/codebuild
@@ -49,7 +49,7 @@ internal/services/aws/sns: aws/lambda aws/logs aws/sqs
 internal/services/aws/states: aws/eventhttp aws/lambda aws/s3
 internal/services/aws/states [test]: aws/batch aws/codebuild aws/dynamodb aws/ecs aws/elasticmapreduce aws/glue aws/sns aws/sqs
 internal/services/gcp/gcs: gcp/storage
-internal/specboot [test]: aws/guardduty aws/lexmodels aws/qldb aws/s3 azure/blobs gcp/storage
+internal/specboot [test]: aws/lexmodels aws/qldb aws/s3 azure/blobs gcp/storage
 internal/spine [test]: aws/dynamodb aws/iam aws/kinesis aws/s3 aws/secretsmanager aws/sns aws/sqs aws/ssm aws/sts azure/blobs azure/queue azure/table cloudflare/api digitalocean/v2 fly/machines gcp/gcs gcp/storage hetzner/v1 hostinger/api railway/graphql vercel/api vercel/kv
 test/behavior/aws [test]: aws/appsync aws/dynamodb aws/es aws/kinesis aws/kms aws/lambda aws/s3 aws/sns aws/sqs aws/states aws/sts aws/timestream
 test/behavior/azure [test]: azure/blobs

@@ -54,6 +54,13 @@ def main(argv):
         if not (exists("behavior", p, d) or exists("internal/generated", p, d) or exists("internal/services", p, d)):
             sys.exit(f"slim-overlay: no service {s!r} here (looked for behavior/{p}/{d}, internal/generated/{p}/{d})")
 
+    # gcp.storage is served by the pack gcp/gcs, and profiles/graph.txt says so.
+    with open(os.path.join(root, "profiles", "graph.txt")) as f:
+        for line in f:
+            m = re.fullmatch(r"(\S+)/(\S+) => (\S+)/(\S+)", line.strip())
+            if m and (m.group(1), m.group(2)) in keep:
+                keep.add((m.group(3), m.group(4)))
+
     replace = {}
     for base in ("internal/generated", "behavior"):
         for provider in sorted(os.listdir(os.path.join(root, base))):

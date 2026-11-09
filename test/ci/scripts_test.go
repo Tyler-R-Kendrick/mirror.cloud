@@ -427,3 +427,46 @@ func needEveryService(t *testing.T, root string) {
 		t.Skip("this is a sparse checkout; the full tree is CI's")
 	}
 }
+
+// A rune literal or a comment that holds a quote must not change which text the
+// graph reads as a string: s3_extra.go, pipes.go and others contain '"', and a
+// pairing that went wrong there would drop every service named after it.
+func TestServiceGraphReadsOnlyStringLiterals(t *testing.T) {
+	root, _ := filepath.Abs("../..")
+	script := `
+import re, sys
+src = open("scripts/service-graph.py").read().split("# ---- end of the tokenizer")[0]
+ns = {}
+exec(src, ns)
+got = ns["string_text"](sys.stdin.read())
+for want in ("aws.sqs", "aws.kms", "aws.sns"):
+    assert want in got, (want, got)
+for unwanted in ("aws.comment", "aws.block"):
+    assert unwanted not in got, (unwanted, got)
+`
+	cmd := exec.Command("python3", "-c", script)
+	cmd.Dir = root
+	cmd.Stdin = strings.NewReader("c := '\"'\n" + `x := "aws.sqs" // "aws.comment` + "\n" +
+		"/* \"aws.block\" */ y := `aws.kms` + \"aws.sns\"\nz := '\\'' + \"aws.kms\"\n")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+// Asking for a service whose pack has another name keeps that pack in a slim build.
+func TestSlimBuildKeepsThePackThatServesAService(t *testing.T) {
+	root, _ := filepath.Abs("../..")
+	needEveryService(t, root)
+	overlay := filepath.Join(t.TempDir(), "o.json")
+	if out, err := run(t, root, nil, "python3", "-I", filepath.Join(root, "scripts", "slim-overlay.py"), overlay, "gcp.storage"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	body, _ := os.ReadFile(overlay)
+	// "" in the overlay hides a file; the gcs pack's file must not be one of them.
+	if strings.Contains(string(body), `svc_gcp_gcs.go": ""`) {
+		t.Error("gcp.storage was built without gcp/gcs, the pack that serves it")
+	}
+	if !strings.Contains(string(body), `svc_aws_s3.go": ""`) {
+		t.Error("the other services' packs were not left out")
+	}
+}

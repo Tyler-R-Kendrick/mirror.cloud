@@ -26,6 +26,26 @@ import sys
 MOD = "github.com/tyler-r-kendrick/mirror.cloud/"
 PACK = re.compile(r"^internal/services/([a-z0-9]+)/([a-z0-9]+)")
 
+# Go tokens that can hold a quote. A comment and a rune literal ('"') are matched
+# and thrown away, so a quote in either cannot shift which text is a string.
+# findall gives (interpreted string, raw string); the other two give ("", "").
+literal = re.compile(
+    r"//[^\n]*"
+    r"|/\*.*?\*/"
+    r"|'(?:\\.[^']*|[^'\\])'"
+    r'|"((?:[^"\\\n]|\\.)*)"'
+    r"|`([^`]*)`",
+    re.S,
+)
+
+
+def string_text(src):
+    """The text of the string literals in Go source, and nothing else."""
+    return " ".join(a or b for a, b in literal.findall(src))
+
+
+# ---- end of the tokenizer (test/ci runs everything above this line); the rest reads the tree ----
+
 
 def key_of(service_id):
     provider, _, rest = service_id.partition(".")
@@ -38,7 +58,6 @@ modeled = {f"{p}/{d}" for base in ("internal/generated", "behavior") if os.path.
 providers = sorted({k.split("/")[0] for k in modeled})
 named = re.compile(r"(?<![\w/.\-])((?:%s)\.[a-z0-9][a-z0-9.\-]*)" % "|".join(providers))
 
-literal = re.compile(r'"((?:[^"\\\n]|\\.)*)"|`([^`]*)`')  # a string literal, not a comment
 prod, test = {}, {}
 
 
@@ -78,7 +97,7 @@ for here, dirs, files in os.walk("."):
         if not (is_test or own):
             continue
         text = open(os.path.join(here, f), errors="ignore").read()
-        strings = " ".join(a or b for a, b in literal.findall(text))
+        strings = string_text(text)
         for name in set(named.findall(strings)):
             add(test if is_test else prod, home, key_of(name.rstrip(".-")))
 

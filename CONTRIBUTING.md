@@ -23,7 +23,7 @@ without file contents and let `scripts/sparse.py` choose what to download:
 ```bash
 git clone --filter=blob:none --no-checkout https://github.com/tyler-r-kendrick/mirror.cloud.git
 cd mirror.cloud
-git show HEAD:scripts/sparse.py | python3 - aws.s3 aws.sqs     # `vercel.*` for every Vercel service
+git show HEAD:scripts/sparse.py | python3 - aws.s3 aws.sqs 'vercel.*'   # quoted: every Vercel service
 go build ./... && make test-service SERVICES="aws.s3 aws.sqs"
 ```
 

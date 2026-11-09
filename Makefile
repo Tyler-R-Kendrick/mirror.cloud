@@ -28,7 +28,7 @@ build-slim:
 # more. docs/TESTING.md says what this does not cover.
 test-service:
 	@test -n "$(SERVICES)" || { echo 'make test-service SERVICES="aws.s3 aws.sqs"  (PROVIDER.* for a whole provider)'; exit 2; }
-	@pkgs="$$(python3 scripts/sparse.py --packages $(SERVICES))"; \
+	@set -f; pkgs="$$(python3 scripts/sparse.py --packages $(SERVICES))"; \
 	if [ -z "$$pkgs" ]; then \
 	  echo "test-service: $(SERVICES) has no hand-written pack, so there is nothing of its own to run here."; \
 	  echo "A bundle is tested through its provider's suite: make test-service SERVICES=PROVIDER.*"; exit 0; fi; \

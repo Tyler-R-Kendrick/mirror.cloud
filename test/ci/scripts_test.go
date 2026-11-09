@@ -46,10 +46,13 @@ func TestRestoreMtimesChangeWheneverContentDoes(t *testing.T) {
 	script := filepath.Join(root, "scripts", "restore-mtimes.py")
 	readScript(t, script)
 	repo := t.TempDir()
+	// No user or system git configuration: a global hook, signing key or
+	// default branch must not change what this builds.
+	isolated := []string{"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1"}
 	git := func(date string, args ...string) {
 		t.Helper()
-		env := []string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date,
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t"}
+		env := append([]string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date,
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t"}, isolated...)
 		if out, err := run(t, repo, env, "git", append([]string{"-c", "commit.gpgsign=false"}, args...)...); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
@@ -63,6 +66,7 @@ func TestRestoreMtimesChangeWheneverContentDoes(t *testing.T) {
 	git(t0, "init", "-q", "-b", "main")
 	write("d/f.txt", "a\n1\n2\n3\nb\n")
 	write("same.txt", "unchanged\n")
+	os.Symlink("same.txt", filepath.Join(repo, "link"))
 	git(t0, "add", ".")
 	git(t0, "commit", "-qm", "base")
 	git(t0, "checkout", "-q", "-b", "pr")
@@ -83,15 +87,15 @@ func TestRestoreMtimesChangeWheneverContentDoes(t *testing.T) {
 	}
 	look := func(dir, ref string) seen {
 		t.Helper()
-		if out, err := run(t, dir, nil, "git", "checkout", "-q", ref); err != nil {
+		if out, err := run(t, dir, isolated, "git", "checkout", "-q", ref); err != nil {
 			t.Fatalf("checkout %s: %v\n%s", ref, err, out)
 		}
-		if out, err := run(t, dir, nil, "python3", "-I", script); err != nil {
+		if out, err := run(t, dir, isolated, "python3", "-I", script); err != nil {
 			t.Fatalf("%v\n%s", err, out)
 		}
 		s := seen{mod: map[string]time.Time{}}
-		for _, p := range []string{"d/f.txt", "d", ".", "same.txt"} {
-			info, err := os.Stat(filepath.Join(dir, p))
+		for _, p := range []string{"d/f.txt", "d", ".", "same.txt", "link"} {
+			info, err := os.Lstat(filepath.Join(dir, p))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -118,9 +122,13 @@ func TestRestoreMtimesChangeWheneverContentDoes(t *testing.T) {
 	if !onMain.mod["same.txt"].Equal(merged.mod["same.txt"]) {
 		t.Errorf("same.txt is unchanged but its mtime moved: %v, %v", onMain.mod["same.txt"], merged.mod["same.txt"])
 	}
+	// A symlink is stamped itself: years in the past, not its checkout time.
+	if time.Since(merged.mod["link"]) < 24*time.Hour {
+		t.Errorf("link kept its checkout mtime %v", merged.mod["link"])
+	}
 	// And the same content gets the same stamps in another clone.
 	other := filepath.Join(t.TempDir(), "other")
-	if out, err := run(t, repo, nil, "git", "clone", "-q", repo, other); err != nil {
+	if out, err := run(t, repo, isolated, "git", "clone", "-q", repo, other); err != nil {
 		t.Fatalf("clone: %v\n%s", err, out)
 	}
 	again := look(other, "merge")

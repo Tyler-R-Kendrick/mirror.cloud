@@ -136,8 +136,9 @@ jobs:
         run: set -o pipefail; make equivalence GOTESTFLAGS=-json COUNT= 2>&1 | python3 -I scripts/test-tiers.py equivalence | tee -a "$RUNNER_TEMP/ci-run.log"
       - name: aws sdk round-trip
         if: ${{ !cancelled() }}
-        # test/sdk/go is its own module, which `go list ./...` never reaches.
-        run: set -o pipefail; make test-sdk GOTESTFLAGS=-json COUNT= 2>&1 | python3 -I scripts/test-tiers.py 'aws sdk round-trip' | tee -a "$RUNNER_TEMP/ci-run.log"
+        # test/sdk/go is its own module, which `go list ./...` never reaches,
+        # so coverage does not rerun it; it runs uncached here (about 15 s).
+        run: set -o pipefail; make test-sdk GOTESTFLAGS=-json COUNT=-count=1 2>&1 | python3 -I scripts/test-tiers.py 'aws sdk round-trip' | tee -a "$RUNNER_TEMP/ci-run.log"
       - name: known red triage
         if: ${{ !cancelled() }}
         run: make known-red RUN="$RUNNER_TEMP/ci-run.log"
@@ -246,10 +247,10 @@ jobs:
             printf '%s\n' "$AFFECTED" > "$RUNNER_TEMP/affected.txt"
             scope=("RACE_PKGS=$RUNNER_TEMP/affected.txt" RACE_FLAGS=-short)
           fi
-          make test-race RACE_SHARD=${{ matrix.shard }} RACE_SHARDS="$SHARDS" "${scope[@]}" 2>&1 | tee -a ci-run.log
+          make test-race RACE_SHARD=${{ matrix.shard }} RACE_SHARDS="$SHARDS" "${scope[@]}" 2>&1 | tee -a "$RUNNER_TEMP/ci-run.log"
       - name: known red triage
         if: ${{ !cancelled() && env.PACKAGES != '0' }}
-        run: make known-red RUN=ci-run.log
+        run: make known-red RUN="$RUNNER_TEMP/ci-run.log"
 
   # The Dockerfile and Dockerfile.release are built here and nowhere else before
   # a tag, so a change that breaks either shows up on the pull request and not in

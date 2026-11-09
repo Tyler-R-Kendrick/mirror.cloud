@@ -82,7 +82,9 @@ jobs:
   # titled "nightly failed" and adds each failing run to it.
   report:
     needs: [unit, coverage, race]
-    if: ${{ failure() }}
+    # A job that times out ends `cancelled` and is reported; a run someone
+    # cancelled makes cancelled() true and is not.
+    if: ${{ !cancelled() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

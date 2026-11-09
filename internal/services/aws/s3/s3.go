@@ -17,6 +17,7 @@ import (
 	"hash/crc32"
 	"hash/crc64"
 	"io"
+	"maps"
 	"mime"
 	"net/http"
 	"net/url"
@@ -2515,9 +2516,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	stored := map[int]multipartPart{}
 	if u != nil {
 		bucket, key = u.bucket, u.key
-		for number, part := range u.parts {
-			stored[number] = part
-		}
+		maps.Copy(stored, u.parts)
 	}
 	p.mu.Unlock()
 	if !matchesMultipartUpload(u, req) {

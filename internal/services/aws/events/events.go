@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -915,9 +916,7 @@ func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Ident
 		endpoint = strings.Replace(endpoint, "*", url.PathEscape(spi.Str(value)), 1)
 	}
 	headers := map[string]any{"Content-Type": "application/json; charset=utf-8"}
-	for key, value := range mapValue(parameters["HeaderParameters"]) {
-		headers[key] = value
-	}
+	maps.Copy(headers, mapValue(parameters["HeaderParameters"]))
 	result, err := eventhttp.Invoke(ctx, connection, eventhttp.Call{
 		Endpoint: endpoint, Method: spi.Str(destination["HttpMethod"]), Body: payload,
 		Headers: headers, Query: mapValue(parameters["QueryStringParameters"]),

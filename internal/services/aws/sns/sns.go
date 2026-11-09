@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -305,9 +306,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				attrs = messageAttrs(m)
 			}
 			entryInput := make(map[string]any, len(req.Input)+6)
-			for key, value := range req.Input {
-				entryInput[key] = value
-			}
+			maps.Copy(entryInput, req.Input)
 			for _, key := range []string{"MessageGroupId", "MessageDeduplicationId", "Subject", "MessageStructure"} {
 				if value, present := m[key]; present {
 					entryInput[key] = value

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 
@@ -485,13 +486,9 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		_ = json.Unmarshal(b, &rec)
 		updated := map[string]any{"Enabled": "true"}
 		if existing, ok := rec["Attributes"].(map[string]any); ok {
-			for key, value := range existing {
-				updated[key] = value
-			}
+			maps.Copy(updated, existing)
 		}
-		for key, value := range flattenAttrEntries(req.Input, "Attributes") {
-			updated[key] = value
-		}
+		maps.Copy(updated, flattenAttrEntries(req.Input, "Attributes"))
 		rec["Attributes"] = updated
 		nb, _ := json.Marshal(rec)
 		_ = col.Put(ctx, arn, nb)

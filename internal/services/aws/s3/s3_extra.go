@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -292,9 +293,7 @@ func (p *Pack) objectAnnotation(ctx context.Context, req *spi.Request) (*spi.Res
 	op := req.Operation
 	if strings.HasPrefix(op, "Put") {
 		doc := map[string]any{"AnnotationId": id, "Bucket": b, "Key": key}
-		for k, v := range req.Input {
-			doc[k] = v
-		}
+		maps.Copy(doc, req.Input)
 		raw, _ := json.Marshal(doc)
 		_ = col.Put(ctx, ck, raw)
 		return &spi.Response{Output: doc}, nil

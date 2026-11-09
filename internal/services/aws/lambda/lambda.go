@@ -55,7 +55,7 @@ func Start(d spi.Deps) func() error {
 }
 
 func (p *runner) emitDLQ(ctx context.Context, req *spi.Request, rec map[string]any, payload []byte, invokeErr error) {
-	target := spi.Str(asMap(rec["DeadLetterConfig"])["TargetArn"])
+	target := spi.Str(spi.Object(rec["DeadLetterConfig"])["TargetArn"])
 	if target == "" || PublishSNS == nil || !strings.Contains(target, ":sns:") {
 		return
 	}
@@ -66,13 +66,6 @@ func (p *runner) emitDLQ(ctx context.Context, req *spi.Request, rec map[string]a
 		"responsePayload": invokeErr.Error(),
 	})
 	PublishSNS(ctx, p.deps, req.Identity, target, string(envelope))
-}
-
-func asMap(v any) map[string]any {
-	if m, ok := v.(map[string]any); ok {
-		return m
-	}
-	return map[string]any{}
 }
 
 func (p *runner) invokeAsync(ctx context.Context, req *spi.Request) (*spi.Response, error) {

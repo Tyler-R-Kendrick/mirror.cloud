@@ -3226,9 +3226,7 @@ func setJSONataRetryCount(context map[string]any, attempts map[int]int) {
 
 func mergeJSONataContext(context, extra map[string]any) map[string]any {
 	merged := maps.Clone(context)
-	for key, value := range extra {
-		merged[key] = value
-	}
+	maps.Copy(merged, extra)
 	return merged
 }
 
@@ -5094,9 +5092,7 @@ func (p *Pack) invokeLambda(ctx context.Context, req *spi.Request, resource stri
 	in := map[string]any{"FunctionName": name}
 	switch m := payload.(type) {
 	case map[string]any:
-		for k, v := range m {
-			in[k] = v
-		}
+		maps.Copy(in, m)
 	default:
 		in["input"] = m
 	}
@@ -7866,9 +7862,7 @@ func testDefinition(definition, stateName string, input any, mock, configuration
 	}
 	next := spi.First(state, "Next")
 	copy := map[string]any{}
-	for key, value := range state {
-		copy[key] = value
-	}
+	maps.Copy(copy, state)
 	if result, exists := mock["Result"]; exists {
 		copy["_TestStateMockResult"] = result
 	} else if failure, exists := mock["ErrorOutput"]; exists {

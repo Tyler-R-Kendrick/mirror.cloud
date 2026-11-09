@@ -86,6 +86,38 @@ as `v0.0.0-dryrun`. It builds the selected commit under that label and keeps the
 archives and `SHA256SUMS` as artifacts of the run; no release is made and no tag
 has to exist.
 
+## Container images
+
+A tag also publishes two multi-arch (linux/amd64, linux/arm64) images to the
+GitHub Container Registry, built from the archives above and not from source, so
+each holds the binary `SHA256SUMS` covers:
+
+| Image | Holds |
+|---|---|
+| `ghcr.io/<owner>/mirror:<version>`, `:latest` | every service |
+| `ghcr.io/<owner>/mirror:<version>-core`, `:core` | the services in `profiles/core.txt` |
+
+`<version>` is the tag without its `v`. A tag with a hyphen (`v0.1.0-rc1`) gets
+its version tags and not `latest` or `core`. Both are `FROM scratch` plus the
+binary (about 30 MB and 21 MB on disk, half that to pull) and run
+`mirror up --bind 0.0.0.0:4566`:
+
+```sh
+docker run --rm -p 4566:4566 ghcr.io/<owner>/mirror:core
+```
+
+Before pushing, the `images` job checks the archives against `SHA256SUMS`, then
+runs what it is about to push: the image must report the tag as its version, and
+serve the services its profile lists (the full image, more than a hundred). A
+version that is already in the registry is never pushed over, and neither image
+is pushed if either exists. Run by hand, the workflow does all of that except
+the login and the push.
+
+The registry creates a package **private**, and only a repository admin can make
+it public (the package's settings, "Change visibility"); the first release needs
+that once. The images carry `org.opencontainers.image.source`, which links the
+package to this repository.
+
 ## SHA256SUMS
 
 The output of `sha256sum`, one line per archive, sorted by file name (bytewise),

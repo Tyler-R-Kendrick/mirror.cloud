@@ -22,7 +22,8 @@ past, so none falls in the two-second window go test refuses to cache.
 
 What git does not describe is left alone: a file whose working copy differs
 from the index or the index from HEAD, and every directory that holds anything
-untracked or modified, keep the mtimes they have. Those are newer than any stamp and change when the
+untracked (ignored files do not count) or modified, keep the mtimes they have.
+A tracked symlink is stamped itself, not its target. Those are newer than any stamp and change when the
 file does, so they can cost a cache hit, never produce a stale one.
 
 Needs no history: it reads the index and HEAD's trees. Run from anywhere inside
@@ -52,7 +53,9 @@ def main():
     # Anything the index does not describe, and every directory above it.
     dirty = set()
     unlike_head = git("diff", "--cached", "--name-only", "-z").decode().split("\0")
-    for path in git("ls-files", "-z", "--modified", "--others", "--deleted").decode().split("\0") + unlike_head:
+    listed = git("ls-files", "-z", "--modified", "--deleted", "--others", "--exclude-standard", "--directory")
+    for path in listed.decode().split("\0") + unlike_head:
+        path = path.rstrip("/")
         if not path:
             continue
         dirty.add(path)
@@ -69,7 +72,7 @@ def main():
             continue
         meta, path = entry.split("\t", 1)
         mode, oid, _ = meta.split(" ")
-        if mode not in ("100644", "100755") or path in dirty or not os.path.isfile(path):
+        if mode not in ("100644", "100755", "120000") or path in dirty or not os.path.lexists(path):
             continue
         t = stamp(oid)
         os.utime(path, ns=(t, t), follow_symlinks=False)

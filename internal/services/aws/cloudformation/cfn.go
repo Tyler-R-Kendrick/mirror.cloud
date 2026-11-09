@@ -43,6 +43,7 @@ type Pack struct {
 	deps  spi.Deps
 	walks int            // resources whose properties order walked, which a test counts
 	tpl   map[string]any // the template an operation reads: its Mappings, which findInMap reads, and its parameters' types
+	body  string         // a change set's template, as it was read when the change set was made (templateBody)
 }
 
 // New constructs the template engine.
@@ -63,7 +64,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"Description": str(tpl["Description"]), "Parameters": paramDecls(tpl)}}, nil
 	case "CreateStack", "UpdateStack":
-		return p.upsert(ctx, req, name, req.Operation == "UpdateStack", "", "")
+		return p.upsert(ctx, req, name, req.Operation == "UpdateStack", "", changeSet{})
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
 	case "UpdateTerminationProtection": // in one transaction, as every write of the record is (settle)
@@ -118,8 +119,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				req.Input[k] = rec[k]
 			}
 		}
-		_, err := p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE", str(rec["StackId"]), key) // claims it as it starts
-		p.unsettled(ctx, req, key, "AVAILABLE", err)                                                   // a refusal leaves it as it was, and says why
+		p.body = str(rec["TemplateBody"])                                                                                                  // read again by no TemplateBody limit: a TemplateURL's is 1 MB
+		_, err := p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE", str(rec["StackId"]), changeSet{key, str(rec["ChangeSetId"])}) // claims this copy as it starts
+		p.unsettled(ctx, req, key, "AVAILABLE", err)                                                                                       // a refusal leaves it as it was, and says why
 		return &spi.Response{Output: map[string]any{}}, err
 	case "DeleteChangeSet": // not one being executed (the wording is a reading)
 		key := name + ":" + str(req.Input["ChangeSetName"])
@@ -135,9 +137,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	}
 }
 
-// changeSetMembers are what CreateChangeSet takes that CreateStack and UpdateStack take: a change set keeps
+// changeSetMembers are what CreateChangeSet takes that CreateStack and UpdateStack take, besides the template
+// (TemplateBody, which it keeps as it read it): a change set keeps
 // those given, DescribeChangeSet answers them, and ExecuteChangeSet makes or updates the stack with them.
-var changeSetMembers = []string{"TemplateBody", "Parameters", "NotificationARNs", "Tags", "Capabilities"}
+var changeSetMembers = []string{"Parameters", "NotificationARNs", "Tags", "Capabilities"}
 
 // createChangeSet records the change set, and for a new stack the stack itself, in one transaction over what
 // it finds: "You can't use the UPDATE type to create a change set for a new stack or the CREATE type to create a
@@ -220,7 +223,9 @@ func retire(name, key string) func(spi.Tx) error {
 		for _, kv := range kvs {
 			rec, err := spi.Decode[map[string]any](kv.Value), error(nil)
 			if kv.Key == key || key == "" && status(rec) == "AVAILABLE" {
-				rec["ExecutionStatus"] = map[bool]string{true: "EXECUTE_COMPLETE", false: "OBSOLETE"}[kv.Key == key]
+				if rec["ExecutionStatus"] = map[bool]string{true: "EXECUTE_COMPLETE", false: "OBSOLETE"}[kv.Key == key]; kv.Key == key {
+					delete(rec, "StatusReason") // a refusal's, before it was executed
+				}
 				err = tx.Put(kv.Key, []byte(spi.JSONText(rec)))
 			} else if key != "" {
 				err = tx.Delete(kv.Key)
@@ -253,7 +258,7 @@ type res struct {
 // upsert makes the stack named name, or updates it, a create under id when one is given (a CREATE change
 // set's, which it answered), as the execution of the change set under key when one is given: claimed in the
 // transaction that starts it, retired in the one that ends it.
-func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id, key string) (*spi.Response, error) {
+func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (*spi.Response, error) {
 	if name == "" {
 		return nil, invalid("StackName required")
 	} else if len(spi.Slice(req.Input["NotificationARNs"])) > 5 { // "Maximum number of 5 items" (API reference, CreateStack and UpdateStack)
@@ -263,8 +268,6 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	if cur, err := p.load(ctx, req, name); err == nil && update { // the id an update's AWS::StackId answers
 		id = cur.ID
 		previous(req.Input, cur)
-	} else if update { // "Stack [x] does not exist": an update makes no stack
-		return nil, err
 	}
 	arns, tags := append([]any{}, spi.Slice(req.Input["NotificationARNs"])...), append([]any{}, spi.Slice(req.Input["Tags"])...)
 	body, tpl, order, refs, err := p.template(ctx, req, name, id)
@@ -298,9 +301,11 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	if err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
 		tx := stx.Collection("cfn")
 		raw, found, _ := tx.Get(name)
-		if err := claim(stx.Collection("cfn-cs"), key); err != nil { // a refusal below puts it back: nothing is written
+		if err := claim(stx.Collection("cfn-cs"), cs); err != nil { // a refusal below puts it back: nothing is written
 			return err
-		} else if _ = json.Unmarshal(raw, &old); found && !update && old.Status == "REVIEW_IN_PROGRESS" && old.ID == id {
+		} else if _ = json.Unmarshal(raw, &old); update && !found { // "Stack [x] does not exist": an update makes no stack
+			return invalid("Stack [" + name + "] does not exist")
+		} else if found && !update && old.Status == "REVIEW_IN_PROGRESS" && old.ID == id {
 			found, old = false, stack{} // a CREATE change set's stack, which its execution makes
 		}
 		if found && !update {
@@ -320,7 +325,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		if st.Reason = err.Error(); !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, "CREATE_IN_PROGRESS", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
 		}
-		p.unsettled(ctx, req, key, "EXECUTE_IN_PROGRESS", err)
+		p.unsettled(ctx, req, cs.key, "EXECUTE_IN_PROGRESS", err)
 		return nil, err
 	}
 	planned := maps.Clone(st.Refs)
@@ -359,10 +364,10 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		return fail(err)
 	}
 	if !update { // a DeleteStack begun during the create ends here: what it made goes, and then the stack
-		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS"), retire(name, key)); err == nil && !wrote {
+		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS"), retire(name, cs.key)); err == nil && !wrote {
 			_ = p.unwind(ctx, req, st, "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED")
 		}
-	} else if cur, wrote, err := p.settle(ctx, req, name, as(old, st), retire(name, key)); err == nil && !wrote {
+	} else if cur, wrote, err := p.settle(ctx, req, name, as(old, st), retire(name, cs.key)); err == nil && !wrote {
 		// Another change came first, in progress while this update ran: what this update made that the stack
 		// does not hold goes, all of it when the stack is being deleted (its delete may have run first).
 		rival := map[bool]string{true: "DELETE_IN_PROGRESS", false: "UPDATE_IN_PROGRESS"}[cur.ID != id || strings.HasPrefix(cur.Status, "DELETE_")]
@@ -408,18 +413,24 @@ func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take f
 	return cur, wrote, err
 }
 
-// claim moves the change set under key (none for "") from AVAILABLE to EXECUTE_IN_PROGRESS: a change set
+// changeSet is the change set an execution executes: its key, and the id of the copy it read.
+type changeSet struct{ key, id string }
+
+// claim moves the change set cs (none for a zero cs), still the copy read, from AVAILABLE to
+// EXECUTE_IN_PROGRESS: a change set
 // executes once, and one executed, failed, obsolete or being executed is InvalidChangeSetStatus, "The
 // specified change set can't be used to update the stack" (the wording is a reading).
-func claim(tx spi.Tx, key string) error {
-	raw, _, _ := tx.Get(key)
-	if rec := spi.Decode[map[string]any](raw); key == "" {
+func claim(tx spi.Tx, cs changeSet) error {
+	raw, found, _ := tx.Get(cs.key)
+	if rec := spi.Decode[map[string]any](raw); cs.key == "" {
 		return nil
+	} else if !found || str(rec["ChangeSetId"]) != cs.id { // deleted, or made again, since it was read
+		return &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
 	} else if s := status(rec); s != "AVAILABLE" {
 		return fault("InvalidChangeSetStatus", "ChangeSet ["+str(rec["ChangeSetId"])+"] cannot be executed in its current execution status of ["+s+"]")
 	} else {
 		rec["ExecutionStatus"] = "EXECUTE_IN_PROGRESS"
-		return tx.Put(key, []byte(spi.JSONText(rec)))
+		return tx.Put(cs.key, []byte(spi.JSONText(rec)))
 	}
 }
 
@@ -436,7 +447,7 @@ func from(st stack, was string) func(stack) (stack, bool) {
 func as(old, st stack) func(stack) (stack, bool) {
 	return func(cur stack) (stack, bool) {
 		st.Protect, cur.Protect = cur.Protect, old.Protect
-		return st, reflect.DeepEqual(cur, old)
+		return st, cur.ID != "" && reflect.DeepEqual(cur, old) // never over no record: only a create makes one
 	}
 }
 
@@ -481,7 +492,9 @@ func pseudo(req *spi.Request, stack, id string) map[string]string {
 // object TemplateURL names, "max size: 1 MB" (API reference, CreateStack), which the quotas page, writing
 // 204,800 bytes "204.8 KB", counts as 1,000,000 bytes.
 func (p *Pack) templateBody(ctx context.Context, req *spi.Request) (string, error) {
-	if body := str(req.Input["TemplateBody"]); len(body) > 51_200 {
+	if p.body != "" { // checked against its own source's limit when its change set was made
+		return p.body, nil
+	} else if body := str(req.Input["TemplateBody"]); len(body) > 51_200 {
 		return "", invalid("1 validation error detected: Value at 'templateBody' failed to satisfy constraint: Member must have length less than or equal to 51200")
 	} else if body != "" {
 		return body, nil

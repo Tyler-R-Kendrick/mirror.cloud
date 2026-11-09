@@ -261,7 +261,7 @@ func TestCloudFormationAChangeSetWithoutAStatusIsAvailable(t *testing.T) {
 	topic, _ := json.Marshal(map[string]any{"Resources": map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}}})
 	stack, _ := h.stored("s")
 	old, _ := json.Marshal(map[string]any{"ChangeSetName": "old", "ChangeSetId": "arn:aws:cloudformation:us-east-1:000000000000:changeSet/old/1", "StackName": "s",
-		"StackId": stack["ID"], "ChangeSetType": "UPDATE", "Status": "CREATE_COMPLETE", "TemplateBody": string(topic)})
+		"StackId": stack["ID"], "ChangeSetType": "UPDATE", "Status": "CREATE_COMPLETE", "TemplateBody": string(topic), "StatusReason": "refused before"})
 	if err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn-cs").Put(h.ctx, "s:old", old); err != nil {
 		t.Fatal(err)
 	}

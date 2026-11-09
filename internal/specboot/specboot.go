@@ -21,6 +21,11 @@ var (
 	complete bool
 )
 
+// Complete reports whether this tree holds every service. A sparse checkout
+// does not (scripts/sparse.py), and a test that compares the whole catalog with
+// something committed skips there instead of failing.
+func Complete() bool { return complete }
+
 // Bundle returns the model the runtime serves.
 //
 // It used to be a hand-authored catalog of a hundred and sixty-six services

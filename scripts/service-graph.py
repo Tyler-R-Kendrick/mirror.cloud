@@ -71,7 +71,8 @@ for here, dirs, files in os.walk("."):
     own = PACK.match(rel)
     home = f"internal/services/{own.group(1)}/{own.group(2)}" if own else rel
     for f in files:
-        if not f.endswith(".go") or rel == "internal/allservices":
+        # test/ci's tests name services as examples for the scripts they test.
+        if not f.endswith(".go") or rel in ("internal/allservices", "test/ci"):
             continue
         is_test = f.endswith("_test.go")
         if not (is_test or own):

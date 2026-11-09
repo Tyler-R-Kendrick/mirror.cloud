@@ -71,22 +71,24 @@ jobs:
         with:
           cache: test
           mtimes: "true"
+      # The log goes outside the checkout: internal/check walks the tree, and
+      # a file there that grows during the run would make it miss the cache.
       - name: unit, by tier
-        run: set -o pipefail; make test-unit GOTESTFLAGS=-json 2>&1 | python3 -I scripts/test-tiers.py unit | tee -a ci-run.log
+        run: set -o pipefail; make test-unit GOTESTFLAGS=-json 2>&1 | python3 -I scripts/test-tiers.py unit | tee -a "$RUNNER_TEMP/ci-run.log"
       - name: extraction equivalence
         if: ${{ !cancelled() }}
         # Named separately so it can be a required check: no pack may be
         # deleted without its recording replaying green against the bundle
-        # that replaced it. The step above ran these packages with the same
-        # flags, so this reads its results from the cache.
-        run: set -o pipefail; make equivalence GOTESTFLAGS=-json COUNT= 2>&1 | python3 -I scripts/test-tiers.py equivalence | tee -a ci-run.log
+        # that replaced it. The step above ran internal/equivalence with the
+        # same flags, so that half reads its result from the cache.
+        run: set -o pipefail; make equivalence GOTESTFLAGS=-json COUNT= 2>&1 | python3 -I scripts/test-tiers.py equivalence | tee -a "$RUNNER_TEMP/ci-run.log"
       - name: aws sdk round-trip
         if: ${{ !cancelled() }}
         # test/sdk/go is its own module, which `go list ./...` never reaches.
-        run: set -o pipefail; make test-sdk GOTESTFLAGS=-json COUNT= 2>&1 | python3 -I scripts/test-tiers.py 'aws sdk round-trip' | tee -a ci-run.log
+        run: set -o pipefail; make test-sdk GOTESTFLAGS=-json COUNT= 2>&1 | python3 -I scripts/test-tiers.py 'aws sdk round-trip' | tee -a "$RUNNER_TEMP/ci-run.log"
       - name: known red triage
         if: ${{ !cancelled() }}
-        run: make known-red RUN=ci-run.log
+        run: make known-red RUN="$RUNNER_TEMP/ci-run.log"
 
   # The 80% floor, per pull request as before, in one -coverpkg=./... pass (see
   # test-coverage in the Makefile). Kept out of the unit job because a covered

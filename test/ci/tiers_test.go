@@ -56,7 +56,7 @@ func TestTierSummaryKeepsTheLogAndSortsTestsIntoTiers(t *testing.T) {
 		"| snapshot | 1 | 1 | 0 | 0 | 1 |",
 		"| bdd | 1 | 1 | 0 | 0 | 0 |",
 		"| unit | 1 | 1 | 0 | 1 | 2 |",
-		"3 packages, 1 from cache; 2.1s in the 2 that ran.",
+		"3 packages with tests, 1 from cache; 2.1s in the 2 that ran.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)

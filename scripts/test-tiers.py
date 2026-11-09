@@ -92,7 +92,8 @@ def main():
                 cached.add(pkg)
         elif action in ("pass", "fail", "skip"):
             lines = pkg_out.pop(pkg, [])
-            seconds[pkg] = ev.get("Elapsed") or 0
+            if action != "skip":  # a package with no test files
+                seconds[pkg] = ev.get("Elapsed") or 0
             if action == "fail":
                 failed = True
                 failed_pkgs.add(pkg)
@@ -125,7 +126,7 @@ def main():
             name, len(r["pkgs"]), r["pass"], r["fail"], r["skip"], r["cached"]))
     ran = [p for p in seconds if p not in cached]
     table.append("")
-    table.append("%d packages, %d from cache; %.1fs in the %d that ran." % (
+    table.append("%d packages with tests, %d from cache; %.1fs in the %d that ran." % (
         len(seconds), len(seconds) - len(ran), sum(seconds[p] for p in ran), len(ran)))
     out.write("\n" + "\n".join(table) + "\n")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")

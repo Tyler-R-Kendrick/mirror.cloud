@@ -29,13 +29,13 @@ jobs:
           # A scheduled run is on main, which would otherwise save.
           save: "false"
       - name: unit, uncached, by tier
-        run: set -o pipefail; make test-unit GOTESTFLAGS=-json 2>&1 | python3 -I scripts/test-tiers.py unit | tee -a ci-run.log
+        run: set -o pipefail; make test-unit GOTESTFLAGS=-json 2>&1 | python3 -I scripts/test-tiers.py unit | tee -a "$RUNNER_TEMP/ci-run.log"
       - name: aws sdk round-trip, uncached
         if: ${{ !cancelled() }}
-        run: set -o pipefail; make test-sdk 2>&1 | tee -a ci-run.log
+        run: set -o pipefail; make test-sdk 2>&1 | tee -a "$RUNNER_TEMP/ci-run.log"
       - name: known red triage
         if: ${{ !cancelled() }}
-        run: make known-red RUN=ci-run.log
+        run: make known-red RUN="$RUNNER_TEMP/ci-run.log"
 
   coverage:
     runs-on: ubuntu-latest

@@ -88,8 +88,10 @@ test-cloudflare-miniflare:
 test-cloudflare-celld:
 	$(GO) test -tags celld ./internal/execution/ -run 'TestCelld' -count=1 -v
 
+# Only the Fuzz functions: a plain go test of these packages already runs every
+# seed corpus along with every other test, which is what this used to repeat.
 test-fuzz-seeds:
-	$(GO) test ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./test/behavior/aws ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/bundled ./internal/proto/aws/restjson ./internal/proto/aws/restxml ./internal/proto/graphql $(COUNT)
+	$(GO) test -run '^Fuzz' ./internal/edge ./internal/identity ./internal/proto/aws/httpuri ./internal/services/aws/dynamodb ./internal/services/aws/dynamodb/expr ./internal/services/aws/firehose ./internal/services/aws/s3 ./test/behavior/aws ./internal/services/aws/states ./internal/services/gcp/gcs ./internal/bundled ./internal/proto/aws/restjson ./internal/proto/aws/restxml ./internal/proto/graphql $(COUNT)
 
 test-fuzz:
 	bash scripts/fuzz.sh
@@ -163,9 +165,11 @@ ratchet-update:
 
 # Replays every recorded pack trace against the bundle that replaced it, and
 # checks that every bundle still builds and registers. A pack may only be
-# deleted with this green.
+# deleted with this green. Only those gate tests of internal/bundled: the rest
+# of it (each bundle's behaviour) is test-unit's, and took most of this target.
 equivalence:
-	$(GO) test $(GOTESTFLAGS) ./internal/equivalence/ ./internal/bundled/ $(COUNT)
+	$(GO) test $(GOTESTFLAGS) ./internal/equivalence/ $(COUNT)
+	$(GO) test $(GOTESTFLAGS) ./internal/bundled/ -run '^(TestEveryBundleBuilds|TestBundlesAreRegistered|TestShadowBundlesAreStillGated)$$' $(COUNT)
 
 vet:
 	$(GO) vet ./...

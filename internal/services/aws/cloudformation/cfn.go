@@ -122,7 +122,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		p.body = str(rec["TemplateBody"])                                                                                                  // read again by no TemplateBody limit: a TemplateURL's is 1 MB
 		_, err := p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE", str(rec["StackId"]), changeSet{key, str(rec["ChangeSetId"])}) // claims this copy as it starts
-		p.unsettled(ctx, req, key, "AVAILABLE", err)                                                                                       // a refusal leaves it as it was, and says why
+		p.unsettled(ctx, req, changeSet{key, str(rec["ChangeSetId"])}, "AVAILABLE", err)                                                   // a refusal leaves it as it was, and says why
 		return &spi.Response{Output: map[string]any{}}, err
 	case "DeleteChangeSet": // not one being executed (the wording is a reading)
 		key := name + ":" + str(req.Input["ChangeSetName"])
@@ -197,15 +197,22 @@ func (p *Pack) createChangeSet(ctx context.Context, req *spi.Request, name strin
 
 // stackName is CreateStack's rule for a stack's name: "alphanumeric characters (case sensitive) and hyphens.
 // It must start with an alphabetical character and can't be longer than 128 characters" (API reference).
-var stackName = regexp.MustCompile(`^[a-zA-Z][-a-zA-Z0-9]{0,127}$`)
+var stackName = regexp.MustCompile(`^[a-zA-Z][-a-zA-Z0-9]*$`)
 
 // checkName is the framework's ValidationError for no name, or for a name a create is given outside the
 // rule. No made stack's name holds a colon, so a change set's key, <stack>:<change set>, is no other stack's.
 func checkName(name string, create bool) error {
-	if name == "" || create && !stackName.MatchString(name) {
-		return invalid("1 validation error detected: Value '" + name + "' at 'stackName' failed to satisfy constraint: Member must satisfy regular expression pattern: [a-zA-Z][-a-zA-Z0-9]*")
+	constraint := ""
+	if name == "" {
+		return invalid("StackName required")
+	} else if create && len(name) > 128 {
+		constraint = "have length less than or equal to 128"
+	} else if create && !stackName.MatchString(name) {
+		constraint = "satisfy regular expression pattern: [a-zA-Z][-a-zA-Z0-9]*"
+	} else {
+		return nil
 	}
-	return nil
+	return invalid("1 validation error detected: Value '" + name + "' at 'stackName' failed to satisfy constraint: Member must " + constraint)
 }
 
 // status is a change set's ExecutionStatus; AVAILABLE for a record stored before it had one.
@@ -214,14 +221,14 @@ func status(rec map[string]any) string { return cmp.Or(str(rec["ExecutionStatus"
 // unsettled records why an execution of the change set under key did not finish, while the change set is
 // still in status was: one a refusal left AVAILABLE stays so, one claimed is EXECUTE_FAILED, each with the
 // error as its StatusReason.
-func (p *Pack) unsettled(ctx context.Context, req *spi.Request, key, was string, cause error) {
+func (p *Pack) unsettled(ctx context.Context, req *spi.Request, cs changeSet, was string, cause error) {
 	_ = p.col(req, "cfn-cs").Txn(ctx, func(tx spi.Tx) error {
-		raw, ok, _ := tx.Get(key)
-		if rec := spi.Decode[map[string]any](raw); ok && cause != nil && status(rec) == was {
+		raw, _, _ := tx.Get(cs.key)
+		if rec := spi.Decode[map[string]any](raw); cs.mine(rec) && cause != nil && status(rec) == was { // not one made again under its name
 			if rec["StatusReason"] = cause.Error(); was != "AVAILABLE" {
 				rec["ExecutionStatus"] = "EXECUTE_FAILED"
 			}
-			return tx.Put(key, []byte(spi.JSONText(rec)))
+			return tx.Put(cs.key, []byte(spi.JSONText(rec)))
 		}
 		return nil
 	})
@@ -232,17 +239,19 @@ func (p *Pack) unsettled(ctx context.Context, req *spi.Request, key, was string,
 // EXECUTE_COMPLETE, and "CloudFormation deletes all other change sets associated with the stack"
 // (ExecuteChangeSet), every one for a key no change set has; an update of no change set (key "") leaves
 // each available one OBSOLETE, "because the stack was already updated" (DescribeChangeSet).
-func retire(name, key string) func(spi.Tx) error {
+func retire(name string, cs changeSet) func(spi.Tx) error {
 	return func(tx spi.Tx) error {
 		kvs, _, _ := tx.List(name+":", "", 0)
 		for _, kv := range kvs {
 			rec, err := spi.Decode[map[string]any](kv.Value), error(nil)
-			if kv.Key == key || key == "" && status(rec) == "AVAILABLE" {
-				if rec["ExecutionStatus"] = map[bool]string{true: "EXECUTE_COMPLETE", false: "OBSOLETE"}[kv.Key == key]; kv.Key == key {
+			if own := kv.Key == cs.key; own && !cs.mine(rec) {
+				continue // made again under its name: not this execution's
+			} else if own || cs.key == "" && status(rec) == "AVAILABLE" {
+				if rec["ExecutionStatus"] = map[bool]string{true: "EXECUTE_COMPLETE", false: "OBSOLETE"}[own]; own {
 					delete(rec, "StatusReason") // a refusal's, before it was executed
 				}
 				err = tx.Put(kv.Key, []byte(spi.JSONText(rec)))
-			} else if key != "" {
+			} else if cs.key != "" {
 				err = tx.Delete(kv.Key)
 			}
 			if err != nil {
@@ -283,6 +292,8 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	if cur, err := p.load(ctx, req, name); err == nil && update { // the id an update's AWS::StackId answers
 		id = cur.ID
 		previous(req.Input, cur)
+	} else if update { // "Stack [x] does not exist" before any template error; read again where it is written
+		return nil, err
 	}
 	arns, tags := append([]any{}, spi.Slice(req.Input["NotificationARNs"])...), append([]any{}, spi.Slice(req.Input["Tags"])...)
 	body, tpl, order, refs, err := p.template(ctx, req, name, id)
@@ -333,7 +344,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		if st.Reason = err.Error(); !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, "CREATE_IN_PROGRESS", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
 		}
-		p.unsettled(ctx, req, cs.key, "EXECUTE_IN_PROGRESS", err)
+		p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", err)
 		return nil, err
 	}
 	planned := maps.Clone(st.Refs)
@@ -351,7 +362,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	for _, logical := range order {
 		rm := asMap(resources[logical]) // props is never nil: provision adds to it
 		typ, props := str(rm["Type"]), maps.Collect(maps.All(asMap(p.resolve(rm["Properties"], st.Refs, req, name))))
-		phys, n, err := "", "", selected(props)
+		phys, n, err := "", "", encode(props)
 		if err == nil {
 			n, err = p.claim(ctx, req, st, old, logical, typ, props) // again: a name may come from a resource made before it
 		}
@@ -369,16 +380,16 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}
 	for _, k := range slices.Sorted(maps.Keys(outs)) {
 		v := p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)
-		if err := selected(v); err != nil {
+		if err := encode(v); err != nil {
 			return fail(err)
 		}
 		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": text(v)})
 	}
 	if !update { // a DeleteStack begun during the create ends here: what it made goes, and then the stack
-		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS"), retire(name, cs.key)); err == nil && !wrote {
+		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS"), retire(name, cs)); err == nil && !wrote {
 			_ = p.unwind(ctx, req, st, "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED")
 		}
-	} else if cur, wrote, err := p.settle(ctx, req, name, as(old, st), retire(name, cs.key)); err == nil && !wrote {
+	} else if cur, wrote, err := p.settle(ctx, req, name, as(old, st), retire(name, cs)); err == nil && !wrote {
 		// Another change came first, in progress while this update ran: what this update made that the stack
 		// does not hold goes, all of it when the stack is being deleted (its delete may have run first).
 		rival := map[bool]string{true: "DELETE_IN_PROGRESS", false: "UPDATE_IN_PROGRESS"}[cur.ID != id || strings.HasPrefix(cur.Status, "DELETE_")]
@@ -409,7 +420,7 @@ func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take f
 		if wrote = yes; !yes {
 			return nil
 		} else if next.Status == "DELETE_COMPLETE" { // its change sets go with it: retire, keyed by no change set
-			if err := retire(name, name)(cs); err != nil {
+			if err := retire(name, changeSet{key: name})(cs); err != nil {
 				return err
 			}
 			return tx.Delete(name)
@@ -427,6 +438,11 @@ func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take f
 // changeSet is the change set an execution executes: its key, and the id of the copy it read.
 type changeSet struct{ key, id string }
 
+// mine is whether rec, a change set's record, is the copy cs read: none of a deleted one, or of one made again.
+func (cs changeSet) mine(rec map[string]any) bool {
+	return rec != nil && str(rec["ChangeSetId"]) == cs.id
+}
+
 // claim moves the change set cs (none for a zero cs), still the copy read, from AVAILABLE to
 // EXECUTE_IN_PROGRESS: a change set
 // executes once, and one executed, failed, obsolete or being executed is InvalidChangeSetStatus, "The
@@ -435,7 +451,7 @@ func claim(tx spi.Tx, cs changeSet) error {
 	raw, found, _ := tx.Get(cs.key)
 	if rec := spi.Decode[map[string]any](raw); cs.key == "" {
 		return nil
-	} else if !found || str(rec["ChangeSetId"]) != cs.id { // deleted, or made again, since it was read
+	} else if !found || !cs.mine(rec) { // deleted, or made again, since it was read
 		return &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
 	} else if s := status(rec); s != "AVAILABLE" {
 		return fault("InvalidChangeSetStatus", "ChangeSet ["+str(rec["ChangeSetId"])+"] cannot be executed in its current execution status of ["+s+"]")
@@ -665,14 +681,36 @@ func holds(v any, m mark) bool {
 	return v == m
 }
 
-// marked is the mark a string built on vs is, an unknown before the others, and whether it is one.
-func marked(vs ...any) (any, bool) {
-	for _, m := range []mark{unknown, unselected, noValue} {
+// combine is the mark a value built on vs is, and whether it is one: an error (AWS::NoValue in it, inValue,
+// or unselected) before unknown, and unknown before a value. Every intrinsic that builds a value from
+// others answers this when it is one.
+func combine(vs ...any) (any, bool) {
+	for _, m := range []mark{inValue, noValue, unselected, unknown} {
 		if holds(vs, m) {
 			return map[bool]mark{true: inValue, false: m}[m == noValue], true
 		}
 	}
 	return nil, false
+}
+
+// refused is the error for a value holding an error mark: a Fn::Select of no element (the wording is a
+// reading), or AWS::NoValue as part of a value. sound refuses them before anything is made, encode as it is.
+func refused(v any) error {
+	if holds(v, inValue) || holds(v, noValue) {
+		return invalid("Template error: AWS::NoValue removes a property or a list element; it cannot be part of a value")
+	} else if holds(v, unselected) {
+		return invalid("Template error: Fn::Select cannot select nonexistent value")
+	}
+	return nil
+}
+
+// encode is the error for a resolved value going to a provider, into the stack record or into an answer
+// that holds any mark: an error mark (refused), or an id not yet known (the wording is a reading).
+func encode(v any) error {
+	if err := refused(v); err != nil || !holds(v, unknown) {
+		return err
+	}
+	return invalid("Template error: a value is not known when it is used")
 }
 
 // planID is the id a resource named n is made with, which a Ref to it answers: n in the form its
@@ -1282,16 +1320,16 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 		if args, ok := t["Fn::Select"]; ok { // [index, listOfObjects]: "a single object from a list of objects by index"
 			args := append(spi.Slice(args), nil, nil)
 			index, list := p.resolve(args[0], refs, req, stack), p.resolve(args[1], refs, req, stack)
-			if i, isInt := coerce(index, "Integer"); holds([]any{index, list}, unknown) {
-				return unknown // of what is not made yet: checked as it is made, when it is known
-			} else if isInt && i.(int) >= 0 && i.(int) < len(spi.Slice(list)) {
+			if m, isMark := combine(index, list); isMark && (m != unknown || index == unknown || list == unknown) {
+				return m // an error in either, or a list or index not known yet: checked as it is made
+			} else if i, isInt := coerce(index, "Integer"); isInt && i.(int) >= 0 && i.(int) < len(spi.Slice(list)) {
 				return spi.Slice(list)[i.(int)]
 			}
 			return unselected // "doesn't check ... if the index is out of bounds": the stack's error (selected)
 		}
 		if args, ok := t["Fn::Split"]; ok { // [delimiter, source string]: "A list of string values"
 			args, parts := append(spi.Slice(args), nil, nil), []any{}
-			if m, isMark := marked(p.resolve(args[1], refs, req, stack)); isMark {
+			if m, isMark := combine(p.resolve(args[1], refs, req, stack)); isMark {
 				return m
 			}
 			for _, part := range strings.Split(str(p.resolve(args[1], refs, req, stack)), str(args[0])) {
@@ -1389,10 +1427,11 @@ func (p *Pack) skipped(order []string, refs map[string]string) {
 	}
 }
 
-// off is whether the condition of a resource or an output v leaves it out: one not settled true.
+// off is whether the condition of a resource or an output v leaves it out: one settled false (a stack's are
+// all settled).
 func off(v any, refs map[string]string) bool {
 	c := str(asMap(v)["Condition"])
-	return c != "" && refs["Condition::"+c] != "true"
+	return c != "" && refs["Condition::"+c] == "false" // one not settled, a template read alone's, is checked: both its Fn::If branches
 }
 
 // sound is the error for a template whose values cannot be made, found before anything is reserved or
@@ -1411,10 +1450,8 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 			values = append(values, p.resolve(asMap(o)["Value"], refs, req, stack))
 		}
 	}
-	if err := selected(values); err != nil && stack != "" {
-		return err
-	} else if holds(values, noValue) || holds(values, inValue) {
-		return invalid("Template error: AWS::NoValue removes a property or a list element; it cannot be part of a value")
+	if err := refused(values); err != nil && (stack != "" || !holds(values, unselected) || holds(values, noValue) || holds(values, inValue)) {
+		return err // a template read alone takes a Fn::Select of no element (round 12)
 	}
 	var err error // without a DefaultValue, "Fn::FindInMap raises an error when a key is not found"
 	each([]any{tpl["Resources"], tpl["Outputs"], tpl["Conditions"]}, func(x map[string]any) {
@@ -1439,15 +1476,6 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 		}
 	})
 	return err
-}
-
-// selected is the error for a value holding a Fn::Select of no element of its list (the wording is a reading):
-// sound finds one in a list it knows whole, and a stack's resource or output, resolved, in any list.
-func selected(v any) error {
-	if holds(v, unselected) {
-		return invalid("Template error: Fn::Select cannot select nonexistent value")
-	}
-	return nil
 }
 
 // findInMap is the value a Fn::FindInMap names, "the value corresponding to keys in a two-level map that's
@@ -1479,7 +1507,7 @@ func findInMap(args any, refs map[string]string, mappings map[string]any) (v any
 func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack string) any {
 	arr, parts := append(spi.Slice(j), nil, nil), []string(nil) // [separator, [values]]
 	sep, list := p.resolve(arr[0], refs, req, stack), p.resolve(arr[1], refs, req, stack)
-	if m, isMark := marked(sep, list); isMark { // a list, from which AWS::NoValue removes its element
+	if m, isMark := combine(sep, list); isMark { // a list, from which AWS::NoValue removes its element
 		return m
 	}
 	for _, x := range spi.Slice(list) {
@@ -1509,7 +1537,7 @@ func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack stri
 		held = append(held, v)
 		return text(v)
 	})
-	if m, isMark := marked(held...); isMark { // a string built on a mark is one
+	if m, isMark := combine(held...); isMark { // a string built on a mark is one
 		return m
 	}
 	return out

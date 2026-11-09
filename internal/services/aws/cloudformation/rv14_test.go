@@ -86,6 +86,9 @@ func TestRV14UpdateVsDeleteResurrects(t *testing.T) {
 	if ok {
 		t.Errorf("BUG: the deleted stack was written back by the racing UpdateStack: %v", rec)
 	}
+	if err == nil || !strings.Contains(err.Error(), "Stack [s] does not exist") {
+		t.Errorf("BUG: the update of a stack deleted under it answered %v, want that it does not exist", err)
+	}
 }
 
 // ExecuteChangeSet reads the change set, a DeleteChangeSet deletes it, and the

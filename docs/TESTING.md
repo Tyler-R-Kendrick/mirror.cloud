@@ -18,13 +18,28 @@ The test suite keeps each failure mode independently runnable:
 
 See [PARITY.md](PARITY.md) for the pinned LocalStack behavioral traceability denominator and current audited percentage; line coverage and operation routing are reported separately there.
 
+## One service
+
+```bash
+make test-service SERVICES="aws.s3 vercel.*"
+```
+
+runs the tests of the named services' hand-written packs (`internal/services/...`)
+and, for `PROVIDER.*`, that provider's behavior suite in `test/behavior`, which is
+where most services are tested because most are data, not code. It is the fast
+loop. It is not the contract: the packages that exercise every service together
+(`internal/runtime`, `internal/bundled`, `internal/edge`, the suites in `test/`)
+run in CI, and in a [sparse checkout](../CONTRIBUTING.md) are left out whenever
+they name a service the checkout does not hold. What a service needs is in
+`profiles/graph.txt` (`make graph`).
+
 ## Known-red triage
 
 `known-red.json` is optional. When present, `scripts/known-red.py` classifies a `go test` log into declared vs new failures by test name. When absent (current main), every failure is new — there is no permitted-red set. An empty `expected` list is illegal; delete the file instead (`internal/check.TestKnownRedIsDeclaredHonestly`).
 
 ## How CI runs these
 
-`.github/workflows/ci.yml` runs the tiers above as parallel jobs (`check`, `unit`, `suites`, `fuzz` in six shards, `race`, `mutation`, `image`), so a run takes as long as its slowest job, not the sum. `race` runs four shards and `mutation` twelve. `image` builds the Dockerfile with a service list and checks the image serves exactly that list. The `test` job only reports whether `check`, `unit`, `suites`, `fuzz`, `race` and `image` passed, and keeps the name the single job had.
+`.github/workflows/ci.yml` runs the tiers above as parallel jobs (`check`, `unit`, `suites`, `fuzz` in six shards, `race`, `mutation`, `image`, `sparse`), so a run takes as long as its slowest job, not the sum. `race` runs four shards and `mutation` twelve. `image` builds the Dockerfile with a service list and checks the image serves exactly that list. `sparse` makes a real partial clone for each of five service sets (`scripts/sparse.py`) and runs `go build`, `go vet` and `go test ./...` in it, so a service that starts reaching into another's files fails here. The `test` job only reports whether `check`, `unit`, `suites`, `fuzz`, `race`, `image` and `sparse` passed, and keeps the name the single job had.
 
 - **Cache.** `.github/actions/go` restores a Go build and test-result cache per job. Only pushes to `main` write it, so a pull request never changes what another run restores. `go test` keys a cached result on the size and mtime of every file the test opened, so the action also runs `scripts/restore-mtimes.py`, which sets each file's mtime to the time of the last commit that touched it. Both are needed: without the second, a fresh checkout invalidates every package that reads a file.
 - **Cached results.** Pull requests reuse a package's cached result when nothing it depends on changed (`COUNT` is empty); `main` clears the test cache and runs everything. A test that depends on something `go test` does not track (the clock, the network, a port) can therefore pass on a pull request from a stale result and fail on `main`.

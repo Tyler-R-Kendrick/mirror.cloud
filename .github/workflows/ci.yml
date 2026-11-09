@@ -194,8 +194,54 @@ jobs:
 
   # Fails unless every job above passed. A job that is skipped or cancelled is
   # not a pass, and `needs` alone would skip this one with it.
+  # What a developer gets from `git clone --filter=blob:none` and scripts/sparse.py:
+  # only the services they name and what those need. Each set is a real partial
+  # checkout, not a copy of this one, and must build, vet and pass every test it
+  # holds, so a service that grew a dependency on another's files, or a test that
+  # assumed the whole catalog, fails here before it fails someone's clone.
+  sparse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # A pack and what it reaches, a leaf pack, a pack under another name than
+        # its service's, a bundle with no pack of its own, and a whole provider.
+        services: ["aws.s3", "aws.dynamodb", "gcp.storage", "aws.sqs", "vercel.* aws.s3"]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            .github
+            scripts
+            profiles
+      - uses: ./.github/actions/go
+        with:
+          cache: check
+          save: "false"
+      - name: check out only those services
+        env:
+          SERVICES: ${{ matrix.services }}
+        run: |
+          set -f
+          python3 scripts/sparse.py $SERVICES
+          # Nothing unrelated came along: no set here asks for these, and nothing
+          # a set asks for needs them.
+          for p in internal/generated/aws/ec2 behavior/azure specs/cloudflare; do
+            if [ -e "$p" ]; then echo "::error::$p was checked out for: $SERVICES"; exit 1; fi
+          done
+          du -sh --exclude=.git . ; du -sh .git
+      - run: go build ./... && go vet ./...
+      - name: every test the tree holds
+        run: go test ./...
+      - name: the tests of those services alone
+        env:
+          SERVICES: ${{ matrix.services }}
+        run: set -f; make test-service SERVICES="$SERVICES"
+
   test:
-    needs: [check, unit, suites, fuzz, race, image]
+    needs: [check, unit, suites, fuzz, race, image, sparse]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

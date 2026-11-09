@@ -3,5 +3,9 @@
 # Change this line in a pull request and merge it. When ci has passed on the commit
 # that merged, cut-release.yml makes that tag on it and release.yml publishes the
 # archives and the container images. A version that already has a tag is left
-# alone, so this line can stay as it is after the release. Leave it empty (as it
-# is now) to release nothing. See docs/RELEASING.md.
+# alone, so this line can stay as it is after the release. Leave it without a
+# version line (as it was before the first release) to release nothing. See
+# docs/RELEASING.md.
+
+v0.0.1-alpha.1
+

@@ -321,6 +321,18 @@ var gates = map[string]gate{
 	},
 }
 
+// linkedList is the selected packages whose test binaries link changed code:
+// every package when everything is selected.
+func (r result) linkedList() []string {
+	out := []string{}
+	for _, p := range r.pkgs {
+		if r.all || r.linked[p] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func (r result) gates(changed []string) map[string]bool {
 	out := map[string]bool{}
 	for name, g := range gates {

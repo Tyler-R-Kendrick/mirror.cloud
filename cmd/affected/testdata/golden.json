@@ -8,6 +8,7 @@
       "generated-models": false,
       "image": false
     },
+    "linked": [],
     "packages": []
   },
   "a fuzz target's tests": {
@@ -19,6 +20,7 @@
       "generated-models": false,
       "image": false
     },
+    "linked": [],
     "packages": [
       "./internal/check",
       "./internal/mutation",
@@ -34,6 +36,7 @@
       "generated-models": true,
       "image": false
     },
+    "linked": [],
     "packages": [
       "./cmd/mirror",
       "./cmd/mirrorgen",
@@ -52,6 +55,7 @@
       "generated-models": false,
       "image": false
     },
+    "linked": [],
     "packages": [
       "./internal/check",
       "./internal/mutation",
@@ -67,6 +71,71 @@
       "generated-models": false,
       "image": true
     },
+    "linked": [
+      "./behavior",
+      "./cmd/mirror",
+      "./internal/allservices",
+      "./internal/bir",
+      "./internal/bundled",
+      "./internal/chaos",
+      "./internal/check",
+      "./internal/conformance",
+      "./internal/edge",
+      "./internal/engine",
+      "./internal/equivalence",
+      "./internal/execution/cicd/amplify",
+      "./internal/execution/cicd/awsdelivery",
+      "./internal/execution/cicd/codebuild",
+      "./internal/execution/cicd/codedeploy",
+      "./internal/execution/cicd/codepipeline",
+      "./internal/execution/cicd/delivery",
+      "./internal/execution/cicd/vercel",
+      "./internal/prim",
+      "./internal/proto/aws/restjson",
+      "./internal/proto/aws/restxml",
+      "./internal/proto/graphql",
+      "./internal/runtime",
+      "./internal/services/aws/apigateway",
+      "./internal/services/aws/athena",
+      "./internal/services/aws/cloudcontrol",
+      "./internal/services/aws/cloudformation",
+      "./internal/services/aws/dynamodb",
+      "./internal/services/aws/ecs",
+      "./internal/services/aws/elasticloadbalancing",
+      "./internal/services/aws/events",
+      "./internal/services/aws/firehose",
+      "./internal/services/aws/iam",
+      "./internal/services/aws/kafka",
+      "./internal/services/aws/kinesis",
+      "./internal/services/aws/kms",
+      "./internal/services/aws/lambda",
+      "./internal/services/aws/organizations",
+      "./internal/services/aws/pipes",
+      "./internal/services/aws/rds",
+      "./internal/services/aws/redshift",
+      "./internal/services/aws/s3",
+      "./internal/services/aws/s3tables",
+      "./internal/services/aws/scheduleexpr",
+      "./internal/services/aws/scheduler",
+      "./internal/services/aws/sns",
+      "./internal/services/aws/ssm",
+      "./internal/services/aws/states",
+      "./internal/services/gcp/gcs",
+      "./internal/spine",
+      "./test/behavior/aws",
+      "./test/behavior/azure",
+      "./test/behavior/bundled",
+      "./test/behavior/cloudflare",
+      "./test/behavior/digitalocean",
+      "./test/behavior/fly",
+      "./test/behavior/gcp",
+      "./test/behavior/hetzner",
+      "./test/behavior/hostinger",
+      "./test/behavior/railway",
+      "./test/behavior/stripe",
+      "./test/behavior/vercel",
+      "./test/terraform"
+    ],
     "packages": [
       "./behavior",
       "./cmd/mirror",
@@ -144,6 +213,7 @@
       "generated-models": false,
       "image": false
     },
+    "linked": [],
     "packages": []
   },
   "testing docs": {
@@ -155,6 +225,7 @@
       "generated-models": false,
       "image": false
     },
+    "linked": [],
     "packages": [
       "./internal/check",
       "./internal/mutation",
@@ -172,6 +243,7 @@
       "generated-models": true,
       "image": true
     },
+    "linked": [],
     "packages": [
       "./internal/check",
       "./internal/execution",
@@ -189,6 +261,7 @@
       "generated-models": false,
       "image": true
     },
+    "linked": [],
     "packages": []
   },
   "the miniflare runtime": {
@@ -200,6 +273,7 @@
       "generated-models": false,
       "image": false
     },
+    "linked": [],
     "packages": [
       "./internal/check",
       "./internal/execution",
@@ -228,6 +302,7 @@
       "generated-models": false,
       "image": false
     },
+    "linked": [],
     "packages": []
   }
 }

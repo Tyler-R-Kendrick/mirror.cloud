@@ -120,6 +120,30 @@ func TestAChangeSelectsItsReverseTestDependencies(t *testing.T) {
 	if docs := g.selectFor([]string{"README.md", "docs/TESTING.md", ".cursor/install.sh"}); docs.all || len(docs.pkgs) != 4+len(readers)-1 {
 		t.Errorf("a documentation change selected %v", docs.pkgs)
 	}
+	// A file tests only read links into nothing, and code links into what
+	// the selection holds.
+	if docs := g.selectFor([]string{"docs/TESTING.md"}); len(docs.linkedList()) != 0 {
+		t.Errorf("a documentation change links %v", docs.linkedList())
+	}
+	linked := map[string]bool{}
+	for _, p := range r.linkedList() {
+		linked[p] = true
+	}
+	if !linked["./internal/clock"] || len(linked) > len(r.pkgs) {
+		t.Errorf("internal/clock links %v", r.linkedList())
+	}
+	for p, deps := range g.deps {
+		links := p == "./internal/clock"
+		for _, d := range deps {
+			links = links || d == "./internal/clock"
+		}
+		if links != linked[p] {
+			t.Errorf("%s: links internal/clock=%v, in linked=%v", p, links, linked[p])
+		}
+	}
+	if every := g.selectFor([]string{"go.mod"}).linkedList(); len(every) != len(g.pkgs) {
+		t.Errorf("go.mod links %d of %d", len(every), len(g.pkgs))
+	}
 	if none := g.selectFor([]string{"README.md", "CONTRIBUTING.md"}); none.all || len(none.pkgs) != 0 {
 		t.Errorf("root Markdown selected %v", none.pkgs)
 	}
@@ -149,7 +173,7 @@ func TestGoldenSelections(t *testing.T) {
 		if r.all {
 			got[name] = map[string]any{"files": files, "all": r.reason, "jobs": r.gates(files)}
 		} else {
-			got[name] = map[string]any{"files": files, "packages": nonNil(r.pkgs), "jobs": r.gates(files)}
+			got[name] = map[string]any{"files": files, "packages": nonNil(r.pkgs), "linked": r.linkedList(), "jobs": r.gates(files)}
 		}
 	}
 	enc, _ := json.MarshalIndent(got, "", "  ")

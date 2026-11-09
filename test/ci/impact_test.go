@@ -129,9 +129,12 @@ func TestCIPlanSizesTheMatrices(t *testing.T) {
 	if none["image"] != "false" || none["generated-models"] != "true" {
 		t.Errorf("gates: %v", none)
 	}
-	some := plan(`{"all": false, "reason": "", "packages": ["./internal/services/aws/s3", "./internal/clock", "./internal/mutation"], ` + jobs + `}`)
+	some := plan(`{"all": false, "reason": "", "packages": ["./internal/services/aws/s3", "./internal/clock", "./internal/mutation", "./internal/check"], "linked": ["./internal/services/aws/s3", "./internal/clock", "./internal/mutation"], ` + jobs + `}`)
 	if r, f := read(some["race"]), read(some["fuzz"]); r.Packages != 2 || r.Count != 1 || f.Targets < 60 || f.Count != 4 {
 		t.Errorf("s3: race %+v fuzz %+v", r, f)
+	}
+	if strings.Contains(some["packages"], "internal/check") {
+		t.Errorf("a package that only reads a changed file reached race and fuzz: %q", some["packages"])
 	}
 }
 

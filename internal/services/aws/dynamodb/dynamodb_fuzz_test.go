@@ -147,11 +147,11 @@ func FuzzDynamoDBTableMetadata(f *testing.F) {
 		}
 		createdTable := spi.Object(created.Output["TableDescription"])
 		describedTable := spi.Object(described.Output["Table"])
-		if createdTable["TableStatus"] != "CREATING" || describedTable["TableStatus"] != "ACTIVE" || asInt(spi.Object(describedTable["WarmThroughput"])["ReadUnitsPerSecond"]) != int(reads) || asInt(spi.Object(describedTable["WarmThroughput"])["WriteUnitsPerSecond"]) != int(writes) || spi.Object(describedTable["WarmThroughput"])["Status"] != "ACTIVE" || spi.Str(spi.Object(describedTable["SSEDescription"])["KMSMasterKeyArn"]) != "arn:aws:kms:us-east-1:000000000000:key/"+key || len(spi.Slice(describedTable["GlobalSecondaryIndexes"])) != 1 {
+		if createdTable["TableStatus"] != "CREATING" || describedTable["TableStatus"] != "ACTIVE" || spi.Integer(spi.Object(describedTable["WarmThroughput"])["ReadUnitsPerSecond"]) != int(reads) || spi.Integer(spi.Object(describedTable["WarmThroughput"])["WriteUnitsPerSecond"]) != int(writes) || spi.Object(describedTable["WarmThroughput"])["Status"] != "ACTIVE" || spi.Str(spi.Object(describedTable["SSEDescription"])["KMSMasterKeyArn"]) != "arn:aws:kms:us-east-1:000000000000:key/"+key || len(spi.Slice(describedTable["GlobalSecondaryIndexes"])) != 1 {
 			t.Fatalf("table metadata did not round trip: %#v %#v", createdTable, describedTable)
 		}
 		throughput := spi.Object(describedTable["ProvisionedThroughput"])
-		if onDemand && (spi.Str(spi.Object(describedTable["BillingModeSummary"])["BillingMode"]) != "PAY_PER_REQUEST" || asInt(throughput["ReadCapacityUnits"]) != 0) || !onDemand && asInt(throughput["ReadCapacityUnits"]) != 5 {
+		if onDemand && (spi.Str(spi.Object(describedTable["BillingModeSummary"])["BillingMode"]) != "PAY_PER_REQUEST" || spi.Integer(throughput["ReadCapacityUnits"]) != 0) || !onDemand && spi.Integer(throughput["ReadCapacityUnits"]) != 5 {
 			t.Fatalf("billing metadata did not round trip: %#v", describedTable)
 		}
 	})
@@ -225,7 +225,7 @@ func FuzzDynamoDBBackupInsights(f *testing.F) {
 		wantStatus := "DISABLED"
 		if enabled {
 			wantStatus = "ENABLED"
-			if asInt(updatedRecovery["RecoveryPeriodInDays"]) != 35 || asInt(describedRecovery["EarliestRestorableDateTime"]) != 0 || asInt(describedRecovery["LatestRestorableDateTime"]) != int(seconds) {
+			if spi.Integer(updatedRecovery["RecoveryPeriodInDays"]) != 35 || spi.Integer(describedRecovery["EarliestRestorableDateTime"]) != 0 || spi.Integer(describedRecovery["LatestRestorableDateTime"]) != int(seconds) {
 				t.Fatalf("recovery window %#v %#v", updatedRecovery, describedRecovery)
 			}
 		} else if describedRecovery["EarliestRestorableDateTime"] != nil || describedRecovery["LatestRestorableDateTime"] != nil {
@@ -322,7 +322,7 @@ func FuzzDynamoDBStreamRecords(f *testing.F) {
 				t.Fatal("binary stream value changed")
 			}
 		}
-		if asInt(dynamodb["SizeBytes"]) != wantSize || dynamodb["StreamViewType"] != view || !strings.HasPrefix(spi.Str(stream.Output["NextShardIterator"]), arn+"|") {
+		if spi.Integer(dynamodb["SizeBytes"]) != wantSize || dynamodb["StreamViewType"] != view || !strings.HasPrefix(spi.Str(stream.Output["NextShardIterator"]), arn+"|") {
 			t.Fatalf("stream record metadata: %#v", dynamodb)
 		}
 	})

@@ -466,7 +466,7 @@ func (p *Pack) listItems(ctx context.Context, req *spi.Request, table, keyCond, 
 		}
 		matched = rest
 	}
-	limit := asInt(req.Input["Limit"])
+	limit := spi.Integer(req.Input["Limit"])
 	var last map[string]any
 	if limit > 0 && len(matched) > limit {
 		last = p.tableKey(td, matched[limit-1])
@@ -505,21 +505,6 @@ func itemsKV(kvs []spi.KV) []any {
 		out = append(out, map[string]any{"Key": kv.Key, "Value": string(kv.Value)})
 	}
 	return out
-}
-
-func asInt(v any) int {
-	switch n := v.(type) {
-	case float64:
-		return int(n)
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case string:
-		i, _ := strconv.Atoi(n)
-		return i
-	}
-	return 0
 }
 
 func cloneMap(m map[string]any) map[string]any {
@@ -626,7 +611,7 @@ func tableDescription(table map[string]any, status string) map[string]any {
 	description["TableStatus"] = status
 	warm := spi.Object(description["WarmThroughput"])
 	if status == "ACTIVE" && len(warm) == 0 {
-		if throughput := spi.Object(description["ProvisionedThroughput"]); asInt(throughput["ReadCapacityUnits"]) > 0 || asInt(throughput["WriteCapacityUnits"]) > 0 {
+		if throughput := spi.Object(description["ProvisionedThroughput"]); spi.Integer(throughput["ReadCapacityUnits"]) > 0 || spi.Integer(throughput["WriteCapacityUnits"]) > 0 {
 			warm = map[string]any{"ReadUnitsPerSecond": throughput["ReadCapacityUnits"], "WriteUnitsPerSecond": throughput["WriteCapacityUnits"]}
 			description["WarmThroughput"] = warm
 		}

@@ -4511,8 +4511,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-old-record-keeps-unsettled-conditions",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `old.Refs = conditioned(prev, old.Refs, req, name, old.ID)`,
-		new:  `_ = prev`,
+		old:  `old.Refs = conditioned(stored(old.Template), old.Refs, req, name, old.ID)`,
+		new:  `_ = old.Template`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationAnOldRecordSettlesItsConditions",
 	},

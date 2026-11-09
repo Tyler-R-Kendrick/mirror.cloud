@@ -604,6 +604,13 @@ The oracle is AWS's documentation as it ships in the vendored model
     and the name is free. Nothing changes it: `UpdateTerminationProtection`
     by its stack id is "does not exist" (round 9 protected the deleted
     record).
+  - A stack's stored template is read as it is stored, its JSON or YAML
+    and nothing more: the stack was made from it, and a check added since
+    may refuse it. Round 10 parsed it in full wherever it read it
+    (`DeleteStack`, an update's comparison, rollback and cleanup,
+    `ContinueUpdateRollback`, `GetTemplateSummary`) and dropped the error,
+    so a template a newer check refuses read as none, and `DeleteStack`
+    deleted a `Retain` resource.
   - An update settles the previous template's conditions again, from the
     record's parameters and the stack's pseudo parameters, before it
     compares: a record written before round 9 holds none in its `Refs`, so

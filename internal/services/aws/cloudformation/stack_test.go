@@ -2156,3 +2156,34 @@ func TestCloudFormationAConditionFlippedOffKeepsItsDeletionPolicy(t *testing.T) 
 		t.Errorf("after On turned off: Retain alive %v, DELETE_SKIPPED %v; Delete alive %v; the stack holds %v", alive("flip-r"), skipped, alive("flip-d"), h.statuses("flip"))
 	}
 }
+
+// A stored template is read for what it holds, not checked again: the stack
+// was made from it, and a check added since may refuse it. So the DeletionPolicy
+// of a stack stored with a template today's checks refuse (here an output's
+// ${ Q }) still holds on DeleteStack, and GetTemplateSummary of the stack still
+// summarises it. Before, every read of a stored template ran the full parse and
+// dropped its error, so the template read as none: DeleteStack deleted the
+// Retain queue.
+func TestCloudFormationAStoredTemplateIsReadAsStored(t *testing.T) {
+	h := newStacks(t)
+	q, err := h.service("aws.sqs", "CreateQueue", map[string]any{"QueueName": "stored-q"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, _ := json.Marshal(map[string]any{"Name": "stored", "ID": "arn:aws:cloudformation:us-east-1:000000000000:stack/stored/1", "Status": "CREATE_COMPLETE",
+		"Template":  `{"Resources":{"Q":{"Type":"AWS::SQS::Queue","DeletionPolicy":"Retain","Properties":{"QueueName":"stored-q"}}},"Outputs":{"O":{"Value":{"Fn::Sub":"${ Q }"}}}}`,
+		"Resources": []any{map[string]any{"Logical": "Q", "Physical": str(q["QueueUrl"]), "Type": "AWS::SQS::Queue", "Name": "stored-q"}},
+		"Outputs":   []any{}, "Refs": map[string]any{"Q": str(q["QueueUrl"])}})
+	if err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "stored", record); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := h.invoke("GetTemplateSummary", map[string]any{"StackName": "stored"}); err != nil || !strings.Contains(spi.JSONText(out["ResourceTypes"]), "AWS::SQS::Queue") {
+		t.Errorf("GetTemplateSummary of the stored stack answered %v (%v), want its queue", out, err)
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "stored"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service("aws.sqs", "GetQueueUrl", map[string]any{"QueueName": "stored-q"}); err != nil {
+		t.Errorf("DeleteStack deleted the Retain queue of a stored template today's checks refuse: %v", err)
+	}
+}

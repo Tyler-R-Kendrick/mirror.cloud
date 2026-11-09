@@ -97,7 +97,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "GetTemplateSummary":
 		_, tpl, _, _, err := p.template(ctx, req, "", "")
 		if st, loadErr := p.load(ctx, req, name); err != nil && name != "" && loadErr == nil && cmp.Or(str(req.Input["TemplateBody"]), str(req.Input["TemplateURL"])) == "" {
-			tpl, err = parseTemplate(st.Template)
+			tpl, err = stored(st.Template), nil
 		}
 		if err != nil {
 			return nil, err
@@ -235,8 +235,8 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}
 	read := old // the record as the update read it, which its writes go over (a rollback changes old's resources)
 	read.Resources = slices.Clone(old.Resources)
-	if prev, err := parseTemplate(old.Template); err == nil && update { // settled again: a record before round 9 holds no conditions
-		old.Refs = conditioned(prev, old.Refs, req, name, old.ID)
+	if update { // settled again: a record before round 9 holds no conditions
+		old.Refs = conditioned(stored(old.Template), old.Refs, req, name, old.ID)
 	}
 	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: refs,
 		Resources: []res{}, Outputs: []any{}} // never null: every read of a stack lists both
@@ -309,7 +309,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	stale := slices.DeleteFunc(slices.Clone(old.Resources), func(r res) bool {
 		return slices.ContainsFunc(st.Resources, func(n res) bool { return n.Physical == r.Physical })
 	})
-	oldTpl, _ := parseTemplate(old.Template)
+	oldTpl := stored(old.Template)
 	_ = p.unwind(ctx, req, st, st, st.Resources, stale, nil, st.Status, st.Status, func(r res) bool {
 		if replaced := slices.ContainsFunc(st.Resources, func(n res) bool { return n.Logical == r.Logical }); replaced { // still the stack's
 			return retains(tpl, "UpdateReplacePolicy", "Retain")(r)
@@ -409,7 +409,7 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 		// DELETE_IN_PROGRESS, written only over the record read. One being created is left to its create,
 		// which deletes what it made, and then the stack.
 		del.Status = "DELETE_IN_PROGRESS"
-		tpl, _ := parseTemplate(st.Template)
+		tpl := stored(st.Template)
 		if _, started, settleErr := p.settle(ctx, req, st, del); settleErr != nil {
 			return nil, settleErr
 		} else if !started { // it changed since it was read
@@ -837,7 +837,7 @@ func (p *Pack) change(req *spi.Request, old stack, logical, typ string, props ma
 	if i < 0 {
 		return res{}, "create"
 	}
-	tpl, _ := parseTemplate(old.Template)
+	tpl := stored(old.Template)
 	before, how := asMap(p.resolve(asMap(asMap(tpl["Resources"])[logical])["Properties"], old.Refs, req, old.Name)), ""
 	for _, k := range slices.Concat(slices.Collect(maps.Keys(before)), slices.Collect(maps.Keys(props))) {
 		if spi.JSONText(before[k]) == spi.JSONText(props[k]) {
@@ -972,7 +972,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 // resources, UPDATE_ROLLBACK_COMPLETE, or UPDATE_ROLLBACK_FAILED with what it could not delete still listed
 // for DeleteStack. Only a finished update deletes what it replaced.
 func (p *Pack) rollback(ctx context.Context, req *spi.Request, seen, old stack, made []res, changed map[string]bool, skip func(res) bool) error {
-	tpl, _ := parseTemplate(old.Template)
+	tpl := stored(old.Template)
 	var doomed []res
 	var first error
 	for _, r := range made {
@@ -1007,7 +1007,7 @@ func (p *Pack) resume(ctx context.Context, req *spi.Request, name string) (*spi.
 	if err != nil {
 		return nil, err
 	}
-	tpl, _ := parseTemplate(st.Template)
+	tpl := stored(st.Template)
 	kept, doomed, first := []res{}, []res{}, error(nil)
 	for _, r := range st.Resources {
 		props := maps.Collect(maps.All(asMap(p.resolve(asMap(asMap(tpl["Resources"])[r.Logical])["Properties"], st.Refs, req, st.Name))))
@@ -1400,21 +1400,10 @@ func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack stri
 }
 
 func parseTemplate(body string) (map[string]any, error) {
-	body = strings.TrimSpace(body)
-	if body == "" {
-		return nil, invalid("empty TemplateBody")
-	}
-	var m map[string]any
-	if body[0] == '{' {
-		if err := json.Unmarshal([]byte(body), &m); err != nil {
-			return nil, invalid(err.Error())
-		}
-	} else if yml, err := parseYAML(body); err != nil {
-		return nil, invalid("TemplateBody YAML: " + err.Error())
-	} else {
-		m = yml
-	}
-	if len(asMap(m["Resources"])) == 0 { // "The Resources section is required in every CloudFormation template"
+	m, err := decode(body)
+	if err != nil {
+		return nil, err
+	} else if len(asMap(m["Resources"])) == 0 { // "The Resources section is required in every CloudFormation template"
 		return nil, invalid("Template format error: At least one Resources member must be defined.")
 	} else if n := len(asMap(m["Resources"])); n > 500 { // "The maximum number of resources that you can declare ... 500 resources" (quotas)
 		return nil, invalid("Template format error: Number of resources, " + strconv.Itoa(n) + ", is greater than maximum allowed, 500")
@@ -1508,6 +1497,27 @@ func referred(v any, refs map[string]string) []string {
 	named := map[string]bool{}
 	names(v, named, refs)
 	return slices.Sorted(maps.Keys(named))
+}
+
+// decode is a template body as JSON, or YAML, before any check of what it holds.
+func decode(body string) (m map[string]any, err error) {
+	if body = strings.TrimSpace(body); body == "" {
+		err = invalid("empty TemplateBody")
+	} else if body[0] == '{' {
+		if jsonErr := json.Unmarshal([]byte(body), &m); jsonErr != nil {
+			err = invalid(jsonErr.Error())
+		}
+	} else if m, err = parseYAML(body); err != nil {
+		err = invalid("TemplateBody YAML: " + err.Error())
+	}
+	return m, err
+}
+
+// stored is a stack's stored template as it holds it: the stack was made from it, so it is read, not
+// checked again by checks added since.
+func stored(body string) map[string]any {
+	m, _ := decode(body)
+	return m
 }
 
 // each calls fn with every map v holds, v itself included.

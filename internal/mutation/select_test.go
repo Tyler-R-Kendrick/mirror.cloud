@@ -28,7 +28,9 @@ import (
 //   - its own entry in this table changed (needs MUTATION_DIFF for the lines;
 //     with MUTATION_FILES alone a change to this package selects everything);
 //   - or the diff touches what every mutant depends on: go.mod, go.sum, or a
-//     line of this package that is not inside a mutant's entry (the harness).
+//     declaration of this package other than the table, an init that appends
+//     to it (which selects the entries it appends) and the imports: the
+//     harness.
 //
 // MUTATION_PKGS and MUTATION_NAMES select by package and by name, for running
 // part of the table locally. Filters add up; an empty selection under a filter
@@ -201,17 +203,29 @@ type entry struct {
 	start, end int
 }
 
+// region is a top-level declaration of this package's source that is not the
+// table itself. A change inside an init function that appends to the table
+// (group) can change every entry it appends, through the locals they share; a
+// change in any other declaration (harness) can change every mutant.
+type region struct {
+	start, end int
+	harness    bool
+	group      []string // the names of the entries an init appends
+}
+
 var (
 	entriesOnce sync.Once
 	entriesErr  error
-	entries     map[string][]entry // file (slash, from the root) -> literals, in order
+	entries     map[string][]entry  // file (slash, from the root) -> literals, in order
+	regions     map[string][]region // file -> declarations other than the table and imports
 )
 
 // tableEntries finds every composite literal in this package that has a
-// `name:` string field, which is what a mutant entry is.
+// `name:` string field, which is what a mutant entry is, and the declarations
+// around them.
 func tableEntries(root string) (map[string][]entry, error) {
 	entriesOnce.Do(func() {
-		entries = map[string][]entry{}
+		entries, regions = map[string][]entry{}, map[string][]region{}
 		names, err := filepath.Glob(filepath.Join(root, "internal", "mutation", "*.go"))
 		if err != nil {
 			entriesErr = err
@@ -225,39 +239,77 @@ func tableEntries(root string) (map[string][]entry, error) {
 				return
 			}
 			rel := "internal/mutation/" + filepath.Base(path)
-			ast.Inspect(f, func(n ast.Node) bool {
-				lit, ok := n.(*ast.CompositeLit)
-				if !ok {
-					return true
-				}
-				for _, el := range lit.Elts {
-					kv, ok := el.(*ast.KeyValueExpr)
+			find := func(root ast.Node) []entry {
+				var found []entry
+				ast.Inspect(root, func(n ast.Node) bool {
+					lit, ok := n.(*ast.CompositeLit)
 					if !ok {
-						continue
+						return true
 					}
-					if key, ok := kv.Key.(*ast.Ident); !ok || key.Name != "name" {
-						continue
-					}
-					if v, ok := kv.Value.(*ast.BasicLit); ok && v.Kind == token.STRING {
-						name, err := strconv.Unquote(v.Value)
-						if err == nil {
-							entries[rel] = append(entries[rel], entry{name, fset.Position(lit.Lbrace).Line, fset.Position(lit.Rbrace).Line})
+					for _, el := range lit.Elts {
+						kv, ok := el.(*ast.KeyValueExpr)
+						if !ok {
+							continue
 						}
+						if key, ok := kv.Key.(*ast.Ident); !ok || key.Name != "name" {
+							continue
+						}
+						if v, ok := kv.Value.(*ast.BasicLit); ok && v.Kind == token.STRING {
+							if name, err := strconv.Unquote(v.Value); err == nil {
+								found = append(found, entry{name, fset.Position(lit.Lbrace).Line, fset.Position(lit.Rbrace).Line})
+							}
+						}
+						return false
 					}
-					return false
+					return true
+				})
+				return found
+			}
+			for _, decl := range f.Decls {
+				start, end := fset.Position(decl.Pos()).Line, fset.Position(decl.End()).Line
+				found := find(decl)
+				entries[rel] = append(entries[rel], found...)
+				switch d := decl.(type) {
+				case *ast.GenDecl:
+					if d.Tok == token.IMPORT {
+						continue // an import changes nothing until code uses it
+					}
+					if isTable(d) {
+						continue // its lines outside every entry are braces
+					}
+				case *ast.FuncDecl:
+					if d.Name.Name == "init" && d.Recv == nil && len(found) > 0 {
+						var group []string
+						for _, e := range found {
+							group = append(group, e.name)
+						}
+						regions[rel] = append(regions[rel], region{start: start, end: end, group: group})
+						continue
+					}
 				}
-				return true
-			})
+				regions[rel] = append(regions[rel], region{start: start, end: end, harness: true})
+			}
 		}
 	})
 	return entries, entriesErr
 }
 
+// isTable reports whether d is `var mutants = []mutant{...}`.
+func isTable(d *ast.GenDecl) bool {
+	if d.Tok != token.VAR || len(d.Specs) != 1 {
+		return false
+	}
+	v, ok := d.Specs[0].(*ast.ValueSpec)
+	return ok && len(v.Names) == 1 && v.Names[0].Name == "mutants"
+}
+
 // entriesFor says which mutants a change to the table's own source selects,
-// and whether it touched the harness instead (which selects all of them).
-// Deleting lines between entries or inside one selects nothing: a deleted
-// mutant cannot run, and an edit inside a surviving entry shows as added
-// lines. A change to a line outside every entry is the harness.
+// and whether it touched the harness instead (which selects all of them). A
+// line inside an entry selects that entry; inside an init that appends
+// entries, all of those; inside any other declaration but an import, every
+// mutant. A line outside every declaration (a comment, a blank) and the
+// braces of the table select nothing, and so does deleting lines that held
+// only entries: a deleted mutant cannot run.
 func entriesFor(root string, sel selection) (map[string]bool, string, error) {
 	table, err := tableEntries(root)
 	if err != nil {
@@ -265,27 +317,34 @@ func entriesFor(root string, sel selection) (map[string]bool, string, error) {
 	}
 	picked := map[string]bool{}
 	for file, ranges := range sel.lines {
-		list := table[file]
-		first, last := 0, 0
-		if len(list) > 0 {
-			first, last = list[0].start, list[len(list)-1].end
-		}
 		for _, r := range ranges {
-			if r[1] < r[0] { // only deleted lines
-				if len(list) > 0 && r[0] >= first && r[0] <= last+1 {
-					continue
-				}
-				return nil, fmt.Sprintf("%s:%d deletes harness lines", file, r[0]), nil
+			lines := [][2]int{{r[0], r[1]}}
+			if r[1] < r[0] { // only deleted lines: the place they were
+				lines = [][2]int{{r[0], r[0]}}
 			}
-			for line := r[0]; line <= r[1]; line++ {
-				hit := false
-				for _, e := range list {
+			for line := lines[0][0]; line <= lines[0][1]; line++ {
+				inEntry := false
+				for _, e := range table[file] {
 					if line >= e.start && line <= e.end {
-						picked[e.name], hit = true, true
+						inEntry = true
+						if r[1] >= r[0] {
+							picked[e.name] = true
+						}
 					}
 				}
-				if !hit {
-					return nil, fmt.Sprintf("%s:%d is harness code, not a mutant entry", file, line), nil
+				if inEntry {
+					continue
+				}
+				for _, g := range regions[file] {
+					if line < g.start || line > g.end {
+						continue
+					}
+					if g.harness {
+						return nil, fmt.Sprintf("%s:%d is harness code, not a mutant entry", file, line), nil
+					}
+					for _, name := range g.group {
+						picked[name] = true
+					}
 				}
 			}
 		}
@@ -552,9 +611,21 @@ func TestADiffSelectsWhatItTouches(t *testing.T) {
 	if got, reason := selectDiff(t, root, del); len(got) != 0 {
 		t.Errorf("deleting an entry selected %d (%s)", len(got), reason)
 	}
-	// The harness is every mutant's.
-	if got, reason := selectDiff(t, root, hunk("internal/mutation/select_test.go", 3)); len(got) != len(mutants) || reason == "" {
-		t.Errorf("a harness change selected %d of %d", len(got), len(mutants))
+	// The harness is every mutant's; an import alone is nobody's.
+	raw, _ := os.ReadFile(filepath.Join(root, "internal", "mutation", "select_test.go"))
+	at := strings.Count(string(raw[:strings.Index(string(raw), "\nfunc assign(")]), "\n") + 3
+	if got, reason := selectDiff(t, root, hunk("internal/mutation/select_test.go", at)); len(got) != len(mutants) || reason == "" {
+		t.Errorf("a harness change at line %d selected %d of %d", at, len(got), len(mutants))
+	}
+	if got, _ := selectDiff(t, root, hunk("internal/mutation/select_test.go", 4)); len(got) != 0 {
+		t.Errorf("an import selected %d", len(got))
+	}
+	// A local of the init that appends the cursor mutants is every one of them.
+	cursor, _ := os.ReadFile(filepath.Join(root, "internal", "mutation", "cursor_mutants_test.go"))
+	at = strings.Count(string(cursor[:strings.Index(string(cursor), "\tengine := ")]), "\n") + 1
+	got, _ = selectDiff(t, root, hunk("internal/mutation/cursor_mutants_test.go", at))
+	if want := len(table["internal/mutation/cursor_mutants_test.go"]); len(got) != want {
+		t.Errorf("a change to the init's locals selected %d, want its %d entries", len(got), want)
 	}
 	if _, _, err := parseDiff(bufio.NewScanner(strings.NewReader("diff --git a/x b/x\n+++ b/x\n@@ nonsense\n"))); err == nil {
 		t.Error("an unreadable hunk header was accepted")

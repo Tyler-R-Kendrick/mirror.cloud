@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net"
 	"reflect"
 	"regexp"
@@ -51,9 +52,10 @@ func (p *Pack) extra(ctx context.Context, req *spi.Request) (*spi.Response, erro
 				fields[eventRuleNext] = next.UTC().Format(time.RFC3339Nano)
 			}
 		}
-		response, err := p.patch(ctx, req, "rules", key, fields)
+		maps.Copy(rule, fields)
+		p.saveEventRecord(ctx, req, "rules", key, rule)
 		p.notify()
-		return response, err
+		return &spi.Response{Output: rule}, nil
 	case "TestEventPattern":
 		ok := matchEventPattern(spi.Str(req.Input["EventPattern"]), req.Input["Event"])
 		return &spi.Response{Output: map[string]any{"Result": ok}}, nil
@@ -339,19 +341,6 @@ func resourceExists(kind string) error {
 
 func (p *Pack) saveEventRecord(ctx context.Context, req *spi.Request, collection, name string, record map[string]any) {
 	_ = spi.PutJSON(ctx, p.col(req, collection), name, record)
-}
-
-func (p *Pack) patch(ctx context.Context, req *spi.Request, col, id string, fields map[string]any) (*spi.Response, error) {
-	rec, _ := p.load(ctx, req, col, id)
-	if rec == nil {
-		rec = map[string]any{"Name": id}
-	}
-	for k, v := range fields {
-		rec[k] = v
-	}
-	b, _ := json.Marshal(rec)
-	_ = p.col(req, col).Put(ctx, id, b)
-	return &spi.Response{Output: rec}, nil
 }
 
 func (p *Pack) load(ctx context.Context, req *spi.Request, col, id string) (map[string]any, bool) {

@@ -177,7 +177,8 @@ operations:
     output:
       Stacks: >-
         items.map(s, merge({'StackName': s.Name, 'StackId': s.ID,
-          'StackStatus': s.Status, 'Outputs': s.Outputs},
+          'StackStatus': s.Status, 'Outputs': s.Outputs,
+          'NotificationARNs': 'NotificationARNs' in s && s.NotificationARNs != null ? s.NotificationARNs : []},
           'Reason' in s ? {'StackStatusReason': s.Reason} : {}))
 
   ListStacks:
@@ -348,8 +349,13 @@ operations:
       ChangeSetId: cs.ChangeSetId
       ChangeSetName: cs.ChangeSetName
       StackName: cs.StackName
+      StackId: "'StackId' in cs ? cs.StackId : null"
       Status: cs.Status
       StatusReason: "'StatusReason' in cs ? cs.StatusReason : dyn(null)"
+      Parameters: "'Parameters' in cs ? cs.Parameters : []"
+      NotificationARNs: "'NotificationARNs' in cs && cs.NotificationARNs != null ? cs.NotificationARNs : []"
+      Tags: "'Tags' in cs ? cs.Tags : []"
+      Capabilities: "'Capabilities' in cs ? cs.Capabilities : []"
 
   ListChangeSets:
     require: [*stackNameOrId, *stackPattern]

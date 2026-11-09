@@ -457,8 +457,9 @@
       },
       "output": {
         "Id": "arn:aws:cloudformation:us-east-1:000000000000:changeSet/cs1/7c589129",
-        "StackId": "arn:aws:cloudformation:us-east-1:000000000000:stack/rem"
-      }
+        "StackId": "arn:aws:cloudformation:us-east-1:000000000000:stack/rem/5f59f223"
+      },
+      "recut": "CreateChangeSet answers \"The unique ID of the stack\" (API reference, CreateChangeSetOutput), a stack id, arn:aws:cloudformation:<region>:<account>:stack/<name>/<id>: rem does not exist, so the id is minted with the change set, and its execution makes the stack under it. The pack answered arn:...:stack/rem, which is no stack's id."
     },
     {
       "operation": "DescribeChangeSet",
@@ -502,11 +503,12 @@
             "StackName": "rem",
             "Status": "FAILED",
             "StatusReason": "ValidationError: Template format error: At least one Resources member must be defined.",
-            "TemplateBody": "{\"AWSTemplateFormatVersion\":\"2010-09-09\",\"Resources\":{}}"
+            "TemplateBody": "{\"AWSTemplateFormatVersion\":\"2010-09-09\",\"Resources\":{}}",
+            "StackId": "arn:aws:cloudformation:us-east-1:000000000000:stack/rem/5f59f223"
           }
         ]
       },
-      "recut": "cs1's template has no Resources, which \"is required in every CloudFormation template\", and a change set's template is now validated when it is created: the change set is FAILED, and its summary carries the error as StatusReason (\"if your attempt to create a change set failed, CloudFormation shows the error message\"). Vendored model cloudformation-2010-05-15.json, sha256 9992e820."
+      "recut": "cs1's template has no Resources, which \"is required in every CloudFormation template\", and a change set's template is now validated when it is created: the change set is FAILED, and its summary carries the error as StatusReason (\"if your attempt to create a change set failed, CloudFormation shows the error message\"). Vendored model cloudformation-2010-05-15.json, sha256 9992e820. ChangeSetSummary declares StackId, \"The ID of the stack with which the change set is associated\" (API reference): the record holds the id minted at CreateChangeSet (step 24)."
     },
     {
       "operation": "DescribeChangeSet",

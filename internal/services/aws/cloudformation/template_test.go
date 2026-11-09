@@ -1036,6 +1036,9 @@ func TestCloudFormationFindsInMap(t *testing.T) {
 	for i, keys := range [][]any{{"Nope", "us-east-1", "Stage"}, {"Env", "eu-west-1", "Stage"}, {"Env", "us-east-1", "Nope"}} {
 		body := template(map[string]any{"P": param(find(keys...))}, nil)
 		want := "Unable to get mapping for " + str(keys[0]) + "::" + str(keys[1]) + "::" + str(keys[2])
+		if keys[0] == "Nope" { // a map the section does not declare is named as one
+			want = "Mapping named 'Nope' is not present in the 'Mappings' section of template."
+		}
 		for _, op := range []string{"ValidateTemplate", "CreateStack"} {
 			if _, err := h.invoke(op, map[string]any{"StackName": fmt.Sprintf("fim-%d", i), "TemplateBody": body}); code(err) != "ValidationError" || !strings.Contains(err.Error(), want) {
 				t.Errorf("%s of Fn::FindInMap %v answered %v, want ValidationError: %s", op, keys, err, want)
@@ -1045,11 +1048,13 @@ func TestCloudFormationFindsInMap(t *testing.T) {
 			t.Errorf("the refused Fn::FindInMap %v left %v", keys, record)
 		}
 	}
-	// A DefaultValue needs the AWS::LanguageExtensions transform, which the engine does not run: a stack is
-	// not made with a Fn::FindInMap it cannot evaluate.
+	// A DefaultValue needs the AWS::LanguageExtensions transform, which the engine does not run: without it
+	// a Fn::FindInMap takes three parameters, and a fourth is refused, by ValidateTemplate too.
 	fallback := template(map[string]any{"P": param(find("Env", "x", "y", map[string]any{"DefaultValue": "d"}))}, nil)
-	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "fim-default", "TemplateBody": fallback}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "cannot be evaluated") {
-		t.Errorf("a Fn::FindInMap with a DefaultValue answered %v, want ValidationError", err)
+	for _, op := range []string{"ValidateTemplate", "CreateStack"} {
+		if _, err := h.invoke(op, map[string]any{"StackName": "fim-default", "TemplateBody": fallback}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "requires three parameters") {
+			t.Errorf("%s of a Fn::FindInMap with a DefaultValue answered %v, want ValidationError: requires three parameters", op, err)
+		}
 	}
 }
 
@@ -1075,23 +1080,23 @@ func TestCloudFormationAParameterMustHaveAValue(t *testing.T) {
 		t.Errorf("the refused stack left %v", record)
 	}
 	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "pmv", "TemplateBody": string(body),
-		"Parameters.member.1.ParameterKey": "Key", "Parameters.member.1.ParameterValue": "k",
-		"Parameters.member.2.ParameterKey": "Other", "Parameters.member.2.ParameterValue": "o"}); err != nil {
+		"Parameters": givenParams("Key", "k", "Other", "o")}); err != nil {
 		t.Errorf("CreateStack with the values answered %v", err)
 	}
 }
 
 // AWS::NotificationARNs "Returns the list of notification Amazon Resource
 // Names (ARNs) for the current stack" (User Guide, pseudo parameters): the
-// request's NotificationARNs, a list, so a Fn::Join of it joins them, in
-// either protocol's spelling of the list. Before, a Ref to it answered its
-// own name, and the Fn::Join was "".
+// request's NotificationARNs, a list, so a Fn::Join of it joins them. The
+// query protocol's spelling of the list is the decoder's to read, and
+// TestBootedServerCloudFormationNotificationARNs sends it over the wire.
+// Before, a Ref to it answered its own name, and the Fn::Join was "".
 func TestCloudFormationNotificationARNsIsAList(t *testing.T) {
 	h := newStacks(t)
 	body, _ := json.Marshal(map[string]any{"Resources": map[string]any{"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String",
 		"Value": map[string]any{"Fn::Join": []any{",", map[string]any{"Ref": "AWS::NotificationARNs"}}}}}}})
 	a, b := "arn:aws:sns:us-east-1:000000000000:a", "arn:aws:sns:us-east-1:000000000000:b"
-	for name, in := range map[string]map[string]any{"na-json": {"NotificationARNs": []any{a, b}}, "na-query": {"NotificationARNs.member.1": a, "NotificationARNs.member.2": b}} {
+	for name, in := range map[string]map[string]any{"na-json": {"NotificationARNs": []any{a, b}}} {
 		in["StackName"], in["TemplateBody"] = name, string(body)
 		if _, err := h.invoke("CreateStack", in); err != nil {
 			t.Fatal(err)

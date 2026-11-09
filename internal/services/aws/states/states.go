@@ -1276,13 +1276,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if spi.First(testedState, "Type") != "Map" || spi.First(processorConfig, "Mode") != "DISTRIBUTED" {
 				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 			}
-			mapInspection := inspectTestState(testedState, cloneJSON(data), jsonataContext(walkRequest, "TestState", nil), variables, mock, configuration, walkResult{}, p.deps.Rand)
+			mapInspection := inspectTestState(testedState, cloneJSON(data), jsonataContext(walkRequest, "TestState"), variables, mock, configuration, walkResult{}, p.deps.Rand)
 			itemCount, countValid := testStateMapItemCount(mapInspection)
 			failureCount := int(toFloat(rawCount))
 			if !countValid || failureCount > itemCount || selection.insideMap && failureCount == itemCount {
 				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 			}
-			if testStateMapFailuresExceeded(testedState, data, jsonataContext(walkRequest, "TestState", nil), variables, p.deps.Rand, failureCount, itemCount) {
+			if testStateMapFailuresExceeded(testedState, data, jsonataContext(walkRequest, "TestState"), variables, p.deps.Rand, failureCount, itemCount) {
 				failure := map[string]any{"error": "States.ExceedToleratedFailureThreshold", "cause": "States.ExceedToleratedFailureThreshold"}
 				delete(testedState, "_TestStateMockResult")
 				testedState["_TestStateMockError"] = failure
@@ -1315,7 +1315,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			response["cause"] = wr.cause
 		}
 		if inspectionLevel != "INFO" {
-			response["inspectionData"] = inspectTestState(testedState, inspectionInput, jsonataContext(walkRequest, "TestState", nil), variables, mock, configuration, wr, p.deps.Rand)
+			response["inspectionData"] = inspectTestState(testedState, inspectionInput, jsonataContext(walkRequest, "TestState"), variables, mock, configuration, wr, p.deps.Rand)
 		}
 		return &spi.Response{Output: response}, nil
 	case "TagResource":
@@ -1724,14 +1724,14 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 			var out any
 			var caught, valid bool
 			if isJSONata {
-				next, out, caught, valid = catchJSONata(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName, nil), pend.Variables, p.deps.Rand)
+				next, out, caught, valid = catchJSONata(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName), pend.Variables, p.deps.Rand)
 				if !valid {
 					failure = stateFailure{name: "States.QueryEvaluationError", cause: "States.QueryEvaluationError"}
 					caught = false
 				}
 			} else {
 				next, out, caught = catchTask(st, failure, pend.StateInput)
-				if caught && !applyCatchAssignments(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName, nil), pend.Variables, p.deps.Rand) {
+				if caught && !applyCatchAssignments(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName), pend.Variables, p.deps.Rand) {
 					failure = stateFailure{name: "States.Runtime", cause: "States.Runtime"}
 					caught = false
 				}
@@ -1748,7 +1748,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		}
 	} else if isJSONata {
 		var valid bool
-		data, valid = applyJSONataState(st, pend.StateInput, data, jsonataContext(&walkRequest, pend.StateName, nil), pend.Variables, p.deps.Rand)
+		data, valid = applyJSONataState(st, pend.StateInput, data, jsonataContext(&walkRequest, pend.StateName), pend.Variables, p.deps.Rand)
 		if !valid {
 			failure := stateFailure{name: "States.QueryEvaluationError", cause: "States.QueryEvaluationError"}
 			if pend.Retries == nil {
@@ -1761,7 +1761,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 				sm["StartAt"] = pend.StateName
 				def, _ := json.Marshal(sm)
 				definition, from, data, retrying = string(def), "", pend.StateInput, true
-			} else if next, out, caught, catchValid := catchJSONata(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName, nil), pend.Variables, p.deps.Rand); caught && catchValid && next != "" {
+			} else if next, out, caught, catchValid := catchJSONata(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName), pend.Variables, p.deps.Rand); caught && catchValid && next != "" {
 				sm["StartAt"] = next
 				def, _ := json.Marshal(sm)
 				definition, from, data = string(def), "", out
@@ -1771,7 +1771,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		}
 	} else {
 		result := data
-		stateContext := jsonataContext(&walkRequest, pend.StateName, nil)
+		stateContext := jsonataContext(&walkRequest, pend.StateName)
 		out, valid := applyStateResult(st, pend.StateInput, result, stateContext, p.deps.Rand, pend.Variables)
 		failure := "States.Runtime"
 		if valid {
@@ -1896,7 +1896,7 @@ walkLoop:
 			queryLanguage = machineQueryLanguage
 		}
 		isJSONata := queryLanguage == "JSONata"
-		stateContext := jsonataContext(req, cur, nil)
+		stateContext := jsonataContext(req, cur)
 		if _, supplied := stateContext["State"].(map[string]any)["EnteredTime"]; !supplied {
 			stateContext["State"].(map[string]any)["EnteredTime"] = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
 		}
@@ -3115,7 +3115,7 @@ type jsonataScope struct {
 	random                     spi.Rand
 }
 
-func jsonataContext(req *spi.Request, state string, extra map[string]any) map[string]any {
+func jsonataContext(req *spi.Request, state string) map[string]any {
 	machineARN := spi.First(req.Input, "_stateMachineArn", "stateMachineArn", "StateMachineArn")
 	stateName := spi.First(req.Input, "_testStateName")
 	if stateName == "" {
@@ -3162,9 +3162,6 @@ func jsonataContext(req *spi.Request, state string, extra map[string]any) map[st
 				context[key] = value
 			}
 		}
-	}
-	for key, value := range extra {
-		context[key] = value
 	}
 	return context
 }

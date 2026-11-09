@@ -100,23 +100,17 @@ func Integer(v any) int {
 	return 0
 }
 
-// Members is the list the query protocol spells name.member.1, name.member.2 and on, in that order.
+// Members is the list the query protocol spells name.member.1, name.member.2 and on, in that order, to
+// the first index missing: a gap ends the list, as the query decoder's (awsquery's listAt) does.
 func Members(in map[string]any, name string) []any {
-	by := map[int]any{}
-	for k, v := range in {
-		if n, ok := strings.CutPrefix(k, name+".member."); ok {
-			if i, err := strconv.Atoi(n); err == nil {
-				by[i] = v
-			}
+	values := []any{}
+	for i := 1; ; i++ {
+		v, ok := in[name+".member."+strconv.Itoa(i)]
+		if !ok {
+			return values
 		}
+		values = append(values, v)
 	}
-	values := make([]any, 0, len(by))
-	for i := 1; i <= len(by); i++ {
-		if value, ok := by[i]; ok {
-			values = append(values, value)
-		}
-	}
-	return values
 }
 
 // PutJSON stores v in c under key as its JSON: the encode and the write every

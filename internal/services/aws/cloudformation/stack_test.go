@@ -2141,7 +2141,7 @@ func TestCloudFormationAConditionFlippedOffKeepsItsDeletionPolicy(t *testing.T) 
 		t.Fatal(err)
 	}
 	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "flip", "TemplateBody": string(template),
-		"Parameters.member.1.ParameterKey": "Make", "Parameters.member.1.ParameterValue": "no"}); err != nil {
+		"Parameters": givenParams("Make", "no")}); err != nil {
 		t.Fatalf("UpdateStack turning On off: %v", err)
 	}
 	alive := func(name string) bool {

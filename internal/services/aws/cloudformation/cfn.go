@@ -11,6 +11,7 @@ import (
 	"io"
 	"maps"
 	"net/url"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -39,8 +40,9 @@ func init() {
 
 // Pack is the template engine behind the native operations.
 type Pack struct {
-	deps  spi.Deps
-	walks int // resources whose properties order walked, which a test counts
+	deps     spi.Deps
+	walks    int            // resources whose properties order walked, which a test counts
+	mappings map[string]any // the template's Mappings, which findInMap reads, set once an operation's template is parsed
 }
 
 // New constructs the template engine.
@@ -66,7 +68,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"Description": str(tpl["Description"]), "Parameters": paramDecls(tpl)}}, nil
 	case "CreateStack", "UpdateStack":
-		return p.upsert(ctx, req, name, req.Operation == "UpdateStack")
+		return p.upsert(ctx, req, name, req.Operation == "UpdateStack", "")
 	case "DeleteStack":
 		return p.drop(ctx, req, name)
 	case "ContinueUpdateRollback":
@@ -123,7 +125,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "CreateChangeSet": // the template is read now: "if your attempt to create a change set failed, CloudFormation shows the error message" (StatusReason)
 		csn, body := str(req.Input["ChangeSetName"]), str(req.Input["TemplateBody"])
 		st, _ := p.load(ctx, req, name)
-		stackID := cmp.Or(st.ID, "arn:aws:cloudformation:"+req.Identity.Region+":"+req.Identity.Account+":stack/"+name)
 		if body == "" {
 			return nil, invalid("TemplateBody required")
 		} else if !updatable(st) { // as UpdateStack refuses one
@@ -132,14 +133,23 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, err
 		}
 		rec := map[string]any{"ChangeSetName": csn, "ChangeSetId": "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":changeSet/" + csn + "/" + p.deps.Rand.Hex(8),
-			"StackName": name, "ChangeSetType": cmp.Or(str(req.Input["ChangeSetType"]), "UPDATE"), "Status": "CREATE_COMPLETE", "TemplateBody": body}
-		if _, _, _, _, err := p.template(ctx, req, named(name), stackID); err != nil { // every check its execution makes
+			"StackName": name, "ChangeSetType": cmp.Or(str(req.Input["ChangeSetType"]), "UPDATE"), "Status": "CREATE_COMPLETE", "TemplateBody": body,
+			"StackId": cmp.Or(st.ID, "arn:aws:cloudformation:"+req.Identity.Region+":"+req.Identity.Account+":stack/"+named(name)+"/"+p.deps.Rand.Hex(8))} // a CREATE change set's stack is made under the id minted here
+		for _, k := range changeSetMembers {
+			if v, given := req.Input[k]; given {
+				rec[k] = v
+			}
+		}
+		if st.ID != "" { // read as its execution reads it, UsePreviousValue taken
+			previous(req.Input, st)
+		}
+		if _, _, _, _, err := p.template(ctx, req, named(name), str(rec["StackId"])); err != nil { // every check its execution makes
 			rec["Status"], rec["StatusReason"] = "FAILED", err.Error()
 		}
 		if err := spi.PutJSON(ctx, p.col(req, "cfn-cs"), named(name)+":"+csn, rec); err != nil {
 			return nil, err
 		}
-		return &spi.Response{Output: map[string]any{"Id": rec["ChangeSetId"], "StackId": stackID}}, nil
+		return &spi.Response{Output: map[string]any{"Id": rec["ChangeSetId"], "StackId": rec["StackId"]}}, nil
 	case "ExecuteChangeSet":
 		csn := str(req.Input["ChangeSetName"])
 		b, ok, _ := p.col(req, "cfn-cs").Get(ctx, named(name)+":"+csn)
@@ -150,8 +160,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if _ = json.Unmarshal(b, &rec); rec["Status"] == "FAILED" { // "The specified change set can't be used to update the stack"
 			return nil, fault("InvalidChangeSetStatus", "ChangeSet ["+str(rec["ChangeSetId"])+"] cannot be executed in its current status of [FAILED]")
 		}
-		req.Input["TemplateBody"] = rec["TemplateBody"]
-		if _, err := p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE"); err != nil { // an UPDATE change set's stack must exist
+		for _, k := range append([]string{"TemplateBody"}, changeSetMembers...) {
+			if rec[k] != nil {
+				req.Input[k] = rec[k]
+			}
+		}
+		if _, err := p.upsert(ctx, req, name, rec["ChangeSetType"] != "CREATE", str(rec["StackId"])); err != nil { // an UPDATE change set's stack must exist
 			return nil, err
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -160,6 +174,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	}
 }
 
+// changeSetMembers are what CreateChangeSet takes that CreateStack and UpdateStack take, besides the template:
+// a change set keeps them, DescribeChangeSet answers them, and ExecuteChangeSet makes or updates the stack with them.
+var changeSetMembers = []string{"Parameters", "NotificationARNs", "Tags", "Capabilities"}
+
 type stack struct {
 	Name, ID, Status, Template string
 	Reason                     string `json:",omitempty"` // StackStatusReason
@@ -167,6 +185,7 @@ type stack struct {
 	Events                     []res `json:",omitempty"` // what left the stack and how: DELETE_SKIPPED
 	Outputs                    []any
 	Refs                       map[string]string
+	NotificationARNs           []any
 	Protect                    bool
 }
 
@@ -177,22 +196,26 @@ type res struct {
 	Name, Status, Reason    string `json:",omitempty"`
 }
 
-func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool) (*spi.Response, error) {
+// upsert makes the stack named name, or updates it, a create under id when one is given (a CREATE change
+// set's, which it answered).
+func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string) (*spi.Response, error) {
 	if err := checkStackName(name, update); err != nil {
 		return nil, err
 	}
 	given, name := name, named(name)
-	id := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name + "/" + p.deps.Rand.Hex(8)
+	id = cmp.Or(id, "arn:aws:cloudformation:"+req.Identity.Region+":"+req.Identity.Account+":stack/"+name+"/"+p.deps.Rand.Hex(8))
 	if cur, err := p.load(ctx, req, given); err == nil && update { // the id an update's AWS::StackId answers
 		id = cur.ID
+		previous(req.Input, cur)
 	}
+	arns := append([]any{}, spi.Slice(req.Input["NotificationARNs"])...)
 	body, tpl, order, refs, err := p.template(ctx, req, name, id)
 	if err != nil {
 		return nil, err
 	}
 	resources, outs := asMap(tpl["Resources"]), asMap(tpl["Outputs"])
 	var old stack // what an update finds; a create reserves the name, CREATE_IN_PROGRESS, in the same transaction
-	reserved := stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}}
+	reserved := stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns}
 	if err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
 		raw, found, _ := tx.Get(name)
 		if _ = json.Unmarshal(raw, &old); old.Status == "DELETE_COMPLETE" { // a deleted stack's name is free
@@ -218,7 +241,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		old.Refs = conditioned(stored(old.Template), old.Refs, req, name, old.ID)
 	}
 	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: refs,
-		Resources: []res{}, Outputs: []any{}} // never null: every read of a stack lists both
+		Resources: []res{}, Outputs: []any{}, NotificationARNs: arns} // never null: every read of a stack lists them
 	changed := map[string]bool{} // what the update changed in place, which a rollback changes back
 	fail := func(err error) (*spi.Response, error) {
 		if st.Reason, old.Reason = err.Error(), err.Error(); !update || old.ID == "" { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
@@ -310,7 +333,7 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 	var order []string
 	var refs map[string]string
 	if err == nil {
-		refs = conditioned(tpl, parameters(req.Input, tpl), req, stack, id)
+		p.mappings, refs = asMap(tpl["Mappings"]), conditioned(tpl, parameters(req.Input, tpl), req, stack, id)
 		order, err = p.order(tpl, refs)
 	}
 	if err == nil {
@@ -356,7 +379,6 @@ func made(tpl map[string]any, order []string, refs map[string]string) ([]string,
 func conditioned(tpl map[string]any, refs map[string]string, req *spi.Request, stack, id string) map[string]string {
 	known := maps.Clone(refs)
 	maps.Copy(known, pseudo(req, stack, id))
-	known["Fn::FindInMap"] = spi.JSONText(tpl["Mappings"]) // the Mappings section, which findInMap reads
 	known = conditions(tpl, known)
 	delete(known, "AWS::NoValue") // ref answers it: no record holds the sentinel
 	return known
@@ -367,7 +389,7 @@ func conditioned(tpl map[string]any, refs map[string]string, req *spi.Request, s
 func pseudo(req *spi.Request, stack, id string) map[string]string {
 	known := map[string]string{"AWS::AccountId": req.Identity.Account, "AWS::Region": req.Identity.Region, "AWS::StackName": stack,
 		"AWS::StackId": id, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com", "AWS::NoValue": noValue,
-		"AWS::NotificationARNs": spi.JSONText(append(spi.Slice(req.Input["NotificationARNs"]), spi.Members(req.Input, "NotificationARNs")...))} // a list, as JSON
+		"AWS::NotificationARNs": spi.JSONText(append([]any{}, spi.Slice(req.Input["NotificationARNs"])...))} // a list, as JSON: [] for none
 	maps.DeleteFunc(known, func(_, v string) bool { return v == "" })
 	return known
 }
@@ -376,7 +398,9 @@ func pseudo(req *spi.Request, stack, id string) map[string]string {
 // object TemplateURL names, "max size: 1 MB" (API reference, CreateStack), which the quotas page, writing
 // 204,800 bytes "204.8 KB", counts as 1,000,000 bytes.
 func (p *Pack) templateBody(ctx context.Context, req *spi.Request) (string, error) {
-	if body := str(req.Input["TemplateBody"]); len(body) > 51_200 {
+	if len(spi.Slice(req.Input["NotificationARNs"])) > 5 { // its other member: "Maximum number of 5 items" (CreateStack, UpdateStack, CreateChangeSet)
+		return "", invalid("1 validation error detected: Value at 'notificationARNs' failed to satisfy constraint: Member must have length less than or equal to 5")
+	} else if body := str(req.Input["TemplateBody"]); len(body) > 51_200 {
 		return "", invalid("1 validation error detected: Value at 'templateBody' failed to satisfy constraint: Member must have length less than or equal to 51200")
 	} else if body != "" {
 		return body, nil
@@ -643,8 +667,9 @@ func attribute(refs map[string]string, req *spi.Request, typ, logical, id string
 // unknown stands for an id known only once its resource is made, and in order for one not yet ordered.
 const unknown = "\uffff"
 
-// noValue is what a Ref to AWS::NoValue answers, and resolve drops.
-const noValue = "\ufffe"
+// noValue is what a Ref to AWS::NoValue answers, and resolve drops; unselected is what a Fn::Select of no
+// element answers, which sound refuses.
+const noValue, unselected = "\ufffe", "\uffffFn::Select"
 
 // planID is the id a resource named n is made with, which a Ref to it answers: n in the form its
 // service gives it back. A queue's URL (its endpoint's business), a KMS key's id and a REST API's are
@@ -784,14 +809,14 @@ func names(v any, named map[string]bool, refs map[string]string) {
 // literals or Refs to parameters, and Fn::Not, Fn::And, Fn::Or and Condition over such conditions (Template
 // Reference, condition functions). Anything else, a pseudo parameter included, settles nothing (a cycle of
 // conditions parseTemplate refuses). memo holds each named condition once evaluated, so each is evaluated once.
-func truth(c any, conds map[string]any, params map[string]string, memo map[string][2]bool) (bool, bool) {
+func truth(c any, conds, mappings map[string]any, params map[string]string, memo map[string][2]bool) (bool, bool) {
 	m, text := asMap(c), [2]string{}
 	if name, ok := m["Condition"]; ok {
 		if r, seen := memo[str(name)]; seen { // or being evaluated: a condition that names itself
 			return r[0], r[1]
 		}
 		memo[str(name)] = [2]bool{}
-		yes, settled := truth(conds[str(name)], conds, params, memo)
+		yes, settled := truth(conds[str(name)], conds, mappings, params, memo)
 		memo[str(name)] = [2]bool{yes, settled}
 		return yes, settled
 	} else if args := spi.Slice(m["Fn::Equals"]); len(args) == 2 {
@@ -800,7 +825,7 @@ func truth(c any, conds map[string]any, params map[string]string, memo map[strin
 			if r, isRef := asMap(x)["Ref"]; isRef {
 				v, ok = params[str(r)]
 			} else if f, isMapped := asMap(x)["Fn::FindInMap"]; isMapped {
-				v, _, ok = findInMap(f, params)
+				v, _, ok = findInMap(f, params, mappings)
 			}
 			if text[i] = str(v); !ok {
 				return false, false
@@ -811,7 +836,7 @@ func truth(c any, conds map[string]any, params map[string]string, memo map[strin
 	for op, a := range m {
 		args, trues := spi.Slice(a), 0
 		for _, x := range args {
-			yes, ok := truth(x, conds, params, memo)
+			yes, ok := truth(x, conds, mappings, params, memo)
 			if trues += map[bool]int{true: 1}[yes]; !ok {
 				return false, false
 			}
@@ -829,7 +854,7 @@ func truth(c any, conds map[string]any, params map[string]string, memo map[strin
 func conditions(tpl map[string]any, params map[string]string) map[string]string {
 	refs, memo := maps.Clone(params), map[string][2]bool{}
 	for name := range asMap(tpl["Conditions"]) {
-		if yes, settled := truth(map[string]any{"Condition": name}, asMap(tpl["Conditions"]), params, memo); settled {
+		if yes, settled := truth(map[string]any{"Condition": name}, asMap(tpl["Conditions"]), asMap(tpl["Mappings"]), params, memo); settled {
 			refs["Condition::"+name] = strconv.FormatBool(yes)
 		}
 	}
@@ -849,7 +874,7 @@ func (p *Pack) change(req *spi.Request, old stack, logical, typ string, props ma
 		return res{}, "create"
 	}
 	tpl := stored(old.Template)
-	before, how := asMap(p.resolve(asMap(asMap(tpl["Resources"])[logical])["Properties"], old.Refs, req, old.Name)), ""
+	before, how := p.props(tpl, logical, old.Refs, req, old.Name), ""
 	for _, k := range slices.Concat(slices.Collect(maps.Keys(before)), slices.Collect(maps.Keys(props))) {
 		if spi.JSONText(before[k]) == spi.JSONText(props[k]) {
 			continue
@@ -902,7 +927,10 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 
 var unnameable = regexp.MustCompile(`[^A-Za-z0-9-]+`)
 
-func fifo(p map[string]any) bool { b, ok := coerce(p["FifoQueue"], "Boolean"); return ok && b == true }
+func fifo(p map[string]any) bool { return isTrue(p["FifoQueue"]) }
+
+// isTrue is whether v is the Boolean true, in any case (coerce).
+func isTrue(v any) bool { b, _ := coerce(v, "Boolean"); return b == true }
 
 func isBoolean(v any) bool { _, ok := coerce(v, "Boolean"); return ok }
 
@@ -989,7 +1017,7 @@ func (p *Pack) rollback(ctx context.Context, req *spi.Request, seen, old stack, 
 	for _, r := range made {
 		if old.Refs[r.Logical] != r.Physical {
 			doomed = append(doomed, r)
-		} else if props := maps.Collect(maps.All(asMap(p.resolve(asMap(asMap(tpl["Resources"])[r.Logical])["Properties"], old.Refs, req, old.Name)))); changed[r.Logical] {
+		} else if props := maps.Collect(maps.All(p.props(tpl, r.Logical, old.Refs, req, old.Name))); changed[r.Logical] {
 			if _, err := p.provision(ctx, req, r.Type, r.Logical, r.Name, props, r.Physical, old.ID); err != nil { // UPDATE_FAILED, for ContinueUpdateRollback
 				i := slices.IndexFunc(old.Resources, func(o res) bool { return o.Logical == r.Logical })
 				old.Resources[i].Status, old.Resources[i].Reason, first = "UPDATE_FAILED", err.Error(), cmp.Or(first, err)
@@ -1006,7 +1034,7 @@ func (p *Pack) rollback(ctx context.Context, req *spi.Request, seen, old stack, 
 // a rollback failed". A retry that fails leaves the stack UPDATE_ROLLBACK_FAILED, with why.
 func (p *Pack) resume(ctx context.Context, req *spi.Request, name string) (*spi.Response, error) {
 	st, err := p.load(ctx, req, name)
-	skip := append(spi.Slice(req.Input["ResourcesToSkip"]), spi.Members(req.Input, "ResourcesToSkip")...)
+	skip := spi.Slice(req.Input["ResourcesToSkip"]) // the list the query decoder builds, to its first gap
 	if err == nil && st.Status != "UPDATE_ROLLBACK_FAILED" {
 		err = invalid("ContinueUpdateRollback cannot be called from current stack status")
 	}
@@ -1021,7 +1049,7 @@ func (p *Pack) resume(ctx context.Context, req *spi.Request, name string) (*spi.
 	tpl := stored(st.Template)
 	kept, doomed, first := []res{}, []res{}, error(nil)
 	for _, r := range st.Resources {
-		props := maps.Collect(maps.All(asMap(p.resolve(asMap(asMap(tpl["Resources"])[r.Logical])["Properties"], st.Refs, req, st.Name))))
+		props := maps.Collect(maps.All(p.props(tpl, r.Logical, st.Refs, req, st.Name)))
 		if r.Status == "DELETE_FAILED" {
 			doomed = append(doomed, r)
 			continue
@@ -1276,8 +1304,27 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 		if s, ok := t["Fn::Sub"]; ok {
 			return p.fnSub(s, refs, req, stack)
 		}
+		if args, ok := t["Fn::Select"]; ok { // [index, listOfObjects]: "a single object from a list of objects by index"
+			args := append(spi.Slice(args), nil, nil)
+			i, isInt := coerce(p.resolve(args[0], refs, req, stack), "Integer")
+			if list := spi.Slice(p.resolve(args[1], refs, req, stack)); isInt && i.(int) >= 0 && i.(int) < len(list) {
+				return list[i.(int)]
+			}
+			return unselected // "doesn't check ... if the index is out of bounds": the stack's error (sound)
+		}
+		if args, ok := t["Fn::Split"]; ok { // [delimiter, source string]: "A list of string values"
+			args, parts := append(spi.Slice(args), nil, nil), []any{}
+			for _, part := range strings.Split(str(p.resolve(args[1], refs, req, stack)), str(args[0])) {
+				parts = append(parts, part)
+			}
+			return parts
+		}
+		if region, ok := t["Fn::GetAZs"]; ok { // "" is the stack's Region; three zones, a reading
+			r := cmp.Or(str(p.resolve(region, refs, req, stack)), req.Identity.Region)
+			return []any{r + "a", r + "b", r + "c"}
+		}
 		if f, ok := t["Fn::FindInMap"]; ok {
-			if v, _, found := findInMap(f, refs); found {
+			if v, _, found := findInMap(f, refs, p.mappings); found {
 				return v
 			}
 		}
@@ -1305,14 +1352,24 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 	}
 }
 
+// props are the resolved Properties of tpl's resource logical, a stack's stored template, whose
+// Fn::FindInMaps read tpl's own Mappings, not the template the operation was given.
+func (p *Pack) props(tpl map[string]any, logical string, refs map[string]string, req *spi.Request, stack string) map[string]any {
+	defer func(given map[string]any) { p.mappings = given }(p.mappings)
+	p.mappings = asMap(tpl["Mappings"])
+	return asMap(p.resolve(asMap(asMap(tpl["Resources"])[logical])["Properties"], refs, req, stack))
+}
+
 // ref is what a Ref to name answers, a pseudo parameter's value, a parameter's or a resource's, and
 // whether name is any of them; the name itself when it is none.
 func (p *Pack) ref(name string, refs map[string]string, req *spi.Request, stack string) (string, bool) {
 	if v, ok := pseudo(req, stack, refs["AWS::StackId"])[name]; ok {
 		return v, true
 	}
-	v, ok := refs[name]
-	return cmp.Or(v, name), ok
+	if v, ok := refs[name]; ok { // an empty parameter is a value: "" is not its name
+		return v, true
+	}
+	return name, false
 }
 
 // getAtt is a Fn::GetAtt's value: the attribute the resource's type has (attribute), or else its Ref's.
@@ -1339,32 +1396,48 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 	for _, o := range asMap(tpl["Outputs"]) {
 		values = append(values, p.resolve(asMap(o)["Value"], refs, req, stack))
 	}
-	if strings.Contains(spi.JSONText(values), noValue) {
+	if text := spi.JSONText(values); strings.Contains(text, unselected) && stack != "" { // the wording is a reading
+		return invalid("Template error: Fn::Select cannot select nonexistent value")
+	} else if strings.Contains(text, noValue) {
 		return invalid("Template error: AWS::NoValue removes a property or a list element; it cannot be part of a value")
 	}
 	var err error // without a DefaultValue, "Fn::FindInMap raises an error when a key is not found"
 	each([]any{tpl["Resources"], tpl["Outputs"], tpl["Conditions"]}, func(x map[string]any) {
-		if _, key, found := findInMap(x["Fn::FindInMap"], refs); x["Fn::FindInMap"] != nil && !found && err == nil && key != "" {
+		f, mapped := x["Fn::FindInMap"]
+		args, literal := append(spi.Slice(f), nil), 0 // literal counts the keys given as literals
+		for _, a := range args {
+			_, ok := coerce(a, "String")
+			literal += map[bool]int{true: 1}[ok]
+		}
+		_, key, found := findInMap(f, refs, p.mappings)
+		switch _, ok := coerce(args[0], "String"); {
+		case !mapped || err != nil || found:
+		case len(args) != 4: // "Fn::FindInMap: [ MapName, TopLevelKey, SecondLevelKey ]" (Template Reference); the wordings are readings
+			err = invalid("Template error: every Fn::FindInMap object requires three parameters, the map name, map key and the attribute for return value")
+		case ok && p.mappings[str(args[0])] == nil:
+			err = invalid("Template error: Mapping named '" + str(args[0]) + "' is not present in the 'Mappings' section of template.")
+		case stack == "" && literal < 3: // a template read alone checks only what literals name
+		case key != "":
 			err = invalid("Template error: Unable to get mapping for " + key)
-		} else if x["Fn::FindInMap"] != nil && !found && err == nil && stack != "" { // a stack is made with every key settled
-			err = invalid("Template error: the Fn::FindInMap " + spi.JSONText(x["Fn::FindInMap"]) + " cannot be evaluated")
+		case stack != "": // a stack is made with every key settled
+			err = invalid("Template error: the Fn::FindInMap " + spi.JSONText(f) + " cannot be evaluated")
 		}
 	})
 	return err
 }
 
 // findInMap is the value a Fn::FindInMap names, "the value corresponding to keys in a two-level map that's
-// declared in the Mappings section", which refs holds as "Fn::FindInMap" (Template Reference, Fn::FindInMap):
+// declared in the Mappings section", the template's mappings (Template Reference, Fn::FindInMap):
 // its three keys literals, or a Ref or another Fn::FindInMap, the functions the page allows there, that refs
 // settles. key is the keys, "map::top::second", "" while one is unsettled; found, whether the map holds it.
-func findInMap(args any, refs map[string]string) (v any, key string, found bool) {
+func findInMap(args any, refs map[string]string, mappings map[string]any) (v any, key string, found bool) {
 	var keys []string
 	for _, a := range spi.Slice(args) {
 		k, ok := coerce(a, "String")
 		if r, isRef := asMap(a)["Ref"]; isRef {
 			k, ok = refs[str(r)]
 		} else if f, isMapped := asMap(a)["Fn::FindInMap"]; isMapped {
-			k, _, ok = findInMap(f, refs)
+			k, _, ok = findInMap(f, refs, mappings)
 		} else if asMap(a) != nil {
 			ok = false
 		}
@@ -1375,8 +1448,6 @@ func findInMap(args any, refs map[string]string) (v any, key string, found bool)
 	if len(keys) != 3 { // a DefaultValue needs the AWS::LanguageExtensions transform, which the engine does not run
 		return nil, "", false
 	}
-	var mappings map[string]any
-	_ = json.Unmarshal([]byte(refs["Fn::FindInMap"]), &mappings)
 	v, found = asMap(asMap(mappings[keys[0]])[keys[1]])[keys[2]]
 	return v, strings.Join(keys, "::"), found
 }
@@ -1426,6 +1497,9 @@ func parseTemplate(body string) (map[string]any, error) {
 				return nil, invalid("Template format error: " + logical + "'s " + attr + " must be one of [" + strings.ReplaceAll(options, " ", ", ") + "], not " + spi.JSONText(v))
 			}
 		}
+	}
+	if err := mapped(m["Mappings"]); err != nil {
+		return nil, err
 	}
 	conds, users := asMap(m["Conditions"]), map[string][]string{} // conditions "based on ... Other conditions" (User Guide)
 	for name, c := range conds {
@@ -1502,6 +1576,36 @@ func dependsOn(r any) []string {
 	return slices.DeleteFunc(names, func(n string) bool { return n == "" })
 }
 
+// mapped is the error for a Mappings section that is not one: "Within the mapping, each map is a key followed
+// by another mapping", and its values "can be of type String or List" (User Guide, Mappings syntax). Each is
+// refused in the service's words, "Every Mappings member <name> must be a map" as a user's report quotes it
+// and the rest readings, the first in sorted order.
+func mapped(section any) error {
+	mappings, isMap := section.(map[string]any)
+	if section != nil && !isMap {
+		return invalid("Template format error: Every Mappings member must be a map")
+	}
+	for _, name := range slices.Sorted(maps.Keys(mappings)) {
+		if mapping, isMap := mappings[name].(map[string]any); !isMap {
+			return invalid("Template format error: Every Mappings member " + name + " must be a map")
+		} else if len(mapping) == 0 {
+			return invalid("Template format error: Mappings member " + name + " must contain at least one key")
+		}
+		for _, key := range slices.Sorted(maps.Keys(asMap(mappings[name]))) {
+			attrs, isMap := asMap(mappings[name])[key].(map[string]any)
+			if !isMap {
+				return invalid("Template format error: Every Mappings member " + key + " must be a map")
+			}
+			for _, v := range attrs {
+				if _, scalar := coerce(v, "String"); !scalar && reflect.TypeOf(v) != reflect.TypeOf([]any{}) {
+					return invalid("Template format error: Every Mappings attribute must be a String or a List.")
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // referred is the names v refers to (names), sorted.
 func referred(v any, refs map[string]string) []string {
 	named := map[string]bool{}
@@ -1543,12 +1647,13 @@ func each(v any, fn func(map[string]any)) {
 	}
 }
 
-// parameters are the request's parameter values, and each Default of a parameter it does not give.
+// parameters are the request's parameter values, the Parameters list the query protocol's decoder builds
+// (awsquery's unflatten), and each Default of a parameter it does not give.
 func parameters(in, tpl map[string]any) map[string]string {
 	out := map[string]string{}
-	for k, v := range in {
-		if pfx, ok := strings.CutSuffix(k, ".ParameterKey"); ok && strings.HasPrefix(k, "Parameters.member.") {
-			out[str(v)] = str(in[pfx+".ParameterValue"])
+	for _, p := range spi.Slice(in["Parameters"]) {
+		if v, valued := asMap(p)["ParameterValue"]; valued {
+			out[str(asMap(p)["ParameterKey"])] = str(v)
 		}
 	}
 	for k, v := range asMap(tpl["Parameters"]) {
@@ -1557,6 +1662,25 @@ func parameters(in, tpl map[string]any) map[string]string {
 		}
 	}
 	return out
+}
+
+// previous puts in an update's request what it takes from the stack cur: its NotificationARNs when the
+// request names none, as UpdateStack keeps them ("Specify an empty list to remove all notification topics",
+// API reference), and the value of each parameter whose UsePreviousValue is true, "the existing parameter
+// value that the stack is using for a given parameter key" (API reference, Parameter).
+func previous(in map[string]any, cur stack) {
+	if _, listed := in["NotificationARNs"]; !listed {
+		in["NotificationARNs"] = cur.NotificationARNs
+	}
+	params := []any{} // new maps: a change set keeps the request's own
+	for _, p := range spi.Slice(in["Parameters"]) {
+		m := maps.Clone(asMap(p))
+		if v, ok := cur.Refs[str(m["ParameterKey"])]; ok && isTrue(m["UsePreviousValue"]) {
+			m["ParameterValue"] = v
+		}
+		params = append(params, m)
+	}
+	in["Parameters"] = params
 }
 
 func paramDecls(tpl map[string]any) []any {

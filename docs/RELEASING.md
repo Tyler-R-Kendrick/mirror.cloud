@@ -103,8 +103,10 @@ binary (about 30 MB and 21 MB on disk, half that to pull) and run
 `mirror up --bind 0.0.0.0:4566`:
 
 ```sh
-docker run --rm -p 4566:4566 ghcr.io/<owner>/mirror:core
+docker run --rm -p 127.0.0.1:4566:4566 ghcr.io/<owner>/mirror:<version>-core
 ```
+
+How to run, configure and consume them is [USING.md](USING.md).
 
 Before pushing, the `images` job checks the archives against `SHA256SUMS`, then
 runs what it is about to push: the image must report the tag as its version, and

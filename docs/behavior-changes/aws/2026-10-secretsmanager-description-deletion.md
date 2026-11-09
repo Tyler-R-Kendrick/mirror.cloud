@@ -246,7 +246,12 @@ The oracle is AWS's documentation as it ships in the vendored model
     in a key-value map", and a pseudo parameter; any other, `${Nope}`, is
     `ValidationError`, "Template format error: Unresolved resource
     dependencies [Nope] in the Resources block of the template" (round 8 left
-    it in the string).
+    it in the string). The page says nothing of a space inside `${}`;
+    CloudFormation answers `${ Q }` with "Template error: variable names in
+    Fn::Sub syntax must contain only alphanumeric characters, underscores,
+    periods, and colons", and so does this engine, on every operation (the
+    service's wording, a reading; round 9 read `" Q "` as an undeclared
+    name).
     A `Fn::If` whose condition the parameters settle orders by the branch it
     takes and only that one: `Fn::Equals` of literals and `Ref`s to
     parameters, and `Fn::Not`, `Fn::And`, `Fn::Or` and `Condition` over such
@@ -254,10 +259,44 @@ The oracle is AWS's documentation as it ships in the vendored model
     evaluated once per operation however many name it (round 8 evaluated a
     named condition afresh wherever it was named, so a chain of 24
     conditions each naming the last twice took 19 s). A condition they do
-    not settle (one on a pseudo parameter, or one that names itself) orders
-    by both branches, a reading. A settled `Fn::If` also resolves to its branch,
+    not settle orders by both branches, a reading. A condition "can be
+    based on: Input or pseudo parameter values" (User Guide, Conditions
+    syntax), and each pseudo parameter the engine answers a `Ref` with
+    settles one: `AWS::Region`, `AccountId`, `StackName`, `StackId`,
+    `Partition`, `URLSuffix` and `NoValue`, the stack's two only once there
+    is a stack (round 9 settled none, so `!If [East, e, w]` on
+    `!Equals [!Ref AWS::Region, us-east-1]` stored `""`). A stack is made
+    or updated only with every condition settled: one the engine cannot
+    evaluate (a `Fn::FindInMap`) is `ValidationError`, "Template error: the
+    condition <name> cannot be evaluated" (a reading). A condition may not
+    name a resource ("you can't reference resource logical IDs or their
+    attributes in conditions"), "Template format error: Unresolved
+    dependencies [P]. Cannot reference resources in the Conditions block of
+    the template", and a `Fn::If` or `Condition` may not name a condition
+    the template does not declare, "Template error: unresolved condition
+    dependency <name>" (both wordings are readings), on every operation.
+    "CloudFormation creates the resource only when the condition evaluates
+    to true", and "If a resource with a condition isn't created, any
+    resources that depend on that resource aren't created either,
+    regardless of their own conditions" (Template Reference, Condition
+    attribute): such a resource is not made and is not in the stack's
+    `Refs`. "CloudFormation creates the output only when the associated
+    condition evaluates to true" (User Guide); an output made that names a
+    resource not made is `ValidationError`, "Template format error:
+    Unresolved resource dependencies [A] in the Outputs block of the
+    template" (a reading), before anything is made. Round 9 made every
+    resource and output, whatever its condition. A cycle of conditions, one naming itself included, is
+    `ValidationError`, "Template format error: Circular dependency between
+    conditions: [A, B]" (the wording is a reading), on every operation that
+    reads a template; round 9 left each unsettled, so the template passed and
+    a `Fn::If` on it stored `""`. A settled `Fn::If` also resolves to its branch,
     and `AWS::NoValue` there "Removes the corresponding resource property"
-    (an element of a list too); an unsettled one reaches the service as
+    (an element of a list too, a `Fn::Join`'s list among them, which the
+    Template Reference does not spell out: a reading). It is never a value:
+    as part of one, a `Fn::Join`'s separator, a `Fn::Sub`'s string or
+    variable, or an output's value, it is `ValidationError` before anything
+    is made (round 9 wrote the sentinel standing for it into the string,
+    `"\ufffe,b"`, `"a\ufffeb"`); an unsettled one reaches the service as
     written, a reading. `AWS::StackId` "Returns the ID (ARN) of the stack"
     (User Guide, pseudo parameters). Round 8 resolved no `Fn::If`, so its
     map reached the service, and left `AWS::StackId` as written. Before, every `Fn::If` ordered by
@@ -340,8 +379,11 @@ The oracle is AWS's documentation as it ships in the vendored model
   - The stack record has no writer but the engine, each write one store
     transaction: `UpdateTerminationProtection` is native and sets the
     protection in a transaction over the record it reads (its Boolean in any
-    case, so `TRUE` protects), as `ContinueUpdateRollback` and every other
-    native write already did. Before, the bundle's `UpdateTerminationProtection` read the
+    case, so `TRUE` protects; it is required, so a request without it is
+    `ValidationError` naming it, as the bundle answered, and one that is no
+    Boolean, `maybe`, is `ValidationError` too, where round 9 read either as
+    false and turned the protection off), as `ContinueUpdateRollback` and
+    every other native write already did. Before, the bundle's `UpdateTerminationProtection` read the
     record and wrote it back separately, so a create that finished between
     the two was written back `CREATE_IN_PROGRESS`, and a `DeleteStack` then
     left it `DELETE_IN_PROGRESS` for good; `TRUE` left a stack unprotected.

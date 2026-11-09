@@ -60,7 +60,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	}
 	switch req.Operation {
 	case "ValidateTemplate":
-		_, tpl, _, err := p.template(ctx, req)
+		_, tpl, _, _, err := p.template(ctx, req, "", "")
 		if err != nil {
 			return nil, err
 		}
@@ -72,7 +72,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "ContinueUpdateRollback":
 		return p.resume(ctx, req, name)
 	case "UpdateTerminationProtection": // in one transaction, as every write of the record is (settle)
-		protect, _ := coerce(req.Input["EnableTerminationProtection"], "Boolean") // a Boolean in any case
+		v := req.Input["EnableTerminationProtection"] // required, a Boolean (the model), in any case
+		protect, isBoolean := coerce(v, "Boolean")
+		if v == nil { // the bundle's missing_input_error, which the operation answered before it was native
+			return nil, invalid("EnableTerminationProtection")
+		} else if !isBoolean {
+			return nil, invalid("EnableTerminationProtection must be a Boolean, not " + spi.JSONText(v))
+		}
 		var st stack
 		err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) (err error) {
 			raw, ok, _ := tx.Get(named(name))
@@ -87,7 +93,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{"StackId": st.ID}}, nil
 	case "GetTemplateSummary":
-		_, tpl, _, err := p.template(ctx, req)
+		_, tpl, _, _, err := p.template(ctx, req, "", "")
 		if st, loadErr := p.load(ctx, req, name); err != nil && name != "" && loadErr == nil && cmp.Or(str(req.Input["TemplateBody"]), str(req.Input["TemplateURL"])) == "" {
 			tpl, err = parseTemplate(st.Template)
 		}
@@ -123,7 +129,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		rec := map[string]any{"ChangeSetName": csn, "ChangeSetId": "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":changeSet/" + csn + "/" + p.deps.Rand.Hex(8),
 			"StackName": name, "ChangeSetType": cmp.Or(str(req.Input["ChangeSetType"]), "UPDATE"), "Status": "CREATE_COMPLETE", "TemplateBody": body}
-		if _, _, _, err := p.template(ctx, req); err != nil {
+		if _, _, _, _, err := p.template(ctx, req, named(name), ""); err != nil {
 			rec["Status"], rec["StatusReason"] = "FAILED", err.Error()
 		}
 		raw, _ := json.Marshal(rec)
@@ -172,14 +178,36 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	if err := checkStackName(name, update); err != nil {
 		return nil, err
 	}
-	body, tpl, order, err := p.template(ctx, req)
+	given, name := name, named(name)
+	id := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name + "/" + p.deps.Rand.Hex(8)
+	if cur, err := p.load(ctx, req, given); err == nil && update { // the id an update's AWS::StackId answers
+		id = cur.ID
+	}
+	body, tpl, order, refs, err := p.template(ctx, req, name, id)
+	for _, c := range slices.Sorted(maps.Keys(asMap(tpl["Conditions"]))) { // a stack is made only with every condition settled
+		if _, settled := refs["Condition::"+c]; err == nil && !settled {
+			err = invalid("Template error: the condition " + c + " cannot be evaluated") // a function the engine does not evaluate
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
-	params := parameters(req.Input, tpl)
-	id := "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name + "/" + p.deps.Rand.Hex(8)
+	// "CloudFormation creates the resource only when the condition evaluates to true", and "any resources that
+	// depend on that resource aren't created either" (Template Reference, Condition attribute): those skip.
+	resources, outs := asMap(tpl["Resources"]), asMap(tpl["Outputs"])
+	off := func(v any) bool { c := str(asMap(v)["Condition"]); return c != "" && refs["Condition::"+c] != "true" }
+	skip := map[string]bool{}
+	for _, l := range order {
+		skip[l] = off(resources[l]) || slices.ContainsFunc(append(referred(asMap(resources[l])["Properties"], refs), dependsOn(resources[l])...), func(n string) bool { return skip[n] })
+	}
+	maps.DeleteFunc(outs, func(_ string, o any) bool { return off(o) }) // "CloudFormation creates the output only when the associated condition evaluates to true"
+	for _, o := range outs {
+		if gone := slices.DeleteFunc(referred(asMap(o)["Value"], refs), func(n string) bool { return !skip[n] }); len(gone) > 0 {
+			return nil, invalid("Template format error: Unresolved resource dependencies [" + strings.Join(gone, ", ") + "] in the Outputs block of the template")
+		}
+	}
+	order = slices.DeleteFunc(order, func(l string) bool { return skip[l] })
 	var old stack // what an update finds; a create reserves the name, CREATE_IN_PROGRESS, in the same transaction
-	given, name := name, named(name)
 	reserved := stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}}
 	if err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
 		raw, found, _ := tx.Get(name)
@@ -202,9 +230,8 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}
 	read := old // the record as the update read it, which its writes go over (a rollback changes old's resources)
 	read.Resources = slices.Clone(old.Resources)
-	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: conditions(tpl, params),
+	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: refs,
 		Resources: []res{}, Outputs: []any{}} // never null: every read of a stack lists both
-	st.Refs["AWS::StackId"] = id // "Returns the ID (ARN) of the stack" (User Guide, pseudo parameters)
 	changed := map[string]bool{} // what the update changed in place, which a rollback changes back
 	fail := func(err error) (*spi.Response, error) {
 		if st.Reason, old.Reason = err.Error(), err.Error(); !update || old.ID == "" { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
@@ -214,15 +241,21 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		}
 		return nil, err
 	}
-	resources, planned := asMap(tpl["Resources"]), maps.Clone(st.Refs)
+	planned := maps.Clone(st.Refs)
 	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
-		typ, props := str(rm["Type"]), asMap(p.resolve(rm["Properties"], planned, req, name))
-		prev, how, n, err := p.next(ctx, req, st, old, logical, typ, props)
-		if planned[logical] = planID(req, typ, n, props); how == "" || how == "update" {
+		resolved, err := p.value(rm["Properties"], planned, req, name)
+		typ, props := str(rm["Type"]), asMap(resolved)
+		prev, how, n, nextErr := p.next(ctx, req, st, old, logical, typ, props)
+		if planned[logical], err = planID(req, typ, n, props), cmp.Or(err, nextErr); how == "" || how == "update" {
 			planned[logical] = prev.Physical
 		}
 		if attribute(planned, req, typ, logical, planned[logical]); err != nil {
+			return fail(err)
+		}
+	}
+	for _, o := range outs {
+		if _, err := p.value(asMap(o)["Value"], planned, req, name); err != nil {
 			return fail(err)
 		}
 	}
@@ -244,7 +277,6 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			return fail(err)
 		}
 	}
-	outs := asMap(tpl["Outputs"])
 	for _, k := range slices.Sorted(maps.Keys(outs)) {
 		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": p.resolve(asMap(outs[k])["Value"], st.Refs, req, name)})
 	}
@@ -284,18 +316,34 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	return &spi.Response{Output: map[string]any{"StackId": id}}, nil
 }
 
-// template reads the request's template body, parses it and orders its resources.
-func (p *Pack) template(ctx context.Context, req *spi.Request) (string, map[string]any, []string, error) {
+// template reads the request's template body, parses it and orders its resources, and answers what a Ref
+// reads besides a resource: the parameters, the pseudo parameters known for the stack named stack, of id
+// stack (none of a stack, to read a template alone), and the conditions they settle.
+func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string) (string, map[string]any, []string, map[string]string, error) {
 	body, err := p.templateBody(ctx, req)
 	if err != nil {
-		return "", nil, nil, err
+		return "", nil, nil, nil, err
 	}
 	tpl, err := parseTemplate(body)
 	var order []string
+	var refs map[string]string
 	if err == nil {
-		order, err = p.order(tpl, parameters(req.Input, tpl))
+		known, pseudos := parameters(req.Input, tpl), pseudo(req, stack, id)
+		maps.Copy(known, pseudos)
+		refs = conditions(tpl, known) // which keep, of the pseudo parameters, the stack id alone: ref answers the rest
+		maps.DeleteFunc(refs, func(k, _ string) bool { return pseudos[k] != "" && k != "AWS::StackId" })
+		order, err = p.order(tpl, refs)
 	}
-	return body, tpl, order, err
+	return body, tpl, order, refs, err
+}
+
+// pseudo are the pseudo parameters (User Guide, pseudo parameters) of the stack named stack, of id id, each
+// as a Ref answers it: the stack's two only when it has them.
+func pseudo(req *spi.Request, stack, id string) map[string]string {
+	known := map[string]string{"AWS::AccountId": req.Identity.Account, "AWS::Region": req.Identity.Region, "AWS::StackName": stack,
+		"AWS::StackId": id, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com", "AWS::NoValue": noValue}
+	maps.DeleteFunc(known, func(_, v string) bool { return v == "" })
+	return known
 }
 
 // templateBody is the request's template: TemplateBody, "a maximum length of 51,200 bytes", or the S3
@@ -589,11 +637,10 @@ func planID(req *spi.Request, typ, n string, props map[string]any) string {
 // Fn::GetAtt or Fn::Sub ("Resource B is created before resource A", Template Reference, DependsOn
 // attribute), and those its DependsOn names, else by logical id. One walk of each resource's properties finds the names, and Kahn's
 // algorithm orders them, the earliest logical id first of those ready. A cycle orders none, and is
-// CloudFormation's error. A Fn::If whose condition params settle names only what its branch taken does.
-func (p *Pack) order(tpl map[string]any, params map[string]string) ([]string, error) {
+// CloudFormation's error. A Fn::If whose condition refs settles names only what its branch taken does.
+func (p *Pack) order(tpl map[string]any, refs map[string]string) ([]string, error) {
 	resources, waiting, users := asMap(tpl["Resources"]), map[string]int{}, map[string][]string{}
 	var ready, order []string
-	refs := conditions(tpl, params)
 	for logical, r := range resources {
 		p.walks++
 		named := map[string]bool{}
@@ -620,20 +667,21 @@ func (p *Pack) order(tpl map[string]any, params map[string]string) ([]string, er
 		}
 	}
 	if len(order) < len(resources) { // the cycle is those that lead back to themselves, not those after it
-		cycle := p.cycles(resources, users)
+		cycle := cycles(resources, users, &p.walks)
 		return nil, invalid("Circular dependency between resources: [" + strings.Join(cycle, ", ") + "]")
 	}
 	return order, nil
 }
 
-// cycles are the resources in a cycle of users' references, sorted: each strongly connected set of more
-// than one, and each that names itself, found in one pass (Tarjan's algorithm).
-func (p *Pack) cycles(resources map[string]any, users map[string][]string) []string {
+// cycles are the nodes (resources, or conditions) in a cycle of users' references, sorted: each strongly
+// connected set of more than one, and each that names itself, found in one pass (Tarjan's algorithm), each
+// visit counted in walks.
+func cycles(nodes map[string]any, users map[string][]string, walks *int) []string {
 	index, low, on := map[string]int{}, map[string]int{}, map[string]bool{}
 	var stack, cycle []string
 	var visit func(string)
 	visit = func(v string) {
-		p.walks++
+		*walks++
 		n := len(index) + 1
 		index[v], low[v], on[v], stack = n, n, true, append(stack, v)
 		for _, w := range users[v] {
@@ -658,7 +706,7 @@ func (p *Pack) cycles(resources map[string]any, users map[string][]string) []str
 			stack = stack[:i]
 		}
 	}
-	for _, l := range slices.Sorted(maps.Keys(resources)) {
+	for _, l := range slices.Sorted(maps.Keys(nodes)) {
 		if index[l] == 0 {
 			visit(l)
 		}
@@ -708,8 +756,8 @@ func names(v any, named map[string]bool, refs map[string]string) {
 
 // truth is a condition's value when the parameters settle it, and whether they do: Fn::Equals of two
 // literals or Refs to parameters, and Fn::Not, Fn::And, Fn::Or and Condition over such conditions (Template
-// Reference, condition functions). Anything else, a pseudo parameter included, settles nothing, nor does a
-// condition that names itself. memo holds each named condition once evaluated, so each is evaluated once.
+// Reference, condition functions). Anything else, a pseudo parameter included, settles nothing (a cycle of
+// conditions parseTemplate refuses). memo holds each named condition once evaluated, so each is evaluated once.
 func truth(c any, conds map[string]any, params map[string]string, memo map[string][2]bool) (bool, bool) {
 	m, text := asMap(c), [2]string{}
 	if name, ok := m["Condition"]; ok {
@@ -760,8 +808,8 @@ func conditions(tpl map[string]any, params map[string]string) map[string]string 
 	return refs
 }
 
-// subVariable is a ${...} in a Fn::Sub string.
-var subVariable = regexp.MustCompile(`\$\{([^}]*)\}`)
+// subVariable is a ${...} in a Fn::Sub string, and subName the name one may hold.
+var subVariable, subName = regexp.MustCompile(`\$\{([^}]*)\}`), regexp.MustCompile(`^[A-Za-z0-9_.:]+$`)
 
 // change is what an update does to the resource of logical the stack holds: "" keeps it as it is,
 // "update" updates it in place, and "replace" makes a new one, when a property whose change "requires
@@ -1228,9 +1276,7 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 // ref is what a Ref to name answers, a pseudo parameter's value, a parameter's or a resource's, and
 // whether name is any of them; the name itself when it is none.
 func (p *Pack) ref(name string, refs map[string]string, req *spi.Request, stack string) (string, bool) {
-	pseudo := map[string]string{"AWS::AccountId": req.Identity.Account, "AWS::Region": req.Identity.Region,
-		"AWS::StackName": stack, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com", "AWS::NoValue": noValue}
-	if v, ok := pseudo[name]; ok {
+	if v, ok := pseudo(req, stack, refs["AWS::StackId"])[name]; ok {
 		return v, true
 	}
 	v, ok := refs[name]
@@ -1247,12 +1293,22 @@ func getAtt(g any, refs map[string]string) string {
 	return cmp.Or(refs[logical+"."+attr], refs[logical])
 }
 
-func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack string) string {
-	arr, parts := append(spi.Slice(j), nil, nil), []string(nil) // [separator, [values]]
-	for _, x := range spi.Slice(arr[1]) {
-		parts = append(parts, str(p.resolve(x, refs, req, stack)))
+// value is v resolved, which AWS::NoValue may leave only as a property it removes or a list element: it
+// "Removes the corresponding resource property" (User Guide, pseudo parameters), so it is never a value,
+// and as part of one, a Fn::Join's separator, a Fn::Sub's string or variable, an output, it is refused.
+func (p *Pack) value(v any, refs map[string]string, req *spi.Request, stack string) (any, error) {
+	if r := p.resolve(v, refs, req, stack); !strings.Contains(spi.JSONText(r), noValue) {
+		return r, nil
 	}
-	return strings.Join(parts, str(arr[0]))
+	return nil, invalid("Template error: AWS::NoValue removes a property or a list element; it cannot be part of a value")
+}
+
+func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack string) string {
+	arr, parts := append(spi.Slice(j), nil, nil), []string(nil)        // [separator, [values]]
+	for _, x := range spi.Slice(p.resolve(arr[1], refs, req, stack)) { // a list, from which AWS::NoValue removes its element
+		parts = append(parts, str(x))
+	}
+	return strings.Join(parts, str(p.resolve(arr[0], refs, req, stack)))
 }
 
 // fnSub is the Fn::Sub string with each ${...} substituted: ${!Literal} is the literal ${Literal}, a
@@ -1295,6 +1351,58 @@ func parseTemplate(body string) (map[string]any, error) {
 	} else if n := len(asMap(m["Resources"])); n > 500 { // "The maximum number of resources that you can declare ... 500 resources" (quotas)
 		return nil, invalid("Template format error: Number of resources, " + strconv.Itoa(n) + ", is greater than maximum allowed, 500")
 	}
+	// DeletionPolicy's options and UpdateReplacePolicy's (Template Reference): DeletionPolicy's Snapshot is
+	// for the types it lists, none of which the engine makes; UpdateReplacePolicy's "reverts to ... Delete".
+	for logical, r := range asMap(m["Resources"]) {
+		for attr, options := range map[string]string{"DeletionPolicy": "Delete Retain RetainExceptOnCreate", "UpdateReplacePolicy": "Delete Retain Snapshot"} {
+			if v, set := asMap(r)[attr]; set && !slices.Contains(strings.Fields(options), str(v)) {
+				return nil, invalid("Template format error: " + logical + "'s " + attr + " must be one of [" + strings.ReplaceAll(options, " ", ", ") + "], not " + spi.JSONText(v))
+			}
+		}
+	}
+	conds, users := asMap(m["Conditions"]), map[string][]string{} // conditions "based on ... Other conditions" (User Guide)
+	for name, c := range conds {
+		each(c, func(x map[string]any) {
+			if n, ok := x["Condition"]; ok {
+				users[str(n)] = append(users[str(n)], name)
+			}
+		})
+	}
+	var named, missing []string // "you can't reference resource logical IDs or their attributes in conditions" (User Guide)
+	each(conds, func(x map[string]any) {
+		target, _, _ := strings.Cut(cmp.Or(str(x["Ref"]), str(append(spi.Slice(x["Fn::GetAtt"]), x["Fn::GetAtt"])[0])), ".")
+		if _, resource := asMap(m["Resources"])[target]; resource {
+			named = append(named, target)
+		}
+		if c, ok := x["Condition"].(string); ok && conds[c] == nil {
+			missing = append(missing, c)
+		}
+	})
+	spaced := false
+	each([]any{m["Resources"], m["Outputs"]}, func(x map[string]any) {
+		if c := str(append(spi.Slice(x["Fn::If"]), nil)[0]); x["Fn::If"] != nil && conds[c] == nil {
+			missing = append(missing, c)
+		}
+		for _, v := range subVariable.FindAllStringSubmatch(str(append(spi.Slice(x["Fn::Sub"]), x["Fn::Sub"])[0]), -1) {
+			spaced = spaced || !strings.HasPrefix(v[1], "!") && !subName.MatchString(v[1])
+		}
+	})
+	if spaced { // the service's wording: the Template Reference says nothing of a space in ${} (a reading)
+		return nil, invalid("Template error: variable names in Fn::Sub syntax must contain only alphanumeric characters, underscores, periods, and colons")
+	}
+	for _, v := range slices.Concat(slices.Collect(maps.Values(asMap(m["Resources"]))), slices.Collect(maps.Values(asMap(m["Outputs"])))) {
+		if c, ok := asMap(v)["Condition"].(string); ok && conds[c] == nil { // a resource's or output's Condition attribute
+			missing = append(missing, c)
+		}
+	}
+	if len(named) > 0 {
+		return nil, invalid("Template format error: Unresolved dependencies [" + strings.Join(slices.Compact(slices.Sorted(slices.Values(named))), ", ") + "]. Cannot reference resources in the Conditions block of the template")
+	} else if len(missing) > 0 {
+		return nil, invalid("Template error: unresolved condition dependency " + strings.Join(slices.Compact(slices.Sorted(slices.Values(missing))), ", "))
+	}
+	if cycle := cycles(conds, users, new(int)); len(cycle) > 0 { // none of them can be evaluated
+		return nil, invalid("Template format error: Circular dependency between conditions: [" + strings.Join(cycle, ", ") + "]")
+	}
 	// A Ref and a Fn::Sub variable, which "can be template parameter names, resource logical IDs, resource
 	// attributes", name a resource, parameter or pseudo parameter (AWS::...); a Fn::GetAtt and a DependsOn,
 	// a resource.
@@ -1314,15 +1422,6 @@ func parseTemplate(body string) (map[string]any, error) {
 	if len(undeclared) > 0 {
 		return nil, invalid("Template format error: Unresolved resource dependencies [" + strings.Join(slices.Sorted(maps.Keys(undeclared)), ", ") + "] in the Resources block of the template")
 	}
-	// DeletionPolicy's options and UpdateReplacePolicy's (Template Reference): DeletionPolicy's Snapshot is
-	// for the types it lists, none of which the engine makes; UpdateReplacePolicy's "reverts to ... Delete".
-	for logical, r := range asMap(m["Resources"]) {
-		for attr, options := range map[string]string{"DeletionPolicy": "Delete Retain RetainExceptOnCreate", "UpdateReplacePolicy": "Delete Retain Snapshot"} {
-			if v, set := asMap(r)[attr]; set && !slices.Contains(strings.Fields(options), str(v)) {
-				return nil, invalid("Template format error: " + logical + "'s " + attr + " must be one of [" + strings.ReplaceAll(options, " ", ", ") + "], not " + spi.JSONText(v))
-			}
-		}
-	}
 	return m, nil
 }
 
@@ -1334,6 +1433,26 @@ func dependsOn(r any) []string {
 		names = append(names, str(d))
 	}
 	return slices.DeleteFunc(names, func(n string) bool { return n == "" })
+}
+
+// referred is the names v refers to (names), sorted.
+func referred(v any, refs map[string]string) []string {
+	named := map[string]bool{}
+	names(v, named, refs)
+	return slices.Sorted(maps.Keys(named))
+}
+
+// each calls fn with every map v holds, v itself included.
+func each(v any, fn func(map[string]any)) {
+	if m, ok := v.(map[string]any); ok {
+		fn(m)
+		for _, x := range m {
+			each(x, fn)
+		}
+	}
+	for _, x := range spi.Slice(v) {
+		each(x, fn)
+	}
 }
 
 // parameters are the request's parameter values, and each Default of a parameter it does not give.

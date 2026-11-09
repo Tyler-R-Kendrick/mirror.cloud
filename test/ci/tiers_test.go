@@ -113,6 +113,7 @@ func readTiers(t *testing.T, root string) tiersFile {
 // out of whichever tier their package is in.
 func TestTiersPartitionPackages(t *testing.T) {
 	root := repo(t)
+	needEveryService(t, root)
 	f := readTiers(t, root)
 	// PackageSet records the package directories and the ones above them, so a
 	// package added or removed reruns this rather than reading a cached pass.

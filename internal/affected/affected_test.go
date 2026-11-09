@@ -21,6 +21,11 @@ func moduleGraph(t *testing.T) (*Graph, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// These tests describe the whole module; a sparse checkout (scripts/sparse.py)
+	// holds only some of it, and CI runs them on the full tree.
+	if out, _ := exec.Command("git", "-C", root, "config", "core.sparseCheckout").Output(); strings.TrimSpace(string(out)) == "true" {
+		t.Skip("this is a sparse checkout; the full tree is CI's")
+	}
 	graphOnce.Do(func() { theGraph, graphErr = Load(root) })
 	if graphErr != nil {
 		t.Fatal(graphErr)

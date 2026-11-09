@@ -107,3 +107,32 @@ func TestCloudFormationAnOutputIsText(t *testing.T) {
 		t.Errorf("outputs = %v, want L a,b,c, N arn:a,arn:b, S <a,b,c> and J a,b,c", got)
 	}
 }
+
+// sound checks only what the stack makes: an output whose Condition is false,
+// and a resource skipped because it names one its condition leaves out ("any
+// resources that depend on that resource aren't created either", Template
+// Reference, Condition attribute), may hold a Fn::Select of no element.
+// Before, both were refused: "Fn::Select cannot select nonexistent value".
+func TestCloudFormationChecksOnlyWhatItMakesOrAnswers(t *testing.T) {
+	h := newStacks(t)
+	sel := map[string]any{"Fn::Select": []any{9, []any{"a"}}}
+	off := map[string]any{"Off": map[string]any{"Fn::Equals": []any{"x", "y"}}}
+	for name, tpl := range map[string]map[string]any{
+		"output-off": {"Conditions": off, "Resources": map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}},
+			"Outputs": map[string]any{"O": map[string]any{"Condition": "Off", "Value": sel}}},
+		"skipped-by-dep": {"Conditions": off, "Resources": map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"},
+			"R": map[string]any{"Type": "AWS::SNS::Topic", "Condition": "Off"},
+			"S": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Name": map[string]any{"Ref": "R"}, "Value": sel}}}},
+	} {
+		if err := rvMake(t, h, name, tpl); err != nil {
+			t.Errorf("%s answered %v, want the stack made", name, err)
+		}
+	}
+}
+
+func rvMake(t *testing.T, h *stacks, name string, tpl map[string]any) error {
+	t.Helper()
+	body, _ := json.Marshal(tpl)
+	_, err := h.invoke("CreateStack", map[string]any{"StackName": name, "TemplateBody": string(body)})
+	return err
+}

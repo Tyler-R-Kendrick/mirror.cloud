@@ -4439,8 +4439,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-make-a-resource-its-condition-leaves-out",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `skip[l] = off(resources[l]) ||`,
-		new:  `skip[l] = false && off(resources[l]) ||`,
+		old:  `p.skip[l] = off(resources[l], refs) ||`,
+		new:  `p.skip[l] = false && off(resources[l], refs) ||`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationMakesOnlyWhatItsConditionAllows",
 	},
@@ -4455,8 +4455,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-novalue-properties-are-a-value",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `if v := p.resolve(asMap(r)["Properties"], refs, req, stack); v != noValue {`,
-		new:  `if v := p.resolve(asMap(r)["Properties"], refs, req, stack); true {`,
+		old:  `v != noValue && !p.skip[l] {`,
+		new:  `true && !p.skip[l] {`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationNoValueRemovesEveryProperty",
 	},
@@ -4523,6 +4523,22 @@ var mutants = []mutant{
 		new:  `} else if false {`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationACycleNamesOnlyItsMembers",
+	},
+	{
+		name: "cloudformation-check-an-output-its-condition-leaves-out",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  "\t\tif !off(o, refs) {\n\t\t\tvalues = append(values",
+		new:  "\t\tif true {\n\t\t\tvalues = append(values",
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationChecksOnlyWhatItMakesOrAnswers",
+	},
+	{
+		name: "cloudformation-make-what-names-a-skipped-resource",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `p.skip[l] = off(resources[l], refs) || slices.ContainsFunc(`,
+		new:  `p.skip[l] = off(resources[l], refs) || false && slices.ContainsFunc(`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationChecksOnlyWhatItMakesOrAnswers",
 	},
 	{
 		name: "cloudformation-an-update-of-a-deleted-stack-makes-it",
@@ -4711,10 +4727,10 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-check-what-a-condition-leaves-out",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `if c := str(asMap(r)["Condition"]); c != "" && refs["Condition::"+c] == "false" {`,
-		new:  `if c := str(asMap(r)["Condition"]); c != "" && false {`,
+		old:  `v != noValue && !p.skip[l] {`,
+		new:  `v != noValue && (l == "" || true) {`,
 		pkg:  "./internal/services/aws/cloudformation",
-		run:  "TestCloudFormationChecksOnlyWhatItMakes",
+		run:  "TestCloudFormationChecksOnlyWhatItMakes|TestCloudFormationChecksOnlyWhatItMakesOrAnswers",
 	},
 	{
 		name: "cloudformation-split-by-nothing",

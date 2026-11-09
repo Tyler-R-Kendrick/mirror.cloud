@@ -41,9 +41,10 @@ func init() {
 // Pack is the template engine behind the native operations.
 type Pack struct {
 	deps  spi.Deps
-	walks int            // resources whose properties order walked, which a test counts
-	tpl   map[string]any // the template an operation reads: its Mappings, which findInMap reads, and its parameters' types
-	body  string         // a change set's template, as it was read when the change set was made (templateBody)
+	walks int             // resources whose properties order walked, which a test counts
+	tpl   map[string]any  // the template an operation reads: its Mappings, which findInMap reads, and its parameters' types
+	skip  map[string]bool // the resources of the template read that the stack does not make (skipped)
+	body  string          // a change set's template, as it was read when the change set was made (templateBody)
 }
 
 // New constructs the template engine.
@@ -282,15 +283,8 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	if err != nil {
 		return nil, err
 	}
-	// "CloudFormation creates the resource only when the condition evaluates to true", and "any resources that
-	// depend on that resource aren't created either" (Template Reference, Condition attribute): those skip.
-	resources, outs := asMap(tpl["Resources"]), asMap(tpl["Outputs"])
-	off := func(v any) bool { c := str(asMap(v)["Condition"]); return c != "" && refs["Condition::"+c] != "true" }
-	skip := map[string]bool{}
-	for _, l := range order {
-		skip[l] = off(resources[l]) || slices.ContainsFunc(referred(asMap(resources[l])["Properties"], refs), func(n string) bool { return skip[n] })
-	}
-	maps.DeleteFunc(outs, func(_ string, o any) bool { return off(o) }) // "CloudFormation creates the output only when the associated condition evaluates to true"
+	resources, outs, skip := asMap(tpl["Resources"]), asMap(tpl["Outputs"]), p.skip
+	maps.DeleteFunc(outs, func(_ string, o any) bool { return off(o, refs) }) // "CloudFormation creates the output only when the associated condition evaluates to true"
 	for _, o := range outs {
 		if gone := slices.DeleteFunc(referred(asMap(o)["Value"], refs), func(n string) bool { return !skip[n] }); len(gone) > 0 {
 			return nil, invalid("Template format error: Unresolved resource dependencies [" + strings.Join(gone, ", ") + "] in the Outputs block of the template")
@@ -471,6 +465,7 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 		p.tpl, refs = tpl, conditions(tpl, known)
 		delete(refs, "AWS::NoValue") // ref answers it: no record holds the sentinel
 		order, err = p.order(tpl, refs)
+		p.skipped(order, refs)
 	}
 	if err == nil {
 		err = cmp.Or(p.sound(tpl, refs, req, stack), capable(tpl, req.Input, stack))
@@ -1340,21 +1335,38 @@ func (p *Pack) unmade(name string, refs map[string]string) bool {
 	return resource && !made
 }
 
+// skipped notes in p.skip each resource the stack does not make: "CloudFormation creates the resource only
+// when the condition evaluates to true", and "any resources that depend on that resource aren't created
+// either" (Template Reference, Condition attribute).
+func (p *Pack) skipped(order []string, refs map[string]string) {
+	resources := asMap(p.tpl["Resources"])
+	p.skip = map[string]bool{}
+	for _, l := range order {
+		p.skip[l] = off(resources[l], refs) || slices.ContainsFunc(referred(asMap(resources[l])["Properties"], refs), func(n string) bool { return p.skip[n] })
+	}
+}
+
+// off is whether the condition of a resource or an output v leaves it out: one not settled true.
+func off(v any, refs map[string]string) bool {
+	c := str(asMap(v)["Condition"])
+	return c != "" && refs["Condition::"+c] != "true"
+}
+
 // sound is the error for a template whose values cannot be made, found before anything is reserved or
 // made: AWS::NoValue "Removes the corresponding resource property" (User Guide, pseudo parameters), or a list
 // element, so it is never a value, and as part of one, a Fn::Join's separator, a Fn::Sub's string or
 // variable, an output's value, it is refused.
 func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Request, stack string) error {
 	var values []any
-	for _, r := range asMap(tpl["Resources"]) { // all its properties, when AWS::NoValue is the whole attribute (a reading)
-		if c := str(asMap(r)["Condition"]); c != "" && refs["Condition::"+c] == "false" {
-			continue // "CloudFormation creates the resource only when the condition evaluates to true"
-		} else if v := p.resolve(asMap(r)["Properties"], refs, req, stack); v != noValue {
+	for l, r := range asMap(tpl["Resources"]) { // all its properties, when AWS::NoValue is the whole attribute (a reading)
+		if v := p.resolve(asMap(r)["Properties"], refs, req, stack); v != noValue && !p.skip[l] { // what the stack makes (skipped)
 			values = append(values, v)
 		}
 	}
 	for _, o := range asMap(tpl["Outputs"]) {
-		values = append(values, p.resolve(asMap(o)["Value"], refs, req, stack))
+		if !off(o, refs) {
+			values = append(values, p.resolve(asMap(o)["Value"], refs, req, stack))
+		}
 	}
 	if err := selected(values); err != nil && stack != "" {
 		return err

@@ -977,12 +977,8 @@ func waitAPIDestinationRate(ctx context.Context, deps spi.Deps, identity spi.Ide
 }
 
 func eventRecord(ctx context.Context, deps spi.Deps, identity spi.Identity, collection, name string) (map[string]any, bool) {
-	body, ok, _ := deps.Store.Scope(identity.Account, identity.Region).Collection(collection).Get(ctx, name)
-	var record map[string]any
-	if !ok || json.Unmarshal(body, &record) != nil {
-		return nil, false
-	}
-	return record, true
+	record, ok, _ := spi.GetJSON(ctx, deps.Store.Scope(identity.Account, identity.Region).Collection(collection), name)
+	return record, ok
 }
 
 func arnResourceName(arn, marker string) string {

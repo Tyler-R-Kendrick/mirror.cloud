@@ -38,7 +38,7 @@ func TestFoldReadsAKeyInAnyCase(t *testing.T) {
 
 // GetJSON answers the object held, not-held for none, and the decode's error for a value that is not one.
 func TestGetJSONReadsAnObject(t *testing.T) {
-	ctx, c := context.Background(), memCollection{"obj": []byte(`{"a":1}`), "bad": []byte(`[1]`)}
+	ctx, c := context.Background(), memCollection{"obj": []byte(`{"a":1}`), "bad": []byte(`[1]`), "null": []byte(`null`)}
 	if rec, ok, err := GetJSON(ctx, c, "obj"); !ok || err != nil || rec["a"] != float64(1) {
 		t.Errorf("obj: %v %v %v", rec, ok, err)
 	}
@@ -47,6 +47,22 @@ func TestGetJSONReadsAnObject(t *testing.T) {
 	}
 	if _, ok, err := GetJSON(ctx, c, "bad"); ok || err == nil {
 		t.Errorf("bad: %v %v", ok, err)
+	}
+	if rec, ok, err := GetJSON(ctx, c, "null"); !ok || err != nil || rec != nil {
+		t.Errorf("null: %v %v %v", rec, ok, err)
+	}
+}
+
+// ReadJSON overlays what c holds on v's defaults, and leaves them when c holds nothing.
+func TestReadJSONOverlaysTheRecordOnDefaults(t *testing.T) {
+	ctx, c := context.Background(), memCollection{"obj": []byte(`{"a":1}`)}
+	m := map[string]any{"a": 0, "b": 2}
+	if !ReadJSON(ctx, c, "obj", &m) || m["a"] != float64(1) || m["b"] != 2 {
+		t.Errorf("obj: %v", m)
+	}
+	d := map[string]any{"b": 2}
+	if ReadJSON(ctx, c, "none", &d) || len(d) != 1 || d["b"] != 2 {
+		t.Errorf("none: %v", d)
 	}
 }
 

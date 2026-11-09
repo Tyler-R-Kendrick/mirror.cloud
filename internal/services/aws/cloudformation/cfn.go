@@ -291,7 +291,7 @@ type res struct {
 // upsert makes the stack named name, or updates it, a create under id when one is given (a CREATE change
 // set's, which it answered), as the execution of the change set under key when one is given: claimed in the
 // transaction that starts it, retired in the one that ends it.
-func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (*spi.Response, error) {
+func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (out *spi.Response, err error) {
 	if err := checkStackName(name, update); err != nil {
 		return nil, err
 	}
@@ -355,15 +355,27 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: refs,
 		Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags} // never null: every read of a stack lists them
 	changed := map[string]bool{} // what the update changed in place, which a rollback changes back
-	fail := func(err error) (*spi.Response, error) {
-		if st.Reason, old.Reason = err.Error(), err.Error(); !update || old.ID == "" { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
+	fail := func(cause error) (_ *spi.Response, err error) {
+		err, st.Reason, old.Reason = cause, cause.Error(), cause.Error()
+		created := !update || old.ID == ""
+		defer func() { // the reservation ends whatever the rollback below does, a panic of its own included
+			_ = recover()
+			st.Status, old.Status = "ROLLBACK_FAILED", "UPDATE_ROLLBACK_FAILED" // where a rollback that panicked leaves it; else it settled
+			_, _, _ = p.settle(ctx, req, map[bool]stack{true: reserved, false: read}[created], map[bool]stack{true: st, false: old}[created])
+			p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", err)
+		}()
+		if created { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, reserved, st, nil, st.Resources, nil, "ROLLBACK_COMPLETE", "ROLLBACK_FAILED", retains(tpl, "DeletionPolicy", "Retain"))
 		} else {
 			_ = p.rollback(ctx, req, read, old, st.Resources, changed, retains(tpl, "DeletionPolicy", "Retain"))
 		}
-		p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", err)
 		return nil, err
 	}
+	defer func() { // a panic of the engine's own, after the reservation, fails the operation as any failure does
+		if recover() != nil {
+			out, err = fail(internalFailure())
+		}
+	}()
 	planned := maps.Clone(st.Refs)
 	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
@@ -620,7 +632,12 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 		} else if !started { // it changed since it was read
 			return p.drop(ctx, req, name)
 		} else if was != "CREATE_IN_PROGRESS" {
-			err = p.unwind(ctx, req, del, del, nil, st.Resources, nil, "DELETE_COMPLETE", "DELETE_FAILED", retains(tpl, "DeletionPolicy", "Retain", "RetainExceptOnCreate"))
+			err = recovered(func() error {
+				return p.unwind(ctx, req, del, del, nil, st.Resources, nil, "DELETE_COMPLETE", "DELETE_FAILED", retains(tpl, "DeletionPolicy", "Retain", "RetainExceptOnCreate"))
+			})
+			failed := del // where an unwind that panicked leaves it
+			failed.Status, failed.Reason = "DELETE_FAILED", cmp.Or(err, error(internalFailure())).Error()
+			_, _, _ = p.settle(ctx, req, del, failed)
 		}
 	}
 	return &spi.Response{Output: map[string]any{}}, err
@@ -671,24 +688,30 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, seen, st stack, kep
 // keyed by no change set). settle answers the record it found and whether it wrote.
 func (p *Pack) settle(ctx context.Context, req *spi.Request, seen, st stack, sets ...func(spi.Tx) error) (stack, bool, error) {
 	var cur stack
+	var err error
 	wrote := false
-	err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
-		tx, cs := stx.Collection("cfn"), stx.Collection("cfn-cs")
-		raw, _, _ := tx.Get(st.Name)
-		if cur = spi.Decode[stack](raw); st.Status == "DELETE_COMPLETE" { // its change sets go with it
-			sets = append(sets, retire(st.Name, changeSet{key: st.Name}))
-		}
-		if st.Protect, seen.Protect = cur.Protect, cur.Protect; spi.JSONText(cur) != spi.JSONText(seen) {
-			return nil
-		}
-		for _, write := range sets {
-			if err := write(cs); err != nil {
-				return err
-			}
-		}
-		wrote = true
-		return tx.Put(st.Name, []byte(spi.JSONText(st)))
-	})
+	if st.Status == "DELETE_COMPLETE" { // its change sets go with it
+		sets = append(sets, retire(st.Name, changeSet{key: st.Name}))
+	}
+	for try := 0; try < 2 && (try == 0 || err != nil); try++ { // a store that failed, or panicked, is tried once more
+		err = recovered(func() error {
+			return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
+				tx, cs := stx.Collection("cfn"), stx.Collection("cfn-cs")
+				raw, _, _ := tx.Get(st.Name)
+				cur, wrote = spi.Decode[stack](raw), false
+				if st.Protect, seen.Protect = cur.Protect, cur.Protect; spi.JSONText(cur) != spi.JSONText(seen) {
+					return nil
+				}
+				for _, write := range sets {
+					if err := write(cs); err != nil {
+						return err
+					}
+				}
+				wrote = true
+				return tx.Put(st.Name, []byte(spi.JSONText(st)))
+			})
+		})
+	}
 	return cur, wrote, err
 }
 
@@ -1180,6 +1203,9 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 		return cmp.Or(n, physicalName(st.Name, logical, st.ID, typ, props)), nil
 	}
 	out, err := p.do(ctx, req, k.find, n, "", props)
+	if err != nil && !gone(err) { // only the owner's not-found says the name is free
+		return "", err
+	}
 	groups, list := out["logGroups"].([]any) // DescribeLogGroups answers a list by prefix, never a fault
 	if err != nil || list && !slices.ContainsFunc(groups, func(g any) bool { return str(asMap(g)["logGroupName"]) == n }) ||
 		slices.ContainsFunc(old.Resources, func(r res) bool { // a record from before res.Name: by the physical id, which ends in the name
@@ -1356,11 +1382,16 @@ func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) (err er
 	if err == nil {
 		_, err = p.do(ctx, req, kinds[r.Type].del, "", r.Physical, nil)
 	}
-	var f *spi.Fault
-	if errors.As(err, &f) && (strings.Contains(f.Code, "NotFound") || strings.Contains(f.Code, "NoSuch") || strings.Contains(f.Code, "NonExistent")) {
+	if gone(err) {
 		return nil
 	}
 	return err
+}
+
+// gone is whether err is its service's not-found error.
+func gone(err error) bool {
+	var f *spi.Fault
+	return errors.As(err, &f) && (strings.Contains(f.Code, "NotFound") || strings.Contains(f.Code, "NoSuch") || strings.Contains(f.Code, "NonExistent"))
 }
 
 // dropTargets removes the rule's targets but those keep names: all of them before the rule is deleted
@@ -1382,13 +1413,7 @@ func (p *Pack) dropTargets(ctx context.Context, req *spi.Request, rule string, k
 
 // call invokes another service the way the edge would: through whatever the registry serves it with, pack
 // or bundle. A pack that runs a worker is closed again, since this construction is per call.
-func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map[string]any) (out map[string]any, err error) {
-	defer func() { // a service that panics fails the call, as InternalFailure: the stack's rollback, or an update's
-		// put-back, goes on past it, and the stack's reservation ends as a failure ends it
-		if recover() != nil {
-			out, err = nil, internalFailure()
-		}
-	}()
+func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map[string]any) (map[string]any, error) {
 	for _, f := range registry.Factories() {
 		if f.ServiceID != id {
 			continue
@@ -1400,8 +1425,11 @@ func (p *Pack) call(ctx context.Context, req *spi.Request, id, op string, in map
 		if closer, ok := pack.(interface{ Close() error }); ok {
 			defer closer.Close()
 		}
-		resp, err := pack.Invoke(ctx, &spi.Request{Identity: req.Identity, AdvertiseURL: advertise(req), Operation: op, Input: input(id, op, in)})
-		if err != nil {
+		var resp *spi.Response // a service that panics fails the call, as InternalFailure: a rollback goes on past it
+		if err := recovered(func() error {
+			resp, err = pack.Invoke(ctx, &spi.Request{Identity: req.Identity, AdvertiseURL: advertise(req), Operation: op, Input: input(id, op, in)})
+			return err
+		}); err != nil {
 			return nil, err
 		}
 		return resp.Output, nil
@@ -1548,6 +1576,16 @@ var generateTypes = map[string]string{"PasswordLength": "Integer", "ExcludeChara
 	"ExcludePunctuation": "Boolean", "IncludeSpace": "Boolean", "RequireEachIncludedType": "Boolean"}
 
 func invalid(message string) *spi.Fault { return fault("ValidationError", message) }
+
+// recovered runs f and answers its error, or InternalFailure when f panics.
+func recovered(f func() error) (err error) {
+	defer func() {
+		if recover() != nil {
+			err = internalFailure()
+		}
+	}()
+	return f()
+}
 
 // internalFailure is the service's answer to a failure of its own, which says nothing of what failed (Common
 // Errors, API reference).

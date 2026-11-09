@@ -45,12 +45,8 @@ func Connection(ctx context.Context, deps spi.Deps, identity spi.Identity, arn s
 	if !found || name == "" {
 		return nil, false
 	}
-	body, ok, _ := deps.Store.Scope(identity.Account, identity.Region).Collection("connections").Get(ctx, name)
-	var connection map[string]any
-	if !ok || json.Unmarshal(body, &connection) != nil {
-		return nil, false
-	}
-	return connection, true
+	connection, ok, _ := spi.GetJSON(ctx, deps.Store.Scope(identity.Account, identity.Region).Collection("connections"), name)
+	return connection, ok
 }
 
 // Invoke performs a call using an EventBridge connection.

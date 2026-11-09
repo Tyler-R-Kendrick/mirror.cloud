@@ -24,11 +24,8 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 	if _, ok, _ := p.col(req, "topics").Get(ctx, name); !ok {
 		return nil, topicNotFoundFault()
 	}
-	b, ok, _ := p.col(req, "topics").Get(ctx, name)
 	m := map[string]any{"arn": arn, "name": name}
-	if ok {
-		_ = json.Unmarshal(b, &m)
-	}
+	spi.ReadJSON(ctx, p.col(req, "topics"), name, &m)
 	attrs, _ := m["attrs"].(map[string]any)
 	if attrs == nil {
 		attrs = map[string]any{}
@@ -200,11 +197,8 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 
 func (p *Pack) listTags(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	arn := str(req.Input["ResourceArn"])
-	b, ok, _ := p.col(req, "tags").Get(ctx, arn)
 	var tags any = []any{}
-	if ok {
-		_ = json.Unmarshal(b, &tags)
-	}
+	spi.ReadJSON(ctx, p.col(req, "tags"), arn, &tags)
 	return &spi.Response{Output: map[string]any{"Tags": tags}}, nil
 }
 
@@ -725,11 +719,8 @@ func (p *Pack) smsAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 		_ = p.col(req, "smsattrs").Put(ctx, "default", b)
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
-	b, ok, _ := p.col(req, "smsattrs").Get(ctx, "default")
 	attrs := map[string]any{"MonthlySpendLimit": "1"}
-	if ok {
-		_ = json.Unmarshal(b, &attrs)
-	}
+	spi.ReadJSON(ctx, p.col(req, "smsattrs"), "default", &attrs)
 	requested := stringList(req.Input, "attributes", "Attributes")
 	if len(requested) > 0 {
 		filtered := map[string]any{}

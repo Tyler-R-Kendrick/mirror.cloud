@@ -153,11 +153,8 @@ func (p records) curSeq(ctx context.Context, req *spi.Request, name string) int 
 }
 
 func (p records) nextSeq(ctx context.Context, req *spi.Request, name string) int {
-	b, ok, _ := p.col(req, "kinesis").Get(ctx, name)
 	var rec map[string]any
-	if ok {
-		_ = json.Unmarshal(b, &rec)
-	} else {
+	if !spi.ReadJSON(ctx, p.col(req, "kinesis"), name, &rec) {
 		rec = map[string]any{"StreamName": name, "Status": "ACTIVE"}
 	}
 	n := asInt(rec["Seq"])

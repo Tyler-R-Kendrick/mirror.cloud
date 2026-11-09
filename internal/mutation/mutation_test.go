@@ -4621,6 +4621,14 @@ var mutants = []mutant{
 		run:  "TestCloudFormationACycleNamesOnlyItsMembers",
 	},
 	{
+		name: "cloudformation-a-failed-change-set-reads-its-template-again",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `} else if err := executable(rec); err != nil && rec["Status"] == "FAILED" {`,
+		new:  `} else if err := executable(rec); err != nil && false {`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationAChangeSetIsValidatedWhenCreated",
+	},
+	{
 		name: "cloudformation-a-change-set-reads-parameters-of-no-template",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
 		old:  `} else if _, err := parameters(req.Input, tpl); err != nil && parseErr == nil {`,

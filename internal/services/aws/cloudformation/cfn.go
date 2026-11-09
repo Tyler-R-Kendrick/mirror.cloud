@@ -129,7 +129,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		rec := spi.Decode[map[string]any](raw) // what CreateChangeSet took that CreateStack and UpdateStack take
 		if !ok {
 			return nil, &spi.Fault{Code: "ChangeSetNotFound", HTTPStatus: 404, Fault: "client"}
-		} else if err := executable(rec); err != nil { // a FAILED one is refused before its template is read again
+		} else if err := executable(rec); err != nil && rec["Status"] == "FAILED" { // refused before its template is read again; any other, as it is claimed
 			return nil, err
 		}
 		for _, k := range append([]string{"TemplateBody"}, changeSetMembers...) {

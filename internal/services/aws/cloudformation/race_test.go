@@ -306,14 +306,16 @@ func TestCloudFormationAnUpdateThatLosesUndoesItself(t *testing.T) {
 			}()
 			within(t, g.reached, "the update reaching its bucket")
 			second, _ := json.Marshal(map[string]any{"Resources": map[string]any{"A": named("u-a"), "N2": named("u-n2")}})
-			if _, err := h.invoke(rival, map[string]any{"StackName": "u", "TemplateBody": string(second)}); err != nil {
+			// An update reserves the stack, so a second update is refused at its start, "is in
+			// UPDATE_IN_PROGRESS state and can not be updated", and the first is the one that ends.
+			if _, err := h.invoke(rival, map[string]any{"StackName": "u", "TemplateBody": string(second)}); rival == "UpdateStack" && !strings.Contains(fmt.Sprint(err), "UPDATE_IN_PROGRESS") || rival == "DeleteStack" && err != nil {
 				t.Fatalf("%s during the update answered %v", rival, err)
 			}
 			close(g.release)
-			if err := within(t, updated, "the update"); code(err) != "ValidationError" {
-				t.Errorf("the update that lost answered %v, want ValidationError", err)
+			if err := within(t, updated, "the update"); rival == "DeleteStack" && code(err) != "ValidationError" || rival == "UpdateStack" && err != nil {
+				t.Errorf("the update, %s during it, answered %v", rival, err)
 			}
-			want := map[string][]string{"UpdateStack": {"u-a", "u-n2"}, "DeleteStack": nil}[rival]
+			want := map[string][]string{"UpdateStack": {"u-a", "u-n1"}, "DeleteStack": nil}[rival]
 			out, err := h.service("aws.sqs", "ListQueues", map[string]any{"QueueNamePrefix": "u-"})
 			var left []string
 			for _, url := range spi.Slice(out["QueueUrls"]) {
@@ -324,7 +326,7 @@ func TestCloudFormationAnUpdateThatLosesUndoesItself(t *testing.T) {
 			}
 			if _, err := h.service("aws.s3", "ListBuckets", map[string]any{}); err != nil {
 				t.Fatal(err)
-			} else if out, _ := h.service("aws.s3", "ListBuckets", map[string]any{}); strings.Contains(fmt.Sprint(out), "u-P150b") {
+			} else if out, _ := h.service("aws.s3", "ListBuckets", map[string]any{}); rival == "DeleteStack" && strings.Contains(fmt.Sprint(out), "u-P150b") {
 				t.Errorf("the losing update's bucket was left: %v", out)
 			}
 		})

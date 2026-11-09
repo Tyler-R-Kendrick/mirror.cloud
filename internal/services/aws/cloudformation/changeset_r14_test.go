@@ -2,6 +2,7 @@ package cloudformation
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -48,13 +49,11 @@ func bucketed() string {
 // sets, is a compare-and-set in one store transaction, so an operation that
 // comes while a change set is being executed finds it so:
 //   - DeleteChangeSet of the change set being executed is InvalidChangeSetStatus;
-//   - a second change set executed meanwhile deletes the first, "all other
-//     change sets associated with the stack" (ExecuteChangeSet), and the first,
-//     finding the stack changed, writes nothing: neither the stack nor its
-//     deleted change set;
-//   - an UpdateStack meanwhile leaves the available change sets OBSOLETE and
-//     the one being executed EXECUTE_FAILED once its execution finds the stack
-//     changed, with why as its StatusReason.
+//   - a second change set executed meanwhile, and an UpdateStack meanwhile,
+//     find the stack UPDATE_IN_PROGRESS, reserved by the first execution, and
+//     are refused (since round 17); the first ends EXECUTE_COMPLETE and
+//     deletes "all other change sets associated with the stack"
+//     (ExecuteChangeSet).
 //
 // Before, DeleteChangeSet deleted the change set mid-execution and the
 // execution then wrote it back; the first execution wrote its deleted change
@@ -89,18 +88,18 @@ func TestCloudFormationChangeSetsRace(t *testing.T) {
 		changeSets(t, h, map[string]string{"a": bucketed(), "b": ""})
 		done := execute(h, "a")
 		within(t, g.reached, "a's execution reaching its bucket")
-		if err := within(t, execute(h, "b"), "b's execution"); err != nil {
-			t.Fatal(err)
+		if err := within(t, execute(h, "b"), "b's execution"); !strings.Contains(fmt.Sprint(err), "UPDATE_IN_PROGRESS") { // a holds the stack
+			t.Errorf("b's execution during a's answered %v, want the stack UPDATE_IN_PROGRESS", err)
 		}
 		close(g.release)
-		if err := within(t, done, "a's execution"); code(err) != "ValidationError" {
-			t.Errorf("a's execution, finding the stack changed under it, answered %v, want ValidationError", err)
+		if err := within(t, done, "a's execution"); err != nil {
+			t.Fatal(err)
 		}
-		if _, err := h.describe("a"); code(err) != "ChangeSetNotFound" {
-			t.Errorf("a, which b's execution deleted, answered %v, want ChangeSetNotFound", err)
+		if out, err := h.describe("a"); err != nil || out["ExecutionStatus"] != "EXECUTE_COMPLETE" {
+			t.Errorf("a is %v, %v, want EXECUTE_COMPLETE", out, err)
 		}
-		if out, err := h.describe("b"); err != nil || out["ExecutionStatus"] != "EXECUTE_COMPLETE" {
-			t.Errorf("b is %v, %v, want EXECUTE_COMPLETE", out, err)
+		if _, err := h.describe("b"); code(err) != "ChangeSetNotFound" {
+			t.Errorf("b, which a's execution deleted, answered %v, want ChangeSetNotFound", err)
 		}
 	})
 	t.Run("update", func(t *testing.T) {
@@ -109,18 +108,18 @@ func TestCloudFormationChangeSetsRace(t *testing.T) {
 		done := execute(h, "a")
 		within(t, g.reached, "a's execution reaching its bucket")
 		topic, _ := json.Marshal(map[string]any{"Resources": map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}, "U": map[string]any{"Type": "AWS::SNS::Topic"}}})
-		if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "s", "TemplateBody": string(topic)}); err != nil {
-			t.Fatal(err)
+		if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "s", "TemplateBody": string(topic)}); !strings.Contains(fmt.Sprint(err), "UPDATE_IN_PROGRESS") {
+			t.Errorf("UpdateStack during a's execution answered %v, want the stack UPDATE_IN_PROGRESS", err)
 		}
 		close(g.release)
-		if err := within(t, done, "a's execution"); code(err) != "ValidationError" {
-			t.Errorf("a's execution, finding the stack updated under it, answered %v, want ValidationError", err)
+		if err := within(t, done, "a's execution"); err != nil {
+			t.Fatal(err)
 		}
-		if out, err := h.describe("a"); err != nil || out["ExecutionStatus"] != "EXECUTE_FAILED" || !strings.Contains(str(out["StatusReason"]), "can not be updated") {
-			t.Errorf("a is %v, %v, want EXECUTE_FAILED with why as its StatusReason", out, err)
+		if out, err := h.describe("a"); err != nil || out["ExecutionStatus"] != "EXECUTE_COMPLETE" {
+			t.Errorf("a is %v, %v, want EXECUTE_COMPLETE", out, err)
 		}
-		if out, err := h.describe("c"); err != nil || out["ExecutionStatus"] != "OBSOLETE" {
-			t.Errorf("c is %v, %v, want OBSOLETE", out, err)
+		if _, err := h.describe("c"); code(err) != "ChangeSetNotFound" {
+			t.Errorf("c, which a's execution deleted, answered %v, want ChangeSetNotFound", err)
 		}
 	})
 }

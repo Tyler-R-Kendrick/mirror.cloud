@@ -316,7 +316,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		}
 	}
 	order = slices.DeleteFunc(order, func(l string) bool { return skip[l] })
-	var old stack // what an update finds; a create reserves the name, CREATE_IN_PROGRESS, in the same transaction
+	// old is what an update finds, and held the record it reserves it with, UPDATE_IN_PROGRESS; a create
+	// reserves the name, CREATE_IN_PROGRESS, in the same transaction.
+	var old, held stack
 	if err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
 		tx := stx.Collection("cfn")
 		raw, found, _ := tx.Get(name)
@@ -331,8 +333,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			return fault("AlreadyExistsException", "Stack ["+name+"] already exists")
 		} else if found && (strings.HasPrefix(old.Status, "ROLLBACK_") || strings.HasSuffix(old.Status, "_IN_PROGRESS") || old.Status == "DELETE_FAILED") {
 			return invalid("Stack:" + old.ID + " is in " + old.Status + " state and can not be updated.")
-		} else if id = cmp.Or(old.ID, id); found || update { // an update reserves nothing: it writes only over what it read
-			return nil
+		} else if id, held = cmp.Or(old.ID, id), old; update { // "is in UPDATE_IN_PROGRESS state" to another change
+			held.Status = "UPDATE_IN_PROGRESS"
+			return tx.Put(name, []byte(spi.JSONText(held)))
 		}
 		return tx.Put(name, []byte(spi.JSONText(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags})))
 	}); err != nil {
@@ -343,6 +346,8 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	fail := func(err error) (*spi.Response, error) {
 		if st.Reason = err.Error(); !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, "CREATE_IN_PROGRESS", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
+		} else { // a failed update's reservation ends: the record as it found it, over its reservation only
+			_, _, _ = p.settle(ctx, req, name, as(held, old))
 		}
 		p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", err)
 		return nil, err
@@ -389,7 +394,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS"), retire(name, cs)); err == nil && !wrote {
 			_ = p.unwind(ctx, req, st, "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED")
 		}
-	} else if cur, wrote, err := p.settle(ctx, req, name, as(old, st), retire(name, cs)); err == nil && !wrote {
+	} else if cur, wrote, err := p.settle(ctx, req, name, as(held, st), retire(name, cs)); err == nil && !wrote {
 		// Another change came first, in progress while this update ran: what this update made that the stack
 		// does not hold goes, all of it when the stack is being deleted (its delete may have run first).
 		rival := map[bool]string{true: "DELETE_IN_PROGRESS", false: "UPDATE_IN_PROGRESS"}[cur.ID != id || strings.HasPrefix(cur.Status, "DELETE_")]
@@ -734,12 +739,21 @@ func planID(req *spi.Request, typ, n string, props map[string]any) string {
 func (p *Pack) order(tpl map[string]any, refs map[string]string) ([]string, error) {
 	resources, waiting, users := asMap(tpl["Resources"]), map[string]int{}, map[string][]string{}
 	var ready, order, undeclared []string
+	// A Ref, a Fn::GetAtt or a Fn::Sub variable names a parameter, a pseudo parameter or a resource the
+	// template declares ("can be template parameter names, resource logical IDs, resource attributes"), or
+	// it is "Unresolved": refused before anything is made, as the service refuses it.
+	unresolved := func(n string) string {
+		if v, _ := strings.CutPrefix(n, "${"); v != "" && resources[v] == nil && asMap(tpl["Parameters"])[v] == nil && !strings.HasPrefix(v, "AWS::") {
+			return v
+		}
+		return ""
+	}
 	for logical, r := range resources {
 		p.walks++
 		named := map[string]bool{}
 		names(asMap(r)["Properties"], named, refs)
-		for n := range named { // a Fn::Sub variable "can be template parameter names, resource logical IDs, resource attributes"
-			if v, sub := strings.CutPrefix(n, "${"); sub && resources[v] == nil && asMap(tpl["Parameters"])[v] == nil && !strings.HasPrefix(v, "AWS::") {
+		for n := range named {
+			if v := unresolved(n); v != "" {
 				undeclared = append(undeclared, v)
 			} else if _, ok := resources[n]; ok {
 				waiting[logical], users[n] = waiting[logical]+1, append(users[n], logical)
@@ -749,8 +763,16 @@ func (p *Pack) order(tpl map[string]any, refs map[string]string) ([]string, erro
 			ready = append(ready, logical)
 		}
 	}
+	block, named := "Resources", map[string]bool{}
+	if names(tpl["Outputs"], named, refs); len(undeclared) == 0 { // then what an output names
+		for n := range named {
+			if v := unresolved(n); v != "" {
+				block, undeclared = "Outputs", append(undeclared, v)
+			}
+		}
+	}
 	if len(undeclared) > 0 {
-		return nil, invalid("Template format error: Unresolved resource dependencies [" + strings.Join(slices.Compact(slices.Sorted(slices.Values(undeclared))), ", ") + "] in the Resources block of the template")
+		return nil, invalid("Template format error: Unresolved resource dependencies [" + strings.Join(slices.Compact(slices.Sorted(slices.Values(undeclared))), ", ") + "] in the " + block + " block of the template")
 	}
 	for slices.Sort(ready); len(ready) > 0; ready = ready[1:] {
 		order = append(order, ready[0])
@@ -1338,7 +1360,11 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 			return parts
 		}
 		if region, ok := t["Fn::GetAZs"]; ok { // "" is the stack's Region; three zones, a reading
-			r := cmp.Or(str(p.resolve(region, refs, req, stack)), req.Identity.Region)
+			v := p.resolve(region, refs, req, stack)
+			if m, isMark := combine(v); isMark {
+				return m
+			}
+			r := cmp.Or(str(v), req.Identity.Region)
 			return []any{r + "a", r + "b", r + "c"}
 		}
 		if f, ok := t["Fn::FindInMap"]; ok {

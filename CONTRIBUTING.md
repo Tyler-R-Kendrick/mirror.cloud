@@ -37,7 +37,7 @@ you ask for its pack, model and bundle, the services that one needs to build and
 to run its own tests (S3 notifies SNS, Lambda and EventBridge, so those come
 too), and nothing else. `scripts/sparse.py --list aws.s3` shows what that is
 without changing anything; run it again with a different list to change the set,
-and `scripts/sparse.py --all` returns to the whole tree. Plain `go build ./...`,
+and `scripts/sparse.py --all` returns to the whole tree. The set is fixed when you run it, so run it again after a `git pull` that gave one of your services a new dependency (the build says which package is missing). Plain `go build ./...`,
 `go vet ./...` and `go test ./...` work in it, so editors do too. The one thing
 it leaves out is a test that names a service that is not there (most of
 `internal/runtime`, `internal/bundled`, `internal/edge` and the suites in `test/`

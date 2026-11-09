@@ -1,0 +1,16 @@
+# Who must approve a change to what makes, builds and publishes a release. This
+# takes effect only where the branch protection rule or ruleset for main turns on
+# "Require review from Code Owners"; see docs/RELEASING.md.
+#
+# The last matching pattern wins, and every release path is listed so that a
+# change to one is a change someone here has looked at.
+
+/.github/CODEOWNERS              @Tyler-R-Kendrick
+/.github/workflows/release.yml   @Tyler-R-Kendrick
+/.github/workflows/cut-release.yml @Tyler-R-Kendrick
+/scripts/cut-release.sh          @Tyler-R-Kendrick
+/scripts/release-archive.sh      @Tyler-R-Kendrick
+/scripts/image-check.sh          @Tyler-R-Kendrick
+/scripts/slim-overlay.py         @Tyler-R-Kendrick
+/Dockerfile.release              @Tyler-R-Kendrick
+/profiles/                       @Tyler-R-Kendrick

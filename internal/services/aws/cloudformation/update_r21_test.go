@@ -107,7 +107,7 @@ func TestCloudFormationAnEnginePanicEndsTheOperation(t *testing.T) {
 	cors := func(op, c, k string) bool { return op == "put" && strings.HasSuffix(k, "rv21cors/cors") }
 	holders := func(op, c, k string) bool { return op == "list" && c == "cfn" }
 	bad := map[string]any{"Type": "AWS::SQS::Queue", "Properties": map[string]any{"QueueName": "rv21-nofifo", "FifoQueue": true}}
-	bucket := map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "rv21cors", "CorsConfiguration": map[string]any{"CorsRules": []any{}}}}
+	bucket := map[string]any{"Type": "AWS::S3::Bucket", "DependsOn": "K", "Properties": map[string]any{"BucketName": "rv21cors", "CorsConfiguration": map[string]any{"CorsRules": []any{}}}}
 	for name, c := range map[string]struct {
 		op   string // CreateStack, UpdateStack or DeleteStack, of a stack holding a topic K
 		pick func(op, collection, key string) bool
@@ -120,8 +120,9 @@ func TestCloudFormationAnEnginePanicEndsTheOperation(t *testing.T) {
 		"delete":          {"DeleteStack", once(holders), nil},
 		// the engine panics, and then its rollback does too
 		"create-twice": {"CreateStack", func() func(op, c, k string) bool {
-			first := once(holders)
-			return func(op, c, k string) bool { return cors(op, c, k) || first(op, c, k) }
+			var fired atomic.Bool // the rollback's first list of the stacks, once the write has panicked
+			first := once(func(op, c, k string) bool { return fired.Load() && holders(op, c, k) })
+			return func(op, c, k string) bool { return cors(op, c, k) && (fired.Swap(true) || true) || first(op, c, k) }
 		}(), map[string]any{"B": bucket}},
 		// the update's final write panics once: written again, the update completes
 		"settle": {"UpdateStack", func() func(op, c, k string) bool {

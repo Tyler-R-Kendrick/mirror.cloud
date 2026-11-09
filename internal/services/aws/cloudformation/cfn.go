@@ -1334,17 +1334,22 @@ func parseTemplate(body string) (map[string]any, error) {
 			undeclared = append(undeclared, c)
 		}
 	})
-	spaced := false
+	var refused *spi.Fault // the first of these refusals, each a reading (the Template Reference gives no wording)
 	each([]any{m["Resources"], m["Outputs"]}, func(x map[string]any) {
 		if c := str(append(spi.Slice(x["Fn::If"]), nil)[0]); x["Fn::If"] != nil && conds[c] == nil {
 			undeclared = append(undeclared, c)
 		}
 		for _, v := range subVariable.FindAllStringSubmatch(str(append(spi.Slice(x["Fn::Sub"]), x["Fn::Sub"])[0]), -1) {
-			spaced = spaced || !strings.HasPrefix(v[1], "!") && !subName.MatchString(v[1])
+			if !strings.HasPrefix(v[1], "!") && !subName.MatchString(v[1]) { // the Template Reference says nothing of a space in ${}
+				refused = cmp.Or(refused, invalid("Template error: variable names in Fn::Sub syntax must contain only alphanumeric characters, underscores, periods, and colons"))
+			}
+		}
+		if x["Fn::Split"] != nil && str(append(spi.Slice(x["Fn::Split"]), nil)[0]) == "" { // "For the Fn::Split delimiter, you can't use any functions. You must specify a string value"
+			refused = cmp.Or(refused, invalid("Template error: Fn::Split's delimiter must be a string of one or more characters"))
 		}
 	})
-	if spaced { // the service's wording: the Template Reference says nothing of a space in ${} (a reading)
-		return nil, invalid("Template error: variable names in Fn::Sub syntax must contain only alphanumeric characters, underscores, periods, and colons")
+	if refused != nil {
+		return nil, refused
 	}
 	for _, v := range slices.Concat(slices.Collect(maps.Values(asMap(m["Resources"]))), slices.Collect(maps.Values(asMap(m["Outputs"])))) {
 		if c, ok := asMap(v)["Condition"].(string); ok && conds[c] == nil { // a resource's or output's Condition attribute

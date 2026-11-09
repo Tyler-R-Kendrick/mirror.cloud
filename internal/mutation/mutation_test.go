@@ -4525,6 +4525,14 @@ var mutants = []mutant{
 		run:  "TestCloudFormationACycleNamesOnlyItsMembers",
 	},
 	{
+		name: "cloudformation-split-by-nothing",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `if x["Fn::Split"] != nil && str(append(spi.Slice(x["Fn::Split"]), nil)[0]) == "" {`,
+		new:  `if x["Fn::Split"] != nil && false {`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationASplitNeedsADelimiter",
+	},
+	{
 		name: "cloudformation-summarise-a-stored-template-with-todays-checks",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
 		old:  `tpl, err = stored(st.Template), nil`,

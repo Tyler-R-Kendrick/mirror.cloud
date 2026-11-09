@@ -106,3 +106,21 @@ func TestCloudFormationSelectsFromWhatIsMade(t *testing.T) {
 		t.Errorf("the rolled-back stack left its queue")
 	}
 }
+
+// "For the Fn::Split delimiter, you can't use any functions. You must specify
+// a string value" (Template Reference, Fn::Split): a delimiter that is a
+// function, or the empty string, which splits at no place (a reading), is
+// refused, by ValidateTemplate too. Before, an empty delimiter split the
+// source into its characters, and a function's map was read as "".
+func TestCloudFormationASplitNeedsADelimiter(t *testing.T) {
+	h := newStacks(t)
+	for _, d := range []any{"", map[string]any{"Ref": "AWS::Region"}} {
+		body, _ := json.Marshal(map[string]any{"Resources": map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}},
+			"Outputs": map[string]any{"O": map[string]any{"Value": map[string]any{"Fn::Join": []any{",", map[string]any{"Fn::Split": []any{d, "abc"}}}}}}})
+		for _, op := range []string{"ValidateTemplate", "CreateStack"} {
+			if _, err := h.invoke(op, map[string]any{"StackName": "unsplit", "TemplateBody": string(body)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Fn::Split's delimiter must be a string") {
+				t.Errorf("%s of a Fn::Split by %v answered %v, want ValidationError", op, d, err)
+			}
+		}
+	}
+}

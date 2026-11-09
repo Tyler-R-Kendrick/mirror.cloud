@@ -158,6 +158,21 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	if err != nil {
 		return nil, err
 	}
+	// "CloudFormation creates the resource only when the condition evaluates to true", and "any resources that
+	// depend on that resource aren't created either" (Template Reference, Condition attribute): those skip.
+	resources, outs := asMap(tpl["Resources"]), asMap(tpl["Outputs"])
+	off := func(v any) bool { c := str(asMap(v)["Condition"]); return c != "" && refs["Condition::"+c] != "true" }
+	skip := map[string]bool{}
+	for _, l := range order {
+		skip[l] = off(resources[l]) || slices.ContainsFunc(referred(asMap(resources[l])["Properties"], refs), func(n string) bool { return skip[n] })
+	}
+	maps.DeleteFunc(outs, func(_ string, o any) bool { return off(o) }) // "CloudFormation creates the output only when the associated condition evaluates to true"
+	for _, o := range outs {
+		if gone := slices.DeleteFunc(referred(asMap(o)["Value"], refs), func(n string) bool { return !skip[n] }); len(gone) > 0 {
+			return nil, invalid("Template format error: Unresolved resource dependencies [" + strings.Join(gone, ", ") + "] in the Outputs block of the template")
+		}
+	}
+	order = slices.DeleteFunc(order, func(l string) bool { return skip[l] })
 	var old stack // what an update finds; a create reserves the name, CREATE_IN_PROGRESS, in the same transaction
 	if err := p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
 		raw, found, _ := tx.Get(name)
@@ -181,7 +196,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		}
 		return nil, err
 	}
-	resources, planned, outs := asMap(tpl["Resources"]), maps.Clone(st.Refs), asMap(tpl["Outputs"])
+	planned := maps.Clone(st.Refs)
 	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
 		resolved, err := p.value(rm["Properties"], planned, req, name)
@@ -1169,6 +1184,11 @@ func parseTemplate(body string) (map[string]any, error) {
 			undeclared = append(undeclared, c)
 		}
 	})
+	for _, v := range slices.Concat(slices.Collect(maps.Values(asMap(m["Resources"]))), slices.Collect(maps.Values(asMap(m["Outputs"])))) {
+		if c, ok := asMap(v)["Condition"].(string); ok && conds[c] == nil { // a resource's or output's Condition attribute
+			undeclared = append(undeclared, c)
+		}
+	}
 	if len(named) > 0 {
 		return nil, invalid("Template format error: Unresolved dependencies [" + strings.Join(slices.Compact(slices.Sorted(slices.Values(named))), ", ") + "]. Cannot reference resources in the Conditions block of the template")
 	} else if len(undeclared) > 0 {
@@ -1178,6 +1198,13 @@ func parseTemplate(body string) (map[string]any, error) {
 		return nil, invalid("Template format error: Circular dependency between conditions: [" + strings.Join(cycle, ", ") + "]")
 	}
 	return m, nil
+}
+
+// referred is the names v refers to (names), sorted.
+func referred(v any, refs map[string]string) []string {
+	named := map[string]bool{}
+	names(v, named, refs)
+	return slices.Sorted(maps.Keys(named))
 }
 
 // each calls fn with every map v holds, v itself included.

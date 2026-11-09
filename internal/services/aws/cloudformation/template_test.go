@@ -864,3 +864,57 @@ func TestCloudFormationSettlesConditionsOnPseudoParameters(t *testing.T) {
 		}
 	}
 }
+
+// "CloudFormation creates the resource only when the condition evaluates to
+// true", and "If a resource with a condition isn't created, any resources that
+// depend on that resource aren't created either, regardless of their own
+// conditions" (Template Reference, Condition attribute); "CloudFormation
+// creates the output only when the associated condition evaluates to true"
+// (User Guide, Conditions syntax). So A, whose condition is false, is not made
+// and is not in the stack's Refs, nor is B, which names it; C, whose condition
+// is true, and D are made; an output on the false condition is left out. An
+// output with no condition that names A has nothing to name: ValidationError,
+// "Template format error: Unresolved resource dependencies [A] in the Outputs
+// block of the template" (the wording is a reading), and nothing is made. A
+// Condition naming no declared condition is ValidationError. Before, every
+// resource and output was made, whatever its condition.
+func TestCloudFormationMakesOnlyWhatItsConditionAllows(t *testing.T) {
+	h := newStacks(t)
+	param := func(cond string, value any) map[string]any {
+		r := map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": value}}
+		if cond != "" {
+			r["Condition"] = cond
+		}
+		return r
+	}
+	template := func(outputs map[string]any, resources map[string]any) string {
+		body, _ := json.Marshal(map[string]any{"Conditions": map[string]any{"No": map[string]any{"Fn::Equals": []any{"a", "b"}}, "Yes": map[string]any{"Fn::Equals": []any{"a", "a"}}},
+			"Resources": resources, "Outputs": outputs})
+		return string(body)
+	}
+	resources := map[string]any{"A": param("No", "a"), "B": param("Yes", map[string]any{"Ref": "A"}), "C": param("Yes", "c"), "D": param("", "d")}
+	outputs := map[string]any{"OA": map[string]any{"Condition": "No", "Value": map[string]any{"Ref": "A"}}, "OC": map[string]any{"Value": map[string]any{"Ref": "C"}}}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "cnd", "TemplateBody": template(outputs, resources)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.statuses("cnd"); !slices.Equal(slices.Sorted(maps.Keys(got)), []string{"C", "D"}) {
+		t.Errorf("the stack holds %v, want C and D alone", got)
+	}
+	if refs := asMap(h.record("cnd")["Refs"]); refs["A"] != nil || refs["B"] != nil || len(h.params("cnd-A")) != 0 || len(h.params("cnd-B")) != 0 {
+		t.Errorf("A or B was made: Refs %v", refs)
+	}
+	if outs := spi.JSONText(h.record("cnd")["Outputs"]); strings.Contains(outs, "OA") || !strings.Contains(outs, `"OutputKey":"OC"`) {
+		t.Errorf("the outputs are %s, want OC alone", outs)
+	}
+	outputs["OB"] = map[string]any{"Value": map[string]any{"Ref": "A"}}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "cnd-out", "TemplateBody": template(outputs, resources)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Unresolved resource dependencies [A] in the Outputs block") {
+		t.Errorf("an output naming a resource not made answered %v, want ValidationError", err)
+	}
+	if len(h.params("cnd-out")) != 0 {
+		t.Errorf("the refused template made %v", h.params("cnd-out"))
+	}
+	resources["E"] = param("Maybe", "e")
+	if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": template(nil, resources)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Maybe") {
+		t.Errorf("a Condition naming no condition answered %v, want ValidationError", err)
+	}
+}

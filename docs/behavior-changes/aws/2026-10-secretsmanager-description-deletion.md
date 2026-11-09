@@ -249,7 +249,18 @@ The oracle is AWS's documentation as it ships in the vendored model
     dependencies [P]. Cannot reference resources in the Conditions block of
     the template", and a `Fn::If` or `Condition` may not name a condition
     the template does not declare, "Template error: unresolved condition
-    dependency <name>" (both wordings are readings), on every operation. A cycle of conditions, one naming itself included, is
+    dependency <name>" (both wordings are readings), on every operation.
+    "CloudFormation creates the resource only when the condition evaluates
+    to true", and "If a resource with a condition isn't created, any
+    resources that depend on that resource aren't created either,
+    regardless of their own conditions" (Template Reference, Condition
+    attribute): such a resource is not made and is not in the stack's
+    `Refs`. "CloudFormation creates the output only when the associated
+    condition evaluates to true" (User Guide); an output made that names a
+    resource not made is `ValidationError`, "Template format error:
+    Unresolved resource dependencies [A] in the Outputs block of the
+    template" (a reading), before anything is made. Round 9 made every
+    resource and output, whatever its condition. A cycle of conditions, one naming itself included, is
     `ValidationError`, "Template format error: Circular dependency between
     conditions: [A, B]" (the wording is a reading), on every operation that
     reads a template; round 9 left each unsettled, so the template passed and

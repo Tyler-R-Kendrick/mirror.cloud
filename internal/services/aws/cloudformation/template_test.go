@@ -1080,3 +1080,25 @@ func TestCloudFormationAParameterMustHaveAValue(t *testing.T) {
 		t.Errorf("CreateStack with the values answered %v", err)
 	}
 }
+
+// AWS::NotificationARNs "Returns the list of notification Amazon Resource
+// Names (ARNs) for the current stack" (User Guide, pseudo parameters): the
+// request's NotificationARNs, a list, so a Fn::Join of it joins them, in
+// either protocol's spelling of the list. Before, a Ref to it answered its
+// own name, and the Fn::Join was "".
+func TestCloudFormationNotificationARNsIsAList(t *testing.T) {
+	h := newStacks(t)
+	body, _ := json.Marshal(map[string]any{"Resources": map[string]any{"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String",
+		"Value": map[string]any{"Fn::Join": []any{",", map[string]any{"Ref": "AWS::NotificationARNs"}}}}}}})
+	a, b := "arn:aws:sns:us-east-1:000000000000:a", "arn:aws:sns:us-east-1:000000000000:b"
+	for name, in := range map[string]map[string]any{"na-json": {"NotificationARNs": []any{a, b}}, "na-query": {"NotificationARNs.member.1": a, "NotificationARNs.member.2": b}} {
+		in["StackName"], in["TemplateBody"] = name, string(body)
+		if _, err := h.invoke("CreateStack", in); err != nil {
+			t.Fatal(err)
+		}
+		got, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": h.resources(name)[0].Physical})
+		if v := str(asMap(got["Parameter"])["Value"]); err != nil || v != a+","+b {
+			t.Errorf("%s's Fn::Join of AWS::NotificationARNs is %q (%v), want %s,%s", name, v, err, a, b)
+		}
+	}
+}

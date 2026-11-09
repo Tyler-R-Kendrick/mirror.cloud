@@ -244,7 +244,9 @@ The oracle is AWS's documentation as it ships in the vendored model
     syntax), and each pseudo parameter the engine answers a `Ref` with
     settles one: `AWS::Region`, `AccountId`, `StackName`, `StackId`,
     `Partition`, `URLSuffix` and `NoValue`, the stack's two only once there
-    is a stack, and `Fn::FindInMap`, "Mapping values" being a base the page
+    is a stack, and `AWS::NotificationARNs`, "the list of notification
+    Amazon Resource Names (ARNs) for the current stack", the request's
+    `NotificationARNs` (round 10 answered its name), and `Fn::FindInMap`, "Mapping values" being a base the page
     names (round 9 settled none, so `!If [East, e, w]` on
     `!Equals [!Ref AWS::Region, us-east-1]` stored `""`). A stack is made
     or updated only with every condition settled: one the engine cannot

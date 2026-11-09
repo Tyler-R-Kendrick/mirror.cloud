@@ -315,7 +315,8 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 // as a Ref answers it: the stack's two only when it has them.
 func pseudo(req *spi.Request, stack, id string) map[string]string {
 	known := map[string]string{"AWS::AccountId": req.Identity.Account, "AWS::Region": req.Identity.Region, "AWS::StackName": stack,
-		"AWS::StackId": id, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com", "AWS::NoValue": noValue}
+		"AWS::StackId": id, "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com", "AWS::NoValue": noValue,
+		"AWS::NotificationARNs": spi.JSONText(append(spi.Slice(req.Input["NotificationARNs"]), spi.Members(req.Input, "NotificationARNs")...))} // a list, as JSON
 	maps.DeleteFunc(known, func(_, v string) bool { return v == "" })
 	return known
 }
@@ -1051,6 +1052,11 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 	case map[string]any:
 		if r, ok := t["Ref"]; ok {
 			v, _ := p.ref(str(r), refs, req, stack)
+			if str(r) == "AWS::NotificationARNs" {
+				var arns []any
+				_ = json.Unmarshal([]byte(v), &arns)
+				return arns
+			}
 			return v
 		}
 		if g, ok := t["Fn::GetAtt"]; ok {

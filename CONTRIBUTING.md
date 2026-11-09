@@ -18,7 +18,7 @@ go build ./...
 
 ```bash
 make test             # unit tests (includes determinism lint + import-graph checks)
-make test-coverage    # unit tests with the coverage floor
+make test-coverage    # every unit test under -coverpkg=./... (never cached), 80% floor
 make test-race        # race detector
 gofmt -l .            # must print nothing
 go vet ./...          # must be clean

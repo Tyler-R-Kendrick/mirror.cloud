@@ -5,7 +5,10 @@ description: >-
 
 inputs:
   cache:
-    description: Name of this job's cache. Jobs that run different builds (coverage, race, fuzz) keep their own.
+    description: >-
+      Name of this job's cache. Jobs that build the same way share one (test:
+      the unit, check, image, generated-models and cloudflare-miniflare jobs);
+      jobs that build differently (coverage, race, fuzz, mutation) keep their own.
     required: true
   save:
     description: Whether this job may write the cache. Main only, whatever this says; one job per cache name, or the first to finish wins.

@@ -1,0 +1,74 @@
+name: nightly
+# What ci.yml no longer does on every push to main: run every test with nothing
+# read from go test's result cache. A test that depends on something go test
+# does not track (the clock, the network, a port, a race the scheduler only
+# sometimes shows) can keep reporting main's cached pass; this is where it gets
+# run again. Coverage runs here too, so the floor is checked against a tree
+# nobody pushed to that day.
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      # Applies to every go test the Makefile runs, and to no other go command.
+      GOFLAGS: -count=1
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/go
+        with:
+          cache: test
+          # A scheduled run is on main, which would otherwise save.
+          save: "false"
+      - name: unit, uncached
+        run: set -o pipefail; make test-unit 2>&1 | tee -a ci-run.log
+      - name: protocol contracts and aws sdk round-trip, uncached
+        if: ${{ !cancelled() }}
+        run: set -o pipefail; make test-contract 2>&1 | tee -a ci-run.log
+      - name: known red triage
+        if: ${{ !cancelled() }}
+        run: make known-red RUN=ci-run.log
+
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/go
+        with:
+          cache: coverage
+          save: "false"
+      - name: coverage floor
+        run: set -o pipefail; make test-coverage 2>&1 | tee -a ci-run.log
+      - name: known red triage
+        if: ${{ !cancelled() }}
+        run: make known-red RUN=ci-run.log
+
+  race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GOFLAGS: -count=1
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/go
+        with:
+          cache: race
+          save: "false"
+      - name: race detector, uncached, shard ${{ matrix.shard }} of 4
+        run: set -o pipefail; make test-race RACE_SHARD=${{ matrix.shard }} RACE_SHARDS=4 2>&1 | tee -a ci-run.log
+      - name: known red triage
+        if: ${{ !cancelled() }}
+        run: make known-red RUN=ci-run.log

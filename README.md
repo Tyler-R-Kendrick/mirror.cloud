@@ -100,7 +100,7 @@ Coding agents are used under human direction and review. Disclose significant AI
 ```bash
 go build ./...        # build everything
 make test             # unit tests (includes determinism lint + import-graph checks)
-make test-coverage    # unit tests with the coverage floor
+make test-coverage    # every unit test under -coverpkg=./... (never cached), 80% floor
 make test-race        # race detector
 ```
 

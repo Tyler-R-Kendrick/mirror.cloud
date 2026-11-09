@@ -1,7 +1,7 @@
 BIN := bin
 GO  := go
-# Whether the suites below may reuse a cached result. CI passes COUNT= on pull
-# requests, where main's cache is restored, and keeps the uncached default on main.
+# Whether the suites below may reuse a cached result. The local default reruns
+# them; CI passes COUNT= so they read the result cache main writes.
 COUNT ?= -count=1
 export CGO_ENABLED := 0
 
@@ -28,9 +28,12 @@ test: test-unit test-contract
 # it is the one part of that suite that is fast, and a mutant whose needle has
 # stopped matching is exactly what a refactor breaks and what waiting for the
 # full suite reports half an hour late.
+#
+# No -count and no -cover, on purpose: either one stops go test caching the
+# result, and this is the run whose results CI caches.
 test-unit:
 	$(GO) test $$($(GO) list ./... | grep -v '/internal/mutation$$')
-	$(GO) test ./internal/mutation -run '^TestMutantNeedlesExist$$' -count=1
+	$(GO) test ./internal/mutation -run '^TestMutantNeedlesExist$$'
 
 test-contract:
 	$(GO) test ./internal/conformance ./internal/proto/... $(COUNT)
@@ -126,20 +129,22 @@ test-race:
 known-red:
 	@python3 scripts/known-red.py $(RUN)
 
+# One pass: every package test-unit runs, each test binary covering the whole
+# module (-coverpkg=./...), so a block counts as covered when any test reaches
+# it. That is a superset of what the two passes this replaced measured -- each
+# package's own tests over itself, plus 25 integration packages over the module
+# -- and it runs each of those 25 once instead of twice. A covered run is never
+# cached, so this is also an uncached run of every test, on every CI run.
 test-coverage:
-	@packages="$$($(GO) list ./... | grep -v '/internal/mutation$$' | grep -v '/internal/generated/')"; $(GO) test $$packages -covermode=atomic -coverprofile=coverage-unit.out
-	$(GO) test ./internal/chaos ./internal/conformance ./internal/runtime ./internal/spine ./test/behavior/... ./test/terraform \
-		./internal/services/aws/apigateway ./internal/services/aws/athena ./internal/services/aws/cloudcontrol \
-		./internal/services/aws/cloudformation ./internal/services/aws/ecs ./internal/services/aws/events ./internal/services/aws/firehose \
-		./internal/services/aws/iam ./internal/services/aws/organizations ./internal/services/aws/pipes ./internal/services/aws/s3 \
-		./internal/services/aws/scheduler ./internal/services/aws/sns ./internal/services/aws/states \
-		-coverpkg=./... -covermode=atomic -coverprofile=coverage-integration.out
+	@packages="$$($(GO) list ./... | grep -v '/internal/mutation$$' | grep -v '/internal/generated/')"; $(GO) test $$packages -coverpkg=./... -covermode=atomic -coverprofile=coverage-all.out
 	@# internal/generated is mirrorgen output pinned by specs/mirror.lock; its
 	@# correctness is asserted by regeneration byte-identity and the
-	@# internal/check gates, not by covering generated accessors.
-	@awk 'BEGIN { print "mode: atomic" } /^mode:/ { next } $$1 ~ /internal\/generated\// { next } { statements[$$1] = $$2; if ($$3 > 0) covered[$$1] = 1 } END { for (block in statements) print block, statements[block], covered[block] + 0 }' coverage-unit.out coverage-integration.out > coverage.out
-	@$(RM) coverage-unit.out coverage-integration.out
-	@pct=$$($(GO) tool cover -func=coverage.out | awk '/^total:/ {gsub("%", "", $$3); print $$3}'); awk -v got="$$pct" 'BEGIN { if (got < 80) { print "coverage " got "% is below 80%"; exit 1 } }'
+	@# internal/check gates, not by covering generated accessors. Every test
+	@# binary reports every block it linked, so a block is covered when any
+	@# binary covered it.
+	@awk 'BEGIN { print "mode: atomic" } /^mode:/ { next } $$1 ~ /internal\/generated\// { next } { statements[$$1] = $$2; if ($$3 > 0) covered[$$1] = 1 } END { for (block in statements) print block, statements[block], covered[block] + 0 }' coverage-all.out > coverage.out
+	@$(RM) coverage-all.out
+	@pct=$$($(GO) tool cover -func=coverage.out | awk '/^total:/ {gsub("%", "", $$3); print $$3}'); echo "coverage $$pct% (floor 80%)"; awk -v got="$$pct" 'BEGIN { if (got < 80) { print "coverage " got "% is below 80%"; exit 1 } }'
 
 ratchet:
 	$(GO) test ./internal/check/ -run 'TestRatchet|TestNoNew' -count=1

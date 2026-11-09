@@ -245,7 +245,7 @@ func retire(name string, cs changeSet) func(spi.Tx) error {
 		for _, kv := range kvs {
 			rec, err := spi.Decode[map[string]any](kv.Value), error(nil)
 			if own := kv.Key == cs.key; own && !cs.mine(rec) {
-				continue // made again under its name: not this execution's
+				continue // made again under its name: defence in depth, as an execution holds its stack and no path reaches it
 			} else if own || cs.key == "" && status(rec) == "AVAILABLE" {
 				if rec["ExecutionStatus"] = map[bool]string{true: "EXECUTE_COMPLETE", false: "OBSOLETE"}[own]; own {
 					delete(rec, "StatusReason") // a refusal's, before it was executed

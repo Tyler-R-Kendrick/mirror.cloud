@@ -634,6 +634,8 @@ func TestADiffSelectsWhatItTouches(t *testing.T) {
 
 func TestEnvironmentFilters(t *testing.T) {
 	root := repoRoot(t)
+	// A pull request's shard runs this package with its own MUTATION_DIFF set.
+	t.Setenv("MUTATION_DIFF", "")
 	t.Setenv("MUTATION_PKGS", "internal/engine")
 	t.Setenv("MUTATION_NAMES", "s3-skip-write-preconditions")
 	t.Setenv("MUTATION_FILES", "internal/mutation/mutation_test.go")

@@ -40,8 +40,9 @@ func init() {
 
 // Pack is the template engine behind the native operations.
 type Pack struct {
-	deps  spi.Deps
-	walks int // resources whose properties order walked, which a test counts
+	deps     spi.Deps
+	walks    int            // resources whose properties order walked, which a test counts
+	mappings map[string]any // the template's Mappings, which findInMap reads, set once an operation's template is parsed
 }
 
 // New constructs the template engine.
@@ -312,8 +313,7 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 	if err == nil {
 		known := parameters(req.Input, tpl)
 		maps.Copy(known, pseudo(req, stack, id))
-		known["Fn::FindInMap"] = spi.JSONText(tpl["Mappings"]) // the Mappings section, which findInMap reads
-		refs = conditions(tpl, known)
+		p.mappings, refs = asMap(tpl["Mappings"]), conditions(tpl, known)
 		delete(refs, "AWS::NoValue") // ref answers it: no record holds the sentinel
 		order, err = p.order(tpl, refs)
 	}
@@ -628,14 +628,14 @@ func names(v any, named map[string]bool, refs map[string]string) {
 // literals or Refs to parameters, and Fn::Not, Fn::And, Fn::Or and Condition over such conditions (Template
 // Reference, condition functions). Anything else, a pseudo parameter included, settles nothing (a cycle of
 // conditions parseTemplate refuses). memo holds each named condition once evaluated, so each is evaluated once.
-func truth(c any, conds map[string]any, params map[string]string, memo map[string][2]bool) (bool, bool) {
+func truth(c any, conds, mappings map[string]any, params map[string]string, memo map[string][2]bool) (bool, bool) {
 	m, text := asMap(c), [2]string{}
 	if name, ok := m["Condition"]; ok {
 		if r, seen := memo[str(name)]; seen { // or being evaluated: a condition that names itself
 			return r[0], r[1]
 		}
 		memo[str(name)] = [2]bool{}
-		yes, settled := truth(conds[str(name)], conds, params, memo)
+		yes, settled := truth(conds[str(name)], conds, mappings, params, memo)
 		memo[str(name)] = [2]bool{yes, settled}
 		return yes, settled
 	} else if args := spi.Slice(m["Fn::Equals"]); len(args) == 2 {
@@ -644,7 +644,7 @@ func truth(c any, conds map[string]any, params map[string]string, memo map[strin
 			if r, isRef := asMap(x)["Ref"]; isRef {
 				v, ok = params[str(r)]
 			} else if f, isMapped := asMap(x)["Fn::FindInMap"]; isMapped {
-				v, _, ok = findInMap(f, params)
+				v, _, ok = findInMap(f, params, mappings)
 			}
 			if text[i] = str(v); !ok {
 				return false, false
@@ -655,7 +655,7 @@ func truth(c any, conds map[string]any, params map[string]string, memo map[strin
 	for op, a := range m {
 		args, trues := spi.Slice(a), 0
 		for _, x := range args {
-			yes, ok := truth(x, conds, params, memo)
+			yes, ok := truth(x, conds, mappings, params, memo)
 			if trues += map[bool]int{true: 1}[yes]; !ok {
 				return false, false
 			}
@@ -673,7 +673,7 @@ func truth(c any, conds map[string]any, params map[string]string, memo map[strin
 func conditions(tpl map[string]any, params map[string]string) map[string]string {
 	refs, memo := maps.Clone(params), map[string][2]bool{}
 	for name := range asMap(tpl["Conditions"]) {
-		if yes, settled := truth(map[string]any{"Condition": name}, asMap(tpl["Conditions"]), params, memo); settled {
+		if yes, settled := truth(map[string]any{"Condition": name}, asMap(tpl["Conditions"]), asMap(tpl["Mappings"]), params, memo); settled {
 			refs["Condition::"+name] = strconv.FormatBool(yes)
 		}
 	}
@@ -1084,7 +1084,7 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 			return p.fnSub(s, refs, req, stack)
 		}
 		if f, ok := t["Fn::FindInMap"]; ok {
-			if v, _, found := findInMap(f, refs); found {
+			if v, _, found := findInMap(f, refs, p.mappings); found {
 				return v
 			}
 		}
@@ -1153,27 +1153,41 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 	}
 	var err error // without a DefaultValue, "Fn::FindInMap raises an error when a key is not found"
 	each([]any{tpl["Resources"], tpl["Outputs"], tpl["Conditions"]}, func(x map[string]any) {
-		if _, key, found := findInMap(x["Fn::FindInMap"], refs); x["Fn::FindInMap"] != nil && !found && err == nil && key != "" {
+		f, mapped := x["Fn::FindInMap"]
+		args, literal := append(spi.Slice(f), nil), 0 // literal counts the keys given as literals
+		for _, a := range args {
+			_, ok := coerce(a, "String")
+			literal += map[bool]int{true: 1}[ok]
+		}
+		_, key, found := findInMap(f, refs, p.mappings)
+		switch _, ok := coerce(args[0], "String"); {
+		case !mapped || err != nil || found:
+		case len(args) != 4: // "Fn::FindInMap: [ MapName, TopLevelKey, SecondLevelKey ]" (Template Reference); the wordings are readings
+			err = invalid("Template error: every Fn::FindInMap object requires three parameters, the map name, map key and the attribute for return value")
+		case ok && p.mappings[str(args[0])] == nil:
+			err = invalid("Template error: Mapping named '" + str(args[0]) + "' is not present in the 'Mappings' section of template.")
+		case stack == "" && literal < 3: // a template read alone checks only what literals name
+		case key != "":
 			err = invalid("Template error: Unable to get mapping for " + key)
-		} else if x["Fn::FindInMap"] != nil && !found && err == nil && stack != "" { // a stack is made with every key settled
-			err = invalid("Template error: the Fn::FindInMap " + spi.JSONText(x["Fn::FindInMap"]) + " cannot be evaluated")
+		case stack != "": // a stack is made with every key settled
+			err = invalid("Template error: the Fn::FindInMap " + spi.JSONText(f) + " cannot be evaluated")
 		}
 	})
 	return err
 }
 
 // findInMap is the value a Fn::FindInMap names, "the value corresponding to keys in a two-level map that's
-// declared in the Mappings section", which refs holds as "Fn::FindInMap" (Template Reference, Fn::FindInMap):
+// declared in the Mappings section", the template's mappings (Template Reference, Fn::FindInMap):
 // its three keys literals, or a Ref or another Fn::FindInMap, the functions the page allows there, that refs
 // settles. key is the keys, "map::top::second", "" while one is unsettled; found, whether the map holds it.
-func findInMap(args any, refs map[string]string) (v any, key string, found bool) {
+func findInMap(args any, refs map[string]string, mappings map[string]any) (v any, key string, found bool) {
 	var keys []string
 	for _, a := range spi.Slice(args) {
 		k, ok := coerce(a, "String")
 		if r, isRef := asMap(a)["Ref"]; isRef {
 			k, ok = refs[str(r)]
 		} else if f, isMapped := asMap(a)["Fn::FindInMap"]; isMapped {
-			k, _, ok = findInMap(f, refs)
+			k, _, ok = findInMap(f, refs, mappings)
 		} else if asMap(a) != nil {
 			ok = false
 		}
@@ -1184,8 +1198,6 @@ func findInMap(args any, refs map[string]string) (v any, key string, found bool)
 	if len(keys) != 3 { // a DefaultValue needs the AWS::LanguageExtensions transform, which the engine does not run
 		return nil, "", false
 	}
-	var mappings map[string]any
-	_ = json.Unmarshal([]byte(refs["Fn::FindInMap"]), &mappings)
 	v, found = asMap(asMap(mappings[keys[0]])[keys[1]])[keys[2]]
 	return v, strings.Join(keys, "::"), found
 }
@@ -1238,6 +1250,9 @@ func parseTemplate(body string) (map[string]any, error) {
 	} else if n := len(asMap(m["Resources"])); n > 500 { // "The maximum number of resources that you can declare ... 500 resources" (quotas)
 		return nil, invalid("Template format error: Number of resources, " + strconv.Itoa(n) + ", is greater than maximum allowed, 500")
 	}
+	if err := mapped(m["Mappings"]); err != nil {
+		return nil, err
+	}
 	conds, users := asMap(m["Conditions"]), map[string][]string{} // conditions "based on ... Other conditions" (User Guide)
 	for name, c := range conds {
 		each(c, func(x map[string]any) {
@@ -1282,6 +1297,36 @@ func parseTemplate(body string) (map[string]any, error) {
 		return nil, invalid("Template format error: Circular dependency between conditions: [" + strings.Join(cycle, ", ") + "]")
 	}
 	return m, nil
+}
+
+// mapped is the error for a Mappings section that is not one: "Within the mapping, each map is a key followed
+// by another mapping", and its values "can be of type String or List" (User Guide, Mappings syntax). Each is
+// refused in the service's words, "Every Mappings member <name> must be a map" as a user's report quotes it
+// and the rest readings, the first in sorted order.
+func mapped(section any) error {
+	mappings, isMap := section.(map[string]any)
+	if section != nil && !isMap {
+		return invalid("Template format error: Every Mappings member must be a map")
+	}
+	for _, name := range slices.Sorted(maps.Keys(mappings)) {
+		if mapping, isMap := mappings[name].(map[string]any); !isMap {
+			return invalid("Template format error: Every Mappings member " + name + " must be a map")
+		} else if len(mapping) == 0 {
+			return invalid("Template format error: Mappings member " + name + " must contain at least one key")
+		}
+		for _, key := range slices.Sorted(maps.Keys(asMap(mappings[name]))) {
+			attrs, isMap := asMap(mappings[name])[key].(map[string]any)
+			if !isMap {
+				return invalid("Template format error: Every Mappings member " + key + " must be a map")
+			}
+			for _, v := range attrs {
+				if _, scalar := coerce(v, "String"); !scalar && reflect.TypeOf(v) != reflect.TypeOf([]any{}) {
+					return invalid("Template format error: Every Mappings attribute must be a String or a List.")
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // referred is the names v refers to (names), sorted.

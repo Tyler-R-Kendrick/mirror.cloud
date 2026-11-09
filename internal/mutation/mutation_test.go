@@ -4463,7 +4463,7 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-conditions-ignore-mappings",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `v, _, ok = findInMap(f, params)`,
+		old:  `v, _, ok = findInMap(f, params, mappings)`,
 		new:  `_ = f`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationFindsInMap",
@@ -4471,8 +4471,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-resolve-ignores-mappings",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `if v, _, found := findInMap(f, refs); found {`,
-		new:  `if v, _, found := findInMap(f, refs); found && false {`,
+		old:  `if v, _, found := findInMap(f, refs, p.mappings); found {`,
+		new:  `if v, _, found := findInMap(f, refs, p.mappings); found && false {`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationFindsInMap",
 	},

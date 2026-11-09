@@ -1036,6 +1036,9 @@ func TestCloudFormationFindsInMap(t *testing.T) {
 	for i, keys := range [][]any{{"Nope", "us-east-1", "Stage"}, {"Env", "eu-west-1", "Stage"}, {"Env", "us-east-1", "Nope"}} {
 		body := template(map[string]any{"P": param(find(keys...))}, nil)
 		want := "Unable to get mapping for " + str(keys[0]) + "::" + str(keys[1]) + "::" + str(keys[2])
+		if keys[0] == "Nope" { // a map the section does not declare is named as one
+			want = "Mapping named 'Nope' is not present in the 'Mappings' section of template."
+		}
 		for _, op := range []string{"ValidateTemplate", "CreateStack"} {
 			if _, err := h.invoke(op, map[string]any{"StackName": fmt.Sprintf("fim-%d", i), "TemplateBody": body}); code(err) != "ValidationError" || !strings.Contains(err.Error(), want) {
 				t.Errorf("%s of Fn::FindInMap %v answered %v, want ValidationError: %s", op, keys, err, want)
@@ -1045,11 +1048,13 @@ func TestCloudFormationFindsInMap(t *testing.T) {
 			t.Errorf("the refused Fn::FindInMap %v left %v", keys, record)
 		}
 	}
-	// A DefaultValue needs the AWS::LanguageExtensions transform, which the engine does not run: a stack is
-	// not made with a Fn::FindInMap it cannot evaluate.
+	// A DefaultValue needs the AWS::LanguageExtensions transform, which the engine does not run: without it
+	// a Fn::FindInMap takes three parameters, and a fourth is refused, by ValidateTemplate too.
 	fallback := template(map[string]any{"P": param(find("Env", "x", "y", map[string]any{"DefaultValue": "d"}))}, nil)
-	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "fim-default", "TemplateBody": fallback}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "cannot be evaluated") {
-		t.Errorf("a Fn::FindInMap with a DefaultValue answered %v, want ValidationError", err)
+	for _, op := range []string{"ValidateTemplate", "CreateStack"} {
+		if _, err := h.invoke(op, map[string]any{"StackName": "fim-default", "TemplateBody": fallback}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "requires three parameters") {
+			t.Errorf("%s of a Fn::FindInMap with a DefaultValue answered %v, want ValidationError: requires three parameters", op, err)
+		}
 	}
 }
 

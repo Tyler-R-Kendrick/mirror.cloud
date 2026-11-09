@@ -21,6 +21,35 @@ jobs:
   # the rest, and one had been doing that for six merges: the ratchet sat third
   # and nine checks after it never ran at all. A red gate that hides other gates
   # reports less than no gate, because the silence reads as coverage.
+  # What this run has to run. On a pull request, the mutants its diff selects
+  # (internal/mutation select_test.go); on main, every one of them.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      mutation: ${{ steps.mutation.outputs.shards }}
+      mutation-count: ${{ steps.mutation.outputs.count }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The pull request's merge commit and its first parent, the base.
+          fetch-depth: 2
+      - uses: ./.github/actions/go
+        with:
+          cache: test
+          save: "false"
+      - name: what changed
+        if: github.event_name == 'pull_request'
+        run: git diff --unified=0 --no-color HEAD^1 HEAD > "$RUNNER_TEMP/pr.diff"
+      - name: mutants selected
+        id: mutation
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = pull_request ]; then export MUTATION_DIFF="$RUNNER_TEMP/pr.diff"; fi
+          MUTATION_PLAN="$RUNNER_TEMP/mutation.json" go test ./internal/mutation -run '^TestMutationPlan$' -count=1
+          cat "$RUNNER_TEMP/mutation.json"
+          python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print("shards=" + json.dumps(d["shards"])); print("count=%d" % len(d["shards"]))' "$RUNNER_TEMP/mutation.json" >> "$GITHUB_OUTPUT"
+
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -218,21 +247,41 @@ jobs:
   # TestShardingIsAPartition proves the split loses no mutant, and the harness
   # fails a shard that selects none -- because a shard that runs nothing still
   # reports success.
+  #
+  # main runs every mutant in twelve shards, filled by measured cost
+  # (internal/mutation costs_test.go). A pull request runs the mutants on the
+  # files it changed, of the tests it changed, and whose own entries it changed
+  # (select_test.go), in as many shards as their cost needs; with none, the job
+  # is skipped. The report says how many kills were the 30s timeout.
   mutation:
+    needs: plan
+    if: needs.plan.outputs.mutation != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        shard: ${{ fromJSON(needs.plan.outputs.mutation) }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
       - uses: ./.github/actions/go
         with:
           cache: mutation
           save: ${{ matrix.shard == 0 }}
-      - name: mutation shard ${{ matrix.shard }} of 12
-        run: set -o pipefail; make test-mutation-shard MUTATION_SHARD=${{ matrix.shard }} MUTATION_SHARDS=12 2>&1 | tee -a ci-run.log
+      - name: the diff the mutants are chosen from
+        if: github.event_name == 'pull_request'
+        run: |
+          git diff --unified=0 --no-color HEAD^1 HEAD > "$RUNNER_TEMP/pr.diff"
+          echo "MUTATION_DIFF=$RUNNER_TEMP/pr.diff" >> "$GITHUB_ENV"
+      - name: mutation shard ${{ matrix.shard }} of ${{ needs.plan.outputs.mutation-count }}
+        env:
+          MUTATION_REPORT: ${{ runner.temp }}/mutation.txt
+        run: set -o pipefail; make test-mutation-shard MUTATION_SHARD=${{ matrix.shard }} MUTATION_SHARDS=${{ needs.plan.outputs.mutation-count }} 2>&1 | tee -a ci-run.log
+      - name: timeouts and cost
+        if: ${{ !cancelled() }}
+        run: if [ -f "$RUNNER_TEMP/mutation.txt" ]; then tee -a "$GITHUB_STEP_SUMMARY" < "$RUNNER_TEMP/mutation.txt"; fi
       - name: known red triage
         if: ${{ !cancelled() }}
         run: make known-red RUN=ci-run.log

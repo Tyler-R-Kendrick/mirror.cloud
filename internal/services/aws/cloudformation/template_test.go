@@ -761,8 +761,8 @@ func TestCloudFormationNoValueIsNeverAValue(t *testing.T) {
 		if code(err) != "ValidationError" || !strings.Contains(err.Error(), "AWS::NoValue") {
 			t.Errorf("AWS::NoValue as part of a value (%s) answered %v, want ValidationError naming it", name, err)
 		}
-		if strings.Contains(spi.JSONText(h.record("nv-"+name)), noValue) || len(h.params("nv-"+name)) != 0 {
-			t.Errorf("AWS::NoValue as part of a value (%s) left %v", name, h.record("nv-"+name))
+		if record, left := h.stored("nv-" + name); left || len(h.params("nv-"+name)) != 0 {
+			t.Errorf("AWS::NoValue as part of a value (%s) left %v", name, record)
 		}
 	}
 }
@@ -938,6 +938,38 @@ func TestCloudFormationASubVariableHasNoSpaces(t *testing.T) {
 		_, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": sub(text)})
 		if ok && err != nil || !ok && (code(err) != "ValidationError" || !strings.Contains(err.Error(), "variable names in Fn::Sub syntax must contain only alphanumeric characters, underscores, periods, and colons")) {
 			t.Errorf("Fn::Sub %q answered %v", text, err)
+		}
+	}
+}
+
+// A template that cannot be made is refused before its name is reserved, so a
+// retry with a sound template under the same name makes the stack: AWS::NoValue
+// as part of a value, in a Fn::Sub or an output, is ValidationError on
+// ValidateTemplate as on CreateStack, and leaves no record. Before, CreateStack
+// found it only after reserving the name, and left a ROLLBACK_COMPLETE stack, so
+// the retry was AlreadyExistsException; ValidateTemplate passed an output that
+// was AWS::NoValue.
+func TestCloudFormationRefusesNoValueBeforeReservingTheName(t *testing.T) {
+	h := newStacks(t)
+	param := func(value any) map[string]any {
+		return map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": value}}
+	}
+	sound, _ := json.Marshal(map[string]any{"Resources": map[string]any{"P": param("v")}})
+	for name, tpl := range map[string]map[string]any{
+		"nvr-sub":    {"Resources": map[string]any{"P": param(map[string]any{"Fn::Sub": "a${AWS::NoValue}"})}},
+		"nvr-output": {"Resources": map[string]any{"P": param("v")}, "Outputs": map[string]any{"O": map[string]any{"Value": map[string]any{"Ref": "AWS::NoValue"}}}},
+	} {
+		body, _ := json.Marshal(tpl)
+		for _, op := range []string{"ValidateTemplate", "CreateStack"} {
+			if _, err := h.invoke(op, map[string]any{"StackName": name, "TemplateBody": string(body)}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "AWS::NoValue") {
+				t.Errorf("%s of %s answered %v, want ValidationError naming AWS::NoValue", op, name, err)
+			}
+		}
+		if record, left := h.stored(name); left {
+			t.Errorf("the refused %s left a record: %v", name, record)
+		}
+		if _, err := h.invoke("CreateStack", map[string]any{"StackName": name, "TemplateBody": string(sound)}); err != nil {
+			t.Errorf("a sound CreateStack of %s after the refusal answered %v", name, err)
 		}
 	}
 }

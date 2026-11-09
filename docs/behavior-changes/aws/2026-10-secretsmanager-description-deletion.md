@@ -274,8 +274,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     (an element of a list too, a `Fn::Join`'s list among them, which the
     Template Reference does not spell out: a reading). It is never a value:
     as part of one, a `Fn::Join`'s separator, a `Fn::Sub`'s string or
-    variable, or an output's value, it is `ValidationError` before anything
-    is made (round 9 wrote the sentinel standing for it into the string,
+    variable, or an output's value, it is `ValidationError` before the
+    stack's name is reserved, on `ValidateTemplate` as on `CreateStack`
+    (round 10 found it only after reserving the name, so the refused stack
+    stayed `ROLLBACK_COMPLETE` and a retry was `AlreadyExistsException`) (round 9 wrote the sentinel standing for it into the string,
     `"\ufffe,b"`, `"a\ufffeb"`); an unsettled one reaches the service as
     written, a reading. `AWS::StackId` "Returns the ID (ARN) of the stack"
     (User Guide, pseudo parameters). Round 8 resolved no `Fn::If`, so its

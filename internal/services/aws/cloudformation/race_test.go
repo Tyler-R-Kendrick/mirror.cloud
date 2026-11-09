@@ -95,13 +95,19 @@ func paused(n int) map[string]map[string]any {
 // record answers the stack's record as the store holds it.
 func (h *stacks) record(name string) map[string]any {
 	h.t.Helper()
-	raw, ok, err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Get(h.ctx, name)
-	if err != nil || !ok {
-		h.t.Fatalf("no record for %s (%v)", name, err)
+	m, ok := h.stored(name)
+	if !ok {
+		h.t.Fatalf("no record for %s", name)
 	}
+	return m
+}
+
+// stored answers the stack's record as the store holds it, and whether it holds one.
+func (h *stacks) stored(name string) (map[string]any, bool) {
+	raw, ok, err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Get(h.ctx, name)
 	var m map[string]any
 	_ = json.Unmarshal(raw, &m)
-	return m
+	return m, ok && err == nil
 }
 
 // The record a create reserves its name with, and every record written

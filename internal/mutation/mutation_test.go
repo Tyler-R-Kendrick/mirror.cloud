@@ -4407,8 +4407,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-novalue-reaches-a-value",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `!strings.Contains(spi.JSONText(r), noValue)`,
-		new:  `true`,
+		old:  `if strings.Contains(spi.JSONText(values), noValue) {`,
+		new:  `if false {`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationNoValueIsNeverAValue",
 	},

@@ -199,18 +199,12 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	planned := maps.Clone(st.Refs)
 	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
-		resolved, err := p.value(rm["Properties"], planned, req, name)
-		typ, props := str(rm["Type"]), asMap(resolved)
-		n, claimErr := p.claim(ctx, req, st, old, logical, typ, props)
-		if planned[logical], err = planID(req, typ, n, props), cmp.Or(err, claimErr); err != nil {
+		typ, props := str(rm["Type"]), asMap(p.resolve(rm["Properties"], planned, req, name))
+		n, err := p.claim(ctx, req, st, old, logical, typ, props)
+		if planned[logical] = planID(req, typ, n, props); err != nil {
 			return fail(err)
 		}
 		attribute(planned, req, typ, logical, planned[logical])
-	}
-	for _, o := range outs {
-		if _, err := p.value(asMap(o)["Value"], planned, req, name); err != nil {
-			return fail(err)
-		}
 	}
 	for _, logical := range order {
 		rm := asMap(resources[logical]) // props is never nil: provision adds to it
@@ -306,6 +300,9 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 		refs = conditions(tpl, known) // which keep, of the pseudo parameters, the stack id alone: ref answers the rest
 		maps.DeleteFunc(refs, func(k, _ string) bool { return pseudos[k] != "" && k != "AWS::StackId" })
 		order, err = p.order(tpl, refs)
+	}
+	if err == nil {
+		err = p.sound(tpl, refs, req, stack)
 	}
 	return body, tpl, order, refs, err
 }
@@ -1103,14 +1100,22 @@ func getAtt(g any, refs map[string]string) string {
 	return cmp.Or(refs[logical+"."+attr], refs[logical])
 }
 
-// value is v resolved, which AWS::NoValue may leave only as a property it removes or a list element: it
-// "Removes the corresponding resource property" (User Guide, pseudo parameters), so it is never a value,
-// and as part of one, a Fn::Join's separator, a Fn::Sub's string or variable, an output, it is refused.
-func (p *Pack) value(v any, refs map[string]string, req *spi.Request, stack string) (any, error) {
-	if r := p.resolve(v, refs, req, stack); !strings.Contains(spi.JSONText(r), noValue) {
-		return r, nil
+// sound is the error for a template whose values cannot be made, found before anything is reserved or
+// made: AWS::NoValue "Removes the corresponding resource property" (User Guide, pseudo parameters), or a list
+// element, so it is never a value, and as part of one, a Fn::Join's separator, a Fn::Sub's string or
+// variable, an output's value, it is refused.
+func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Request, stack string) error {
+	var values []any
+	for _, r := range asMap(tpl["Resources"]) {
+		values = append(values, p.resolve(asMap(r)["Properties"], refs, req, stack))
 	}
-	return nil, invalid("Template error: AWS::NoValue removes a property or a list element; it cannot be part of a value")
+	for _, o := range asMap(tpl["Outputs"]) {
+		values = append(values, p.resolve(asMap(o)["Value"], refs, req, stack))
+	}
+	if strings.Contains(spi.JSONText(values), noValue) {
+		return invalid("Template error: AWS::NoValue removes a property or a list element; it cannot be part of a value")
+	}
+	return nil
 }
 
 func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack string) string {

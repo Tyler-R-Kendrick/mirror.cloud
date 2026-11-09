@@ -253,7 +253,7 @@ func retire(name string, cs changeSet) func(spi.Tx) error {
 		for _, kv := range kvs {
 			rec, err := spi.Decode[map[string]any](kv.Value), error(nil)
 			if own := kv.Key == cs.key; own && !cs.mine(rec) {
-				continue // made again under its name: not this execution's
+				continue // made again under its name: defence in depth, as an execution holds its stack and no path reaches it
 			} else if own || cs.key == "" && status(rec) == "AVAILABLE" {
 				if rec["ExecutionStatus"] = map[bool]string{true: "EXECUTE_COMPLETE", false: "OBSOLETE"}[own]; own {
 					delete(rec, "StatusReason") // a refusal's, before it was executed
@@ -312,7 +312,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		return nil, err
 	}
 	resources, outs := asMap(tpl["Resources"]), asMap(tpl["Outputs"])
-	var old stack // what an update finds; a create reserves the name, CREATE_IN_PROGRESS, in the same transaction
+	// old is what an update finds, and held the record it reserves it with, UPDATE_IN_PROGRESS; a create
+	// reserves the name, CREATE_IN_PROGRESS, in the same transaction.
+	var old, held stack
 	reserved := stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags}
 	if err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
 		tx := stx.Collection("cfn")
@@ -328,14 +330,15 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			return invalid("Stack [" + given + "] does not exist")
 		} else if found && !updatable(old) {
 			return invalid("Stack:" + old.ID + " is in " + old.Status + " state and can not be updated.")
-		} else if id = cmp.Or(old.ID, id); found { // an update reserves nothing: it writes only over what it read
-			return nil
+		} else if id, held = cmp.Or(old.ID, id), old; update { // "is in UPDATE_IN_PROGRESS state" to another change
+			held.Status = "UPDATE_IN_PROGRESS"
+			return tx.Put(name, []byte(spi.JSONText(held)))
 		}
 		return tx.Put(name, []byte(spi.JSONText(reserved)))
 	}); err != nil {
 		return nil, err
 	}
-	read := old // the record as the update read it, which its writes go over (a rollback changes old's resources)
+	read := held // the record as the update reserved it, which its writes go over (a rollback changes old's resources)
 	read.Resources = slices.Clone(old.Resources)
 	if update { // settled again: a record before round 9 holds no conditions
 		old.Refs = conditioned(stored(old.Template), old.Refs, req, name, old.ID)
@@ -890,7 +893,16 @@ func planID(req *spi.Request, typ, n string, props map[string]any) string {
 // CloudFormation's error. A Fn::If whose condition refs settles names only what its branch taken does.
 func (p *Pack) order(tpl map[string]any, refs map[string]string) ([]string, error) {
 	resources, waiting, users := asMap(tpl["Resources"]), map[string]int{}, map[string][]string{}
-	var ready, order []string
+	var ready, order, undeclared []string
+	// A Ref, a Fn::GetAtt or a Fn::Sub variable names a parameter, a pseudo parameter or a resource the
+	// template declares ("can be template parameter names, resource logical IDs, resource attributes"), or
+	// it is "Unresolved": refused before anything is made, as the service refuses it.
+	unresolved := func(n string) string {
+		if v, _ := strings.CutPrefix(n, "${"); strings.TrimPrefix(v, ".") != "" && resources[strings.TrimPrefix(v, ".")] == nil && asMap(tpl["Parameters"])[v] == nil && !strings.HasPrefix(v, "AWS::") {
+			return strings.TrimPrefix(v, ".") // names marks a Fn::GetAtt's resource with a dot
+		}
+		return ""
+	}
 	for logical, r := range resources {
 		p.walks++
 		named := map[string]bool{}
@@ -899,13 +911,26 @@ func (p *Pack) order(tpl map[string]any, refs map[string]string) ([]string, erro
 			named[d] = true
 		}
 		for n := range named {
-			if _, ok := resources[n]; ok {
+			if v := unresolved(n); v != "" {
+				undeclared = append(undeclared, v)
+			} else if _, ok := resources[n]; ok {
 				waiting[logical], users[n] = waiting[logical]+1, append(users[n], logical)
 			}
 		}
 		if waiting[logical] == 0 {
 			ready = append(ready, logical)
 		}
+	}
+	block, named := "Resources", map[string]bool{}
+	if names(tpl["Outputs"], named, refs); len(undeclared) == 0 { // then what an output names
+		for n := range named {
+			if v := unresolved(n); v != "" {
+				block, undeclared = "Outputs", append(undeclared, v)
+			}
+		}
+	}
+	if len(undeclared) > 0 {
+		return nil, invalid("Template format error: Unresolved resource dependencies [" + strings.Join(slices.Compact(slices.Sorted(slices.Values(undeclared))), ", ") + "] in the " + block + " block of the template")
 	}
 	for slices.Sort(ready); len(ready) > 0; ready = ready[1:] {
 		order = append(order, ready[0])
@@ -1535,7 +1560,11 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 			return parts
 		}
 		if region, ok := t["Fn::GetAZs"]; ok { // "" is the stack's Region; three zones, a reading
-			r := cmp.Or(str(p.resolve(region, refs, req, stack)), req.Identity.Region)
+			v := p.resolve(region, refs, req, stack)
+			if m, isMark := combine(v); isMark {
+				return m
+			}
+			r := cmp.Or(str(v), req.Identity.Region)
 			return []any{r + "a", r + "b", r + "c"}
 		}
 		if f, ok := t["Fn::FindInMap"]; ok {

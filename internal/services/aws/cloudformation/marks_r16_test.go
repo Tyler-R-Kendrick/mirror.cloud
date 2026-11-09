@@ -12,7 +12,7 @@ import (
 // before a value. A template whose output holds an error, at any depth, is
 // refused before anything is made; one built on an id not known yet is made,
 // with that id in it. The table puts each mark two deep in each pair of
-// intrinsics. One pack serves the whole table; its cases run in turn, since
+// intrinsics, Fn::GetAZs among them since round 17. One pack serves the whole table; its cases run in turn, since
 // the harness's random source is not shared across goroutines.
 // Before, Fn::Join and Fn::Sub passed on no AWS::NoValue already inside a
 // string, and an unknown hid an error, so marks reached providers, the stack
@@ -26,6 +26,7 @@ func TestCloudFormationCombinesMarksInEveryIntrinsic(t *testing.T) {
 		"split":  func(v any) any { return map[string]any{"Fn::Split": []any{",", v}} },
 		"select": func(v any) any { return map[string]any{"Fn::Select": []any{0, []any{v}}} },
 		"if":     func(v any) any { return map[string]any{"Fn::If": []any{"On", v, "z"}} },
+		"getazs": func(v any) any { return map[string]any{"Fn::GetAZs": v} }, // round 17
 	}
 	marks := map[string]struct {
 		v      any

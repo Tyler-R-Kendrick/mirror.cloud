@@ -282,9 +282,10 @@ func TestCloudFormationNothingUpdatesAStackBeingCreated(t *testing.T) {
 }
 
 // An update writes its record only over the record it read (termination
-// protection aside). One that finds the stack changed under it, by another
-// update or a DeleteStack, deletes what it made that the stack now does not
-// hold and is ValidationError, so nothing it made outlives it. Before, the
+// protection aside). Since round 17 an update holds its stack, so another
+// update is refused at its start, and since round 18 so is a DeleteStack
+// ("cannot be deleted while in status UPDATE_IN_PROGRESS"): the first update
+// is the one that ends. Before, the
 // later of two updates wrote its record over the earlier's, whose resources
 // then belonged to no stack, and an update during a DeleteStack brought the
 // deleted stack back.
@@ -308,14 +309,14 @@ func TestCloudFormationAnUpdateThatLosesUndoesItself(t *testing.T) {
 			second, _ := json.Marshal(map[string]any{"Resources": map[string]any{"A": named("u-a"), "N2": named("u-n2")}})
 			// An update reserves the stack, so a second update is refused at its start, "is in
 			// UPDATE_IN_PROGRESS state and can not be updated", and the first is the one that ends.
-			if _, err := h.invoke(rival, map[string]any{"StackName": "u", "TemplateBody": string(second)}); rival == "UpdateStack" && !strings.Contains(fmt.Sprint(err), "UPDATE_IN_PROGRESS") || rival == "DeleteStack" && err != nil {
+			if _, err := h.invoke(rival, map[string]any{"StackName": "u", "TemplateBody": string(second)}); !strings.Contains(fmt.Sprint(err), "UPDATE_IN_PROGRESS") { // DeleteStack too, since round 18
 				t.Fatalf("%s during the update answered %v", rival, err)
 			}
 			close(g.release)
-			if err := within(t, updated, "the update"); rival == "DeleteStack" && code(err) != "ValidationError" || rival == "UpdateStack" && err != nil {
+			if err := within(t, updated, "the update"); err != nil {
 				t.Errorf("the update, %s during it, answered %v", rival, err)
 			}
-			want := map[string][]string{"UpdateStack": {"u-a", "u-n1"}, "DeleteStack": nil}[rival]
+			want := []string{"u-a", "u-n1"}
 			out, err := h.service("aws.sqs", "ListQueues", map[string]any{"QueueNamePrefix": "u-"})
 			var left []string
 			for _, url := range spi.Slice(out["QueueUrls"]) {
@@ -323,11 +324,6 @@ func TestCloudFormationAnUpdateThatLosesUndoesItself(t *testing.T) {
 			}
 			if slices.Sort(left); err != nil || strings.Join(left, ",") != strings.Join(want, ",") {
 				t.Errorf("after %s won, the queues are %v (%v), want %v", rival, left, err, want)
-			}
-			if _, err := h.service("aws.s3", "ListBuckets", map[string]any{}); err != nil {
-				t.Fatal(err)
-			} else if out, _ := h.service("aws.s3", "ListBuckets", map[string]any{}); rival == "DeleteStack" && strings.Contains(fmt.Sprint(out), "u-P150b") {
-				t.Errorf("the losing update's bucket was left: %v", out)
 			}
 		})
 	}

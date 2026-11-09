@@ -106,10 +106,9 @@ func TestCloudFormationAnUpdateHoldsItsStack(t *testing.T) {
 	}
 }
 
-// An update ends its reservation however it ends: one that fails puts the
-// stack back as it found it, so the next update is taken; and one that finds
-// the stack changed under it, by a DeleteStack that failed, writes nothing
-// over it. These pin what a reservation's end writes.
+// An update that fails puts the stack back as it found it, so the next update
+// is taken. (Round 17 also checked an update finding a failed DeleteStack
+// under it; since round 18 a DeleteStack of a stack being updated is refused.)
 func TestCloudFormationAnUpdateEndsItsReservation(t *testing.T) {
 	h := newStacks(t)
 	topic := map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}}
@@ -128,30 +127,19 @@ func TestCloudFormationAnUpdateEndsItsReservation(t *testing.T) {
 		t.Errorf("the update after a failed one answered %v, want it taken", err)
 	}
 
-	full := map[string]any{"K": map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "r17full"}}}
-	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "d", "TemplateBody": r17Tpl(full, nil)}); err != nil {
-		t.Fatal(err)
-	}
-	h.fill("r17full", true) // DeleteStack fails on it
-	g := h.gateOn(func(collection, key string, _ []byte) bool {
-		return collection == "bktcfg" && strings.HasSuffix(key, "/cors")
-	})
-	full["C"] = map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "r17cors",
-		"CorsConfiguration": map[string]any{"CorsRules": []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"*"}}}}}}
-	done := make(chan error, 1)
-	go func() {
-		_, err := h.invoke("UpdateStack", map[string]any{"StackName": "d", "TemplateBody": r17Tpl(full, nil)})
-		done <- err
-	}()
-	within(t, g.reached, "the update reaching its bucket")
-	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "d"}); err == nil {
-		t.Fatal("DeleteStack of a stack holding a full bucket succeeded")
+}
+
+// heldFromDelete is whether DeleteStack of the stack s, while an execution holds it, is refused, "Stack [s]
+// cannot be deleted while in status UPDATE_IN_PROGRESS" (since round 18), the execution then let finish:
+// the reviewer's scenarios that delete a stack under an execution cannot happen.
+func heldFromDelete(t *testing.T, h *stacks, g *gate, done chan error) bool {
+	t.Helper()
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "s"}); err == nil || !strings.Contains(err.Error(), "Stack [s] cannot be deleted while in status UPDATE_IN_PROGRESS") {
+		t.Errorf("DeleteStack during an execution answered %v, want it refused", err)
 	}
 	close(g.release)
-	if err := within(t, done, "the update"); code(err) != "ValidationError" {
-		t.Errorf("the update, the stack's delete failing during it, answered %v, want ValidationError", err)
+	if err := within(t, done, "the execution"); err != nil {
+		t.Errorf("the execution the delete was refused under answered %v", err)
 	}
-	if status, _, _ := h.status("d"); status != "DELETE_FAILED" {
-		t.Errorf("the stack is %s, want DELETE_FAILED: the update wrote over the failed delete", status)
-	}
+	return true
 }

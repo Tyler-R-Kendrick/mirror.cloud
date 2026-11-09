@@ -346,8 +346,14 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	fail := func(err error) (*spi.Response, error) {
 		if st.Reason = err.Error(); !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, st, "CREATE_IN_PROGRESS", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
-		} else { // a failed update's reservation ends: the record as it found it, over its reservation only
-			_, _, _ = p.settle(ctx, req, name, as(held, old))
+		} else { // a failed update's reservation ends: the record as it found it, over its reservation only, and
+			// what the update made that the record, put back or another's, does not hold goes
+			cur, wrote, _ := p.settle(ctx, req, name, as(held, old))
+			keep := map[bool][]res{true: old.Resources, false: cur.Resources}[wrote]
+			st.Resources = slices.DeleteFunc(st.Resources, func(r res) bool {
+				return slices.ContainsFunc(keep, func(c res) bool { return c.Physical == r.Physical })
+			})
+			_ = p.unwind(ctx, req, st, "", "", "")
 		}
 		p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", err)
 		return nil, err
@@ -391,21 +397,15 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": text(v)})
 	}
 	if !update { // a DeleteStack begun during the create ends here: what it made goes, and then the stack
-		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS"), retire(name, cs)); err == nil && !wrote {
+		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS"), retire(name, cs)); err != nil {
+			return fail(err) // the final write failed: an error, never success
+		} else if !wrote {
 			_ = p.unwind(ctx, req, st, "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED")
 		}
-	} else if cur, wrote, err := p.settle(ctx, req, name, as(held, st), retire(name, cs)); err == nil && !wrote {
-		// Another change came first, in progress while this update ran: what this update made that the stack
-		// does not hold goes, all of it when the stack is being deleted (its delete may have run first).
-		rival := map[bool]string{true: "DELETE_IN_PROGRESS", false: "UPDATE_IN_PROGRESS"}[cur.ID != id || strings.HasPrefix(cur.Status, "DELETE_")]
-		if cur.ID == id && rival == "DELETE_IN_PROGRESS" {
-			cur.Resources = nil
-		}
-		st.Resources = slices.DeleteFunc(st.Resources, func(r res) bool {
-			return slices.ContainsFunc(cur.Resources, func(c res) bool { return c.Physical == r.Physical })
-		})
-		_ = p.unwind(ctx, req, st, "", "", "")
-		return fail(invalid("Stack:" + id + " is in " + rival + " state and can not be updated."))
+	} else if cur, wrote, err := p.settle(ctx, req, name, as(held, st), retire(name, cs)); err != nil {
+		return fail(err) // the final write failed: an error, never success
+	} else if !wrote { // the record is not the reservation (fail deletes what the update made that it does not hold)
+		return fail(invalid("Stack:" + id + " is in " + cmp.Or(cur.Status, "DELETE_COMPLETE") + " state and can not be updated."))
 	}
 	return &spi.Response{Output: map[string]any{"StackId": id}}, nil
 }
@@ -567,6 +567,8 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 	st, err := p.load(ctx, req, name)
 	if err == nil && st.Protect {
 		err = invalid("stack has termination protection")
+	} else if err == nil && strings.HasPrefix(st.Status, "UPDATE_") && strings.HasSuffix(st.Status, "_IN_PROGRESS") { // the wording is the service's
+		err = invalid("Stack [" + name + "] cannot be deleted while in status " + st.Status)
 	} else if was, del := st.Status, st; err == nil && was != "DELETE_IN_PROGRESS" {
 		del.Status = "DELETE_IN_PROGRESS"
 		_, started, settleErr := p.settle(ctx, req, name, func(cur stack) (stack, bool) { return del, reflect.DeepEqual(cur, st) })
@@ -739,11 +741,13 @@ func planID(req *spi.Request, typ, n string, props map[string]any) string {
 func (p *Pack) order(tpl map[string]any, refs map[string]string) ([]string, error) {
 	resources, waiting, users := asMap(tpl["Resources"]), map[string]int{}, map[string][]string{}
 	var ready, order, undeclared []string
-	// A Ref, a Fn::GetAtt or a Fn::Sub variable names a parameter, a pseudo parameter or a resource the
-	// template declares ("can be template parameter names, resource logical IDs, resource attributes"), or
-	// it is "Unresolved": refused before anything is made, as the service refuses it.
+	// A Ref, a Fn::GetAtt, a Fn::Sub variable or a DependsOn names a parameter, a pseudo parameter or a
+	// resource the template declares ("can be template parameter names, resource logical IDs, resource
+	// attributes"; a Fn::GetAtt's and a DependsOn's, a resource), or it is "Unresolved": refused before
+	// anything is made, in any block and either branch of a Fn::If, as the service refuses it.
 	unresolved := func(n string) string {
-		if v, _ := strings.CutPrefix(n, "${"); v != "" && resources[v] == nil && asMap(tpl["Parameters"])[v] == nil && !strings.HasPrefix(v, "AWS::") {
+		v, _ := strings.CutPrefix(n, "${")
+		if l, attr := strings.CutPrefix(v, "."); l != "" && resources[l] == nil && (attr || asMap(tpl["Parameters"])[l] == nil && !strings.HasPrefix(l, "AWS::")) {
 			return v
 		}
 		return ""
@@ -751,11 +755,9 @@ func (p *Pack) order(tpl map[string]any, refs map[string]string) ([]string, erro
 	for logical, r := range resources {
 		p.walks++
 		named := map[string]bool{}
-		names(asMap(r)["Properties"], named, refs)
+		names(r, named, refs) // its properties and its DependsOn; the order prunes what a settled Fn::If does not take
 		for n := range named {
-			if v := unresolved(n); v != "" {
-				undeclared = append(undeclared, v)
-			} else if _, ok := resources[n]; ok {
+			if _, ok := resources[n]; ok {
 				waiting[logical], users[n] = waiting[logical]+1, append(users[n], logical)
 			}
 		}
@@ -763,13 +765,22 @@ func (p *Pack) order(tpl map[string]any, refs map[string]string) ([]string, erro
 			ready = append(ready, logical)
 		}
 	}
-	block, named := "Resources", map[string]bool{}
-	if names(tpl["Outputs"], named, refs); len(undeclared) == 0 { // then what an output names
-		for n := range named {
-			if v := unresolved(n); v != "" {
-				block, undeclared = "Outputs", append(undeclared, v)
+	block := "Resources"
+	for _, b := range []string{"Resources", "Outputs", "Conditions"} {
+		if all := map[string]bool{}; len(undeclared) == 0 {
+			names(tpl[b], all, nil) // every branch of a Fn::If
+			for n := range all {
+				if v := unresolved(n); v != "" {
+					block, undeclared = b, append(undeclared, v)
+				}
 			}
 		}
+	}
+	if i := slices.IndexFunc(undeclared, func(u string) bool { return strings.HasPrefix(u, ".") && asMap(tpl["Parameters"])[u[1:]] != nil }); i >= 0 {
+		return nil, invalid("Template error: instance of Fn::GetAtt references undefined resource " + undeclared[i][1:])
+	}
+	for i, u := range undeclared {
+		undeclared[i] = strings.TrimPrefix(u, ".")
 	}
 	if len(undeclared) > 0 {
 		return nil, invalid("Template format error: Unresolved resource dependencies [" + strings.Join(slices.Compact(slices.Sorted(slices.Values(undeclared))), ", ") + "] in the " + block + " block of the template")
@@ -844,7 +855,8 @@ func names(v any, named map[string]bool, refs map[string]string) {
 				named[str(x)] = true
 			case "Fn::GetAtt":
 				logical, _, _ := strings.Cut(str(x), ".")
-				named[cmp.Or(str(append(spi.Slice(x), nil)[0]), logical)] = true
+				logical = cmp.Or(str(append(spi.Slice(x), nil)[0]), logical)
+				named[logical], named["."+logical] = true, true // ".": what names a resource alone (order)
 			case "Fn::Sub":
 				parts := append(spi.Slice(x), x, nil) // "text", or ["text", {variables}]
 				for _, m := range subVariable.FindAllStringSubmatch(str(parts[0]), -1) {
@@ -853,6 +865,12 @@ func names(v any, named map[string]bool, refs map[string]string) {
 					}
 				}
 				names(parts[1], named, refs)
+			case "DependsOn": // "Resource B is created before resource A": a string or a list of them, each a resource
+				for _, d := range append(spi.Slice(x), x) {
+					if d, ok := d.(string); ok {
+						named[d], named["."+d] = true, true
+					}
+				}
 			case "Fn::If": // [condition, then, else]
 				branches := append(spi.Slice(x), nil, nil, nil)
 				if yes, settled := refs["Condition::"+str(branches[0])]; settled {

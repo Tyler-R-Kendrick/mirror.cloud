@@ -123,8 +123,8 @@ func TestRV15ExecuteVsRecreatedExecuting(t *testing.T) {
 		done <- err
 	}()
 	within(t, g.reached, "a's execution at the bucket")
-	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "s"}); err != nil {
-		t.Fatal(err)
+	if heldFromDelete(t, h, g, done) { // since round 18 the scenario below cannot happen
+		return
 	}
 	st, _, serr := h.status("s")
 	t.Logf("after DeleteStack: %v %v", st, serr)
@@ -218,8 +218,8 @@ func TestRV15TwoExecutionsSameName(t *testing.T) {
 		done <- err
 	}()
 	within(t, g.reached, "a's execution at the bucket")
-	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "s"}); err != nil {
-		t.Fatal(err)
+	if heldFromDelete(t, h, g, done) { // since round 18 the scenario below cannot happen
+		return
 	}
 	if _, ok := h.stored("s"); ok {
 		t.Fatal("s still stored")
@@ -273,8 +273,8 @@ func TestRV15UpdateExecVsDelete(t *testing.T) {
 		done <- err
 	}()
 	within(t, g.reached, "a at the bucket")
-	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "s"}); err != nil {
-		t.Fatal(err)
+	if heldFromDelete(t, h, g, done) { // since round 18 the scenario below cannot happen
+		return
 	}
 	close(g.release)
 	err := within(t, done, "a")

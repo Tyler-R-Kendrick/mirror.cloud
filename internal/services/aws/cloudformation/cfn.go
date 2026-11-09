@@ -295,10 +295,11 @@ func (p *Pack) template(ctx context.Context, req *spi.Request, stack, id string)
 	var order []string
 	var refs map[string]string
 	if err == nil {
-		known, pseudos := parameters(req.Input, tpl), pseudo(req, stack, id)
-		maps.Copy(known, pseudos)
-		refs = conditions(tpl, known) // which keep, of the pseudo parameters, the stack id alone: ref answers the rest
-		maps.DeleteFunc(refs, func(k, _ string) bool { return pseudos[k] != "" && k != "AWS::StackId" })
+		known := parameters(req.Input, tpl)
+		maps.Copy(known, pseudo(req, stack, id))
+		known["Fn::FindInMap"] = spi.JSONText(tpl["Mappings"]) // the Mappings section, which findInMap reads
+		refs = conditions(tpl, known)
+		delete(refs, "AWS::NoValue") // ref answers it: no record holds the sentinel
 		order, err = p.order(tpl, refs)
 	}
 	if err == nil {
@@ -626,6 +627,8 @@ func truth(c any, conds map[string]any, params map[string]string, memo map[strin
 			v, ok := coerce(x, "String")
 			if r, isRef := asMap(x)["Ref"]; isRef {
 				v, ok = params[str(r)]
+			} else if f, isMapped := asMap(x)["Fn::FindInMap"]; isMapped {
+				v, _, ok = findInMap(f, params)
 			}
 			if text[i] = str(v); !ok {
 				return false, false
@@ -1056,6 +1059,11 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 		if s, ok := t["Fn::Sub"]; ok {
 			return p.fnSub(s, refs, req, stack)
 		}
+		if f, ok := t["Fn::FindInMap"]; ok {
+			if v, _, found := findInMap(f, refs); found {
+				return v
+			}
+		}
 		branches := append(spi.Slice(t["Fn::If"]), nil, nil, nil) // the branch its condition takes (conditions)
 		if yes, settled := refs["Condition::"+str(branches[0])]; settled && t["Fn::If"] != nil {
 			return p.resolve(branches[map[bool]int{true: 1, false: 2}[yes == "true"]], refs, req, stack)
@@ -1117,7 +1125,43 @@ func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Reques
 	if strings.Contains(spi.JSONText(values), noValue) {
 		return invalid("Template error: AWS::NoValue removes a property or a list element; it cannot be part of a value")
 	}
-	return nil
+	var err error // without a DefaultValue, "Fn::FindInMap raises an error when a key is not found"
+	each([]any{tpl["Resources"], tpl["Outputs"], tpl["Conditions"]}, func(x map[string]any) {
+		if _, key, found := findInMap(x["Fn::FindInMap"], refs); x["Fn::FindInMap"] != nil && !found && err == nil && key != "" {
+			err = invalid("Template error: Unable to get mapping for " + key)
+		} else if x["Fn::FindInMap"] != nil && !found && err == nil && stack != "" { // a stack is made with every key settled
+			err = invalid("Template error: the Fn::FindInMap " + spi.JSONText(x["Fn::FindInMap"]) + " cannot be evaluated")
+		}
+	})
+	return err
+}
+
+// findInMap is the value a Fn::FindInMap names, "the value corresponding to keys in a two-level map that's
+// declared in the Mappings section", which refs holds as "Fn::FindInMap" (Template Reference, Fn::FindInMap):
+// its three keys literals, or a Ref or another Fn::FindInMap, the functions the page allows there, that refs
+// settles. key is the keys, "map::top::second", "" while one is unsettled; found, whether the map holds it.
+func findInMap(args any, refs map[string]string) (v any, key string, found bool) {
+	var keys []string
+	for _, a := range spi.Slice(args) {
+		k, ok := coerce(a, "String")
+		if r, isRef := asMap(a)["Ref"]; isRef {
+			k, ok = refs[str(r)]
+		} else if f, isMapped := asMap(a)["Fn::FindInMap"]; isMapped {
+			k, _, ok = findInMap(f, refs)
+		} else if asMap(a) != nil {
+			ok = false
+		}
+		if keys = append(keys, str(k)); !ok {
+			return nil, "", false
+		}
+	}
+	if len(keys) != 3 { // a DefaultValue needs the AWS::LanguageExtensions transform, which the engine does not run
+		return nil, "", false
+	}
+	var mappings map[string]any
+	_ = json.Unmarshal([]byte(refs["Fn::FindInMap"]), &mappings)
+	v, found = asMap(asMap(mappings[keys[0]])[keys[1]])[keys[2]]
+	return v, strings.Join(keys, "::"), found
 }
 
 func (p *Pack) fnJoin(j any, refs map[string]string, req *spi.Request, stack string) string {

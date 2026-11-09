@@ -244,11 +244,22 @@ The oracle is AWS's documentation as it ships in the vendored model
     syntax), and each pseudo parameter the engine answers a `Ref` with
     settles one: `AWS::Region`, `AccountId`, `StackName`, `StackId`,
     `Partition`, `URLSuffix` and `NoValue`, the stack's two only once there
-    is a stack (round 9 settled none, so `!If [East, e, w]` on
+    is a stack, and `Fn::FindInMap`, "Mapping values" being a base the page
+    names (round 9 settled none, so `!If [East, e, w]` on
     `!Equals [!Ref AWS::Region, us-east-1]` stored `""`). A stack is made
     or updated only with every condition settled: one the engine cannot
-    evaluate (a `Fn::FindInMap`) is `ValidationError`, "Template error: the
-    condition <name> cannot be evaluated" (a reading). A condition may not
+    evaluate (a `Fn::Select`) is `ValidationError`, "Template error: the
+    condition <name> cannot be evaluated" (a reading). `Fn::FindInMap`
+    "returns the value corresponding to keys in a two-level map that's
+    declared in the Mappings section", its keys literals, a `Ref` or
+    another `Fn::FindInMap` (Template Reference, Fn::FindInMap), in a
+    condition, a property and an output (round 10 resolved it nowhere, and
+    refused it in a condition); "If omitted, Fn::FindInMap raises an error
+    when a key is not found", so a missing map or key is `ValidationError`,
+    "Template error: Unable to get mapping for Env::eu-west-1::Stage" (a
+    reading), and one the engine cannot evaluate when it makes a stack (a
+    `DefaultValue`, which needs the `AWS::LanguageExtensions` transform) is
+    refused too. A condition may not
     name a resource ("you can't reference resource logical IDs or their
     attributes in conditions"), "Template format error: Unresolved
     dependencies [P]. Cannot reference resources in the Conditions block of

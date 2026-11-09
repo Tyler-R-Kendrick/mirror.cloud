@@ -800,7 +800,7 @@ func TestCloudFormationRefusesACycleOfConditions(t *testing.T) {
 // answers a Ref with when it makes or updates a stack: AWS::Region,
 // AccountId, StackName, StackId, Partition, URLSuffix and NoValue. So each
 // condition on one settles, and its Fn::If takes its branch. A condition the
-// engine cannot settle when it makes the stack (here a Fn::FindInMap, which it
+// engine cannot settle when it makes the stack (here a Fn::Select, which it
 // does not evaluate) is ValidationError naming it, never stored as the Fn::If
 // map or "". A condition may not name a resource ("you can't reference
 // resource logical IDs or their attributes in conditions"), and a Fn::If may
@@ -840,8 +840,7 @@ func TestCloudFormationSettlesConditionsOnPseudoParameters(t *testing.T) {
 		t.Errorf("the parameter on AWS::StackId is %v, want mine", got)
 	}
 	refused := map[string]map[string]any{
-		"unsettled": {"Mappings": map[string]any{"M": map[string]any{"k": map[string]any{"v": "x"}}},
-			"Conditions": map[string]any{"Mapped": map[string]any{"Fn::Equals": []any{map[string]any{"Fn::FindInMap": []any{"M", "k", "v"}}, "x"}}}},
+		"unsettled":  {"Conditions": map[string]any{"Mapped": map[string]any{"Fn::Equals": []any{map[string]any{"Fn::Select": []any{0, []any{"x"}}}, "x"}}}},
 		"resource":   {"Conditions": map[string]any{"OnP": is("P", "x")}},
 		"undeclared": {"Conditions": map[string]any{}},
 	}
@@ -988,5 +987,68 @@ func TestCloudFormationNoValueRemovesEveryProperty(t *testing.T) {
 	}
 	if got := h.resources("nvp"); len(got) != 1 || !strings.Contains(got[0].Physical, "nvp-Q-") {
 		t.Errorf("the stack holds %v, want one queue under a generated name", got)
+	}
+}
+
+// Conditions "can be based on: ... Mapping values" (User Guide, Conditions
+// syntax), and Fn::FindInMap "returns the value corresponding to keys in a
+// two-level map that's declared in the Mappings section"; its keys may be
+// literals, a Ref (to a parameter or pseudo parameter) or another Fn::FindInMap
+// (Template Reference, Fn::FindInMap, supported functions). So a condition on a
+// mapping settles, and a property or output takes the mapping's value, a list
+// included. Without a DefaultValue, "Fn::FindInMap raises an error when a key is
+// not found": a missing map, top-level key or second-level key is
+// ValidationError, "Template error: Unable to get mapping for Env::eu-west-1::Stage"
+// (the wording is a reading), on ValidateTemplate and CreateStack, and nothing is
+// made. Before, the engine resolved no Fn::FindInMap: the condition was
+// refused as one it cannot evaluate, and a property was the function's map.
+func TestCloudFormationFindsInMap(t *testing.T) {
+	h := newStacks(t)
+	find := func(keys ...any) any { return map[string]any{"Fn::FindInMap": keys} }
+	region := map[string]any{"Ref": "AWS::Region"}
+	param := func(value any) map[string]any {
+		return map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Type": "String", "Value": value}}
+	}
+	template := func(resources, outputs map[string]any) string {
+		body, _ := json.Marshal(map[string]any{
+			"Mappings": map[string]any{"Env": map[string]any{"us-east-1": map[string]any{"Stage": "prod", "Ids": []any{"a", "b"}}},
+				"Keys": map[string]any{"k": map[string]any{"region": "us-east-1"}}},
+			"Conditions": map[string]any{"IsProd": map[string]any{"Fn::Equals": []any{find("Env", region, "Stage"), "prod"}}},
+			"Resources":  resources, "Outputs": outputs})
+		return string(body)
+	}
+	resources := map[string]any{"P": param(map[string]any{"Fn::If": []any{"IsProd", find("Env", region, "Stage"), "dev"}}),
+		"Q": param(map[string]any{"Fn::Join": []any{",", find("Env", "us-east-1", "Ids")}}),
+		"R": param(find("Env", find("Keys", "k", "region"), "Stage"))}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "fim", "TemplateBody": template(resources, map[string]any{"O": map[string]any{"Value": find("Env", region, "Stage")}})}); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"P": "prod", "Q": "a,b", "R": "prod"}
+	for _, r := range h.resources("fim") {
+		got, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": r.Physical})
+		if v := str(asMap(got["Parameter"])["Value"]); err != nil || v != want[r.Logical] {
+			t.Errorf("%s is %q (%v), want %q", r.Logical, v, err, want[r.Logical])
+		}
+	}
+	if outs := spi.JSONText(h.record("fim")["Outputs"]); !strings.Contains(outs, `"OutputValue":"prod"`) {
+		t.Errorf("the outputs are %s, want O prod", outs)
+	}
+	for i, keys := range [][]any{{"Nope", "us-east-1", "Stage"}, {"Env", "eu-west-1", "Stage"}, {"Env", "us-east-1", "Nope"}} {
+		body := template(map[string]any{"P": param(find(keys...))}, nil)
+		want := "Unable to get mapping for " + str(keys[0]) + "::" + str(keys[1]) + "::" + str(keys[2])
+		for _, op := range []string{"ValidateTemplate", "CreateStack"} {
+			if _, err := h.invoke(op, map[string]any{"StackName": fmt.Sprintf("fim-%d", i), "TemplateBody": body}); code(err) != "ValidationError" || !strings.Contains(err.Error(), want) {
+				t.Errorf("%s of Fn::FindInMap %v answered %v, want ValidationError: %s", op, keys, err, want)
+			}
+		}
+		if record, left := h.stored(fmt.Sprintf("fim-%d", i)); left {
+			t.Errorf("the refused Fn::FindInMap %v left %v", keys, record)
+		}
+	}
+	// A DefaultValue needs the AWS::LanguageExtensions transform, which the engine does not run: a stack is
+	// not made with a Fn::FindInMap it cannot evaluate.
+	fallback := template(map[string]any{"P": param(find("Env", "x", "y", map[string]any{"DefaultValue": "d"}))}, nil)
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "fim-default", "TemplateBody": fallback}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "cannot be evaluated") {
+		t.Errorf("a Fn::FindInMap with a DefaultValue answered %v, want ValidationError", err)
 	}
 }

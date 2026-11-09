@@ -4423,8 +4423,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-conditions-ignore-pseudo-parameters",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `maps.Copy(known, pseudos)`,
-		new:  `_ = pseudos`,
+		old:  `maps.Copy(known, pseudo(req, stack, id))`,
+		new:  `_ = id`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationSettlesConditionsOnPseudoParameters",
 	},

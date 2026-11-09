@@ -303,3 +303,26 @@ func TestCloudFormationAChangeSetKeepsTheTemplateItRead(t *testing.T) {
 		t.Errorf("the stack is %q, want CREATE_COMPLETE", status)
 	}
 }
+
+// A stack is made only under CreateStack's name rule, "alphanumeric
+// characters (case sensitive) and hyphens ... can't be longer than 128
+// characters" (API reference, CreateStack), by CreateStack and by a CREATE
+// change set, so no stack's name holds the colon a change set's key,
+// <stack>:<change set>, joins with, and retiring one stack's change sets
+// touches no other's. Before, stacks a:x, 1a, a_b and one of 129 characters
+// were each made.
+func TestCloudFormationAChangeSetKeyIsItsStacks(t *testing.T) {
+	h := newStacks(t)
+	topic, _ := json.Marshal(map[string]any{"Resources": map[string]any{"T": map[string]any{"Type": "AWS::SNS::Topic"}}})
+	for _, name := range []string{"a:x", "1a", "a_b", "a" + strings.Repeat("b", 128)} {
+		if _, err := h.invoke("CreateStack", map[string]any{"StackName": name, "TemplateBody": string(topic)}); code(err) != "ValidationError" {
+			t.Errorf("CreateStack of %q answered %v, want ValidationError", name, err)
+		}
+		if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": name, "ChangeSetName": "c", "ChangeSetType": "CREATE", "TemplateBody": string(topic)}); code(err) != "ValidationError" {
+			t.Errorf("a CREATE change set of %q answered %v, want ValidationError", name, err)
+		}
+	}
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "a" + strings.Repeat("b", 127), "TemplateBody": string(topic)}); err != nil {
+		t.Errorf("CreateStack of a 128-character name answered %v", err)
+	}
+}

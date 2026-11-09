@@ -152,6 +152,7 @@ var changeSetMembers = []string{"Parameters", "NotificationARNs", "Tags", "Capab
 func (p *Pack) createChangeSet(ctx context.Context, req *spi.Request, name string) (*spi.Response, error) {
 	csn, create := str(req.Input["ChangeSetName"]), req.Input["ChangeSetType"] == "CREATE"
 	body, err := p.templateBody(ctx, req)
+	err = cmp.Or(checkName(name, create), err)
 	if _, paramErr := parameters(req.Input, stored(body)); err == nil {
 		err = paramErr
 	}
@@ -192,6 +193,19 @@ func (p *Pack) createChangeSet(ctx context.Context, req *spi.Request, name strin
 		return stx.Collection("cfn-cs").Put(name+":"+csn, []byte(spi.JSONText(rec)))
 	})
 	return &spi.Response{Output: map[string]any{"Id": rec["ChangeSetId"], "StackId": rec["StackId"]}}, err
+}
+
+// stackName is CreateStack's rule for a stack's name: "alphanumeric characters (case sensitive) and hyphens.
+// It must start with an alphabetical character and can't be longer than 128 characters" (API reference).
+var stackName = regexp.MustCompile(`^[a-zA-Z][-a-zA-Z0-9]{0,127}$`)
+
+// checkName is the framework's ValidationError for no name, or for a name a create is given outside the
+// rule. No made stack's name holds a colon, so a change set's key, <stack>:<change set>, is no other stack's.
+func checkName(name string, create bool) error {
+	if name == "" || create && !stackName.MatchString(name) {
+		return invalid("1 validation error detected: Value '" + name + "' at 'stackName' failed to satisfy constraint: Member must satisfy regular expression pattern: [a-zA-Z][-a-zA-Z0-9]*")
+	}
+	return nil
 }
 
 // status is a change set's ExecutionStatus; AVAILABLE for a record stored before it had one.
@@ -260,8 +274,8 @@ type res struct {
 // set's, which it answered), as the execution of the change set under key when one is given: claimed in the
 // transaction that starts it, retired in the one that ends it.
 func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update bool, id string, cs changeSet) (*spi.Response, error) {
-	if name == "" {
-		return nil, invalid("StackName required")
+	if err := checkName(name, !update); err != nil {
+		return nil, err
 	} else if len(spi.Slice(req.Input["NotificationARNs"])) > 5 { // "Maximum number of 5 items" (API reference, CreateStack and UpdateStack)
 		return nil, invalid("1 validation error detected: Value at 'notificationARNs' failed to satisfy constraint: Member must have length less than or equal to 5")
 	}

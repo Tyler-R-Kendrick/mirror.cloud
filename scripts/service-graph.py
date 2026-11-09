@@ -42,9 +42,9 @@ literal = re.compile(r'"((?:[^"\\\n]|\\.)*)"|`([^`]*)`')  # a string literal, no
 prod, test = {}, {}
 
 
-def add(kind, home, k):
+def add(kind, home, k, imported=False):
     own = PACK.match(home)
-    if k in modeled and not (own and f"{own.group(1)}/{own.group(2)}" == k):
+    if (imported or k in modeled) and not (own and f"{own.group(1)}/{own.group(2)}" == k):
         kind.setdefault(home, set()).add(k)
 
 
@@ -61,7 +61,7 @@ for line in subprocess.run(["go", "list", "-e", "-f", fmt, "./..."], check=True,
         for imp in " ".join(group).split():
             m = PACK.match(imp.removeprefix(MOD)) if imp.startswith(MOD) else None
             if m:
-                add(kind, home, f"{m.group(1)}/{m.group(2)}")
+                add(kind, home, f"{m.group(1)}/{m.group(2)}", imported=True)  # helper packs have no model
 
 # What each directory names: everywhere in tests, and in packs in production too.
 skip = {".git", "specs", "node_modules", "bin"}

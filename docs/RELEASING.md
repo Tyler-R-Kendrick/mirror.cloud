@@ -19,6 +19,37 @@ administrator must turn on one of these in the repository's settings:
 
 This is a setting of the repository, not something the code can enforce.
 
+## Cutting a release
+
+Two ways, and they end in the same place.
+
+**By merging.** Put the version tag on the one line of [`RELEASE`](../RELEASE) in a
+pull request, and merge it:
+
+```
+v0.1.0
+```
+
+When `ci` has passed on the commit that merged, `cut-release.yml` creates that tag
+on it and calls `release.yml`, which does everything below. It does nothing when
+`RELEASE` names no version, when its tag already exists (so the line can stay as
+it is after the release), when CI failed, or when `main` has moved on since that
+commit (the newest commit's run decides). It never moves or recreates a tag, and
+refuses a `RELEASE` that is not exactly one tag of the form below. A release that
+fails part-way is retried by re-running the failed jobs of that `cut-release` run
+in the Actions tab: the tag is already there, so it is the release that runs again.
+
+**By tag.** A maintainer pushes the tag, as below.
+
+**What the first way changes.** A tag is made by pushing it, which needs write
+access to the repository, and the tag ruleset below is what protects it. A change
+to `RELEASE` needs only a merged pull request, so *anyone who can merge to `main`
+can release*, and the tag is made by the workflow, not signed by a person. If that
+is more than you want, protect `RELEASE` with a code owner (`.github/CODEOWNERS`)
+or delete `cut-release.yml`; the tag path is unaffected. The tag ruleset must allow
+the Actions bot to create tags, or the `plan` job fails when it tries, which shows
+as a red `cut-release` run and releases nothing.
+
 ## From a tag to assets
 
 ```sh

@@ -1,0 +1,58 @@
+name: cut-release
+
+# Merging a change to RELEASE cuts the release it names, once CI has passed on the
+# commit that merged. RELEASE holds one version tag (v0.1.0); this workflow runs
+# after ci finishes on main, and scripts/cut-release.sh creates that tag if it does
+# not exist yet, on the commit CI passed, and only while that commit is still the
+# tip of main. release.yml then builds, checks and publishes it exactly as it does
+# for a tag a maintainer pushes. How to use it, and what it changes about who can
+# release, is in docs/RELEASING.md.
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+# One at a time, and never cancelled: a release in progress is not something a
+# later commit's run should stop.
+concurrency:
+  group: cut-release
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    # Only a push to main that passed: not a pull request's CI, and not a failed or
+    # cancelled run.
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # to create the tag, and nothing else
+    outputs:
+      tag: ${{ steps.cut.outputs.tag }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          # The commit CI passed on, not the tip of main now.
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - id: cut
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: scripts/cut-release.sh
+
+  release:
+    needs: plan
+    if: ${{ needs.plan.outputs.tag != '' }}
+    # The most release.yml's jobs may ask for.
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.plan.outputs.tag }}
+      publish: true
+      ref: refs/tags/${{ needs.plan.outputs.tag }}

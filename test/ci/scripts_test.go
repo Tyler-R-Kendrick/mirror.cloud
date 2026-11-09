@@ -129,3 +129,94 @@ func TestSlimBuildServesExactlyTheServicesItWasGiven(t *testing.T) {
 		t.Errorf("the slim build lists %v; want exactly aws.s3 aws.sqs", got)
 	}
 }
+
+// cut-release.sh is the one script that creates a tag, so what makes it decline
+// matters as much as what makes it act. Each case is a real origin and checkout,
+// and a stand-in gh that records what it is asked to create.
+func TestCutReleaseTagsOnlyWhatRELEASEAsksForAndNothingElse(t *testing.T) {
+	root, _ := filepath.Abs("../..")
+	script := filepath.Join(root, "scripts", "cut-release.sh")
+
+	type result struct {
+		out, tag, ghCalls string
+		err               error
+	}
+	// setup makes origin with main at a commit whose RELEASE is `release`, plus any
+	// existing tags, then runs the script in a clone of it. `advance` leaves main
+	// one commit ahead of the clone.
+	run1 := func(t *testing.T, release string, existing []string, advance bool) result {
+		t.Helper()
+		dir := t.TempDir()
+		origin, work := filepath.Join(dir, "origin.git"), filepath.Join(dir, "work")
+		ident := []string{"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t"}
+		must := func(d string, args ...string) {
+			t.Helper()
+			if out, err := run(t, d, ident, "git", args...); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+		}
+		must(dir, "init", "-q", "--bare", "-b", "main", origin)
+		must(dir, "clone", "-q", origin, work)
+		os.WriteFile(filepath.Join(work, "RELEASE"), []byte(release), 0o644)
+		must(work, "add", "RELEASE")
+		must(work, "commit", "-qm", "release")
+		must(work, "push", "-q", "origin", "HEAD:main")
+		for _, tag := range existing {
+			must(work, "tag", tag)
+			must(work, "push", "-q", "origin", tag)
+		}
+		if advance {
+			other := filepath.Join(dir, "other")
+			must(dir, "clone", "-q", origin, other)
+			must(other, "commit", "-q", "--allow-empty", "-m", "later")
+			must(other, "push", "-q", "origin", "HEAD:main")
+		}
+		bin := filepath.Join(dir, "bin")
+		os.MkdirAll(bin, 0o755)
+		log := filepath.Join(dir, "gh.log")
+		os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\necho \"$@\" >> "+log+"\necho deadbeef\n"), 0o755)
+		outFile := filepath.Join(dir, "output")
+		out, err := run(t, work, []string{"PATH=" + bin + ":" + os.Getenv("PATH"), "GH_REPO=o/r", "GITHUB_OUTPUT=" + outFile}, "bash", script)
+		got, _ := os.ReadFile(outFile)
+		calls, _ := os.ReadFile(log)
+		return result{out: out, tag: strings.TrimSpace(strings.TrimPrefix(string(got), "tag=")), ghCalls: string(calls), err: err}
+	}
+
+	t.Run("a version that does not exist is tagged, at this commit", func(t *testing.T) {
+		r := run1(t, "# next\nv1.2.3-alpha.1\n", nil, false)
+		if r.err != nil || r.tag != "v1.2.3-alpha.1" {
+			t.Fatalf("tag %q, err %v\n%s", r.tag, r.err, r.out)
+		}
+		if strings.Count(r.ghCalls, "\n") != 2 || !strings.Contains(r.ghCalls, "git/tags") || !strings.Contains(r.ghCalls, "refs/tags/v1.2.3-alpha.1") {
+			t.Errorf("expected a tag object and a ref to be created, got:\n%s", r.ghCalls)
+		}
+	})
+	for name, c := range map[string]struct {
+		release  string
+		existing []string
+		advance  bool
+	}{
+		"nothing is asked for":               {release: "# no release pending\n"},
+		"the tag already exists":             {release: "v1.2.3\n", existing: []string{"v1.2.3"}},
+		"main has moved on past this commit": {release: "v1.2.3\n", advance: true},
+	} {
+		t.Run("no tag when "+name, func(t *testing.T) {
+			r := run1(t, c.release, c.existing, c.advance)
+			if r.err != nil || r.tag != "" || r.ghCalls != "" {
+				t.Errorf("tag %q, gh called with %q, err %v\n%s", r.tag, r.ghCalls, r.err, r.out)
+			}
+		})
+	}
+	for name, release := range map[string]string{
+		"not a version tag": "1.2.3\n",
+		"a path":            "v1/../x\n",
+		"two versions":      "v1.2.3\nv1.2.4\n",
+	} {
+		t.Run("an error when RELEASE is "+name, func(t *testing.T) {
+			r := run1(t, release, nil, false)
+			if r.err == nil || r.ghCalls != "" {
+				t.Errorf("accepted %q: err %v, gh %q\n%s", release, r.err, r.ghCalls, r.out)
+			}
+		})
+	}
+}

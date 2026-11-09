@@ -1103,8 +1103,10 @@ func (p *Pack) ref(name string, refs map[string]string, req *spi.Request, stack 
 	if v, ok := pseudo(req, stack, refs["AWS::StackId"])[name]; ok {
 		return v, true
 	}
-	v, ok := refs[name]
-	return cmp.Or(v, name), ok
+	if v, ok := refs[name]; ok { // an empty parameter is a value: "" is not its name
+		return v, true
+	}
+	return name, false
 }
 
 // getAtt is a Fn::GetAtt's value: the attribute the resource's type has (attribute), or else its Ref's.
@@ -1287,13 +1289,12 @@ func each(v any, fn func(map[string]any)) {
 	}
 }
 
-// parameters are the request's parameter values, and each Default of a parameter it does not give.
+// parameters are the request's parameter values, the Parameters list the query protocol's decoder builds
+// (awsquery's unflatten), and each Default of a parameter it does not give.
 func parameters(in, tpl map[string]any) map[string]string {
 	out := map[string]string{}
-	for k, v := range in {
-		if pfx, ok := strings.CutSuffix(k, ".ParameterKey"); ok && strings.HasPrefix(k, "Parameters.member.") {
-			out[str(v)] = str(in[pfx+".ParameterValue"])
-		}
+	for _, p := range spi.Slice(in["Parameters"]) {
+		out[str(asMap(p)["ParameterKey"])] = str(asMap(p)["ParameterValue"])
 	}
 	for k, v := range asMap(tpl["Parameters"]) {
 		if _, given := out[k]; !given && asMap(v)["Default"] != nil {

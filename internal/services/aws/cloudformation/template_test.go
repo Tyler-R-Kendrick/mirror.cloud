@@ -1075,8 +1075,7 @@ func TestCloudFormationAParameterMustHaveAValue(t *testing.T) {
 		t.Errorf("the refused stack left %v", record)
 	}
 	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "pmv", "TemplateBody": string(body),
-		"Parameters.member.1.ParameterKey": "Key", "Parameters.member.1.ParameterValue": "k",
-		"Parameters.member.2.ParameterKey": "Other", "Parameters.member.2.ParameterValue": "o"}); err != nil {
+		"Parameters": givenParams("Key", "k", "Other", "o")}); err != nil {
 		t.Errorf("CreateStack with the values answered %v", err)
 	}
 }

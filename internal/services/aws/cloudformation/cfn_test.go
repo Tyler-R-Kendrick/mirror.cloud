@@ -497,7 +497,7 @@ func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
 		"Defaulted": map[string]any{"Default": "fallback"}, "Explicit": map[string]any{"Default": "wrong"}, "Required": map[string]any{},
 	}}
 	params := parameters(map[string]any{
-		"Parameters.member.1.ParameterKey": "Explicit", "Parameters.member.1.ParameterValue": "set", "ignored": "value",
+		"Parameters": givenParams("Explicit", "set"), "ignored": "value",
 	}, tpl)
 	if params["Explicit"] != "set" || params["Defaulted"] != "fallback" || len(paramDecls(tpl)) != 3 {
 		t.Fatalf("parameters %#v %#v", params, tpl)

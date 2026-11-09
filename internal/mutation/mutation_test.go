@@ -3657,7 +3657,7 @@ var mutants = []mutant{
 	{
 		name: "states-ignore-test-state-map-failure-threshold",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `if testStateMapFailuresExceeded(testedState, data, jsonataContext(walkRequest, "TestState", nil), variables, p.deps.Rand, failureCount, itemCount) {`,
+		old:  `if testStateMapFailuresExceeded(testedState, data, jsonataContext(walkRequest, "TestState"), variables, p.deps.Rand, failureCount, itemCount) {`,
 		new:  `if false {`,
 		pkg:  "./internal/services/aws/states",
 		run:  "TestStatesTestStateMapFailureCounts",
@@ -4747,8 +4747,8 @@ var mutants = []mutant{
 	{
 		name: "states-disable-jsonata-query-language",
 		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  "isJSONata := queryLanguage == \"JSONata\"\n\t\tstateContext := jsonataContext(req, cur, nil)",
-		new:  "isJSONata := false\n\t\tstateContext := jsonataContext(req, cur, nil)",
+		old:  "isJSONata := queryLanguage == \"JSONata\"\n\t\tstateContext := jsonataContext(req, cur)",
+		new:  "isJSONata := false\n\t\tstateContext := jsonataContext(req, cur)",
 		pkg:  "./internal/services/aws/states",
 		run:  "TestStatesJSONataBehavior",
 	},

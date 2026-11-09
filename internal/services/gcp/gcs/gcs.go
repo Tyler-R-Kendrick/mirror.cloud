@@ -48,15 +48,6 @@ type session struct {
 	total                     int64
 }
 
-type bucketRec struct {
-	Name           string `json:"name"`
-	Metageneration string `json:"metageneration"`
-	TimeCreated    string `json:"timeCreated"`
-	Updated        string `json:"updated"`
-	Location       string `json:"location"`
-	StorageClass   string `json:"storageClass"`
-}
-
 type objectRec struct {
 	Name           string `json:"name"`
 	Bucket         string `json:"bucket"`
@@ -201,7 +192,7 @@ func (p *objects) col(req *spi.Request, name string) spi.Collection {
 
 func (p *objects) objectInsert(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	bucket := p.bucketName(req)
-	if _, err := p.loadBucket(ctx, req, bucket); err != nil {
+	if err := p.loadBucket(ctx, req, bucket); err != nil {
 		return nil, err
 	}
 	uploadType := spi.Str(req.Input["uploadType"])
@@ -224,10 +215,7 @@ func (p *objects) objectInsert(ctx context.Context, req *spi.Request) (*spi.Resp
 		h.Set("Location", loc)
 		return &spi.Response{Status: 200, Headers: h, Output: map[string]any{"upload_id": id}}, nil
 	}
-	body, name, ctype, err := p.readInsertBody(req, name)
-	if err != nil {
-		return nil, err
-	}
+	body, name, ctype := p.readInsertBody(req, name)
 	if uploadType == "" && !strings.Contains(spi.Str(req.Input["_path"]), "/upload/") {
 		var meta map[string]any
 		if json.Unmarshal(body, &meta) == nil && len(meta) > 0 {
@@ -339,7 +327,7 @@ func (p *objects) objectGet(ctx context.Context, req *spi.Request) (*spi.Respons
 
 func (p *objects) objectList(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	bucket := p.bucketName(req)
-	if _, err := p.loadBucket(ctx, req, bucket); err != nil {
+	if err := p.loadBucket(ctx, req, bucket); err != nil {
 		return nil, err
 	}
 	prefix := spi.Str(req.Input["prefix"])
@@ -482,7 +470,7 @@ func (p *objects) objectPatch(ctx context.Context, req *spi.Request) (*spi.Respo
 }
 
 func (p *objects) storeObject(ctx context.Context, req *spi.Request, bucket, name, ctype string, body []byte) (*spi.Response, error) {
-	if _, err := p.loadBucket(ctx, req, bucket); err != nil {
+	if err := p.loadBucket(ctx, req, bucket); err != nil {
 		return nil, err
 	}
 	if err := p.checkCreatePreconditions(ctx, req, bucket, name); err != nil {
@@ -512,7 +500,7 @@ func (p *objects) storeObject(ctx context.Context, req *spi.Request, bucket, nam
 	return &spi.Response{Status: 200, Output: p.objectResource(req, rec)}, nil
 }
 
-func (p *objects) readInsertBody(req *spi.Request, name string) ([]byte, string, string, error) {
+func (p *objects) readInsertBody(req *spi.Request, name string) ([]byte, string, string) {
 	ctype := spi.Str(req.Input["contentType"])
 	r := readerOf(req)
 	if req.HTTP != nil {
@@ -527,10 +515,7 @@ func (p *objects) readInsertBody(req *spi.Request, name string) ([]byte, string,
 			var body []byte
 			for {
 				part, err := mr.NextPart()
-				if err == io.EOF {
-					break
-				}
-				if err != nil {
+				if err != nil { // io.EOF ends the parts, as any other error does
 					break
 				}
 				b, _ := io.ReadAll(part)
@@ -548,24 +533,19 @@ func (p *objects) readInsertBody(req *spi.Request, name string) ([]byte, string,
 					ctype = c
 				}
 			}
-			return body, name, ctype, nil
+			return body, name, ctype
 		}
 	}
 	b, _ := io.ReadAll(r)
-	return b, name, ctype, nil
+	return b, name, ctype
 }
 
-func (p *objects) loadBucket(ctx context.Context, req *spi.Request, name string) (bucketRec, error) {
-	b, ok, err := p.col(req, "buckets").Get(ctx, name)
-	if err != nil {
-		return bucketRec{}, err
+// loadBucket is the error for a bucket named name that does not exist.
+func (p *objects) loadBucket(ctx context.Context, req *spi.Request, name string) error {
+	if _, ok, err := p.col(req, "buckets").Get(ctx, name); err != nil || ok {
+		return err
 	}
-	if !ok {
-		return bucketRec{}, fault("notFound", "bucket "+name+" not found", 404)
-	}
-	var rec bucketRec
-	_ = json.Unmarshal(b, &rec)
-	return rec, nil
+	return fault("notFound", "bucket "+name+" not found", 404)
 }
 
 func (p *objects) loadObject(ctx context.Context, req *spi.Request, bucket, name string) (objectRec, error) {

@@ -20,18 +20,32 @@ func run(t *testing.T, dir string, env []string, name string, args ...string) (s
 	return string(out), err
 }
 
-// restore-mtimes must give each file the time of the last commit that touched
-// it (not the newest commit's, and not a constant: either would let an edit that
-// keeps a file's size hit a stale go test result), and a directory the newest
-// time beneath it.
-func TestRestoreMtimesUsesTheLastCommitThatTouchedEachFile(t *testing.T) {
+// readScript opens a script the test runs in a subprocess, so go test's result
+// cache, which follows only what the test process itself opens, reruns the test
+// when the script changes.
+func readScript(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.ReadFile(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// go test keys a cached result on the size and mtime of what a test opened, so
+// restore-mtimes must give different content a different mtime even at the same
+// size, whatever the history. It used the last commit that named a file in git
+// log, and a merge commit names none: a pull request's merge checkout then held
+// a file whose content no commit had, under main's mtime and size, and go test
+// reported main's cached pass for it. This is that checkout.
+func TestRestoreMtimesChangeWheneverContentDoes(t *testing.T) {
 	root, _ := filepath.Abs("../..")
+	script := filepath.Join(root, "scripts", "restore-mtimes.py")
+	readScript(t, script)
 	repo := t.TempDir()
 	git := func(date string, args ...string) {
 		t.Helper()
 		env := []string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date,
 			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t"}
-		if out, err := run(t, repo, env, "git", args...); err != nil {
+		if out, err := run(t, repo, env, "git", append([]string{"-c", "commit.gpgsign=false"}, args...)...); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
@@ -40,25 +54,74 @@ func TestRestoreMtimesUsesTheLastCommitThatTouchedEachFile(t *testing.T) {
 		os.MkdirAll(filepath.Dir(p), 0o755)
 		os.WriteFile(p, []byte(body), 0o644)
 	}
-	git("1000000000 +0000", "init", "-q")
-	write("a.txt", "a")
-	write("d/b.txt", "b")
-	git("1000000000 +0000", "add", ".")
-	git("1000000000 +0000", "commit", "-qm", "one")
-	write("d/b.txt", "bb")
-	git("1100000000 +0000", "commit", "-qam", "two")
-	// A fresh checkout: everything stamped with one time that is no commit's.
-	now := time.Unix(1700000000, 0)
-	for _, p := range []string{"a.txt", "d/b.txt", "d", "."} {
-		os.Chtimes(filepath.Join(repo, p), now, now)
+	const t0, t1, t2, t3 = "1000000000 +0000", "1100000000 +0000", "1200000000 +0000", "1300000000 +0000"
+	git(t0, "init", "-q", "-b", "main")
+	write("d/f.txt", "a\n1\n2\n3\nb\n")
+	write("same.txt", "unchanged\n")
+	git(t0, "add", ".")
+	git(t0, "commit", "-qm", "base")
+	git(t0, "checkout", "-q", "-b", "pr")
+	write("d/f.txt", "x\n1\n2\n3\nb\n")
+	git(t1, "commit", "-qam", "the pull request's edit")
+	git(t1, "checkout", "-q", "main")
+	write("d/f.txt", "a\n1\n2\n3\ny\n")
+	git(t2, "commit", "-qam", "main's edit, later and the same size")
+	// GitHub's merge ref: main with the pull request merged in, which holds
+	// both edits -- content neither parent has.
+	git(t3, "checkout", "-q", "-b", "merge")
+	git(t3, "merge", "-q", "--no-edit", "pr")
+
+	type seen struct {
+		body string
+		size int64
+		mod  map[string]time.Time
 	}
-	if out, err := run(t, repo, nil, "python3", "-I", filepath.Join(root, "scripts", "restore-mtimes.py")); err != nil {
-		t.Fatalf("%v\n%s", err, out)
+	look := func(dir, ref string) seen {
+		t.Helper()
+		if out, err := run(t, dir, nil, "git", "checkout", "-q", ref); err != nil {
+			t.Fatalf("checkout %s: %v\n%s", ref, err, out)
+		}
+		if out, err := run(t, dir, nil, "python3", "-I", script); err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		s := seen{mod: map[string]time.Time{}}
+		for _, p := range []string{"d/f.txt", "d", ".", "same.txt"} {
+			info, err := os.Stat(filepath.Join(dir, p))
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.mod[p] = info.ModTime()
+			if p == "d/f.txt" {
+				s.size = info.Size()
+				b, _ := os.ReadFile(filepath.Join(dir, p))
+				s.body = string(b)
+			}
+		}
+		return s
 	}
-	for p, want := range map[string]int64{"a.txt": 1000000000, "d/b.txt": 1100000000, "d": 1100000000, ".": 1100000000} {
-		info, err := os.Stat(filepath.Join(repo, p))
-		if err != nil || info.ModTime().Unix() != want {
-			t.Errorf("%s: mtime %v (%v), want %d", p, info.ModTime().Unix(), err, want)
+	onMain, merged := look(repo, "main"), look(repo, "merge")
+	if onMain.body == merged.body || onMain.size != merged.size {
+		t.Fatalf("the setup is wrong: main %q, merge %q", onMain.body, merged.body)
+	}
+	for _, p := range []string{"d/f.txt", "d", "."} {
+		if onMain.mod[p].Equal(merged.mod[p]) {
+			t.Errorf("%s: main's checkout and the merge checkout differ in content but share mtime %v; go test would report main's cached result for the merge", p, merged.mod[p])
+		}
+	}
+	// What did not change keeps its stamp, which is what lets a pull request
+	// read main's results at all.
+	if !onMain.mod["same.txt"].Equal(merged.mod["same.txt"]) {
+		t.Errorf("same.txt is unchanged but its mtime moved: %v, %v", onMain.mod["same.txt"], merged.mod["same.txt"])
+	}
+	// And the same content gets the same stamps in another clone.
+	other := filepath.Join(t.TempDir(), "other")
+	if out, err := run(t, repo, nil, "git", "clone", "-q", repo, other); err != nil {
+		t.Fatalf("clone: %v\n%s", err, out)
+	}
+	again := look(other, "merge")
+	for p, want := range merged.mod {
+		if !again.mod[p].Equal(want) {
+			t.Errorf("%s: %v in one clone, %v in another", p, want, again.mod[p])
 		}
 	}
 }

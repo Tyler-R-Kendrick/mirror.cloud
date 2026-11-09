@@ -166,23 +166,38 @@ func TestCloudFormationAStackInReviewIsReserved(t *testing.T) {
 // stack's change sets behind.
 func TestCloudFormationAChangeSetSaysWhyItFailed(t *testing.T) {
 	h := newStacks(t)
-	role, _ := json.Marshal(map[string]any{"Resources": map[string]any{"R": map[string]any{"Type": "AWS::IAM::Role",
-		"Properties": map[string]any{"AssumeRolePolicyDocument": map[string]any{"Version": "2012-10-17", "Statement": []any{}}}}}})
-	taken, _ := json.Marshal(map[string]any{"Resources": map[string]any{"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "taken", "Type": "String", "Value": "v"}}}})
+	kept, _ := json.Marshal(map[string]any{"Resources": map[string]any{"B": map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "kept-b"}}}})
+	taken, _ := json.Marshal(map[string]any{"Resources": map[string]any{"B": map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "kept-b"}},
+		"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "taken", "Type": "String", "Value": "v"}}}})
 	if _, err := h.service("aws.ssm", "PutParameter", map[string]any{"Name": "taken", "Type": "String", "Value": "v"}); err != nil {
 		t.Fatal(err)
 	}
-	changeSets(t, h, map[string]string{"refused": string(role), "failing": string(taken)})
-	for cs, want := range map[string]string{"refused": "AVAILABLE", "failing": "EXECUTE_FAILED"} {
+	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "s", "TemplateBody": string(kept)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, cs := range []string{"failing", "refused"} {
+		if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "s", "ChangeSetName": cs, "TemplateBody": string(taken)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, cs := range []string{"failing", "refused"} {
+		if cs == "refused" { // a stack whose delete failed takes no update: "is in DELETE_FAILED state"
+			h.fill("kept-b", true)
+			if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "s"}); err == nil {
+				t.Fatal("DeleteStack of a stack holding a full bucket succeeded")
+			}
+		}
 		_, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "s", "ChangeSetName": cs})
+		want := map[string]string{"failing": "EXECUTE_FAILED", "refused": "AVAILABLE"}[cs]
 		if out, _ := h.describe(cs); err == nil || out["ExecutionStatus"] != want || out["StatusReason"] != err.Error() {
 			t.Errorf("after ExecuteChangeSet of %s answered %v, it is %v, want %s with that error as its StatusReason", cs, err, out, want)
 		}
 	}
+	h.fill("kept-b", false)
 	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "s"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, cs := range []string{"refused", "failing"} {
+	for _, cs := range []string{"failing", "refused"} {
 		if _, err := h.describe(cs); code(err) != "ChangeSetNotFound" {
 			t.Errorf("after DeleteStack, DescribeChangeSet of %s answered %v, want ChangeSetNotFound", cs, err)
 		}

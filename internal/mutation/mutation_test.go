@@ -4583,8 +4583,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-a-deleted-stack-keeps-its-change-sets",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  "\t\t\tkvs, _, _ := cs.List(name+\":\", \"\", 0)\n\t\t\tfor _, kv := range kvs {\n\t\t\t\tif err := cs.Delete(kv.Key)",
-		new:  "\t\t\tkvs, _, _ := cs.List(name+\":\\x00\", \"\", 0)\n\t\t\tfor _, kv := range kvs {\n\t\t\t\tif err := cs.Delete(kv.Key)",
+		old:  `if err := retire(name, name)(cs); err != nil {`,
+		new:  `if err := retire(name, "")(cs); err != nil {`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationAChangeSetSaysWhyItFailed",
 	},

@@ -211,9 +211,9 @@ func (p *Pack) unsettled(ctx context.Context, req *spi.Request, key, was string,
 
 // retire is what a stack's write that ends an operation does to its change sets, in the same transaction:
 // the change set under key being executed (its claim, and take's check of the stack, hold it) is
-// EXECUTE_COMPLETE, and "CloudFormation
-// deletes all other change sets associated with the stack" (ExecuteChangeSet); an update of no change set
-// (key "") leaves each available one OBSOLETE, "because the stack was already updated" (DescribeChangeSet).
+// EXECUTE_COMPLETE, and "CloudFormation deletes all other change sets associated with the stack"
+// (ExecuteChangeSet), every one for a key no change set has; an update of no change set (key "") leaves
+// each available one OBSOLETE, "because the stack was already updated" (DescribeChangeSet).
 func retire(name, key string) func(spi.Tx) error {
 	return func(tx spi.Tx) error {
 		kvs, _, _ := tx.List(name+":", "", 0)
@@ -392,12 +392,9 @@ func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take f
 		next, yes := take(cur)
 		if wrote = yes; !yes {
 			return nil
-		} else if next.Status == "DELETE_COMPLETE" { // its change sets go with it
-			kvs, _, _ := cs.List(name+":", "", 0)
-			for _, kv := range kvs {
-				if err := cs.Delete(kv.Key); err != nil {
-					return err
-				}
+		} else if next.Status == "DELETE_COMPLETE" { // its change sets go with it: retire, keyed by no change set
+			if err := retire(name, name)(cs); err != nil {
+				return err
 			}
 			return tx.Delete(name)
 		}

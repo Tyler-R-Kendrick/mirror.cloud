@@ -519,12 +519,14 @@ func attribute(refs map[string]string, req *spi.Request, typ, logical, id string
 	}
 }
 
-// unknown stands for an id known only once its resource is made, and in order for one not yet ordered.
+// unknown stands for an id known only once its resource is made, and in order for one not yet ordered: what
+// a Ref to or a Fn::GetAtt of a resource not made yet answers, and any value holding it is. resolve has three
+// outcomes, a value, unselected (a Fn::Select of no element of a list it knows) or unknown.
 const unknown = "\uffff"
 
 // noValue is what a Ref to AWS::NoValue answers, and resolve drops; unselected is what a Fn::Select of no
 // element answers, which sound refuses.
-const noValue, unselected = "\ufffe", "\uffffFn::Select"
+const noValue, unselected = "\ufffe", "\ufdd0Fn::Select"
 
 // planID is the id a resource named n is made with, which a Ref to it answers: n in the form its
 // service gives it back. A queue's URL (its endpoint's business), a KMS key's id and a REST API's are
@@ -1104,7 +1106,9 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 	case map[string]any:
 		if r, ok := t["Ref"]; ok {
 			v, _ := p.ref(str(r), refs, req, stack)
-			if str(r) == "AWS::NotificationARNs" {
+			if p.unmade(str(r), refs) {
+				return unknown
+			} else if str(r) == "AWS::NotificationARNs" {
 				arns := spi.Decode[[]any]([]byte(v))
 				return arns
 			} else if typ := str(asMap(asMap(p.tpl["Parameters"])[str(r)])["Type"]); typ == "CommaDelimitedList" || strings.HasPrefix(typ, "List<") {
@@ -1127,11 +1131,11 @@ func (p *Pack) resolve(v any, refs map[string]string, req *spi.Request, stack st
 		}
 		if args, ok := t["Fn::Select"]; ok { // [index, listOfObjects]: "a single object from a list of objects by index"
 			args := append(spi.Slice(args), nil, nil)
-			i, isInt := coerce(p.resolve(args[0], refs, req, stack), "Integer")
-			if list := spi.Slice(p.resolve(args[1], refs, req, stack)); isInt && i.(int) >= 0 && i.(int) < len(list) {
-				return list[i.(int)]
-			} else if slices.ContainsFunc(referred(t, refs), func(n string) bool { _, known := refs[n]; return !known }) {
-				return "" // a list of what is not made yet, checked once it is
+			index, list := p.resolve(args[0], refs, req, stack), p.resolve(args[1], refs, req, stack)
+			if i, isInt := coerce(index, "Integer"); strings.Contains(spi.JSONText([]any{index, list}), unknown) {
+				return unknown // of what is not made yet: checked as it is made, when it is known
+			} else if isInt && i.(int) >= 0 && i.(int) < len(spi.Slice(list)) {
+				return spi.Slice(list)[i.(int)]
 			}
 			return unselected // "doesn't check ... if the index is out of bounds": the stack's error (selected)
 		}
@@ -1194,7 +1198,18 @@ func getAtt(g any, refs map[string]string) string {
 		t = append(slices.Clip(t), nil, nil)
 		logical, attr = str(t[0]), str(t[1])
 	}
+	if _, made := refs[logical]; !made { // a resource not made yet
+		return unknown
+	}
 	return cmp.Or(refs[logical+"."+attr], refs[logical])
+}
+
+// unmade is whether name is a resource of the template read whose id refs does not hold yet: what reads it
+// is unknown until it is made (unknown).
+func (p *Pack) unmade(name string, refs map[string]string) bool {
+	_, resource := asMap(p.tpl["Resources"])[name]
+	_, made := refs[name]
+	return resource && !made
 }
 
 // sound is the error for a template whose values cannot be made, found before anything is reserved or
@@ -1204,7 +1219,9 @@ func getAtt(g any, refs map[string]string) string {
 func (p *Pack) sound(tpl map[string]any, refs map[string]string, req *spi.Request, stack string) error {
 	var values []any
 	for _, r := range asMap(tpl["Resources"]) { // all its properties, when AWS::NoValue is the whole attribute (a reading)
-		if v := p.resolve(asMap(r)["Properties"], refs, req, stack); v != noValue {
+		if c := str(asMap(r)["Condition"]); c != "" && refs["Condition::"+c] == "false" {
+			continue // "CloudFormation creates the resource only when the condition evaluates to true"
+		} else if v := p.resolve(asMap(r)["Properties"], refs, req, stack); v != noValue {
 			values = append(values, v)
 		}
 	}
@@ -1297,6 +1314,8 @@ func (p *Pack) fnSub(s any, refs map[string]string, req *spi.Request, stack stri
 			return str(p.resolve(v, refs, req, stack))
 		} else if logical, attr, ok := strings.Cut(name, "."); ok {
 			return getAtt([]any{logical, attr}, refs)
+		} else if p.unmade(name, refs) {
+			return unknown
 		} else if v, ok := p.ref(name, refs, req, stack); ok {
 			return v
 		}

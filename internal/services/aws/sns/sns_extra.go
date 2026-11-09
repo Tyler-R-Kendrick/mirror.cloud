@@ -63,8 +63,7 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 		raw, _ := json.Marshal(pol)
 		attrs["Policy"] = string(raw)
 		m["attrs"] = attrs
-		nb, _ := json.Marshal(m)
-		_ = p.col(req, "topics").Put(ctx, name, nb)
+		_ = spi.PutJSON(ctx, p.col(req, "topics"), name, m)
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
 	label := str(req.Input["Label"])
@@ -84,8 +83,7 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 	raw, _ := json.Marshal(pol)
 	attrs["Policy"] = string(raw)
 	m["attrs"] = attrs
-	nb, _ := json.Marshal(m)
-	_ = p.col(req, "topics").Put(ctx, name, nb)
+	_ = spi.PutJSON(ctx, p.col(req, "topics"), name, m)
 	return &spi.Response{Output: map[string]any{}}, nil
 }
 
@@ -237,8 +235,7 @@ func (p *Pack) dataProtection(ctx context.Context, req *spi.Request) (*spi.Respo
 		}
 		attrs["DataProtectionPolicy"] = policy
 		m["attrs"] = attrs
-		nb, _ := json.Marshal(m)
-		_ = p.col(req, "topics").Put(ctx, name, nb)
+		_ = spi.PutJSON(ctx, p.col(req, "topics"), name, m)
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
 	b, ok, _ := p.col(req, "dpp").Get(ctx, arn)

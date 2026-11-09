@@ -79,8 +79,7 @@ func (p *runner) putS3Table(ctx context.Context, req *spi.Request, bucket, datab
 		"format": "ICEBERG", "columns": cols, "metadataLocation": "",
 	})
 	_ = p.col(req, "s3tt").Put(ctx, key, rec)
-	raw, _ := json.Marshal(s3Rows{Rows: rows})
-	return p.col(req, "s3trows").Put(ctx, key, raw)
+	return spi.PutJSON(ctx, p.col(req, "s3trows"), key, s3Rows{Rows: rows})
 }
 
 // s3Rows is a table's stored rows, in the shape the s3tables row plane and

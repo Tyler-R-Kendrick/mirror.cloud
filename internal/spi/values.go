@@ -1,6 +1,7 @@
 package spi
 
 import (
+	"context"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -116,4 +117,14 @@ func Members(in map[string]any, name string) []any {
 		}
 	}
 	return values
+}
+
+// PutJSON stores v in c under key as its JSON: the encode and the write every
+// record store makes, and the error of either.
+func PutJSON(ctx context.Context, c Collection, key string, v any) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return c.Put(ctx, key, raw)
 }

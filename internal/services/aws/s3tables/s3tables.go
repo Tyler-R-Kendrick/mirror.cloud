@@ -51,8 +51,7 @@ func (t *Tables) CreateTable(ctx context.Context, identity spi.Identity, bucket,
 		// RenameTable read a row-plane table the same as an API one.
 		"metadataLocation": "",
 	}
-	encoded, _ := json.Marshal(record)
-	return t.col(identity, "s3tt").Put(ctx, bucket+"/"+namespace+"/"+table, encoded)
+	return spi.PutJSON(ctx, t.col(identity, "s3tt"), bucket+"/"+namespace+"/"+table, record)
 }
 
 // ApplyRows commits insert, update, and delete mutations to a local table.

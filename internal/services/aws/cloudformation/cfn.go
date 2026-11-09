@@ -136,8 +136,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if _, _, _, _, err := p.template(ctx, req, named(name), stackID); err != nil { // every check its execution makes
 			rec["Status"], rec["StatusReason"] = "FAILED", err.Error()
 		}
-		raw, _ := json.Marshal(rec)
-		if err := p.col(req, "cfn-cs").Put(ctx, named(name)+":"+csn, raw); err != nil {
+		if err := spi.PutJSON(ctx, p.col(req, "cfn-cs"), named(name)+":"+csn, rec); err != nil {
 			return nil, err
 		}
 		return &spi.Response{Output: map[string]any{"Id": rec["ChangeSetId"], "StackId": stackID}}, nil
@@ -1173,8 +1172,7 @@ func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket str
 		"ReplicationConfiguration": "replication", "NotificationConfiguration": "notification", "WebsiteConfiguration": "website",
 	} {
 		if value, ok := props[property]; ok {
-			raw, _ := json.Marshal(map[string]any{property: value})
-			_ = p.col(req, "bktcfg").Put(ctx, bucket+"/"+kind, raw)
+			_ = spi.PutJSON(ctx, p.col(req, "bktcfg"), bucket+"/"+kind, map[string]any{property: value})
 		}
 	}
 	return nil

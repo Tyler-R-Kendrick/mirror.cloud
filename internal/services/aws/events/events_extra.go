@@ -338,8 +338,7 @@ func resourceExists(kind string) error {
 }
 
 func (p *Pack) saveEventRecord(ctx context.Context, req *spi.Request, collection, name string, record map[string]any) {
-	body, _ := json.Marshal(record)
-	_ = p.col(req, collection).Put(ctx, name, body)
+	_ = spi.PutJSON(ctx, p.col(req, collection), name, record)
 }
 
 func (p *Pack) patch(ctx context.Context, req *spi.Request, col, id string, fields map[string]any) (*spi.Response, error) {

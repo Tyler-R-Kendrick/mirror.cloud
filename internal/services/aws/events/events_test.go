@@ -16,6 +16,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/eventhttp"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -1094,4 +1095,10 @@ func TestBootedServerEventsExtraOps(t *testing.T) {
 	for _, op := range bundled.Handler("aws.events", spitest.Deps(t)).Operations() {
 		soft(op, payload)
 	}
+}
+
+// mergeConnectionBody merges a connection's body parameters into a payload
+// under API destinations' 64 KB request bound, as eventhttp's call does.
+func mergeConnectionBody(payload []byte, raw any) ([]byte, error) {
+	return eventhttp.MergeBody(payload, raw, 64<<10)
 }

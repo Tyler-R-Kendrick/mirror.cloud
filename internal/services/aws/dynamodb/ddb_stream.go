@@ -55,8 +55,7 @@ func (p *Pack) emitStream(ctx context.Context, req *spi.Request, table, event st
 			if event == "REMOVE" {
 				_ = p.col(regionalReq, "items:"+table).Delete(ctx, key)
 			} else {
-				encoded, _ := json.Marshal(item)
-				_ = p.col(regionalReq, "items:"+table).Put(ctx, key, encoded)
+				_ = spi.PutJSON(ctx, p.col(regionalReq, "items:"+table), key, item)
 			}
 		}
 		p.emitRegionalStream(ctx, regionalReq, table, event, item, old)
@@ -162,8 +161,7 @@ func (p *Pack) kinesisDestination(ctx context.Context, req *spi.Request) (*spi.R
 			return nil, &spi.Fault{Code: "ValidationException", Message: "Kinesis stream not found: " + streamARN, HTTPStatus: 400, Fault: "client"}
 		}
 		record := map[string]any{"StreamArn": streamARN, "DestinationStatus": "ACTIVE"}
-		b, _ := json.Marshal(record)
-		_ = destinations.Put(ctx, key, b)
+		_ = spi.PutJSON(ctx, destinations, key, record)
 		return &spi.Response{Output: map[string]any{"TableName": table, "StreamArn": streamARN, "DestinationStatus": "ENABLING", "EnableKinesisStreamingConfiguration": map[string]any{}}}, nil
 	}
 	if !exists {
@@ -172,8 +170,7 @@ func (p *Pack) kinesisDestination(ctx context.Context, req *spi.Request) (*spi.R
 	record := spi.JSONObject(stored)
 	if req.Operation == "DisableKinesisStreamingDestination" {
 		record["DestinationStatus"] = "DISABLED"
-		b, _ := json.Marshal(record)
-		_ = destinations.Put(ctx, key, b)
+		_ = spi.PutJSON(ctx, destinations, key, record)
 		return &spi.Response{Output: map[string]any{"TableName": table, "StreamArn": streamARN, "DestinationStatus": "DISABLING"}}, nil
 	}
 	configuration := spi.Object(req.Input["UpdateKinesisStreamingConfiguration"])
@@ -189,8 +186,7 @@ func (p *Pack) kinesisDestination(ctx context.Context, req *spi.Request) (*spi.R
 	}
 	record["DestinationStatus"] = "ACTIVE"
 	record["ApproximateCreationDateTimePrecision"] = precision
-	b, _ := json.Marshal(record)
-	_ = destinations.Put(ctx, key, b)
+	_ = spi.PutJSON(ctx, destinations, key, record)
 	return &spi.Response{Output: map[string]any{"TableName": table, "StreamArn": streamARN, "DestinationStatus": "UPDATING", "UpdateKinesisStreamingConfiguration": configuration}}, nil
 }
 

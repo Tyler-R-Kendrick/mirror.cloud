@@ -277,8 +277,7 @@ func (p *Pack) globalTable(ctx context.Context, req *spi.Request) (*spi.Response
 		_ = col.Put(ctx, name, nb)
 		return &spi.Response{Output: map[string]any{"GlobalTableDescription": rec}}, nil
 	case "UpdateGlobalTableSettings":
-		b, _ := json.Marshal(req.Input)
-		_ = p.col(req, "gtset").Put(ctx, name, b)
+		_ = spi.PutJSON(ctx, p.col(req, "gtset"), name, req.Input)
 		return &spi.Response{Output: map[string]any{"GlobalTableName": name, "ReplicaSettings": req.Input["ReplicaSettings"]}}, nil
 	case "DescribeGlobalTableSettings":
 		b, ok, _ := p.col(req, "gtset").Get(ctx, name)
@@ -365,8 +364,7 @@ func (p *Pack) updateTableReplicas(ctx context.Context, req *spi.Request, table 
 			encoded, _ := json.Marshal(state)
 			_ = p.col(target, "ddbglobal").Put(ctx, table, encoded)
 		}
-		encoded, _ := json.Marshal(stored)
-		_ = p.col(target, "tables").Put(ctx, table, encoded)
+		_ = spi.PutJSON(ctx, p.col(target, "tables"), table, stored)
 		if region == req.Identity.Region {
 			for key := range definition {
 				delete(definition, key)

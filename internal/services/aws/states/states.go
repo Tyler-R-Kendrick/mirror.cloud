@@ -259,8 +259,7 @@ func (p *Pack) timeoutExecution(ctx context.Context, req *spi.Request, token str
 	history := spi.Slice(record["history"])
 	record["history"] = append(history, map[string]any{"type": "ExecutionTimedOut", "id": len(history) + 1, "error": "States.Timeout", "cause": "States.Timeout"})
 	delete(record, "pendingToken")
-	body, _ := json.Marshal(record)
-	_ = p.col(req, "ex").Put(ctx, wait.ExecARN, body)
+	_ = spi.PutJSON(ctx, p.col(req, "ex"), wait.ExecARN, record)
 	_ = p.col(req, "pending").Delete(ctx, token)
 }
 
@@ -306,8 +305,7 @@ func (p *Pack) resumeWait(ctx context.Context, req *spi.Request, token string, w
 	}
 	if result.pending != nil {
 		result.pending.ExecARN, result.pending.Definition = wait.ExecARN, wait.Definition
-		pendingBytes, _ := json.Marshal(result.pending)
-		_ = p.col(req, "pending").Put(ctx, result.pending.Token, pendingBytes)
+		_ = spi.PutJSON(ctx, p.col(req, "pending"), result.pending.Token, result.pending)
 		record["pendingToken"] = result.pending.Token
 	}
 	for _, run := range result.mapRuns {
@@ -317,11 +315,9 @@ func (p *Pack) resumeWait(ctx context.Context, req *spi.Request, token string, w
 		}
 		run.record["mapRunArn"], run.record["executionArn"], run.record["stateMachineArn"] = arn, wait.ExecARN, record["stateMachineArn"]
 		run.record["startDate"], run.record["stopDate"] = float64(now), float64(now)
-		body, _ := json.Marshal(run.record)
-		_ = p.col(req, "maprun").Put(ctx, arn, body)
+		_ = spi.PutJSON(ctx, p.col(req, "maprun"), arn, run.record)
 	}
-	body, _ := json.Marshal(record)
-	_ = p.col(req, "ex").Put(ctx, wait.ExecARN, body)
+	_ = spi.PutJSON(ctx, p.col(req, "ex"), wait.ExecARN, record)
 	_ = p.col(req, "pending").Delete(ctx, token)
 	if result.pending != nil {
 		p.signalWaits()
@@ -398,8 +394,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		b, _ := json.Marshal(rec)
 		_ = p.col(req, "sm").Put(ctx, name, b)
 		if tags != nil {
-			tagsJSON, _ := json.Marshal(tags)
-			_ = p.col(req, "tag").Put(ctx, arn, tagsJSON)
+			_ = spi.PutJSON(ctx, p.col(req, "tag"), arn, tags)
 		}
 		output := map[string]any{"stateMachineArn": arn, "creationDate": float64(now)}
 		if publish {
@@ -553,8 +548,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			"stateMachineVersionArn": versionARN, "creationDate": float64(now), "description": spi.First(req.Input, "description", "Description"),
 			"revisionId": revision, "definition": machine["definition"], "roleArn": machine["roleArn"], "type": machine["type"],
 		}
-		encoded, _ := json.Marshal(record)
-		_ = p.col(req, "ver").Put(ctx, name+":"+strconv.Itoa(next), encoded)
+		_ = spi.PutJSON(ctx, p.col(req, "ver"), name+":"+strconv.Itoa(next), record)
 		return &spi.Response{Output: map[string]any{"stateMachineVersionArn": versionARN, "creationDate": float64(now)}}, nil
 	case "ListStateMachineVersions":
 		name := baseSMName(spi.First(req.Input, "stateMachineArn", "StateMachineArn"))
@@ -607,8 +601,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			"stateMachineAliasArn": aliasARN, "name": name, "description": spi.First(req.Input, "description", "Description"),
 			"routingConfiguration": routes, "creationDate": float64(now), "updateDate": float64(now),
 		}
-		encoded, _ := json.Marshal(record)
-		_ = p.col(req, "alias").Put(ctx, aliasARN, encoded)
+		_ = spi.PutJSON(ctx, p.col(req, "alias"), aliasARN, record)
 		return &spi.Response{Output: map[string]any{"stateMachineAliasArn": aliasARN, "creationDate": float64(now)}}, nil
 	case "ListStateMachineAliases":
 		requestedARN := spi.First(req.Input, "stateMachineArn", "StateMachineArn")
@@ -652,8 +645,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			record["description"] = description
 		}
 		record["updateDate"] = float64(now)
-		encoded, _ := json.Marshal(record)
-		_ = p.col(req, "alias").Put(ctx, arn, encoded)
+		_ = spi.PutJSON(ctx, p.col(req, "alias"), arn, record)
 		return &spi.Response{Output: map[string]any{"updateDate": float64(now)}}, nil
 	case "StartExecution", "StartSyncExecution":
 		arn := spi.First(req.Input, "stateMachineArn", "StateMachineArn")
@@ -715,8 +707,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			run.record["mapRunArn"], run.record["executionArn"], run.record["stateMachineArn"] = mapRunARN, execARN, baseARN
 			run.record["startDate"], run.record["stopDate"] = float64(now), float64(now)
-			encoded, _ := json.Marshal(run.record)
-			_ = p.col(req, "maprun").Put(ctx, mapRunARN, encoded)
+			_ = spi.PutJSON(ctx, p.col(req, "maprun"), mapRunARN, run.record)
 		}
 		ob, _ := json.Marshal(wr.out)
 		rec := map[string]any{
@@ -746,8 +737,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if wr.pending != nil {
 			wr.pending.ExecARN = execARN
 			wr.pending.Definition = def
-			pb, _ := json.Marshal(wr.pending)
-			_ = p.col(req, "pending").Put(ctx, wr.pending.Token, pb)
+			_ = spi.PutJSON(ctx, p.col(req, "pending"), wr.pending.Token, wr.pending)
 			rec["pendingToken"] = wr.pending.Token
 		}
 		eb, _ := json.Marshal(rec)
@@ -928,8 +918,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !updated {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
-		encoded, _ := json.Marshal(record)
-		_ = p.col(req, "maprun").Put(ctx, arn, encoded)
+		_ = spi.PutJSON(ctx, p.col(req, "maprun"), arn, record)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "DescribeStateMachineForExecution":
 		executionARN := spi.First(req.Input, "executionArn", "ExecutionArn")
@@ -991,8 +980,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		b, _ := json.Marshal(rec)
 		_ = p.col(req, "act").Put(ctx, name, b)
 		if tags != nil {
-			tagsJSON, _ := json.Marshal(tags)
-			_ = p.col(req, "tag").Put(ctx, arn, tagsJSON)
+			_ = spi.PutJSON(ctx, p.col(req, "tag"), arn, tags)
 		}
 		return &spi.Response{Output: map[string]any{"activityArn": arn, "creationDate": float64(now)}}, nil
 	case "DeleteActivity":
@@ -1047,8 +1035,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				continue
 			}
 			startTaskTimers(&pend, p.deps.Clock.Now())
-			encoded, _ := json.Marshal(pend)
-			_ = p.col(req, "pending").Put(ctx, pend.Token, encoded)
+			_ = spi.PutJSON(ctx, p.col(req, "pending"), pend.Token, pend)
 			p.signalWaits()
 			inb, _ := json.Marshal(pend.Input)
 			return &spi.Response{Output: map[string]any{"taskToken": pend.Token, "input": string(inb)}}, nil
@@ -1369,8 +1356,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(tags) > 50 {
 			return nil, &spi.Fault{Code: "TooManyTags", HTTPStatus: 400, Fault: "client"}
 		}
-		b, _ := json.Marshal(tags)
-		_ = p.col(req, "tag").Put(ctx, arn, b)
+		_ = spi.PutJSON(ctx, p.col(req, "tag"), arn, tags)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "UntagResource":
 		arn := spi.First(req.Input, "resourceArn", "ResourceArn")
@@ -1400,8 +1386,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				kept = append(kept, tag)
 			}
 		}
-		b, _ := json.Marshal(kept)
-		_ = p.col(req, "tag").Put(ctx, arn, b)
+		_ = spi.PutJSON(ctx, p.col(req, "tag"), arn, kept)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "ListTagsForResource":
 		arn := spi.First(req.Input, "resourceArn", "ResourceArn")
@@ -1603,8 +1588,7 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 	}
 	if result.pending != nil {
 		result.pending.ExecARN, result.pending.Definition = arn, string(redriveDefinition)
-		encoded, _ := json.Marshal(result.pending)
-		_ = p.col(req, "pending").Put(ctx, result.pending.Token, encoded)
+		_ = spi.PutJSON(ctx, p.col(req, "pending"), result.pending.Token, result.pending)
 		record["pendingToken"] = result.pending.Token
 	}
 	if token != "" {
@@ -1614,8 +1598,7 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 		tokens[token] = float64(now)
 		record["redriveTokens"] = tokens
 	}
-	encoded, _ := json.Marshal(record)
-	_ = p.col(req, "ex").Put(ctx, arn, encoded)
+	_ = spi.PutJSON(ctx, p.col(req, "ex"), arn, record)
 	if result.pending != nil {
 		p.signalWaits()
 	}
@@ -1700,8 +1683,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 			return false
 		}
 		scheduled.pending.ExecARN, scheduled.pending.Definition = pend.ExecARN, pend.Definition
-		pb, _ := json.Marshal(scheduled.pending)
-		_ = p.col(req, "pending").Put(ctx, scheduled.pending.Token, pb)
+		_ = spi.PutJSON(ctx, p.col(req, "pending"), scheduled.pending.Token, scheduled.pending)
 		rec["pendingToken"] = scheduled.pending.Token
 		nb, _ := json.Marshal(rec)
 		_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
@@ -1727,8 +1709,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 			if !pend.Callback {
 				pend.Token = p.deps.Rand.Hex(16)
 				pend.Started, pend.TaskDeadline, pend.HeartbeatDeadline = false, "", ""
-				pb, _ := json.Marshal(pend)
-				_ = p.col(req, "pending").Put(ctx, pend.Token, pb)
+				_ = spi.PutJSON(ctx, p.col(req, "pending"), pend.Token, pend)
 				rec["pendingToken"] = pend.Token
 				nb, _ := json.Marshal(rec)
 				_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
@@ -1829,8 +1810,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	if wr.pending != nil {
 		wr.pending.ExecARN = pend.ExecARN
 		wr.pending.Definition = pend.Definition
-		pb, _ := json.Marshal(wr.pending)
-		_ = p.col(req, "pending").Put(ctx, wr.pending.Token, pb)
+		_ = spi.PutJSON(ctx, p.col(req, "pending"), wr.pending.Token, wr.pending)
 		rec["pendingToken"] = wr.pending.Token
 	} else {
 		delete(rec, "pendingToken")
@@ -4139,8 +4119,7 @@ func (p *Pack) storeMapItemExecution(ctx context.Context, req *spi.Request, mapR
 			record[strings.ToLower(field)] = value
 		}
 	}
-	encoded, _ := json.Marshal(record)
-	_ = p.col(req, "ex").Put(ctx, spi.First(metadata, "ExecutionArn"), encoded)
+	_ = spi.PutJSON(ctx, p.col(req, "ex"), spi.First(metadata, "ExecutionArn"), record)
 }
 
 func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[string]any, data any, items []mapItemResult, mapRunARN string, scope *jsonataScope, variables ...map[string]any) (any, int, bool, bool) {

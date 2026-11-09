@@ -112,11 +112,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			return &spi.Response{Output: map[string]any{"TopicArn": current["arn"]}}, nil
 		}
-		b, _ := json.Marshal(map[string]any{"arn": arn, "name": name, "attrs": attrs})
-		_ = p.col(req, "topics").Put(ctx, name, b)
+		_ = spi.PutJSON(ctx, p.col(req, "topics"), name, map[string]any{"arn": arn, "name": name, "attrs": attrs})
 		if len(spi.Slice(tags)) > 0 {
-			tb, _ := json.Marshal(tags)
-			_ = p.col(req, "tags").Put(ctx, arn, tb)
+			_ = spi.PutJSON(ctx, p.col(req, "tags"), arn, tags)
 		}
 		return &spi.Response{Output: map[string]any{"TopicArn": arn}}, nil
 	case "ListTopics":
@@ -226,8 +224,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			attrs[attributeName] = req.Input["AttributeValue"]
 		}
 		m["attrs"] = attrs
-		nb, _ := json.Marshal(m)
-		_ = p.col(req, "topics").Put(ctx, name, nb)
+		_ = spi.PutJSON(ctx, p.col(req, "topics"), name, m)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "Publish":
 		if phone := str(req.Input["PhoneNumber"]); phone != "" && str(req.Input["TopicArn"]) == "" && str(req.Input["TargetArn"]) == "" {
@@ -607,8 +604,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			merged = append(merged, tag)
 		}
 		sort.Slice(merged, func(i, j int) bool { return str(spi.Object(merged[i])["Key"]) < str(spi.Object(merged[j])["Key"]) })
-		b, _ := json.Marshal(merged)
-		_ = p.col(req, "tags").Put(ctx, arn, b)
+		_ = spi.PutJSON(ctx, p.col(req, "tags"), arn, merged)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "UntagResource":
 		arn := str(req.Input["ResourceArn"])
@@ -640,8 +636,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if len(kept) == 0 {
 				_ = p.col(req, "tags").Delete(ctx, arn)
 			} else {
-				nb, _ := json.Marshal(kept)
-				_ = p.col(req, "tags").Put(ctx, arn, nb)
+				_ = spi.PutJSON(ctx, p.col(req, "tags"), arn, kept)
 			}
 		}
 		return &spi.Response{Output: map[string]any{}}, nil

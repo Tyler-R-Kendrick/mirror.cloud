@@ -200,8 +200,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(targets) > 5 {
 			return nil, &spi.Fault{Code: "LimitExceededException", Message: "A rule cannot have more than five targets.", HTTPStatus: 400, Fault: "client"}
 		}
-		b, _ := json.Marshal(map[string]any{"Bus": eventBus(req.Input), "Rule": spi.Str(req.Input["Rule"]), "Targets": targets})
-		_ = p.col(req, "targets").Put(ctx, key, b)
+		_ = spi.PutJSON(ctx, p.col(req, "targets"), key, map[string]any{"Bus": eventBus(req.Input), "Rule": spi.Str(req.Input["Rule"]), "Targets": targets})
 		return &spi.Response{Output: map[string]any{"FailedEntryCount": len(failed), "FailedEntries": failed}}, nil
 	case "PutEvents":
 		entries, _ := req.Input["Entries"].([]any)
@@ -442,8 +441,7 @@ func (p *Pack) runScheduledRules(ctx context.Context) time.Time {
 					continue
 				}
 				rule[eventRuleNext] = next.UTC().Format(time.RFC3339Nano)
-				body, _ := json.Marshal(rule)
-				_ = collection.Put(ctx, kv.Key, body)
+				_ = spi.PutJSON(ctx, collection, kv.Key, rule)
 			}
 			if next.After(now) {
 				earliest = earlierTime(earliest, next)
@@ -462,8 +460,7 @@ func (p *Pack) runScheduledRules(ctx context.Context) time.Time {
 				continue
 			}
 			rule[eventRuleNext] = next.UTC().Format(time.RFC3339Nano)
-			body, _ := json.Marshal(rule)
-			_ = collection.Put(ctx, kv.Key, body)
+			_ = spi.PutJSON(ctx, collection, kv.Key, rule)
 			earliest = earlierTime(earliest, next)
 		}
 	}
@@ -995,10 +992,6 @@ func arnResourceName(arn, marker string) string {
 	_, resource, _ := strings.Cut(arn, marker)
 	name, _, _ := strings.Cut(resource, "/")
 	return name
-}
-
-func mergeConnectionBody(payload []byte, raw any) ([]byte, error) {
-	return eventhttp.MergeBody(payload, raw, 64<<10)
 }
 
 func mapValue(value any) map[string]any { values, _ := value.(map[string]any); return values }

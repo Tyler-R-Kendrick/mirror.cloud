@@ -888,8 +888,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		if err := validateOwnership(); err != nil {
 			return nil, err
 		}
-		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "namespace": namespace, "objectLockEnabled": objectLock, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")})
-		if err := buckets.Put(ctx, b, meta); err != nil {
+		if err := spi.PutJSON(ctx, buckets, b, map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "namespace": namespace, "objectLockEnabled": objectLock, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")}); err != nil {
 			return nil, err
 		}
 		if err := persistConfigurations(); err != nil {
@@ -927,8 +926,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		if err := validateOwnership(); err != nil {
 			return nil, err
 		}
-		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "objectLockEnabled": objectLock, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")})
-		if err := buckets.Put(ctx, b, meta); err != nil {
+		if err := spi.PutJSON(ctx, buckets, b, map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "objectLockEnabled": objectLock, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")}); err != nil {
 			return nil, err
 		}
 		location, _ := json.Marshal(map[string]any{"account": req.Identity.Account, "region": bucketRegion})
@@ -1234,8 +1232,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 			versionMeta["checksums"] = provided
 			versionMeta["checksumType"] = checksumType
 		}
-		vm, _ := json.Marshal(versionMeta)
-		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, vm)
+		_ = spi.PutJSON(ctx, p.col(req, "versions"), b+"/"+key+"/"+vid, versionMeta)
 	}
 	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled, "sseCustomerKeyMD5": sseCustomerKeyMD5}
 	if versioned {
@@ -1968,8 +1965,7 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		} else if currentExists {
 			current["versionOrder"] = kept
 			current["deletedVersionNext"] = deletedVersionNext
-			raw, _ := json.Marshal(current)
-			_ = p.col(req, "objects").Put(ctx, b+"/"+key, raw)
+			_ = spi.PutJSON(ctx, p.col(req, "objects"), b+"/"+key, current)
 		}
 		h := http.Header{}
 		h.Set("x-amz-version-id", wantVer)
@@ -3280,8 +3276,7 @@ func (p *Pack) bucketLifecycle(ctx context.Context, req *spi.Request) (*spi.Resp
 			return nil, &spi.Fault{Code: "InvalidRequest", Message: "Invalid TransitionDefaultMinimumObjectSize found: " + minimum, HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
 		document := map[string]any{"Rules": configuration["Rules"], "TransitionDefaultMinimumObjectSize": minimum}
-		raw, _ := json.Marshal(document)
-		_ = collection.Put(ctx, key, raw)
+		_ = spi.PutJSON(ctx, collection, key, document)
 		headers := http.Header{}
 		headers.Set("x-amz-transition-default-minimum-object-size", minimum)
 		return &spi.Response{Status: http.StatusOK, Headers: headers}, nil
@@ -3552,8 +3547,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 			}
 			doc[k] = v
 		}
-		raw, _ := json.Marshal(doc)
-		_ = col.Put(ctx, key, raw)
+		_ = spi.PutJSON(ctx, col, key, doc)
 		if req.Operation == "PutObjectAcl" {
 			p.notify(ctx, req, b, spi.Str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)
 		}
@@ -4054,8 +4048,7 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 		if err != nil {
 			return nil, err
 		}
-		raw, _ := json.Marshal(configuration)
-		_ = p.col(req, "notify").Put(ctx, b, raw)
+		_ = spi.PutJSON(ctx, p.col(req, "notify"), b, configuration)
 		return &spi.Response{Status: 200}, nil
 	case "GetBucketNotificationConfiguration":
 		raw, ok, _ := p.col(req, "notify").Get(ctx, b)
@@ -5309,8 +5302,7 @@ func (p *Pack) restoreCurrentVersion(ctx context.Context, req *spi.Request, buck
 	meta := spi.JSONObject(raw)
 	meta["versionOrder"] = order
 	meta["deletedVersionNext"] = deletedVersionNext
-	current, _ := json.Marshal(meta)
-	_ = p.col(req, "objects").Put(ctx, currentKey, current)
+	_ = spi.PutJSON(ctx, p.col(req, "objects"), currentKey, meta)
 	if truthy(meta["deleteMarker"]) {
 		_ = p.deps.Blobs.Delete(ctx, blobKey(req, bucket, key))
 	} else {

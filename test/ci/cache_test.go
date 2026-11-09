@@ -12,7 +12,7 @@ import (
 // and the unit job ran with -coverprofile; any one of the three leaves pull
 // requests nothing to read from the cache main saves. This pins the repair.
 func TestUnitResultsStayCacheable(t *testing.T) {
-	root, _ := filepath.Abs("../..")
+	root := repo(t)
 	read := func(rel string) string {
 		b, err := os.ReadFile(filepath.Join(root, rel))
 		if err != nil {

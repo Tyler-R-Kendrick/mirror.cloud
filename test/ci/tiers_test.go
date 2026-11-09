@@ -15,7 +15,7 @@ const mod = "github.com/tyler-r-kendrick/mirror.cloud/"
 // whole output of a failing test -- and put each test in the tier whose suite
 // used to run it.
 func TestTierSummaryKeepsTheLogAndSortsTestsIntoTiers(t *testing.T) {
-	root, _ := filepath.Abs("../..")
+	root := repo(t)
 	events := strings.Join([]string{
 		`go test -json ./...`,
 		`{"Action":"start","Package":"` + mod + `internal/chaos"}`,

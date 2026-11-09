@@ -9,12 +9,17 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/testinputs"
 )
+
+// runIn is testinputs.Command: in dir, without the stat of dir that go test
+// would record. What the command reads is recorded by repo.
+func runIn(dir, name string, args ...string) *exec.Cmd { return testinputs.Command(dir, name, args...) }
 
 func run(t *testing.T, dir string, env []string, name string, args ...string) (string, error) {
 	t.Helper()
-	cmd := exec.Command(name, args...)
-	cmd.Dir = dir
+	cmd := runIn(dir, name, args...)
 	cmd.Env = append(os.Environ(), env...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
@@ -25,7 +30,7 @@ func run(t *testing.T, dir string, env []string, name string, args ...string) (s
 // keeps a file's size hit a stale go test result), and a directory the newest
 // time beneath it.
 func TestRestoreMtimesUsesTheLastCommitThatTouchedEachFile(t *testing.T) {
-	root, _ := filepath.Abs("../..")
+	root := repo(t)
 	repo := t.TempDir()
 	git := func(date string, args ...string) {
 		t.Helper()
@@ -65,7 +70,7 @@ func TestRestoreMtimesUsesTheLastCommitThatTouchedEachFile(t *testing.T) {
 
 // go test -fuzz exits 0 for a name that matches nothing; fuzz.sh must not.
 func TestFuzzScriptFailsWhereGoTestStaysGreen(t *testing.T) {
-	root, _ := filepath.Abs("../..")
+	root := repo(t)
 	script := filepath.Join(root, "scripts", "fuzz.sh")
 	dir := t.TempDir()
 	list := func(body string) []string {
@@ -90,7 +95,7 @@ func TestFuzzScriptFailsWhereGoTestStaysGreen(t *testing.T) {
 // is not one: a profile that quietly built a different set is the failure that
 // matters here, since nothing else would notice.
 func TestSlimBuildServesExactlyTheServicesItWasGiven(t *testing.T) {
-	root, _ := filepath.Abs("../..")
+	root := repo(t)
 	script := filepath.Join(root, "scripts", "slim-overlay.py")
 	dir := t.TempDir()
 
@@ -135,7 +140,7 @@ func TestSlimBuildServesExactlyTheServicesItWasGiven(t *testing.T) {
 // holding the given commit messages (oldest first), with the given tags on the
 // commits they name, and a stand-in gh that records what it is asked to create.
 func TestCutReleaseDerivesTheNextVersionFromTheCommitsSinceTheLastTag(t *testing.T) {
-	root, _ := filepath.Abs("../..")
+	root := repo(t)
 	script := filepath.Join(root, "scripts", "cut-release.sh")
 
 	type result struct {
@@ -241,7 +246,7 @@ func TestCutReleaseDerivesTheNextVersionFromTheCommitsSinceTheLastTag(t *testing
 // an image can be wrong must stop it. docker is a stand-in that answers for one
 // image: its version, its services and the binary it holds.
 func TestImageCheckStopsAnImageThatIsNotWhatTheReleaseSays(t *testing.T) {
-	root, _ := filepath.Abs("../..")
+	root := repo(t)
 	script := filepath.Join(root, "scripts", "image-check.sh")
 	profile, err := os.ReadFile(filepath.Join(root, "profiles", "core.txt"))
 	if err != nil {

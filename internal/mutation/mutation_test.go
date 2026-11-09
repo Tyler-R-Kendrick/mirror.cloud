@@ -4352,7 +4352,7 @@ var mutants = []mutant{
 		old:  `return st, cur.ID != "" && reflect.DeepEqual(cur, old)`,
 		new:  `return st, cur.ID != ""`,
 		pkg:  "./internal/services/aws/cloudformation",
-		run:  "TestCloudFormationAnUpdateThatLosesUndoesItself",
+		run:  "TestCloudFormationAnUpdateThatLosesUndoesItself|TestCloudFormationAnUpdateEndsItsReservation",
 	},
 	{
 		name: "cloudformation-order-ignores-references",
@@ -4560,7 +4560,7 @@ var mutants = []mutant{
 		old:  "\t\t\t_, _, _ = p.settle(ctx, req, name, as(held, old))\n",
 		new:  "\t\t\t_ = held\n",
 		pkg:  "./internal/services/aws/cloudformation",
-		run:  "TestCloudFormation",
+		run:  "TestCloudFormationAnUpdateEndsItsReservation",
 	},
 	{
 		name: "cloudformation-getazs-of-a-mark-is-text",

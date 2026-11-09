@@ -619,7 +619,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		arn := str(req.Input["ResourceArn"])
 		keys := req.Input["TagKeys"]
 		if keys == nil {
-			keys = flattenValues(req.Input, "TagKeys")
+			keys = spi.Members(req.Input, "TagKeys")
 			if len(spi.Slice(keys)) == 0 {
 				_ = p.col(req, "tags").Delete(ctx, arn)
 				return &spi.Response{Output: map[string]any{}}, nil
@@ -1539,28 +1539,6 @@ func flattenMembers(in map[string]any, prefix string) []any {
 		}
 	}
 	return out
-}
-
-func flattenValues(in map[string]any, prefix string) []any {
-	by := map[int]any{}
-	p := prefix + ".member."
-	for k, v := range in {
-		n, ok := strings.CutPrefix(k, p)
-		if !ok {
-			continue
-		}
-		i, err := strconv.Atoi(n)
-		if err == nil {
-			by[i] = v
-		}
-	}
-	values := make([]any, 0, len(by))
-	for i := 1; i <= len(by); i++ {
-		if value, ok := by[i]; ok {
-			values = append(values, value)
-		}
-	}
-	return values
 }
 
 func mustJSON(v any) []byte { b, _ := json.Marshal(v); return b }

@@ -264,11 +264,24 @@ The oracle is AWS's documentation as it ships in the vendored model
     syntax), and each pseudo parameter the engine answers a `Ref` with
     settles one: `AWS::Region`, `AccountId`, `StackName`, `StackId`,
     `Partition`, `URLSuffix` and `NoValue`, the stack's two only once there
-    is a stack (round 9 settled none, so `!If [East, e, w]` on
+    is a stack, and `AWS::NotificationARNs`, "the list of notification
+    Amazon Resource Names (ARNs) for the current stack", the request's
+    `NotificationARNs` (round 10 answered its name), and `Fn::FindInMap`, "Mapping values" being a base the page
+    names (round 9 settled none, so `!If [East, e, w]` on
     `!Equals [!Ref AWS::Region, us-east-1]` stored `""`). A stack is made
     or updated only with every condition settled: one the engine cannot
-    evaluate (a `Fn::FindInMap`) is `ValidationError`, "Template error: the
-    condition <name> cannot be evaluated" (a reading). A condition may not
+    evaluate (a `Fn::Select`) is `ValidationError`, "Template error: the
+    condition <name> cannot be evaluated" (a reading). `Fn::FindInMap`
+    "returns the value corresponding to keys in a two-level map that's
+    declared in the Mappings section", its keys literals, a `Ref` or
+    another `Fn::FindInMap` (Template Reference, Fn::FindInMap), in a
+    condition, a property and an output (round 10 resolved it nowhere, and
+    refused it in a condition); "If omitted, Fn::FindInMap raises an error
+    when a key is not found", so a missing map or key is `ValidationError`,
+    "Template error: Unable to get mapping for Env::eu-west-1::Stage" (a
+    reading), and one the engine cannot evaluate when it makes a stack (a
+    `DefaultValue`, which needs the `AWS::LanguageExtensions` transform) is
+    refused too. A condition may not
     name a resource ("you can't reference resource logical IDs or their
     attributes in conditions"), "Template format error: Unresolved
     dependencies [P]. Cannot reference resources in the Conditions block of
@@ -294,8 +307,13 @@ The oracle is AWS's documentation as it ships in the vendored model
     (an element of a list too, a `Fn::Join`'s list among them, which the
     Template Reference does not spell out: a reading). It is never a value:
     as part of one, a `Fn::Join`'s separator, a `Fn::Sub`'s string or
-    variable, or an output's value, it is `ValidationError` before anything
-    is made (round 9 wrote the sentinel standing for it into the string,
+    variable, or an output's value, it is `ValidationError` before the
+    stack's name is reserved, on `ValidateTemplate` as on `CreateStack`; as
+    the whole `Properties` attribute, `!If [C, {...}, !Ref AWS::NoValue]`,
+    it leaves the resource no properties (the attribute is no property, so
+    this is a reading; round 10 refused it)
+    (round 10 found it only after reserving the name, so the refused stack
+    stayed `ROLLBACK_COMPLETE` and a retry was `AlreadyExistsException`) (round 9 wrote the sentinel standing for it into the string,
     `"\ufffe,b"`, `"a\ufffeb"`); an unsettled one reaches the service as
     written, a reading. `AWS::StackId` "Returns the ID (ARN) of the stack"
     (User Guide, pseudo parameters). Round 8 resolved no `Fn::If`, so its
@@ -670,7 +688,12 @@ The oracle is AWS's documentation as it ships in the vendored model
     engine named were. A
     parameter is a string ("the parameter value becomes a string", User
     Guide, Parameters), so a numeric `Default`, `Default: 16` in JSON or
-    YAML, is its text `"16"`; before, it became `""`. Each
+    YAML, is its text `"16"`; before, it became `""`. "For parameters
+    without default values, users must specify a key name value at stack
+    creation", or it is "Parameters: [KeyName] must have values" (User
+    Guide, Parameters): `CreateStack` and `UpdateStack` refuse such a
+    template in those words before anything is reserved (round 10 left the
+    parameter out). Each
     way it can be wrong is `ValidationError` with its own message: not an
     object; `SecretString` beside it; `GenerateStringKey` without
     `SecretStringTemplate`, or the reverse; a template that is not JSON, or

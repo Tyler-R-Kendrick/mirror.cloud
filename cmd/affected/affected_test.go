@@ -199,6 +199,16 @@ func TestRunPrintsPackagesAndJSON(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &r); err != nil || r.All || r.Packages == nil || len(r.Packages) != 0 {
 		t.Errorf("json %q: %v", out.String(), err)
 	}
+	// The default root is ".", a relative path, which is how CI runs it: a
+	// file must still find its package.
+	out.Reset()
+	errb.Reset()
+	if err := run([]string{"-root", filepath.Join("..", "..")}, strings.NewReader("internal/clock/clock.go\n"), &out, &errb); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "./internal/clock\n") || strings.Contains(errb.String(), "every package") {
+		t.Errorf("a relative root: stdout %q stderr %q", out.String(), errb.String())
+	}
 	if err := run([]string{"-files", filepath.Join(t.TempDir(), "absent")}, nil, &out, &errb); err == nil {
 		t.Error("a missing -files was accepted")
 	}

@@ -93,6 +93,15 @@ type graph struct {
 // with everything it links, which is the set of packages whose change can
 // change that package's test result.
 func load(root string) (*graph, error) {
+	// go list prints absolute, symlink-free directories; root has to be the
+	// same kind of path for a file to find the package that holds it.
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	if root, err = filepath.EvalSymlinks(abs); err != nil {
+		return nil, err
+	}
 	cmd := exec.Command("go", "list", "-e", "-test", "-f", "{{.ImportPath}}\t{{.Dir}}\t{{.Module}}\t{{join .Deps \" \"}}", "./...")
 	cmd.Dir = root
 	var stderr bytes.Buffer

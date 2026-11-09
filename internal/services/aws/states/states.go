@@ -3,6 +3,7 @@ package states
 
 import (
 	"bytes"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"crypto/md5"
@@ -2366,47 +2367,14 @@ walkLoop:
 						failed = &walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime"}
 					}
 				}
-				var next string
-				var out any
-				var delay time.Duration
-				var retry, caught, valid bool
-				if isJSONata {
-					next, out, delay, retry, caught, valid = recoverJSONata(st, *failed, stateInput, stateContext, variables, p.deps.Rand, retries[cur])
-					if !valid {
-						return walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
-					}
-				} else {
-					next, out, delay, retry, caught = recoverState(st, *failed, stateInput, retries[cur], p.deps.Rand)
-				}
-				if retry {
-					if scheduled := p.scheduleRetry(ctx, req, cur, stateInput, retries[cur], variables, delay, hist); scheduled != nil {
-						return *scheduled
-					}
+				done, next, out, again := p.recovered(ctx, req, st, failed, cur, stateInput, data, stateContext, variables, retries, hist, isJSONata)
+				if done != nil {
+					return *done
+				} else if again {
 					continue
 				}
-				if caught {
-					if next == "" {
-						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
-					}
-					failureName := failed.errorName
-					if failureName == "" {
-						failureName = "States.TaskFailed"
-					}
-					if !isJSONata && !applyCatchAssignments(st, stateFailure{name: failureName, cause: failed.cause}, stateInput, stateContext, variables, p.deps.Rand) {
-						return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
-					}
-					data = out
-					if !isJSONata {
-						data, ok = applyDataPath(st, "OutputPath", out, variables)
-						if !ok {
-							return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
-						}
-					}
-					cur = next
-					continue walkLoop
-				}
-				failed.hist, failed.failedState, failed.failedInput = hist, cur, stateInput
-				return *failed
+				data, cur = out, next
+				continue walkLoop
 			}
 		case "Map":
 			stateInput := rawInput
@@ -2743,47 +2711,14 @@ walkLoop:
 						failed = &walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime"}
 					}
 				}
-				var next string
-				var out any
-				var delay time.Duration
-				var retry, caught, valid bool
-				if isJSONata {
-					next, out, delay, retry, caught, valid = recoverJSONata(st, *failed, stateInput, stateContext, variables, p.deps.Rand, retries[cur])
-					if !valid {
-						return walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
-					}
-				} else {
-					next, out, delay, retry, caught = recoverState(st, *failed, stateInput, retries[cur], p.deps.Rand)
-				}
-				if retry {
-					if scheduled := p.scheduleRetry(ctx, req, cur, stateInput, retries[cur], variables, delay, hist); scheduled != nil {
-						return *scheduled
-					}
+				done, next, out, again := p.recovered(ctx, req, st, failed, cur, stateInput, data, stateContext, variables, retries, hist, isJSONata)
+				if done != nil {
+					return *done
+				} else if again {
 					continue
 				}
-				if caught {
-					if next == "" {
-						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
-					}
-					failureName := failed.errorName
-					if failureName == "" {
-						failureName = "States.TaskFailed"
-					}
-					if !isJSONata && !applyCatchAssignments(st, stateFailure{name: failureName, cause: failed.cause}, stateInput, stateContext, variables, p.deps.Rand) {
-						return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
-					}
-					data = out
-					if !isJSONata {
-						data, ok = applyDataPath(st, "OutputPath", out, variables)
-						if !ok {
-							return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
-						}
-					}
-					cur = next
-					continue walkLoop
-				}
-				failed.hist, failed.failedState, failed.failedInput = hist, cur, stateInput
-				return *failed
+				data, cur = out, next
+				continue walkLoop
 			}
 		default:
 			return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
@@ -2927,6 +2862,39 @@ func (p *Pack) executionWake(req *spi.Request, wake time.Time) (time.Time, bool)
 		return deadline, true
 	}
 	return wake, false
+}
+
+// recovered is what a failed Parallel or Map state does next, by its Retry and Catch: done, the result the
+// execution ends with (a retry scheduled for later included); again, retry it now; or else go to next with
+// out, its Catch's.
+func (p *Pack) recovered(ctx context.Context, req *spi.Request, st map[string]any, failed *walkResult, cur string, stateInput, data any, stateContext, variables map[string]any, retries map[string]map[int]int, hist []any, isJSONata bool) (done *walkResult, next string, out any, again bool) {
+	var delay time.Duration
+	var retry, caught, valid, ok bool
+	if isJSONata {
+		next, out, delay, retry, caught, valid = recoverJSONata(st, *failed, stateInput, stateContext, variables, p.deps.Rand, retries[cur])
+		if !valid {
+			return &walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}, "", nil, false
+		}
+	} else {
+		next, out, delay, retry, caught = recoverState(st, *failed, stateInput, retries[cur], p.deps.Rand)
+	}
+	switch {
+	case retry:
+		return p.scheduleRetry(ctx, req, cur, stateInput, retries[cur], variables, delay, hist), "", nil, true
+	case !caught:
+		failed.hist, failed.failedState, failed.failedInput = hist, cur, stateInput
+		return failed, "", nil, false
+	case next == "":
+		return &walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}, "", nil, false
+	case !isJSONata && !applyCatchAssignments(st, stateFailure{name: cmp.Or(failed.errorName, "States.TaskFailed"), cause: failed.cause}, stateInput, stateContext, variables, p.deps.Rand):
+		return &walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}, "", nil, false
+	}
+	if !isJSONata {
+		if out, ok = applyDataPath(st, "OutputPath", out, variables); !ok {
+			return &walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}, "", nil, false
+		}
+	}
+	return nil, next, out, false
 }
 
 func (p *Pack) scheduleRetry(ctx context.Context, req *spi.Request, state string, input any, attempts map[int]int, variables map[string]any, delay time.Duration, hist []any) *walkResult {

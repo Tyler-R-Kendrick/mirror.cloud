@@ -710,8 +710,12 @@ The oracle is AWS's documentation as it ships in the vendored model
     `Timeout` ("The default is 3 seconds"), `MemorySize` ("128 MB"),
     `Layers`, `KMSKeyArn`, `DeadLetterConfig`, `TracingConfig` and
     `EphemeralStorage` are the values a function made without them has; a
-    bucket's tags, public access block, ownership controls and stored
-    configurations are deleted. A bucket's versioning is suspended, since
+    bucket's tags and stored configurations are deleted, and its public
+    access block and ownership controls are the ones S3 gives a new bucket
+    (all four settings on, `BucketOwnerEnforced`; that the service sends
+    them when a template stops giving the property is a reading). They were
+    deleted, which left a bucket rolled back from an update that gave it a
+    block with none where it had S3's. A bucket's versioning is suspended, since
     "Once you version-enable a bucket, it can never return to an unversioned
     state. You can, however, suspend versioning on that bucket". Only what
     the template the resource is updated from gave is cleared: an update
@@ -724,6 +728,13 @@ The oracle is AWS's documentation as it ships in the vendored model
     cleared only when the previous template gave one, a stream goes back to
     one shard only when the previous template gave a `ShardCount`, and a
     rule's targets are removed only when the previous template gave them.
+    Two values are one when they are alike member for member, a number or
+    a Boolean being its text ("the parameter value becomes a string" when a
+    Number parameter is referenced), and a string is never the list, the
+    object or the nothing it reads as: a property whose value is the text
+    `null` is a property given. A rule's `Targets` that is not a list is
+    refused before the rule is touched (the wording is this emulator's),
+    and the rollback of that update removes no target.
     A resource that is `UPDATE_FAILED` records the names of the properties
     the failed update gave another value than its template's (names, never
     values; none is recorded as an empty list), the ids of the targets it

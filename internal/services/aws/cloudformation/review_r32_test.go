@@ -205,3 +205,67 @@ func TestCloudFormationARuleWhoseTargetsAreNotAListIsRefused(t *testing.T) {
 		t.Errorf("the stack is %s", status)
 	}
 }
+
+// rv32Bucket is the bucket's public access block and object ownership as S3 answers them.
+func rv32Bucket(h *stacks, bucket string) string {
+	block := asMap(rv31Get(h, "aws.s3", "GetPublicAccessBlock", map[string]any{"Bucket": bucket})["PublicAccessBlockConfiguration"])
+	rules := spi.Slice(asMap(rv31Get(h, "aws.s3", "GetBucketOwnershipControls", map[string]any{"Bucket": bucket})["OwnershipControls"])["Rules"])
+	owner := any(nil)
+	if len(rules) > 0 {
+		owner = asMap(rules[0])["ObjectOwnership"]
+	}
+	return fmt.Sprint("block=", spi.JSONText(block), " ownership=", owner)
+}
+
+// A bucket's public access block and object ownership taken out of its template go back to what S3 gives
+// a new bucket, as every other property cleared goes back to its service's default: "all four Block
+// Public Access settings enabled and ACLs disabled" (S3 User Guide, default settings for new buckets;
+// the wording is remembered). They were deleted, which a new bucket never is without: a failed update
+// that gave a bucket a block left it, rolled back, with none where it had S3's. That the service sends
+// the defaults when a template stops giving them is a reading.
+func TestCloudFormationABucketClearedHasWhatANewBucketHas(t *testing.T) {
+	t.Parallel()
+	bucket := func(properties map[string]any) map[string]any {
+		return map[string]any{"B": map[string]any{"Type": "AWS::S3::Bucket", "Properties": properties}}
+	}
+	given := map[string]any{"PublicAccessBlockConfiguration": map[string]any{"BlockPublicAcls": true},
+		"OwnershipControls": map[string]any{"Rules": []any{map[string]any{"ObjectOwnership": "ObjectWriter"}}}}
+	for _, continued := range []bool{false, true} {
+		h := newStacks(t)
+		if err := rvMake(t, h, "nb", map[string]any{"Resources": bucket(map[string]any{})}); err != nil {
+			t.Fatal(err)
+		}
+		id := rv31IDs(h, "nb")["B"]
+		made := rv32Bucket(h, id)
+		if !strings.Contains(made, `"RestrictPublicBuckets":true`) || !strings.HasSuffix(made, "ownership=BucketOwnerEnforced") {
+			t.Fatalf("a new bucket has %s", made)
+		}
+		failing := bucket(given)
+		failing["Z"] = rv31Dep(rv31Bad, "B")
+		if continued { // the rollback's restore of the bucket panics, and ContinueUpdateRollback finishes it
+			var writes atomic.Int32
+			off := faultStore(h, func(op, c, k string) bool { return op == "put" && c == "bktcfg" && writes.Add(1) == 3 })
+			err := rv28Update(h, "nb", failing)
+			if off(); err == nil || rv32Bucket(h, id) == made {
+				t.Fatalf("the update whose rollback panics answered %v and left the bucket %s", err, rv32Bucket(h, id))
+			} else if status, _, _ := h.status("nb"); status != "UPDATE_ROLLBACK_FAILED" {
+				t.Fatalf("the stack whose rollback panicked is %s", status)
+			}
+			if _, err := h.invoke("ContinueUpdateRollback", map[string]any{"StackName": "nb"}); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := rv28Update(h, "nb", failing); err == nil {
+			t.Fatal("the failing update was accepted")
+		}
+		if got := rv32Bucket(h, id); got != made {
+			t.Errorf("continued=%v: rolled back, the bucket has %s; want what it was made with, %s", continued, got, made)
+		}
+		// and an update that gives them, then one that gives them no longer
+		if err := rv28Update(h, "nb", bucket(given)); err != nil || rv32Bucket(h, id) == made {
+			t.Fatalf("the update that gives them answered %v and left %s", err, rv32Bucket(h, id))
+		}
+		if err := rv28Update(h, "nb", bucket(map[string]any{})); err != nil || rv32Bucket(h, id) != made {
+			t.Errorf("continued=%v: the update that gives them no longer answered %v and left %s; want %s", continued, err, rv32Bucket(h, id), made)
+		}
+	}
+}

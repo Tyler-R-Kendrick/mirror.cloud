@@ -319,10 +319,10 @@ func TestCloudFormationAnUpdateClearsWhatItsTemplateNoLongerGives(t *testing.T) 
 		}
 		versioning, _ := h.service("aws.s3", "GetBucketVersioning", map[string]any{"Bucket": ids["B"]})
 		tags, _ := h.service("aws.s3", "GetBucketTagging", map[string]any{"Bucket": ids["B"]})
-		_, blockErr := h.service("aws.s3", "GetPublicAccessBlock", map[string]any{"Bucket": ids["B"]})
+		block := rv32Bucket(h, ids["B"]) // what S3 gives a new bucket, not the one setting the template gave
 		_, cors, _ := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("bktcfg").Get(h.ctx, ids["B"]+"/cors")
-		if versioning["Status"] == "Enabled" || len(spi.Slice(tags["TagSet"])) != 0 || blockErr == nil || cors {
-			t.Errorf("%s: the bucket has versioning %v, tags %v, a public access block: %t, CORS: %t; want suspended and none", when, versioning["Status"], tags["TagSet"], blockErr == nil, cors)
+		if versioning["Status"] == "Enabled" || len(spi.Slice(tags["TagSet"])) != 0 || !strings.Contains(block, `"RestrictPublicBuckets":true`) || cors {
+			t.Errorf("%s: the bucket has versioning %v, tags %v, %s, CORS: %t; want suspended, none, a new bucket's block and none", when, versioning["Status"], tags["TagSet"], block, cors)
 		}
 	}
 	full := resources(true)

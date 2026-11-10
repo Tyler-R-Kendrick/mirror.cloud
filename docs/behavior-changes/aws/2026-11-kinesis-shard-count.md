@@ -25,9 +25,20 @@
   `LimitExceededException`: "The requested resource exceeds the maximum number
   allowed, or the number of concurrent stream requests exceeds the maximum
   number allowed."
-- The quoted wording is from the API reference as remembered: the vendored
-  model file is not in a checkout, so each quotation is a reading until it is
-  compared with the page.
+- The quotations of `DescribeLimits`, `UpdateShardCount`, `UpdateStreamMode`,
+  `StreamModeDetails` and of the Developer Guide's
+  [Quotas and limits](https://docs.aws.amazon.com/streams/latest/dev/service-sizes-and-limits.html)
+  were read from the pages in 2026-11. The others are from the API reference
+  as remembered: the vendored model file is not in a checkout, so each of
+  those is a reading until it is compared with the page.
+- The shard quota is the provisioned streams'. The quotas table gives, for
+  "Number of shards", under on-demand mode "There's no upper limit. Number of
+  shards depends on the amount of data ingested and the level of throughput
+  you require. Kinesis Data Streams automatically scales the number of
+  shards", and only under provisioned mode "The default shard quota is ...
+  shards per AWS account". An on-demand stream has the other quota: "By
+  default, you can create up to 50 data streams with the on-demand capacity
+  mode."
 - Before, `CreateStream` accepted `ShardCount` and dropped it. A
   CloudFormation stream whose template gave three shards was made with one,
   and a rollback that put the template's count back could only do it with
@@ -46,21 +57,28 @@
 | `DescribeStreamSummary` | No `StreamModeDetails` | The stream's mode: the one it was created with or `UpdateStreamMode` set, `PROVISIONED` when none was given |
 | `DescribeLimits` with on-demand streams | `OnDemandStreamCount` 0 | The number of the caller's streams whose mode is `ON_DEMAND` |
 | `UpdateShardCount` on a stream that does not exist | 200, and a stream record of that count | `ResourceNotFoundException` |
-| `CreateStream` or `UpdateShardCount` that would take the caller's open shards past `ShardLimit` (500) | Accepted | `LimitExceededException` |
+| `CreateStream` or `UpdateShardCount` of a provisioned stream that would take the caller's provisioned shards past `ShardLimit` (500) | Accepted | `LimitExceededException` |
+| `DescribeLimits.OpenShardCount` with on-demand streams | 1 | The provisioned streams' shards; an on-demand stream's are not counted |
 | A 51st on-demand stream (`OnDemandStreamCountLimit` 50) | Accepted | `LimitExceededException` |
 
 ## Readings
 
 - A provisioned stream created with no `ShardCount`, or one that is not
   positive, has one shard; the service requires a count there. An on-demand
-  stream has four: the Developer Guide gives a new on-demand stream "4 MB/s
-  write and 8 MB/s read throughput" by default, a shard carrying one megabyte
-  of writes a second (as remembered; a reading). A `ShardCount` given with
-  `ON_DEMAND` is kept as the count.
-- The shard limit is held over every stream's shards, on-demand ones
-  included, less those of the name a create replaces. Whether the service
-  counts on-demand shards against `ShardLimit` is not established. The
-  messages of both `LimitExceededException`s are this emulator's.
+  stream has four: "By default, new data streams created with the on-demand
+  capacity mode have 4 MB/s of write and 8 MB/s of read throughput", and
+  "Each shard can support up to 1 MB/sec ... write throughput" (Quotas and
+  limits); that this is four shards is the arithmetic, not a sentence of the
+  guide. A `ShardCount` given with `ON_DEMAND` is kept as the count.
+- The shard limit holds a provisioned stream over the shards of the other
+  provisioned streams, less those of the name a create replaces. An
+  on-demand stream's shards are neither held to it nor counted in it.
+  `DescribeLimits.OpenShardCount` is "The number of open shards", of an
+  operation that "Describes the shard limits and usage for the account":
+  that it is the count held against `ShardLimit`, the provisioned streams',
+  and leaves on-demand shards out, is a reading. The messages of both
+  `LimitExceededException`s are this emulator's, and so is the limit of 500
+  (the guide's defaults are 1,000, 6,000 or 20,000 by Region).
 - `SplitShard`, `MergeShards` and the retention operations still make a
   record for a stream that does not exist, as the recorded trace has them.
 - A CloudFormation `AWS::Kinesis::Stream` does not pass its

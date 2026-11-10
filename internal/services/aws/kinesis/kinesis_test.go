@@ -278,16 +278,16 @@ func TestKinesisAnOnDemandStreamIsRecordedAsOne(t *testing.T) {
 			t.Errorf("stream %s is summarized %s; want %s", stream, got, want)
 		}
 	}
-	if got := limits(); got != "open=15 on-demand=2" {
-		t.Errorf("the account's limits read %s; want 15 open shards and 2 on-demand streams", got)
+	if got := limits(); got != "open=5 on-demand=2" {
+		t.Errorf("the account's limits read %s; want the 5 open shards of its provisioned streams and 2 on-demand streams", got)
 	}
 	call("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/plain","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
 	call("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/od","StreamModeDetails":{"StreamMode":"PROVISIONED"}}`)
-	if got := summary("plain") + ", " + summary("od") + ", " + limits(); got != "ON_DEMAND 3, PROVISIONED 4, open=15 on-demand=2" {
+	if got := summary("plain") + ", " + summary("od") + ", " + limits(); got != "ON_DEMAND 3, PROVISIONED 4, open=6 on-demand=2" {
 		t.Errorf("after each of two streams changed mode: %s", got)
 	}
 	call("DeleteStream", `{"StreamName":"od6"}`)
-	if got := limits(); got != "open=9 on-demand=1" {
+	if got := limits(); got != "open=6 on-demand=1" {
 		t.Errorf("after an on-demand stream is deleted the limits read %s", got)
 	}
 }
@@ -296,8 +296,12 @@ func TestKinesisAnOnDemandStreamIsRecordedAsOne(t *testing.T) {
 // does not exist answered 200 and made a record of one; and nothing held the ShardLimit DescribeLimits
 // reports. UpdateShardCount lists ResourceNotFoundException and LimitExceededException among its errors,
 // CreateStream LimitExceededException: "The requested resource exceeds the maximum number allowed"
-// (Kinesis API reference, as remembered). The message here is this emulator's. Shards of on-demand
-// streams are counted against the limit with the others, which is a reading.
+// (Kinesis API reference). The message here is this emulator's. The limit is the provisioned streams':
+// the Developer Guide's quotas give "the default shard quota" under provisioned mode alone, and under
+// on-demand "There's no upper limit ... Kinesis Data Streams automatically scales the number of shards",
+// so an on-demand stream's shards are neither held to it nor counted in it. That DescribeLimits'
+// OpenShardCount, "The number of open shards", is the count held against ShardLimit, the provisioned
+// streams', is a reading: the operation "Describes the shard limits and usage for the account".
 func TestKinesisAShardCountIsAnExistingStreamsWithinTheLimit(t *testing.T) {
 	try := kinesisTries(t)
 	code := func(op, body string) string { // of try as it is when called: a second service is booted below
@@ -316,10 +320,10 @@ func TestKinesisAShardCountIsAnExistingStreamsWithinTheLimit(t *testing.T) {
 		{"CreateStream", `{"StreamName":"b","ShardCount":201}`, "400 LimitExceededException"},
 		{"CreateStream", `{"StreamName":"b","ShardCount":200}`, "200 <nil>"},
 		{"CreateStream", `{"StreamName":"c"}`, "400 LimitExceededException"},
-		{"CreateStream", `{"StreamName":"c","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "400 LimitExceededException"},
+		{"CreateStream", `{"StreamName":"od","ShardCount":400,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "200 <nil>"}, // on-demand: not the limit's
 		{"UpdateShardCount", `{"StreamName":"a","TargetShardCount":301,"ScalingType":"UNIFORM_SCALING"}`, "400 LimitExceededException"},
 		{"UpdateShardCount", `{"StreamName":"a","TargetShardCount":296,"ScalingType":"UNIFORM_SCALING"}`, "200 <nil>"},
-		{"CreateStream", `{"StreamName":"c","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "200 <nil>"},
+		{"CreateStream", `{"StreamName":"c","ShardCount":4}`, "200 <nil>"},
 		{"CreateStream", `{"StreamName":"a","ShardCount":296}`, "200 <nil>"}, // over its own name: its 296 shards are not counted twice
 		{"CreateStream", `{"StreamName":"a","ShardCount":297}`, "400 LimitExceededException"},
 	} {
@@ -328,7 +332,7 @@ func TestKinesisAShardCountIsAnExistingStreamsWithinTheLimit(t *testing.T) {
 		}
 	}
 	if _, limits := try("DescribeLimits", `{}`); fmt.Sprint(limits["OpenShardCount"], limits["ShardLimit"]) != "500 500" {
-		t.Errorf("the limits read %v; want every one of the 500 shards open", limits)
+		t.Errorf("the limits read %v; want every one of the 500 shards open, the on-demand stream's 400 apart", limits)
 	}
 
 	// The on-demand streams have their own limit, the OnDemandStreamCountLimit DescribeLimits reports.

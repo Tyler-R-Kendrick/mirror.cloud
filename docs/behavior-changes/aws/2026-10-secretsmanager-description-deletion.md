@@ -728,11 +728,16 @@ The oracle is AWS's documentation as it ships in the vendored model
     cleared only when the previous template gave one, a stream goes back to
     one shard only when the previous template gave a `ShardCount`, and a
     rule's targets are removed only when the previous template gave them.
-    Two values are one when they are alike member for member, a number or
-    a Boolean being its text ("the parameter value becomes a string" when a
-    Number parameter is referenced), and a string is never the list, the
-    object or the nothing it reads as: a property whose value is the text
-    `null` is a property given. A rule's `Targets` that is not a list is
+    Two property values are compared as the service is sent them. A number
+    or a Boolean that is a property's whole value is its text ("the
+    parameter value becomes a string" when a Number parameter is
+    referenced), and so is one in a member the resource's create operation
+    types: a table's `ReadCapacityUnits` of 5 and of a `Ref` to a Number
+    parameter are one value, and no update. Inside a document the model
+    does not type, an event pattern or a policy, a scalar keeps its type:
+    `[3]` and `["3"]` are a change, and the rule is updated. A string is
+    never the list, the object or the nothing it reads as: a property whose
+    value is the text `null` is a property given. A rule's `Targets` that is not a list is
     refused before the rule is touched (the wording is this emulator's),
     and the rollback of that update removes no target.
     A resource that is `UPDATE_FAILED` records the names of the properties

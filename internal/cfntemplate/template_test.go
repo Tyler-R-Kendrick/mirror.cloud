@@ -71,3 +71,25 @@ func TestPseudoNotificationARNsWithNoneGiven(t *testing.T) {
 		t.Errorf("AWS::NotificationARNs with none given = %q, want []", got)
 	}
 }
+
+// Same reads two scalars by their text and everything else as it is: a scalar inside a list or an object
+// keeps its type, a string is never what it reads as, and a type no template holds is compared by its JSON.
+func TestSameComparesScalarsByTextAndTheRestExactly(t *testing.T) {
+	for _, c := range []struct {
+		a, b any
+		want bool
+	}{
+		{nil, nil, true}, {"null", nil, false}, {"", nil, false}, {"", "", true}, {0.0, nil, false}, {false, nil, false}, {false, "", false},
+		{3.0, "3", true}, {3, 3.0, true}, {3.0, "3.0", false}, {true, "true", true}, {"True", true, false}, {int64(9007199254740993), "9007199254740993", true},
+		{"[]", []any{}, false}, {"{}", map[string]any{}, false}, {"[1,2]", []any{1.0, 2.0}, false}, {[]any{"1"}, "1", false}, {"a,b", []any{"a", "b"}, false},
+		{[]any{3.0}, []any{"3"}, false}, {[]any{true}, []any{"true"}, false}, {[]any{3.0}, []any{3}, true}, {[]any{1.0, 2.0}, []any{2.0, 1.0}, false},
+		{map[string]any{"a": 1.0, "b": []any{"x"}}, map[string]any{"b": []any{"x"}, "a": 1.0}, true}, {map[string]any{"a": 1.0}, map[string]any{"a": "1"}, false},
+		{map[string]any{"a": nil}, map[string]any{}, false}, {[]any{nil}, []any{""}, false}, {[]any{}, nil, false},
+		{[]string{"a"}, []string{"b"}, false}, {[]string{"a"}, []string{"a"}, true}, {map[string]string{"a": "1"}, map[string]string{"a": "2"}, false},
+		{int32(1), int32(2), false}, {int32(1), int32(1), true}, {float32(1), float32(2), false},
+	} {
+		if got := Same(c.a, c.b); got != c.want || Same(c.b, c.a) != c.want {
+			t.Errorf("Same(%#v, %#v) is %v, and %v the other way; want %v", c.a, c.b, got, Same(c.b, c.a), c.want)
+		}
+	}
+}

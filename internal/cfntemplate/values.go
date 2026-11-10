@@ -34,33 +34,17 @@ func Coerce(v any, want string) (any, bool) {
 // Str is a String property's value: a scalar's text (coerce), nothing for anything else.
 func Str(v any) string { s, _ := Coerce(v, "String"); t, _ := s.(string); return t }
 
-// Same is whether a and b are one property value: both absent, or both given and alike member for member, a
-// number or a Boolean being its text, as Coerce reads one (a Number parameter's Ref is a String). Each is
-// compared inside a list, where a string is quoted: it is its own value, never the list, the object or the
-// nothing it reads as.
+// Same is whether a and b are one property value. Two scalars are one when their text is, as Coerce reads
+// a String (3 and "3": a Number parameter's Ref is a String). Anything else is compared as it is, member
+// for member: a string is quoted, so it is never the list, the object or the nothing it reads as; a scalar
+// inside a list or an object keeps its type ([3] is not ["3"], which a JSON document tells apart); and a
+// value of a type no template holds is its JSON.
 func Same(a, b any) bool {
-	return spi.JSONText([]any{plain(a)}) == spi.JSONText([]any{plain(b)})
-}
-
-// plain is v with every scalar in it as its text.
-func plain(v any) any {
-	switch v := v.(type) {
-	case map[string]any:
-		out := map[string]any{}
-		for k, member := range v {
-			out[k] = plain(member)
-		}
-		return out
-	case []any:
-		out := make([]any, len(v))
-		for i, member := range v {
-			out[i] = plain(member)
-		}
-		return out
-	case nil:
-		return nil
+	x, scalar := Coerce(a, "String")
+	if y, both := Coerce(b, "String"); scalar && both {
+		return x == y
 	}
-	return Str(v)
+	return spi.JSONText([]any{a}) == spi.JSONText([]any{b})
 }
 
 // Text is a value as a String holds it, an output's OutputValue (the model's String) or a ${Name} in a

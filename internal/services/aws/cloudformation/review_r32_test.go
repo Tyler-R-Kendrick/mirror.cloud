@@ -122,16 +122,17 @@ func TestCloudFormationATakeoverMarksWhatTheFailedUpdateChanged(t *testing.T) {
 // A property's value is compared as a value. The comparison was of JSON text with a string's own text
 // standing for it, so the string "null" was the absent property, and a string that reads as a list or an
 // object was that list or object: an update that took such a property away, or gave one, was judged to
-// change nothing. A number and a Boolean are still their text: "the parameter value becomes a string"
-// when a Number parameter is referenced (User Guide, Parameters), so 3 and "3" are one value.
+// change nothing. A number and a Boolean that are a property's whole value are still their text: "the
+// parameter value becomes a string" when a Number parameter is referenced (User Guide, Parameters), so 3
+// and "3" are one value. Inside a list or an object a scalar keeps its type (the sixth review).
 func TestCloudFormationAStringThatReadsAsNothingIsAValue(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
 		a, b any
 		want bool
 	}{{nil, nil, true}, {"null", nil, false}, {nil, "null", false}, {"", nil, false}, {"[1,2]", []any{1.0, 2.0}, false}, {`{"x":1}`, map[string]any{"x": 1.0}, false},
-		{3.0, "3", true}, {true, "true", true}, {"3", "3", true}, {[]any{1.0, 2.0}, []any{2.0, 1.0}, false}, {[]any{1.0, "a"}, []any{"1", "a"}, true},
-		{map[string]any{"x": 1.0, "y": []any{true}}, map[string]any{"y": []any{"true"}, "x": "1"}, true}, {map[string]any{"x": nil}, map[string]any{}, false}} {
+		{3.0, "3", true}, {true, "true", true}, {"3", "3", true}, {[]any{1.0, 2.0}, []any{2.0, 1.0}, false}, {[]any{1.0, "a"}, []any{"1", "a"}, false},
+		{map[string]any{"x": 1.0, "y": []any{true}}, map[string]any{"y": []any{"true"}, "x": "1"}, false}, {map[string]any{"x": 1.0, "y": []any{true}}, map[string]any{"y": []any{true}, "x": 1.0}, true}, {map[string]any{"x": nil}, map[string]any{}, false}} {
 		if got := same(c.a, c.b); got != c.want {
 			t.Errorf("same(%#v, %#v) is %v", c.a, c.b, got)
 		}

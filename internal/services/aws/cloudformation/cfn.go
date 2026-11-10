@@ -966,7 +966,9 @@ func (w prior) differs(property string, now any) bool {
 // it did not (took), whose values a restore carries back.
 func gave(failed, now map[string]any) (names, targets, took *[]string) {
 	changed, lost := []string{}, []string{}
-	for _, property := range slices.Compact(slices.Sorted(slices.Values(slices.Concat(slices.Collect(maps.Keys(failed)), slices.Collect(maps.Keys(now)))))) {
+	properties := slices.Concat(slices.Collect(maps.Keys(failed)), slices.Collect(maps.Keys(now))) // of either, each once, in order
+	slices.Sort(properties)
+	for _, property := range slices.Compact(properties) {
 		if failed[property] == nil && now[property] != nil {
 			lost = append(lost, property)
 		} else if !same(failed[property], now[property]) {

@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ type sqsFixture struct {
 	t     *testing.T
 }
 
-func newSQS(t *testing.T) *sqsFixture {
+func newSQS(t *testing.T, around ...func(*clock.Controllable) spi.Clock) *sqsFixture {
 	t.Helper()
 	svc, err := generated.Model(sqsID)
 	if err != nil {
@@ -45,6 +46,9 @@ func newSQS(t *testing.T) *sqsFixture {
 	clk, ok := deps.Clock.(*clock.Controllable)
 	if !ok {
 		t.Fatalf("want a controllable clock, got %T", deps.Clock)
+	}
+	for _, wrap := range around {
+		deps.Clock = wrap(clk)
 	}
 	pack, err := engine.New(deps, ir, svc)
 	if err != nil {
@@ -321,6 +325,122 @@ func TestLongPollReturnsEarlyWhenTimeAdvances(t *testing.T) {
 				t.Fatal(err)
 			}
 			time.Sleep(20 * time.Millisecond)
+		}
+	}
+}
+
+// steppingClock moves the clock once, by step, inside the nth reading of it
+// after arm: the instant passes between two things the engine does, which is
+// where a wait can lose a deadline. parked is told each time something waits.
+type steppingClock struct {
+	*clock.Controllable
+	mu     sync.Mutex
+	left   int
+	step   time.Duration
+	parked chan struct{}
+}
+
+func (c *steppingClock) arm(n int, step time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.left, c.step = n, step
+}
+
+// spent reports whether the step has been taken.
+func (c *steppingClock) spent() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.left == 0
+}
+
+func (c *steppingClock) Now() time.Time {
+	c.mu.Lock()
+	fire := c.left == 1
+	if c.left > 0 {
+		c.left--
+	}
+	c.mu.Unlock()
+	if fire {
+		_ = c.Controllable.Advance(c.step)
+	}
+	return c.Controllable.Now()
+}
+
+func (c *steppingClock) AfterTime(at time.Time) <-chan time.Time {
+	ch := c.Controllable.AfterTime(at)
+	select {
+	case c.parked <- struct{}{}:
+	default:
+	}
+	return ch
+}
+
+// TestLongPollDoesNotLoseADeadlineThatPassesWhileItLooks: a wait selects, finds
+// nothing, and then works out when to wake. If the clock reaches a record's
+// deadline between those two steps, the deadline is neither selected nor in the
+// future, and a wait that only counted future deadlines parked on its own
+// timeout with the message already visible: late on a real clock, for ever on
+// a controllable one.
+//
+// The interleaving is forced, not raced for: the clock is stepped over the
+// deadline inside the nth reading of it, for every n the poll makes before it
+// parks. Left to the scheduler the window is hit a few times in a thousand.
+func TestLongPollDoesNotLoseADeadlineThatPassesWhileItLooks(t *testing.T) {
+	for n := 1; ; n++ {
+		var clk *steppingClock
+		f := newSQS(t, func(c *clock.Controllable) spi.Clock {
+			clk = &steppingClock{Controllable: c, parked: make(chan struct{}, 1)}
+			return clk
+		})
+		url := f.queue("q", nil)
+		f.must("SendMessage", map[string]any{"QueueUrl": url, "MessageBody": "hello"})
+		if got := f.must("ReceiveMessage", map[string]any{"QueueUrl": url, "VisibilityTimeout": 1})["Messages"].([]any); len(got) != 1 {
+			t.Fatalf("receive got %d messages, want 1", len(got))
+		}
+		if err := f.clock.Advance(999 * time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+
+		clk.arm(n, time.Millisecond)
+		done := make(chan int, 1)
+		go func() {
+			out, err := f.call("ReceiveMessage", map[string]any{"QueueUrl": url, "WaitTimeSeconds": 2})
+			if err != nil {
+				done <- -1
+				return
+			}
+			items, _ := out["Messages"].([]any)
+			done <- len(items)
+		}()
+		hung := time.After(10 * time.Second)
+		last := false
+		for got := false; !got; {
+			select {
+			case messages := <-done:
+				if messages != 1 {
+					t.Fatalf("clock stepped in reading %d: long poll returned %d messages, want 1", n, messages)
+				}
+				got = true
+			case <-clk.parked:
+				// Parked with the step never taken: the poll reads the clock
+				// fewer than n times before it waits, so every reading has
+				// been tried. Take the step from outside, as a test would.
+				if !clk.spent() {
+					last = true
+					clk.arm(0, 0)
+					if err := f.clock.Advance(time.Millisecond); err != nil {
+						t.Fatal(err)
+					}
+				}
+			case <-hung:
+				t.Fatalf("clock stepped over the deadline in reading %d: the long poll never returned", n)
+			}
+		}
+		if last {
+			if n < 3 {
+				t.Fatalf("the poll parked after %d readings of the clock; the step was never inside it", n-1)
+			}
+			return
 		}
 	}
 }

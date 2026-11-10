@@ -1624,12 +1624,14 @@ func TestSQSDelayedMessageExplicitWaitBDD(t *testing.T) {
 	}
 	server := httptest.NewServer(rt.Handler())
 	defer server.Close()
+	// No wall time passes here, so a request that takes seconds is a hang.
+	client := &http.Client{Timeout: 10 * time.Second}
 	call := func(action, payload string) (int, []byte) {
 		request, _ := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(payload))
 		request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00")
 		request.Header.Set("Content-Type", "application/x-amz-json-1.0")
 		request.Header.Set("X-Amz-Target", "AmazonSQS."+action)
-		response, err := http.DefaultClient.Do(request)
+		response, err := client.Do(request)
 		if err != nil {
 			t.Error(err)
 			return 0, nil
@@ -1667,8 +1669,13 @@ func TestSQSDelayedMessageExplicitWaitBDD(t *testing.T) {
 		if err := rt.Deps.Clock.Advance(time.Millisecond); err != nil {
 			t.Fatal(err)
 		}
-		if got := <-polled; got.status != http.StatusOK || !bytes.Contains(got.body, []byte(`"Body":"foobar"`)) {
-			t.Fatalf("delayed receive %d %s", got.status, got.body)
+		select {
+		case got := <-polled:
+			if got.status != http.StatusOK || !bytes.Contains(got.body, []byte(`"Body":"foobar"`)) {
+				t.Fatalf("delayed receive %d %s", got.status, got.body)
+			}
+		case <-time.After(15 * time.Second):
+			t.Fatal("the long poll did not return once the delay had run out")
 		}
 	})
 }

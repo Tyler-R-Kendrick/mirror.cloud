@@ -90,10 +90,13 @@ func TestReadyFileAndCancelCleanup(t *testing.T) {
 	defer cancel()
 
 	p, err := process.Start(ctx, process.Config{
-		Path:         script,
-		Args:         []string{ready},
-		ReadyFile:    ready,
-		ReadyTimeout: 2 * time.Second,
+		Path:      script,
+		Args:      []string{ready},
+		ReadyFile: ready,
+		// Readiness is polled and returns when the file is there; this only
+		// stops a hang. Two seconds was a guess at how fast a shell starts,
+		// which a loaded machine does not honour.
+		ReadyTimeout: 5 * time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)

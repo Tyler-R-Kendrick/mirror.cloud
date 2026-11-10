@@ -182,16 +182,20 @@ operations:
       - { cond: "verb != 'EXPIRE' || size(cmd) > 2", error: BadRequest, message: "EXPIRE needs key and seconds" }
       - { cond: "verb != 'TTL' || size(cmd) > 1", error: BadRequest, message: "TTL needs key" }
       - { cond: "verb != 'SETEX' || size(cmd) > 3", error: BadRequest, message: "SETEX needs key, seconds and value" }
-      - { cond: "!(verb == 'SETEX' || verb == 'EXPIRE') || ttl_is_int", error: BadRequest, message: "ERR value is not an integer or out of range" }
+      # "ERR value is not an int or out of range" is Upstash's wording, quoted
+      # in its REST API documentation for an INCR of a value that is no number
+      # (Redis says "integer"). The invalid-expire-time texts below are Redis
+      # 6.0's; Upstash's own are not documented and have not been read.
+      - { cond: "!(verb == 'SETEX' || verb == 'EXPIRE') || ttl_is_int", error: BadRequest, message: "ERR value is not an int or out of range" }
       - { cond: "verb != 'SETEX' || (ttl > 0 && ttl_fits)", error: BadRequest, message: "ERR invalid expire time in setex" }
       - { cond: "verb != 'EXPIRE' || ttl_fits", error: BadRequest, message: "ERR invalid expire time in expire" }
-      - { cond: "!(verb == 'INCRBY' || verb == 'DECRBY') || by_is_int", error: BadRequest, message: "ERR value is not an integer or out of range" }
+      - { cond: "!(verb == 'INCRBY' || verb == 'DECRBY') || by_is_int", error: BadRequest, message: "ERR value is not an int or out of range" }
       - { cond: "verb != 'DECRBY' || by != -9223372036854775808", error: BadRequest, message: "ERR decrement would overflow" }
       # INCR family on a live non-integer: Redis WRONGTYPE/ERR, not 501.
       - {
           cond: "!(verb == 'INCR' || verb == 'DECR' || verb == 'INCRBY' || verb == 'DECRBY') || base_is_int",
           error: BadRequest,
-          message: "ERR value is not an integer or out of range"
+          message: "ERR value is not an int or out of range"
         }
       - {
           cond: "!(verb == 'INCR' || verb == 'DECR' || verb == 'INCRBY' || verb == 'DECRBY') || !overflows",

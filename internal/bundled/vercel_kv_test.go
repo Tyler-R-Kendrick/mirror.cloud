@@ -193,7 +193,7 @@ func TestVercelKVReadsSecondsAsRedisDoes(t *testing.T) {
 			t.Fatalf("%v: got %q, %v; want %q", argv, got, err, want)
 		}
 	}
-	const notInt = "ERR value is not an integer or out of range"
+	const notInt = "ERR value is not an int or out of range"
 	want("OK", "SET", "k", "v")
 
 	// Not an integer as Redis parses one: a sign it does not take, a leading
@@ -265,7 +265,7 @@ func TestVercelKVAnswersMalformedArguments(t *testing.T) {
 			t.Fatalf("%v: got %q, %v; want %q", argv, got, err, want)
 		}
 	}
-	const notInt = "ERR value is not an integer or out of range"
+	const notInt = "ERR value is not an int or out of range"
 	const notScalar = "redis command arguments must be strings or numbers"
 	want("OK", "SET", "k", "v")
 	want("OK", "SET", "n", "5")
@@ -357,7 +357,7 @@ func TestVercelKVSpellsJSONNumbersInDecimal(t *testing.T) {
 	want("OK", "SET", "f", 1.5)
 	want("1.5", "GET", "f")
 	_, err := cmd("INCRBY", "n", 1.5)
-	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR value is not an integer or out of range" {
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR value is not an int or out of range" {
 		t.Fatalf("INCRBY by a fraction: %#v", err)
 	}
 	// Past 2^53 a JSON number no longer reaches the bundle digit for digit --
@@ -365,7 +365,7 @@ func TestVercelKVSpellsJSONNumbersInDecimal(t *testing.T) {
 	// the float's own spelling and is not read as an integer. A client that
 	// needs such a number sends it as a string, which is exact.
 	_, err = cmd("INCRBY", "n", 1e19)
-	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR value is not an integer or out of range" {
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR value is not an int or out of range" {
 		t.Fatalf("INCRBY by 1e19: %#v", err)
 	}
 	want("-8500000", "INCRBY", "n", "1")

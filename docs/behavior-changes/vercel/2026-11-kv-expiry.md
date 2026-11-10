@@ -30,7 +30,7 @@ that error, as in Redis.
 Redis parses the seconds with `string2ll`: a signed 64-bit integer in its one
 canonical spelling. Answers that change:
 
-- **Not that spelling is `ERR value is not an integer or out of range`.** A
+- **Not that spelling is `ERR value is not an int or out of range`.** A
   leading zero (`007`), a plus sign (`+5`), `-0`, a fraction, a space or a
   word. Before, `007` was accepted as 7 and the rest answered `ERR invalid
   expire time in setex` / `in expire`; a number past 64 bits answered that
@@ -51,7 +51,7 @@ evaluation error before unless said otherwise:
   trailing argument. This message is this emulator's own; no reading of
   Upstash's answer for it has been taken.
 - **Where seconds or an increment belong** (`SETEX`, `EXPIRE`, `INCRBY`,
-  `DECRBY`), it is `ERR value is not an integer or out of range`, as any text
+  `DECRBY`), it is `ERR value is not an int or out of range`, as any text
   that is not an integer is.
 - **`INCRBY` / `DECRBY` read their number as Redis reads an integer**, the
   same spelling as the seconds above. `INCRBY n soon` was accepted and counted
@@ -77,3 +77,14 @@ A fraction keeps its own spelling (`1.5`) and is not an integer. A number past
 2^53 is decoded to a float before the bundle sees it, so its digits are not
 all there to spell; it keeps the float's spelling and is not read as an
 integer. Sent as a string it is exact.
+
+## Error texts
+
+- **`ERR value is not an int or out of range`** is the text for a value that
+  is not an integer. It is Upstash's wording: its REST API documentation
+  quotes it as the answer to an `INCR` of a value that is no number. Redis
+  itself says "integer", which is what this bundle said before.
+- **`ERR invalid expire time in setex` / `in expire`** are unchanged and
+  unestablished. They are Redis 6.0's wording; Redis 6.2 and later say `ERR
+  invalid expire time in 'setex' command`. Upstash's documentation says only
+  that "an error is returned", and no reading of its text has been taken.

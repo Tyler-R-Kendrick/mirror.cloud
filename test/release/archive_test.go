@@ -20,12 +20,21 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/testinputs"
 )
 
 const epoch = 1700000000 // an even second: a zip stores two-second resolution
 
+var packagesOnce sync.Once
+
+// repoRoot returns the repository root and records, for go test's result
+// cache, what the release script and the release builds read there: the
+// script, LICENSE, release.yml and every package ./cmd/mirror compiles. A
+// pull request that changes none of them reads main's cached result.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -34,6 +43,8 @@ func repoRoot(t *testing.T) string {
 	}
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			testinputs.Record(t, dir, "scripts/release-archive.sh", "LICENSE", ".github/workflows/release.yml")
+			packagesOnce.Do(func() { testinputs.Packages(t, dir, "./cmd/mirror") })
 			return dir
 		}
 		parent := filepath.Dir(dir)

@@ -5,13 +5,16 @@ description: >-
 
 inputs:
   cache:
-    description: Name of this job's cache. Jobs that run different builds (coverage, race, fuzz) keep their own.
+    description: >-
+      Name of this job's cache. Jobs that build the same way share one (test:
+      the unit, check, image, generated-models and cloudflare-miniflare jobs);
+      jobs that build differently (coverage, race, fuzz, mutation) keep their own.
     required: true
   save:
     description: Whether this job may write the cache. Main only, whatever this says; one job per cache name, or the first to finish wins.
     default: "true"
   mtimes:
-    description: Restore file mtimes from history (needs fetch-depth 0). Only jobs that use go test's result cache need it.
+    description: Give every tracked file and directory an mtime derived from its git object id, so go test's result cache sees exactly the content changes. Needs no history. Only jobs that use go test's result cache need it.
     default: "false"
 
 runs:

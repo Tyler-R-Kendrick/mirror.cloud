@@ -16,6 +16,7 @@ import (
 )
 
 func init() {
+	spi.ExpireDynamoDBItems = ExpireItems
 	for _, op := range []string{"CreateTable", "DeleteTable", "DescribeTable", "UpdateTable",
 		"PutItem", "GetItem", "DeleteItem", "UpdateItem", "BatchGetItem", "BatchWriteItem",
 		"Query", "Scan", "TransactGetItems", "TransactWriteItems",

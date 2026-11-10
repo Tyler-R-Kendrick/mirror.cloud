@@ -293,3 +293,17 @@ type AllowAllAuthorizer struct{}
 func (AllowAllAuthorizer) Authorize(context.Context, Identity, string, string, string) error {
 	return nil
 }
+
+// A package that is linked into the binary can hand core one behavior the core
+// calls by name. Core never imports a service package: it asks here, and a
+// binary that does not contain the service answers nil. Each is set once, from
+// the service's init.
+var (
+	// NewPolicyAuthorizer evaluates the policies the IAM service stored. Set by
+	// aws/iam; without it a runtime allows every request.
+	NewPolicyAuthorizer func(Store) Authorizer
+
+	// ExpireDynamoDBItems deletes the DynamoDB items whose TTL has passed, for
+	// the edge's /_aws/dynamodb/expired. Set by aws/dynamodb.
+	ExpireDynamoDBItems func(ctx context.Context, deps Deps, id Identity) (int, error)
+)

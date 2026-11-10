@@ -12,7 +12,7 @@ Pick one. All of them are the same program.
 | the 12 services most test suites use ([`profiles/core.txt`](../profiles/core.txt)) | `…_core` archive, or image `mirror:<version>-core` | 8 MB | 21 MB |
 | exactly the services you name | build it yourself, below | smaller still | smaller still |
 
-Sizes are linux/amd64. The core build also starts in under a second and uses about 60 MB of memory, against about 5 seconds and 415 MB for the full one, because it does not decode the models of services you will not call. If you do not know that you need the rest, take core.
+Sizes are linux/amd64. The core build also starts in under a second and uses about 60 MB of memory, against about 3 seconds and 340 MB for the full one, because it does not decode the models of services you will not call. If you do not know that you need the rest, take core.
 
 ### A release archive
 
@@ -180,6 +180,6 @@ services:
 
 `depends_on` here waits for the container to start, not to be ready; a client that retries its first connection, or a wait on `/_mirror/health`, covers the second.
 
-## Packages that are private
+## If a pull is refused
 
-The registry creates a package private. Until a maintainer makes `ghcr.io/tyler-r-kendrick/mirror` public, `docker pull` needs a login (`docker login ghcr.io` with a token that can read packages), and a service container needs `credentials:` in the workflow.
+The packages of `v0.0.1-alpha.1` are public and need no login. If a later package is private, `docker pull` needs `docker login ghcr.io` with a token that can read packages, and a GitHub Actions service container needs `credentials:` in the workflow.

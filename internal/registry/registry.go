@@ -6,6 +6,7 @@ package registry
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -68,6 +69,8 @@ func New(deps spi.Deps, enabled []string, tiers map[string]model.Tier) (Registry
 		}
 	}
 	r := &mem{enabled: map[string]spi.BehaviorPack{}}
+	var todo []Factory
+	seen := map[string]bool{}
 	for _, f := range Factories() {
 		if !want[f.ServiceID] {
 			continue
@@ -76,20 +79,37 @@ func New(deps spi.Deps, enabled []string, tiers map[string]model.Tier) (Registry
 		// during extraction, typically a hand-written pack that outlived its
 		// bundle. Silently keeping the last one would decide that by import
 		// order, so refuse instead.
-		if _, dup := r.enabled[f.ServiceID]; dup {
+		if seen[f.ServiceID] {
 			return nil, fmt.Errorf("registry: %s is registered twice; "+
 				"a service is served either by a pack or by its behavior bundle, not both",
 				f.ServiceID)
 		}
-		if t, ok := tiers[f.ServiceID]; ok && t != f.Tier && t != model.TierProxy {
-			// Factory still used; mock pack is attached separately by the edge.
-			_ = t
+		seen[f.ServiceID] = true
+		todo = append(todo, f)
+	}
+
+	// The factories are independent, and a bundle's takes most of a second to
+	// compile its expressions, so they run on every core. What comes out does not
+	// depend on that: packs are kept in factory order, and the error returned
+	// is the first one in that order, as when they ran one at a time.
+	packs := make([]spi.BehaviorPack, len(todo))
+	errs := make([]error, len(todo))
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, runtime.GOMAXPROCS(0))
+	for i, f := range todo {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func() {
+			defer func() { <-slots; wg.Done() }()
+			packs[i], errs[i] = f.New(deps)
+		}()
+	}
+	wg.Wait()
+	for i, f := range todo {
+		if errs[i] != nil {
+			return nil, errs[i]
 		}
-		p, err := f.New(deps)
-		if err != nil {
-			return nil, err
-		}
-		r.enabled[f.ServiceID] = p
+		r.enabled[f.ServiceID] = packs[i]
 		r.order = append(r.order, f.ServiceID)
 	}
 	return r, nil

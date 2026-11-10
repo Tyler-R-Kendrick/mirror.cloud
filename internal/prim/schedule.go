@@ -3,7 +3,7 @@ package prim
 import (
 	"fmt"
 
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/scheduleexpr"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/scheduleexpr"
 )
 
 // scheduler.expression_error answers why a schedule expression does not

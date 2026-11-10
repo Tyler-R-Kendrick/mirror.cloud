@@ -1,4 +1,4 @@
-package cert
+package snscert
 
 import (
 	"crypto"

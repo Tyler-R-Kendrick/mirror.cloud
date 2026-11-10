@@ -9,6 +9,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/identity"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/racegate"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -20,6 +21,7 @@ import (
 // failure by construction, which is the whole reason bundles are validated
 // against models instead of interpreted hopefully.
 func TestEveryBundleBuilds(t *testing.T) {
+	racegate.SkipUnderRaceOnPullRequest(t, "builds and validates every bundle against its model")
 	ids := allBundles()
 	if len(ids) == 0 {
 		t.Fatal("no bundles; behavior/ should hold at least the extracted services")

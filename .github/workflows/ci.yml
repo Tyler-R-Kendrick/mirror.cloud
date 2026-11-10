@@ -8,11 +8,63 @@ concurrency:
   cancel-in-progress: true
 permissions:
   contents: read
-env:
-  # Pull requests let the suites reuse a result main's cache holds for an
-  # unchanged package; main runs everything. See .github/actions/go.
-  COUNT: ${{ github.ref == 'refs/heads/main' && '-count=1' || '' }}
 jobs:
+  # What this run has to run. On a pull request: the packages the diff can
+  # reach (cmd/affected over the files it changes), the fuzz targets they
+  # hold, the mutants the diff selects, and which path-gated jobs its files
+  # open. On main: everything.
+  # A path cmd/affected cannot place selects everything, and if this job fails,
+  # every job that needs it is skipped, which `test` reads as a failure.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      packages: ${{ steps.affected.outputs.packages }}
+      all: ${{ steps.affected.outputs.all }}
+      race: ${{ steps.affected.outputs.race }}
+      fuzz: ${{ steps.affected.outputs.fuzz }}
+      mutation: ${{ steps.mutation.outputs.shards }}
+      mutation-count: ${{ steps.mutation.outputs.count }}
+      generated-models: ${{ steps.affected.outputs.generated-models }}
+      image: ${{ steps.affected.outputs.image }}
+      sparse: ${{ steps.affected.outputs.sparse }}
+      cloudflare-miniflare: ${{ steps.affected.outputs.cloudflare-miniflare }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The pull request's merge commit and its first parent, the base.
+          fetch-depth: 2
+      - uses: ./.github/actions/go
+        with:
+          cache: test
+          save: "false"
+      - name: what changed
+        if: github.event_name == 'pull_request'
+        run: |
+          # NUL-separated and never renamed: every name exactly as it is, both
+          # sides of a move, and no quoting a name could hide behind.
+          git diff -z --name-only --no-renames HEAD^1 HEAD > "$RUNNER_TEMP/changed.z"
+          git -c core.quotePath=false diff --unified=0 --no-color --no-renames HEAD^1 HEAD > "$RUNNER_TEMP/pr.diff"
+          echo "$(tr -cd '\0' < "$RUNNER_TEMP/changed.z" | wc -c) files changed"
+      - name: affected packages and gates
+        id: affected
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            go run ./cmd/affected -json -z -files "$RUNNER_TEMP/changed.z" > "$RUNNER_TEMP/affected.json"
+          else
+            go run ./cmd/affected -json -all -files /dev/null > "$RUNNER_TEMP/affected.json"
+          fi
+          python3 -I scripts/ci-plan.py "$RUNNER_TEMP/affected.json" >> "$GITHUB_OUTPUT"
+      - name: mutants selected
+        id: mutation
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = pull_request ]; then export MUTATION_DIFF="$RUNNER_TEMP/pr.diff"; fi
+          MUTATION_PLAN="$RUNNER_TEMP/mutation.json" go test ./internal/mutation -run '^TestMutationPlan$' -count=1
+          cat "$RUNNER_TEMP/mutation.json"
+          python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print("shards=" + json.dumps(d["shards"])); print("count=%d" % len(d["shards"]))' "$RUNNER_TEMP/mutation.json" >> "$GITHUB_OUTPUT"
+
   # What used to be one job was 69 minutes of independent checks run one after
   # another, 41 of them native fuzzing. They are separate jobs now, so the run
   # takes as long as the slowest and each failure names its own job.
@@ -28,6 +80,9 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # The Makefile's build, so vet reuses the packages the unit job compiled.
+      CGO_ENABLED: "0"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -36,7 +91,8 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/go
         with:
-          cache: check
+          cache: test
+          save: "false"
       - name: vet
         if: ${{ !cancelled() }}
         run: go vet ./...
@@ -46,16 +102,20 @@ jobs:
       - name: anti-drift ratchet
         if: ${{ !cancelled() }}
         run: set -o pipefail; make ratchet 2>&1 | tee -a ci-run.log
-      - name: extraction equivalence
-        if: ${{ !cancelled() }}
-        # Named separately so it can be a required check: no pack may be
-        # deleted without its recording replaying green against the bundle
-        # that replaced it.
-        run: set -o pipefail; make equivalence 2>&1 | tee -a ci-run.log
       - name: known red triage
         if: ${{ !cancelled() }}
         run: make known-red RUN=ci-run.log
 
+  # Every package of the module, once, with nothing that stops go test caching
+  # the result. main runs it the same way and saves the cache, so a pull request
+  # reports main's result for every package whose inputs it did not change. main
+  # used to pass -count=1 and clear the cache first, which left nothing to read
+  # and made pull requests rerun everything. The uncached run of every test is
+  # now the coverage job, which go test cannot cache, and nightly.yml.
+  #
+  # The snapshot, chaos, BDD, contract and fuzz-seed suites used to be steps of
+  # their own that ran these packages a second time; the table
+  # scripts/test-tiers.py prints at the end says how each of them did.
   unit:
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -65,93 +125,141 @@ jobs:
           fetch-depth: 0
       - uses: ./.github/actions/go
         with:
-          cache: unit
+          cache: test
           mtimes: "true"
-      - name: drop cached results
-        if: ${{ github.ref == 'refs/heads/main' }}
-        run: go clean -testcache
-      - name: unit and coverage floor
+      # The log goes outside the checkout: internal/check walks the tree, and
+      # a file there that grows during the run would make it miss the cache.
+      - name: unit, by tier
+        run: set -o pipefail; make test-unit GOTESTFLAGS=-json 2>&1 | python3 -I scripts/test-tiers.py unit | tee -a "$RUNNER_TEMP/ci-run.log"
+      - name: extraction equivalence
+        if: ${{ !cancelled() }}
+        # Named separately so it can be a required check: no pack may be
+        # deleted without its recording replaying green against the bundle
+        # that replaced it. The step above ran internal/equivalence with the
+        # same flags, so that half reads its result from the cache.
+        run: set -o pipefail; make equivalence GOTESTFLAGS=-json COUNT= 2>&1 | python3 -I scripts/test-tiers.py equivalence | tee -a "$RUNNER_TEMP/ci-run.log"
+      - name: aws sdk round-trip
+        if: ${{ !cancelled() }}
+        # test/sdk/go is its own module, which `go list ./...` never reaches,
+        # so coverage does not rerun it; it runs uncached here (about 15 s).
+        run: set -o pipefail; make test-sdk GOTESTFLAGS=-json COUNT=-count=1 2>&1 | python3 -I scripts/test-tiers.py 'aws sdk round-trip' | tee -a "$RUNNER_TEMP/ci-run.log"
+      - name: known red triage
+        if: ${{ !cancelled() }}
+        run: make known-red RUN="$RUNNER_TEMP/ci-run.log"
+
+  # The 80% floor, per pull request as before, in one -coverpkg=./... pass (see
+  # test-coverage in the Makefile). Kept out of the unit job because a covered
+  # run is never cached: this is the job that runs every test uncached.
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The ratchet's baseline guard in internal/check skips without history.
+          fetch-depth: 0
+      - uses: ./.github/actions/go
+        with:
+          cache: coverage
+      - name: coverage floor
         run: set -o pipefail; make test-coverage 2>&1 | tee -a ci-run.log
       - name: known red triage
         if: ${{ !cancelled() }}
         run: make known-red RUN=ci-run.log
 
-  # The same packages the coverage run covers, each under the name of what it
-  # asserts, so a failure says which kind of contract broke.
-  suites:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: ./.github/actions/go
-        with:
-          cache: suites
-          mtimes: "true"
-      - name: protocol contracts and aws sdk round-trip
-        run: set -o pipefail; make test-contract 2>&1 | tee -a ci-run.log
-      - name: snapshots
-        if: ${{ !cancelled() }}
-        run: set -o pipefail; make test-snapshot 2>&1 | tee -a ci-run.log
-      - name: chaos
-        if: ${{ !cancelled() }}
-        run: set -o pipefail; make test-chaos 2>&1 | tee -a ci-run.log
-      - name: bdd and functional
-        if: ${{ !cancelled() }}
-        run: set -o pipefail; make test-bdd 2>&1 | tee -a ci-run.log
-      - name: fuzz seeds
-        if: ${{ !cancelled() }}
-        run: set -o pipefail; make test-fuzz-seeds 2>&1 | tee -a ci-run.log
-      - name: known red triage
-        if: ${{ !cancelled() }}
-        run: make known-red RUN=ci-run.log
-
-  # 127 native fuzz targets, 10000 executions each. Run in one job they were 41
-  # minutes; the split is by line of scripts/fuzz-targets.txt, so the 68 targets
-  # of one package spread across all six.
+  # The native fuzz targets in scripts/fuzz-targets.txt, 10000 executions each.
+  # Run in one job they were 41 minutes; main splits them six ways by line. A
+  # pull request fuzzes only the targets in the packages its diff can reach, in
+  # as many shards as they need (scripts/ci-plan.py), and one shard that says
+  # so when there are none.
   fuzz:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5]
+        shard: ${{ fromJSON(needs.plan.outputs.fuzz).shards }}
+    env:
+      SHARDS: ${{ fromJSON(needs.plan.outputs.fuzz).count }}
+      TARGETS: ${{ fromJSON(needs.plan.outputs.fuzz).targets }}
     steps:
+      - name: skipped as unaffected
+        if: env.TARGETS == '0'
+        run: echo "no fuzz target is in a package this change can reach"
+      - name: the plan sized this job
+        run: '[[ "$TARGETS" =~ ^[0-9]+$ ]] || { echo "::error::plan gave TARGETS=$TARGETS"; exit 1; }'
       - uses: actions/checkout@v6
+        if: env.TARGETS != '0'
       - uses: ./.github/actions/go
+        if: env.TARGETS != '0'
         with:
           cache: fuzz
           save: ${{ matrix.shard == 0 }}
-      - name: fuzz shard ${{ matrix.shard }} of 6
-        run: scripts/fuzz.sh ${{ matrix.shard }} 6
+      - name: fuzz shard ${{ matrix.shard }}
+        if: env.TARGETS != '0'
+        env:
+          AFFECTED: ${{ needs.plan.outputs.packages }}
+          ALL: ${{ needs.plan.outputs.all }}
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ] && [ "$ALL" != true ]; then
+            printf '%s\n' "$AFFECTED" > "$RUNNER_TEMP/affected.txt"
+            export FUZZ_PKGS="$RUNNER_TEMP/affected.txt"
+          fi
+          scripts/fuzz.sh ${{ matrix.shard }} "$SHARDS"
 
   # The race build of the whole suite was 20 minutes in one job, the longest
-  # there is. Four jobs each take every fourth package.
+  # there is. main and the nightly split every package four ways by the race
+  # times main measured (test/race-costs.json), strict. A pull request runs the
+  # packages its diff can reach, in as many shards as they need, with -short:
+  # internal/racegate skips there the tests that parse large inputs on one
+  # goroutine, where the race detector costs ten to forty times as much and
+  # can find nothing. unit runs those on every pull request without race, and
+  # main runs them under it. A pull request's -short results are not main's, so
+  # they never come from main's race cache. On main every shard reads the race
+  # cache, but only shard 0 saves it; nightly.yml runs all four uncached.
   race:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3]
+        shard: ${{ fromJSON(needs.plan.outputs.race).shards }}
+    env:
+      SHARDS: ${{ fromJSON(needs.plan.outputs.race).count }}
+      PACKAGES: ${{ fromJSON(needs.plan.outputs.race).packages }}
     steps:
+      - name: skipped as unaffected
+        if: env.PACKAGES == '0'
+        run: echo "this change reaches no package"
+      - name: the plan sized this job
+        run: '[[ "$PACKAGES" =~ ^[0-9]+$ ]] || { echo "::error::plan gave PACKAGES=$PACKAGES"; exit 1; }'
       - uses: actions/checkout@v6
+        if: env.PACKAGES != '0'
         with:
           fetch-depth: 0
       - uses: ./.github/actions/go
+        if: env.PACKAGES != '0'
         with:
           cache: race
           mtimes: "true"
           save: ${{ matrix.shard == 0 }}
-      - name: drop cached results
-        if: ${{ github.ref == 'refs/heads/main' }}
-        run: go clean -testcache
-      - name: race detector, shard ${{ matrix.shard }} of 4
-        run: set -o pipefail; make test-race RACE_SHARD=${{ matrix.shard }} RACE_SHARDS=4 2>&1 | tee -a ci-run.log
+      - name: race detector, shard ${{ matrix.shard }}
+        if: env.PACKAGES != '0'
+        env:
+          AFFECTED: ${{ needs.plan.outputs.packages }}
+        run: |
+          set -o pipefail
+          scope=()
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            printf '%s\n' "$AFFECTED" > "$RUNNER_TEMP/affected.txt"
+            scope=("RACE_PKGS=$RUNNER_TEMP/affected.txt" RACE_FLAGS=-short)
+          fi
+          make test-race RACE_SHARD=${{ matrix.shard }} RACE_SHARDS="$SHARDS" "${scope[@]}" 2>&1 | tee -a "$RUNNER_TEMP/ci-run.log"
       - name: known red triage
-        if: ${{ !cancelled() }}
-        run: make known-red RUN=ci-run.log
+        if: ${{ !cancelled() && env.PACKAGES != '0' }}
+        run: make known-red RUN="$RUNNER_TEMP/ci-run.log"
 
   # The Dockerfile and Dockerfile.release are built here and nowhere else before
   # a tag, so a change that breaks either shows up on the pull request and not in
@@ -159,23 +267,43 @@ jobs:
   # with an argument to get wrong. Dockerfile.release: laid out and built the way
   # release.yml does it, for both architectures, from binaries built here in
   # place of the archives, and everything but the push.
+  #
+  # Path-gated: it runs when ./cmd/mirror, a Dockerfile, a profile or the slim
+  # overlay can have changed (cmd/affected's gates), and otherwise passes as
+  # skipped, so `test` still requires it.
   image:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      GATE: ${{ needs.plan.outputs.image }}
     steps:
+      - name: skipped as unaffected
+        if: env.GATE == 'false'
+        run: echo "nothing the image is built from changed"
+      - name: the plan named this gate
+        # Anything but true or false means the plan did not say; run nothing
+        # and fail, rather than read a missing answer as unaffected.
+        if: env.GATE != 'true' && env.GATE != 'false'
+        run: echo "::error::plan gave this gate '$GATE', not true or false" && exit 1
       - uses: actions/checkout@v6
+        if: env.GATE != 'false'
       - uses: ./.github/actions/go
+        if: env.GATE != 'false'
         with:
-          cache: check
+          cache: test
           save: "false"
       - name: build with a service list
+        if: env.GATE != 'false'
         run: docker build --build-arg SERVICES=@profiles/core.txt -t mirror-core .
       - name: it serves exactly that list, from a scratch image
+        if: env.GATE != 'false'
         run: |
           got=$(docker run --rm mirror-core services | cut -f1 | sort | tr '\n' ' ')
           want=$(grep -v '^#' profiles/core.txt | sort | tr '\n' ' ')
           [ "$got" = "$want" ] || { echo "::error::image serves: $got; profile lists: $want"; exit 1; }
       - name: the release image builds for both architectures
+        if: env.GATE != 'false'
         run: |
           set -euo pipefail
           python3 -I scripts/slim-overlay.py "$RUNNER_TEMP/overlay.json" @profiles/core.txt
@@ -194,8 +322,76 @@ jobs:
 
   # Fails unless every job above passed. A job that is skipped or cancelled is
   # not a pass, and `needs` alone would skip this one with it.
+  # What a developer gets from `git clone --filter=blob:none` and scripts/sparse.py:
+  # only the services they name and what those need. Each set is a real partial
+  # checkout, not a copy of this one, and must build, vet and pass every test it
+  # holds, so a service that grew a dependency on another's files, or a test that
+  # assumed the whole catalog, fails here before it fails someone's clone.
+  #
+  # Path-gated like image: it runs when something a service set is made of can have
+  # changed (cmd/affected's gates), and otherwise passes as skipped, so `test`
+  # still requires it.
+  sparse:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GATE: ${{ needs.plan.outputs.sparse }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # A pack and what it reaches, a leaf pack, a pack under another name than
+        # its service's, a bundle with no pack of its own, and a whole provider.
+        services: ["aws.s3", "aws.dynamodb", "gcp.storage", "aws.sqs", "vercel.* aws.s3"]
+    steps:
+      - name: skipped as unaffected
+        if: env.GATE == 'false'
+        run: echo "nothing a sparse checkout is made of changed"
+      - name: the plan named this gate
+        # Anything but true or false means the plan did not say; run nothing
+        # and fail, rather than read a missing answer as unaffected.
+        if: env.GATE != 'true' && env.GATE != 'false'
+        run: echo "::error::plan gave this gate '$GATE', not true or false" && exit 1
+      - uses: actions/checkout@v6
+        if: env.GATE != 'false'
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            .github
+            scripts
+            profiles
+      - uses: ./.github/actions/go
+        if: env.GATE != 'false'
+        with:
+          cache: test
+          save: "false"
+      - name: check out only those services
+        if: env.GATE != 'false'
+        env:
+          SERVICES: ${{ matrix.services }}
+        run: |
+          set -f
+          python3 scripts/sparse.py $SERVICES
+          # Nothing unrelated came along: no set here asks for these, and nothing
+          # a set asks for needs them.
+          for p in internal/generated/aws/ec2 behavior/azure specs/cloudflare; do
+            if [ -e "$p" ]; then echo "::error::$p was checked out for: $SERVICES"; exit 1; fi
+          done
+          du -sh --exclude=.git . ; du -sh .git
+      - name: build and vet
+        if: env.GATE != 'false'
+        run: go build ./... && go vet ./...
+      - name: every test the tree holds
+        if: env.GATE != 'false'
+        run: go test ./...
+      - name: the tests of those services alone
+        if: env.GATE != 'false'
+        env:
+          SERVICES: ${{ matrix.services }}
+        run: set -f; make test-service SERVICES="$SERVICES"
+
   test:
-    needs: [check, unit, suites, fuzz, race, image]
+    needs: [plan, check, unit, coverage, fuzz, race, image, generated-models, cloudflare-miniflare, sparse]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -220,21 +416,42 @@ jobs:
   # TestShardingIsAPartition proves the split loses no mutant, and the harness
   # fails a shard that selects none -- because a shard that runs nothing still
   # reports success.
+  #
+  # main runs every mutant in twelve shards, filled by measured cost
+  # (internal/mutation costs_test.go). A pull request runs the mutants whose
+  # tests are in a package internal/affected selects for its diff, those on or
+  # beside the files it changed, and those whose entries it changed
+  # (select_test.go), in as many shards as their cost needs; with none, the job
+  # is skipped. The report says how many kills were the 30s timeout.
   mutation:
+    needs: plan
+    if: needs.plan.outputs.mutation != '[]'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        shard: ${{ fromJSON(needs.plan.outputs.mutation) }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
       - uses: ./.github/actions/go
         with:
           cache: mutation
           save: ${{ matrix.shard == 0 }}
-      - name: mutation shard ${{ matrix.shard }} of 12
-        run: set -o pipefail; make test-mutation-shard MUTATION_SHARD=${{ matrix.shard }} MUTATION_SHARDS=12 2>&1 | tee -a ci-run.log
+      - name: the diff the mutants are chosen from
+        if: github.event_name == 'pull_request'
+        run: |
+          git -c core.quotePath=false diff --unified=0 --no-color --no-renames HEAD^1 HEAD > "$RUNNER_TEMP/pr.diff"
+          echo "MUTATION_DIFF=$RUNNER_TEMP/pr.diff" >> "$GITHUB_ENV"
+      - name: mutation shard ${{ matrix.shard }} of ${{ needs.plan.outputs.mutation-count }}
+        env:
+          MUTATION_REPORT: ${{ runner.temp }}/mutation.txt
+        run: set -o pipefail; make test-mutation-shard MUTATION_SHARD=${{ matrix.shard }} MUTATION_SHARDS=${{ needs.plan.outputs.mutation-count }} 2>&1 | tee -a ci-run.log
+      - name: timeouts and cost
+        if: ${{ !cancelled() }}
+        run: if [ -f "$RUNNER_TEMP/mutation.txt" ]; then tee -a "$GITHUB_STEP_SUMMARY" < "$RUNNER_TEMP/mutation.txt"; fi
       - name: known red triage
         if: ${{ !cancelled() }}
         run: make known-red RUN=ci-run.log
@@ -242,20 +459,38 @@ jobs:
   # Separate job: syncing specs leaves ~92 MB under specs/, and a populated
   # specs/ changes what the runtime boots from, so it must not share a
   # workspace with the unit tests.
+  #
+  # Path-gated like image: specs/, internal/generated, cmd/mirrorgen and what
+  # it links, and the sync scripts.
   generated-models:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      GATE: ${{ needs.plan.outputs.generated-models }}
     steps:
+      - name: skipped as unaffected
+        if: env.GATE == 'false'
+        run: echo "nothing the models are generated from changed"
+      - name: the plan named this gate
+        # Anything but true or false means the plan did not say; run nothing
+        # and fail, rather than read a missing answer as unaffected.
+        if: env.GATE != 'true' && env.GATE != 'false'
+        run: echo "::error::plan gave this gate '$GATE', not true or false" && exit 1
       - uses: actions/checkout@v6
+        if: env.GATE != 'false'
       - uses: ./.github/actions/go
+        if: env.GATE != 'false'
         with:
-          cache: check
+          cache: test
           save: "false"
       - name: regenerate from the pinned specs
+        if: env.GATE != 'false'
         run: |
           make specs-sync
           make generate
       - name: models reproduce byte-for-byte
+        if: env.GATE != 'false'
         # `make specs-sync` fetches exactly what the lock pins -- the AWS
         # models at the recorded commit, the committed Discovery document --
         # so this is deterministic. A diff means the committed models no
@@ -279,22 +514,41 @@ jobs:
   # ci failure is a job failure, never a silent pass. Ordinary CI performs
   # no other npm install and no session start; real-provider probes remain
   # unrun (no credentials, by policy).
+  #
+  # Path-gated like image: internal/execution, test/behavior/cloudflare and
+  # what they link, and tools/cloudflare-runtime.
   cloudflare-miniflare:
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      GATE: ${{ needs.plan.outputs.cloudflare-miniflare }}
     steps:
+      - name: skipped as unaffected
+        if: env.GATE == 'false'
+        run: echo "nothing the miniflare suite builds or drives changed"
+      - name: the plan named this gate
+        # Anything but true or false means the plan did not say; run nothing
+        # and fail, rather than read a missing answer as unaffected.
+        if: env.GATE != 'true' && env.GATE != 'false'
+        run: echo "::error::plan gave this gate '$GATE', not true or false" && exit 1
       - uses: actions/checkout@v6
+        if: env.GATE != 'false'
       - uses: ./.github/actions/go
+        if: env.GATE != 'false'
         with:
-          cache: check
+          cache: test
           save: "false"
       - uses: actions/setup-node@v4
+        if: env.GATE != 'false'
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: tools/cloudflare-runtime/package-lock.json
       - name: provision pinned miniflare/workerd
+        if: env.GATE != 'false'
         run: npm ci --no-audit --no-fund
         working-directory: tools/cloudflare-runtime
       - name: live miniflare session suite
+        if: env.GATE != 'false'
         run: set -o pipefail; make test-cloudflare-miniflare 2>&1 | tee -a ci-run.log

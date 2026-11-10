@@ -26,8 +26,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/proto/gcp/gcprest"
 	graphqlproto "github.com/tyler-r-kendrick/mirror.cloud/internal/proto/graphql"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/dynamodb"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns/cert"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/snscert"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
@@ -706,7 +705,7 @@ func (s *Server) handleAWSInternal(w http.ResponseWriter, r *http.Request) bool 
 	}
 	if strings.Contains(path, "/_aws/sns/SimpleNotificationService") && strings.HasSuffix(path, ".pem") {
 		w.Header().Set("Content-Type", "application/x-pem-file")
-		_, _ = w.Write(cert.Certificate())
+		_, _ = w.Write(snscert.Certificate())
 		return true
 	}
 	switch {
@@ -737,7 +736,11 @@ func (s *Server) expireDynamoDBItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := s.internalIdentity(r)
-	expired, err := dynamodb.ExpireItems(r.Context(), s.deps, id)
+	if spi.ExpireDynamoDBItems == nil {
+		http.Error(w, "MirrorNotImplemented: aws.dynamodb", http.StatusNotImplemented)
+		return
+	}
+	expired, err := spi.ExpireDynamoDBItems(r.Context(), s.deps, id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

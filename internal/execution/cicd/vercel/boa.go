@@ -65,12 +65,19 @@ func PublishBOA(outputDir string) (*delivery.Site, error) {
 	return delivery.PublishDir(staticDir)
 }
 
-// InvokeFunction runs a bounded Node Serverless Function from
+// InvokeFunction runs a Node Serverless Function from
 // outputDir/functions/<name>.func/ (.vc-config.json runtime nodejs*, handler).
 // Only handlers that export a default (req,res) function — ESM default or
 // module.exports = (req,res)=>… — via a tiny node harness writing the body.
 // path is the request URL passed to the handler (e.g. "/api/hello").
-func InvokeFunction(outputDir, name, path string) ([]byte, error) {
+//
+// How long it may take is the caller's to say, through ctx: the run is stopped
+// when ctx is done and the error is ctx's. No product limit is emulated here
+// (a function's maxDuration is not read), and the function has no deadline of
+// its own: one fixed here also counted Node's start-up, which is the
+// machine's, and on a loaded one stopped a function that had done nothing
+// wrong.
+func InvokeFunction(ctx context.Context, outputDir, name, path string) ([]byte, error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, fmt.Errorf("vercel boa: empty function name")
 	}
@@ -142,15 +149,20 @@ const reqPath = process.env.MIRROR_VC_PATH || '/';
   if (!done) res.end('');
 })().catch((e) => { process.stderr.write(String(e && e.stack || e)); process.exit(1); });
 `
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
 	cmd := exec.CommandContext(ctx, node, "-e", script)
+	// Stopped, Node may leave a child holding its pipes; do not wait on it.
+	cmd.WaitDelay = time.Second
 	cmd.Dir = funcDir
 	cmd.Env = append(process.ScrubEnv(os.Environ()),
 		"MIRROR_VC_HANDLER="+handlerPath,
 		"MIRROR_VC_PATH="+path,
 	)
 	out, err := cmd.Output()
+	if ctx.Err() != nil {
+		// Stopped by the caller: say that, not what stopping it looked like
+		// ("signal: killed").
+		return nil, fmt.Errorf("vercel boa: invoke %s: %w", name, ctx.Err())
+	}
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			return nil, fmt.Errorf("vercel boa: invoke %s: %w\n%s", name, err, ee.Stderr)

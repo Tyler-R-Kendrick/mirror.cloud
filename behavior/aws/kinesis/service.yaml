@@ -134,7 +134,9 @@ operations:
     reads:
       s: { resource: stream }
     require:
-      - { cond: s_found, error: NotFound }
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input ? string(input.StreamName) : '') + ' under account ' + identity.account + ' not found.'"
     output:
       StreamDescription: >
         {'StreamName': s.StreamName,
@@ -150,7 +152,9 @@ operations:
     reads:
       s: { resource: stream }
     require:
-      - { cond: s_found, error: NotFound }
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input ? string(input.StreamName) : '') + ' under account ' + identity.account + ' not found.'"
     output:
       StreamDescriptionSummary: >
         {'StreamName': s.StreamName,
@@ -296,7 +300,15 @@ operations:
           missing: ignore
     output: {}
 
-  DescribeStreamConsumer: {get: {resource: consumer, error: NotFound, key: '''ConsumerARN'' in input && string(input.ConsumerARN) != '''' ? string(input.ConsumerARN) : (''ConsumerArn'' in input && string(input.ConsumerArn) != '''' ? string(input.ConsumerArn) : '''')', wrap: ConsumerDescription}}
+  DescribeStreamConsumer:
+    reads:
+      c: { resource: consumer, key: "'ConsumerARN' in input && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : '')" }
+    require:
+      - cond: c_found
+        error: NotFound
+        message_expr: "'Consumer ' + ('ConsumerARN' in input && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : '')) + ' under account ' + identity.account + ' not found.'"
+    output:
+      ConsumerDescription: c
   # The pack ignores the StreamARN it is asked about: every consumer in the
   # account and region is listed, whichever stream the request names.
   ListStreamConsumers:

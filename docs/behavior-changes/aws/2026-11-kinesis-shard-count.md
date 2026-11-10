@@ -65,6 +65,7 @@
 | `SplitShard` or `MergeShards` on an on-demand stream | The count moved | `ValidationException` |
 | `SplitShard` or `MergeShards` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException`, "Stream <name> under account <id> not found." |
 | `IncreaseStreamRetentionPeriod` or `DecreaseStreamRetentionPeriod` on a stream that does not exist | 200, and a stream record that `DescribeStream` then answered | `ResourceNotFoundException`, with the message; no record |
+| `DescribeStream`, `DescribeStreamSummary`, `PutRecord` or `DescribeStreamConsumer` of what does not exist | `ResourceNotFoundException` with no message | The same, with the message |
 | `UpdateStreamMode` with no `StreamModeDetails`, or a null one | `ValidationException`, "StreamModeDetails is required" | The same (it was `InternalFailure`, 500, between the two changes of this note) |
 | `CreateStream` or `UpdateStreamMode` with a `StreamModeDetails` that is `{}`, holds a null `StreamMode`, or is no structure | Taken as provisioned, or `InternalFailure` | `ValidationException` |
 | `UpdateStreamMode` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException` |
@@ -88,10 +89,11 @@
   and leaves on-demand shards out, is a reading. The messages of both
   `LimitExceededException`s are this emulator's, and so is the limit of 500
   (the guide's defaults are 1,000, 6,000 or 20,000 by Region).
-- The `ResourceNotFoundException` of `UpdateShardCount` and `UpdateStreamMode`
-  carries "Stream <name> under account <id> not found.", the service's
-  message as its clients report it (not printed in the reference; a reading).
-  The other operations' is still empty.
+- Every `ResourceNotFoundException` carries a message. A stream's is "Stream
+  <name> under account <id> not found.", the service's as its clients
+  report it (the reference says only that the message "provides information
+  about the error"; a reading). A consumer's, from `DescribeStreamConsumer`,
+  is worded the same way with its ARN, which is this emulator's choice.
 - `StreamMode` has "Valid Values: `PROVISIONED | ON_DEMAND`" (API reference,
   StreamModeDetails). The message for any other is the form the service's
   request validation gives an enum; that it is these words, and the order of

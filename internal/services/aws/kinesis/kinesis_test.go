@@ -518,7 +518,7 @@ func TestKinesisAStreamModeIsReadWhole(t *testing.T) {
 		{"CreateStream", `{"StreamName":"a","StreamModeDetails":"ON_DEMAND"}`, shape},
 		{"CreateStream", `{"StreamName":"a","StreamModeDetails":{"StreamMode":7}}`, enum("7")},
 		{"CreateStream", `{"StreamName":"a","StreamModeDetails":{"StreamMode":["ON_DEMAND"]}}`, enum(`["ON_DEMAND"]`)},
-		{"DescribeStreamSummary", `{"StreamName":"a"}`, "400 ResourceNotFoundException: "},
+		{"DescribeStreamSummary", `{"StreamName":"a"}`, "400 ResourceNotFoundException: Stream a under account 000000000000 not found."},
 		{"CreateStream", `{"StreamName":"a","StreamModeDetails":null}`, "200"},
 	} {
 		if got := answer(row.op, row.body); got != row.want {
@@ -638,5 +638,43 @@ func TestKinesisARetentionPeriodIsAnExistingStreams(t *testing.T) {
 	answer("CreateStream", `{"StreamName":"s"}`)
 	if got := answer("IncreaseStreamRetentionPeriod", `{"StreamName":"s","RetentionPeriodHours":48}`) + " " + answer("DecreaseStreamRetentionPeriod", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s","RetentionPeriodHours":24}`); got != "200 200" {
 		t.Errorf("the retention period of a stream that exists answered %s", got)
+	}
+}
+
+// Every ResourceNotFoundException names what was not found. The fault "provides information about the
+// error" in its message (API reference, ResourceNotFoundException), and the service's for a stream is
+// "Stream <name> under account <id> not found.", as its clients report it; DescribeStream,
+// DescribeStreamSummary, PutRecord and DescribeStreamConsumer answered the code with no message. That a
+// consumer's is worded as a stream's, with its ARN, is a reading.
+func TestKinesisEveryNotFoundNamesWhatWasNotFound(t *testing.T) {
+	answer := kinesisAnswers(t)
+	const stream = "400 ResourceNotFoundException: Stream ghost under account 000000000000 not found."
+	for op, body := range map[string]string{
+		"DescribeStream":                `{"StreamName":"ghost"}`,
+		"DescribeStreamSummary":         `{"StreamName":"ghost"}`,
+		"PutRecord":                     `{"StreamName":"ghost","PartitionKey":"k","Data":"aGk="}`,
+		"UpdateShardCount":              `{"StreamName":"ghost","TargetShardCount":2,"ScalingType":"UNIFORM_SCALING"}`,
+		"UpdateStreamMode":              `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/ghost","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`,
+		"SplitShard":                    `{"StreamName":"ghost","ShardToSplit":"shardId-000000000000","NewStartingHashKey":"10"}`,
+		"MergeShards":                   `{"StreamName":"ghost","ShardToMerge":"shardId-000000000000","AdjacentShardToMerge":"shardId-000000000001"}`,
+		"IncreaseStreamRetentionPeriod": `{"StreamName":"ghost","RetentionPeriodHours":48}`,
+		"DecreaseStreamRetentionPeriod": `{"StreamName":"ghost","RetentionPeriodHours":24}`,
+	} {
+		if got := answer(op, body); got != stream {
+			t.Errorf("%s of a stream that does not exist answered %s", op, got)
+		}
+	}
+	const arn = "arn:aws:kinesis:us-east-1:000000000000:stream/s/consumer/none:1"
+	if got := answer("DescribeStreamConsumer", `{"ConsumerARN":"`+arn+`"}`); got != "400 ResourceNotFoundException: Consumer "+arn+" under account 000000000000 not found." {
+		t.Errorf("DescribeStreamConsumer of a consumer that does not exist answered %s", got)
+	}
+	// A consumer that exists is still described, as it was.
+	answer("CreateStream", `{"StreamName":"s"}`)
+	try := kinesisTries(t)
+	_, made := try("RegisterStreamConsumer", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s","ConsumerName":"c"}`)
+	consumer, _ := made["Consumer"].(map[string]any)
+	_, described := try("DescribeStreamConsumer", `{"ConsumerARN":"`+fmt.Sprint(consumer["ConsumerARN"])+`"}`)
+	if description, _ := described["ConsumerDescription"].(map[string]any); description["ConsumerName"] != "c" || description["ConsumerARN"] != consumer["ConsumerARN"] {
+		t.Errorf("a consumer that exists is described %v; registered as %v", described, made)
 	}
 }

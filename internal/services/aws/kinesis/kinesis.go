@@ -115,7 +115,7 @@ func (p records) invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 
 func (p records) put(ctx context.Context, req *spi.Request, name string, data any, pk string) (*spi.Response, error) {
 	if _, ok, _ := p.col(req, "kinesis").Get(ctx, name); !ok {
-		return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
+		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Stream " + name + " under account " + req.Identity.Account + " not found.", HTTPStatus: 400, Fault: "client"}
 	}
 	seq := p.nextSeq(ctx, req, name)
 	seqStr := strconv.Itoa(seq)

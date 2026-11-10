@@ -142,8 +142,16 @@ operations:
           : 'default') + '\x00' + ('Name' in input ? string(input.Name) : '')
     require:
       - { cond: "!t_found || size(t.Targets) == 0", error: HasTargets }
+    # The rule's targets record, empty by now, goes with it.
     effects:
       - delete: { resource: rule, missing: ignore }
+      - delete:
+          resource: targets
+          missing: ignore
+          key: >-
+            ('EventBusName' in input && string(input.EventBusName) != ''
+            ? (string(input.EventBusName).contains(':event-bus/') ? split(string(input.EventBusName), ':event-bus/')[1] : string(input.EventBusName))
+            : 'default') + '\x00' + ('Name' in input ? string(input.Name) : '')
     output: {}
 
   ListTargetsByRule:

@@ -13,7 +13,8 @@ import (
 
 // Reader reads templates for one request. Account and Region are the caller's, which the pseudo parameters
 // answer, and NotificationARNs the request's, read whenever AWS::NotificationARNs is (none when nil).
-// Walks counts the resources whose properties an ordering walked, which a test reads.
+// Walks is for tests only: it counts the resources whose properties an ordering walked, which the engine's
+// tests of its cost read through the pack that embeds the Reader. Nothing in the library or the engine reads it.
 type Reader struct {
 	Account, Region  string
 	NotificationARNs func() []any

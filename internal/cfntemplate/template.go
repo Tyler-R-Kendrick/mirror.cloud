@@ -12,6 +12,11 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
+// Parse reads a template body, JSON or YAML, and checks what can be checked of it alone, before any
+// parameter has a value: its Resources (required, 500 at most), each DeletionPolicy and UpdateReplacePolicy,
+// the shape of its Mappings, its conditions (declared, no resource named, no cycle), its Fn::Sub and
+// Fn::Split forms, and that every Ref, Fn::GetAtt and DependsOn names something the template declares.
+// It answers the template, or the service's ValidationError for the first thing wrong.
 func Parse(body string) (map[string]any, error) {
 	m, err := decode(body)
 	if err != nil {
@@ -242,8 +247,8 @@ func made(tpl map[string]any, order []string, refs map[string]string) ([]string,
 // Conditioned is refs, what a Ref reads, with the pseudo parameters of the stack named stack, of id id, but
 // AWS::NoValue, tpl's Mappings (findInMap) and the conditions of tpl that they settle.
 func (p *Reader) Conditioned(tpl map[string]any, refs map[string]string, stack, id string) map[string]string {
-	known := maps.Clone(refs)
-	maps.Copy(known, p.pseudo(stack, id))
+	known := p.pseudo(stack, id)
+	maps.Copy(known, refs) // a stack's record keeps the values its own operation read: its NotificationARNs, not this request's
 	known = conditions(tpl, known)
 	delete(known, "AWS::NoValue") // ref answers it: no record holds the sentinel
 	return known

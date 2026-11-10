@@ -62,6 +62,12 @@ func Encode(v any) error {
 	return invalid("Template error: a value is not known when it is used")
 }
 
+// Resolve is v, a template value of the stack named stack, with its intrinsic functions evaluated against
+// refs: what a Ref reads (parameters, pseudo parameters, conditions as Condition::<name>, and the id of each
+// resource made so far, its attributes as <logical id>.<attribute>). Maps and lists are resolved through,
+// and AWS::NoValue is dropped from them. What cannot be a value yet, or ever, is answered as a mark, which
+// Unknown and Encode tell: an id not known until its resource is made, a Fn::Select of no element, or
+// AWS::NoValue as part of a value.
 func (p *Reader) Resolve(v any, refs map[string]string, stack string) any {
 	switch t := v.(type) {
 	case map[string]any:
@@ -160,10 +166,10 @@ func (p *Reader) Props(tpl map[string]any, logical string, refs map[string]strin
 // ref is what a Ref to name answers, a pseudo parameter's value, a parameter's or a resource's, and
 // whether name is any of them; the name itself when it is none.
 func (p *Reader) ref(name string, refs map[string]string, stack string) (string, bool) {
-	if v, ok := p.pseudo(stack, refs["AWS::StackId"])[name]; ok {
+	if v, ok := refs[name]; ok { // an empty parameter is a value: "" is not its name; a pseudo parameter refs holds is the one its stack read
 		return v, true
 	}
-	if v, ok := refs[name]; ok { // an empty parameter is a value: "" is not its name
+	if v, ok := p.pseudo(stack, refs["AWS::StackId"])[name]; ok {
 		return v, true
 	}
 	return name, false

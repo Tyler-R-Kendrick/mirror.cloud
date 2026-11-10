@@ -22,4 +22,6 @@ straight back.
 The reported times (`InsertionTime`, `ExpirationTime`, `TimeNextVisible`,
 `x-ms-time-next-visible`) are unchanged: whole seconds, as the service reports
 them, with the fraction dropped. A message can therefore outlive its reported
-`ExpirationTime` by under a second, never fall short of its TTL.
+`ExpirationTime` by under a second, never fall short of its TTL. Likewise it
+becomes visible up to under a second after its reported `TimeNextVisible` /
+`x-ms-time-next-visible`, never before.

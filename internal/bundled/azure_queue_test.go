@@ -247,33 +247,99 @@ func TestAzureQueueLifetimesAreNotTruncated(t *testing.T) {
 		t.Fatalf("1s after dequeue: peek %q", got)
 	}
 
-	// A record written before the millisecond deadlines existed (a restored
-	// snapshot) is still served, on its whole-second times.
+	// Records written before the millisecond deadlines existed (a restored
+	// snapshot) are still served, on their whole-second times, by every
+	// operation that reads a deadline.
 	inv("ClearMessages", map[string]any{"queue": "q"})
-	old := inv("PutMessage", map[string]any{"queue": "q", "message": "old", "messagettl": "2"})
+	advance(150 * time.Millisecond) // 4.0 s: an old record's seconds are exact from here
 	col := deps.Store.Scope(id.Account, id.Region).Collection("azqmsg:q")
-	raw, ok, err := col.Get(ctx, fmt.Sprint(old.Output["id"]))
-	if err != nil || !ok {
-		t.Fatalf("stored message: %v %v", ok, err)
+	stored := func(mid string) map[string]any {
+		t.Helper()
+		raw, ok, err := col.Get(ctx, mid)
+		if err != nil || !ok {
+			t.Fatalf("stored message %s: %v %v", mid, ok, err)
+		}
+		var rec map[string]any
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			t.Fatal(err)
+		}
+		return rec
 	}
-	var rec map[string]any
-	if err := json.Unmarshal(raw, &rec); err != nil {
-		t.Fatal(err)
+	putOld := func(in map[string]any) string {
+		t.Helper()
+		in["queue"] = "q"
+		mid := fmt.Sprint(inv("PutMessage", in).Output["id"])
+		rec := stored(mid)
+		if rec["expires_ms"] == nil || rec["visible_ms"] == nil {
+			t.Fatalf("stored message has no millisecond deadlines: %v", rec)
+		}
+		delete(rec, "expires_ms")
+		delete(rec, "visible_ms")
+		raw, _ := json.Marshal(rec)
+		if err := col.Put(ctx, mid, raw); err != nil {
+			t.Fatal(err)
+		}
+		return mid
 	}
-	if rec["expires_ms"] == nil || rec["visible_ms"] == nil {
-		t.Fatalf("stored message has no millisecond deadlines: %s", raw)
+	fault := func(op string, in map[string]any, code string) {
+		t.Helper()
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if f, ok := err.(*spi.Fault); !ok || f.Code != code {
+			t.Fatalf("%s: got %#v, want %s", op, err, code)
+		}
 	}
-	delete(rec, "expires_ms")
-	delete(rec, "visible_ms")
-	raw, _ = json.Marshal(rec)
-	if err := col.Put(ctx, fmt.Sprint(old.Output["id"]), raw); err != nil {
-		t.Fatal(err)
-	}
+	putOld(map[string]any{"message": "old", "messagettl": "2"})
+	putOld(map[string]any{"message": "old-delayed", "visibilitytimeout": "1"})
 	if got := peeked(); got != "old" {
-		t.Fatalf("record without millisecond deadlines: peek %q", got)
+		t.Fatalf("old records: peek %q, want the delayed one hidden", got)
 	}
-	advance(2 * time.Second)
-	if got := peeked(); got != "" {
-		t.Fatalf("record without millisecond deadlines after its TTL: peek %q", got)
+	if got := count(); got != "2" {
+		t.Fatalf("old records: approx count %s, want 2", got)
+	}
+	advance(999 * time.Millisecond)
+	if got := peeked(); got != "old" {
+		t.Fatalf("old records 0.999s on: peek %q", got)
+	}
+	advance(time.Millisecond)
+	if got := peeked(); got != "old,old-delayed" {
+		t.Fatalf("old records 1s on: peek %q, want the delay over", got)
+	}
+	// Dequeued, an old record gets a millisecond deadline like any other, and
+	// its expiry still falls back.
+	dq = inv("GetMessages", map[string]any{"queue": "q", "visibilitytimeout": "1"}).Output["_list"].([]any)
+	if len(dq) != 1 || dq[0].(map[string]any)["message"] != "old" {
+		t.Fatalf("old records: dequeue %#v", dq)
+	}
+	oldID, oldReceipt := fmt.Sprint(dq[0].(map[string]any)["id"]), fmt.Sprint(dq[0].(map[string]any)["pop_receipt"])
+	if rec := stored(oldID); rec["visible_ms"] == nil || rec["expires_ms"] != nil {
+		t.Fatalf("dequeued old record %v", rec)
+	}
+	upd = inv("UpdateMessage", map[string]any{"queue": "q", "messageid": oldID, "popreceipt": oldReceipt, "visibilitytimeout": "1", "message": "old"})
+	advance(999 * time.Millisecond)
+	if got := peeked(); got != "old-delayed" {
+		t.Fatalf("old record 0.999s after its update: peek %q", got)
+	}
+	if got := count(); got != "2" {
+		t.Fatalf("old record before its TTL: approx count %s, want 2", got)
+	}
+	// 6.0 s: the old record's two seconds are spent.
+	advance(time.Millisecond)
+	if got := peeked(); got != "old-delayed" {
+		t.Fatalf("old record after its TTL: peek %q", got)
+	}
+	if got := count(); got != "1" {
+		t.Fatalf("old record after its TTL: approx count %s, want 1", got)
+	}
+	oldReceipt = fmt.Sprint(upd.Output["pop_receipt"])
+	fault("UpdateMessage", map[string]any{"queue": "q", "messageid": oldID, "popreceipt": oldReceipt, "visibilitytimeout": "1", "message": "x"}, "MessageNotFound")
+	fault("DeleteMessage", map[string]any{"queue": "q", "messageid": oldID, "popreceipt": oldReceipt}, "MessageNotFound")
+	// An unexpired old record is deleted on its receipt.
+	dq = inv("GetMessages", map[string]any{"queue": "q"}).Output["_list"].([]any)
+	if len(dq) != 1 || dq[0].(map[string]any)["message"] != "old-delayed" {
+		t.Fatalf("old delayed record: dequeue %#v", dq)
+	}
+	inv("DeleteMessage", map[string]any{"queue": "q", "messageid": fmt.Sprint(dq[0].(map[string]any)["id"]), "popreceipt": fmt.Sprint(dq[0].(map[string]any)["pop_receipt"])})
+	if got := count(); got != "0" {
+		t.Fatalf("after delete: approx count %s, want 0", got)
 	}
 }

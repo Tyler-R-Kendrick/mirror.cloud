@@ -174,3 +174,32 @@ func TestVercelKVExpireNowDeletesTheKey(t *testing.T) {
 	}
 	want("v", "GET", "k")
 }
+
+// A TTL too large to add to the clock is refused as Redis refuses it, not
+// answered with whatever the arithmetic does.
+func TestVercelKVRefusesAnExpiryThatOverflows(t *testing.T) {
+	cmd := kvPack(t)
+	if _, err := cmd("SET", "k", "v"); err != nil {
+		t.Fatal(err)
+	}
+	for _, seconds := range []string{"9223372036854775807", "9223372036854776", "99999999999999999999", "-99999999999999999999"} {
+		for verb, argv := range map[string][]any{"setex": {"SETEX", "k", seconds, "v"}, "expire": {"EXPIRE", "k", seconds}} {
+			_, err := cmd(argv...)
+			if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR invalid expire time in "+verb {
+				t.Fatalf("%v: %#v", argv, err)
+			}
+		}
+	}
+	if got, err := cmd("TTL", "k"); err != nil || got != "-1" {
+		t.Fatalf("after the refusals: TTL %q, %v", got, err)
+	}
+	// The largest TTL taken: about thirty million years.
+	for _, argv := range [][]any{{"SETEX", "big", "999999999999999", "v"}, {"EXPIRE", "k", "999999999999999"}} {
+		if _, err := cmd(argv...); err != nil {
+			t.Fatalf("%v: %v", argv, err)
+		}
+	}
+	if got, err := cmd("TTL", "k"); err != nil || got != "999999999999999" {
+		t.Fatalf("TTL of the largest expiry: %q, %v", got, err)
+	}
+}

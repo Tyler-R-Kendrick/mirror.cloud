@@ -103,11 +103,15 @@ operations:
       next_num: "base_num + delta"
       # SETEX key seconds value -- value is argv[3], not the schema's body[2].
       setex_value: "size(cmd) > 3 ? string(cmd[3]) : ''"
+      # Fifteen digits at most, here and for EXPIRE: more cannot be added to
+      # the clock in milliseconds, and Redis refuses an expiry that overflows
+      # as an invalid expire time. Anything longer reads as 0 / not ok and is
+      # answered by the rules below, where it used to be an evaluation error.
       setex_ttl: >
-        size(cmd) > 2 && string(cmd[2]).matches('^[0-9]+$') ? int(cmd[2]) : 0
+        size(cmd) > 2 && string(cmd[2]).matches('^[0-9]{1,15}$') ? int(cmd[2]) : 0
       # EXPIRE takes zero and negative seconds too: Redis deletes the key
       # there and then, and answers 1 as for any EXPIRE that found it.
-      expire_ok: "size(cmd) > 2 && string(cmd[2]).matches('^-?[0-9]+$')"
+      expire_ok: "size(cmd) > 2 && string(cmd[2]).matches('^-?[0-9]{1,15}$')"
       expire_ttl: "expire_ok ? int(cmd[2]) : 0"
     reads:
       # Read unconditionally rather than per command: GET answers the value,

@@ -739,9 +739,16 @@ The oracle is AWS's documentation as it ships in the vendored model
     does not type, an event pattern or a policy, a scalar keeps its type:
     `[3]` and `["3"]` are a change, and the rule is updated. A string is
     never the list, the object or the nothing it reads as: a property whose
-    value is the text `null` is a property given. A rule's `Targets` that is not a list is
-    refused before the rule is touched (the wording is this emulator's),
-    and the rollback of that update removes no target.
+    value is the text `null` is a property given. A property given as null
+    itself is a property not given, as a `Ref` to `AWS::NoValue` leaves
+    one, for everything that reads what a template gave (the service
+    refuses such a template, "'null' values are not allowed in templates",
+    as users report it; that refusal is not made here). A rule's `Targets`
+    that is not a list is refused as the update plans the rule, before
+    anything is made (the wording is this emulator's), and only for a rule
+    the update makes or changes: a rollback, and a continued one, restore a
+    stored template as it was always read, the rule written and its targets
+    EventBridge's to judge.
     A resource that is `UPDATE_FAILED` records the names of the properties
     the failed update gave another value than its template's (names, never
     values; none is recorded as an empty list), the ids of the targets it

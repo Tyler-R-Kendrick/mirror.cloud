@@ -46,3 +46,10 @@ Update Message).
   message stayed hidden until it expired. A timeout equal to the TTL is taken,
   and a message that never expires (`messagettl=-1`) takes any timeout up to
   seven days.
+- **A query parameter that is not a number is 400
+  `InvalidQueryParameterValue`.** The common REST error codes give it for "an
+  invalid value was specified for one of the query parameters in the request
+  URI". `visibilitytimeout`, `messagettl` and `numofmessages` that are not a
+  decimal integer (`abc`, an empty value, `1.5`) answered 500 before, on Put
+  Message, Get Messages, Peek Messages and Update Message. A number outside
+  the documented range is still `OutOfRangeQueryParameterValue`.

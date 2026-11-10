@@ -915,6 +915,20 @@ func TestBootedServerAzureQueue(t *testing.T) {
 			t.Fatalf("peek after an update with body %s, want %s: %d %s", c.body, c.want, code, raw)
 		}
 	}
+	// A timeout that is not a number is an invalid value, not a server error.
+	for _, c := range []struct{ method, path, body string }{
+		{http.MethodPost, "/q1/messages?visibilitytimeout=abc", envelope("x")},
+		{http.MethodPost, "/q1/messages?messagettl=abc", envelope("x")},
+		{http.MethodGet, "/q1/messages?visibilitytimeout=abc", ""},
+		{http.MethodGet, "/q1/messages?numofmessages=abc", ""},
+		{http.MethodGet, "/q1/messages?peekonly=true&numofmessages=abc", ""},
+		{http.MethodPut, "/q1/messages/" + msgID + "?popreceipt=" + url.QueryEscape(h.Get("x-ms-popreceipt")) + "&visibilitytimeout=abc", envelope("x")},
+	} {
+		code, raw, eh := do(c.method, c.path, c.body, nil)
+		if code != 400 || eh.Get("x-ms-error-code") != "InvalidQueryParameterValue" {
+			t.Fatalf("%s %s: %d %#v %s", c.method, c.path, code, eh, raw)
+		}
+	}
 	code, raw, h = do(http.MethodPost, "/q1/messages?visibilitytimeout=691200", envelope("x"), nil)
 	if code != 400 || h.Get("x-ms-error-code") != "OutOfRangeQueryParameterValue" {
 		t.Fatalf("invalid visibilitytimeout %d %#v %s", code, h, raw)

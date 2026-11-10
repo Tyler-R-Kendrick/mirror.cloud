@@ -553,6 +553,8 @@ func TestAzureQueueMalformedQueryParameters(t *testing.T) {
 	fault(outOfRange, "GetMessages", map[string]any{"numofmessages": "-1"})
 	fault(outOfRange, "UpdateMessage", map[string]any{"messageid": mid, "popreceipt": receipt, "visibilitytimeout": "-1", "message": "x"})
 
+	// Update Message's timeout is required.
+	fault("MissingRequiredQueryParameter", "UpdateMessage", map[string]any{"messageid": mid, "popreceipt": receipt, "message": "x"})
 	// Nothing above touched the message.
 	peek := inv("PeekMessages", map[string]any{})["_list"].([]any)
 	if len(peek) != 1 || peek[0].(map[string]any)["message"] != "m" || fmt.Sprint(peek[0].(map[string]any)["dequeue_count"]) != "0" {

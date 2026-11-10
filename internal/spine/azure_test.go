@@ -915,6 +915,11 @@ func TestBootedServerAzureQueue(t *testing.T) {
 			t.Fatalf("peek after an update with body %s, want %s: %d %s", c.body, c.want, code, raw)
 		}
 	}
+	// Update Message's timeout is required.
+	code, raw, eh := do(http.MethodPut, "/q1/messages/"+msgID+"?popreceipt="+url.QueryEscape(h.Get("x-ms-popreceipt")), envelope("x"), nil)
+	if code != 400 || eh.Get("x-ms-error-code") != "MissingRequiredQueryParameter" {
+		t.Fatalf("update with no visibilitytimeout: %d %#v %s", code, eh, raw)
+	}
 	// A timeout that is not a number is an invalid value, not a server error.
 	for _, c := range []struct{ method, path, body string }{
 		{http.MethodPost, "/q1/messages?visibilitytimeout=abc", envelope("x")},
@@ -924,7 +929,7 @@ func TestBootedServerAzureQueue(t *testing.T) {
 		{http.MethodGet, "/q1/messages?peekonly=true&numofmessages=abc", ""},
 		{http.MethodPut, "/q1/messages/" + msgID + "?popreceipt=" + url.QueryEscape(h.Get("x-ms-popreceipt")) + "&visibilitytimeout=abc", envelope("x")},
 	} {
-		code, raw, eh := do(c.method, c.path, c.body, nil)
+		code, raw, eh = do(c.method, c.path, c.body, nil)
 		if code != 400 || eh.Get("x-ms-error-code") != "InvalidQueryParameterValue" {
 			t.Fatalf("%s %s: %d %#v %s", c.method, c.path, code, eh, raw)
 		}

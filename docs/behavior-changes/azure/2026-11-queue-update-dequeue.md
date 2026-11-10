@@ -53,3 +53,8 @@ Update Message).
   decimal integer (`abc`, an empty value, `1.5`) answered 500 before, on Put
   Message, Get Messages, Peek Messages and Update Message. A number outside
   the documented range is still `OutOfRangeQueryParameterValue`.
+- **Update Message without `visibilitytimeout` is 400
+  `MissingRequiredQueryParameter`.** Update Message marks the parameter
+  Required, and the common REST error codes give that code for "a required
+  query parameter was not specified for this request". Before, it answered
+  `OutOfRangeQueryParameterValue`.

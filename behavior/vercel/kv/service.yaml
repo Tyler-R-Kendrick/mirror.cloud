@@ -38,15 +38,18 @@ resources:
       #
       # And over what the key is: a JSON null, list or object there has no
       # spelling, and the rule that refuses it runs after this.
+      #
+      # A key sent as a JSON number is spelled as `cmd` spells one, so that the
+      # number and its digits are one key.
       derive: >
         ('body' in input && input.body != null && size(input.body) > 1
           && (type(input.body[1]) == string || type(input.body[1]) == int || type(input.body[1]) == uint
               || type(input.body[1]) == double || type(input.body[1]) == bool))
-          ? string(input.body[1]) : ''
+          ? ((type(input.body[1]) == double && input.body[1] >= -9007199254740992.0 && input.body[1] <= 9007199254740992.0 && input.body[1] == double(int(input.body[1]))) ? string(int(input.body[1])) : string(input.body[1])) : ''
     record:
-      value: >
-        ('body' in input && input.body != null && size(input.body) > 2)
-          ? string(input.body[2]) : ''
+      # What a put that names no value stores. SET names its own, read
+      # through `cmd` like every other argument.
+      value: "''"
       # 0 means no TTL. Redis SET clears expiry; SETEX/EXPIRE write a unix
       # deadline here, in milliseconds, and reads treat a past deadline as a
       # miss. Milliseconds because a TTL of N seconds runs N seconds from the
@@ -89,7 +92,15 @@ operations:
       # args_ok is what refuses the command for it.
       raw: "('body' in input && input.body != null) ? input.body : []"
       args_ok: "raw.all(a, type(a) == string || type(a) == int || type(a) == uint || type(a) == double || type(a) == bool)"
-      cmd: "raw.map(a, (type(a) == string || type(a) == int || type(a) == uint || type(a) == double || type(a) == bool) ? string(a) : '')"
+      #
+      # A JSON number is the text Redis would be sent: its decimal digits. A
+      # number arrives here as a float, which prints in exponent form from a
+      # million up ("1e+06"), so a whole number within the range a float holds
+      # exactly (2^53 either way) is spelled as the integer it is. A fraction
+      # keeps the float's spelling. So does a number past 2^53: its digits
+      # were lost when the JSON was decoded, before this bundle saw it, and it
+      # is not read as an integer; a client sends such a number as a string.
+      cmd: "raw.map(a, (type(a) == string || type(a) == int || type(a) == uint || type(a) == double || type(a) == bool) ? ((type(a) == double && a >= -9007199254740992.0 && a <= 9007199254740992.0 && a == double(int(a))) ? string(int(a)) : string(a)) : '')"
       verb: "size(cmd) > 0 ? upper(cmd[0]) : ''"
       # A key past its deadline is a miss for every read path, matching Redis
       # lazy expiry. A deadline of 0 / absent means no TTL. entry is {} on a
@@ -203,6 +214,9 @@ operations:
       - put:
           resource: entry
           when: "verb == 'SET'"
+          record:
+            value: "cmd[2]"
+            expires_ms: "0"
       - put:
           resource: entry
           when: "verb == 'SETEX'"

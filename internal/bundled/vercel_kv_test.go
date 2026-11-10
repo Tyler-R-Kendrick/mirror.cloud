@@ -221,7 +221,7 @@ func TestVercelKVReadsSecondsAsRedisDoes(t *testing.T) {
 	want("9223372036854775", "TTL", "big")
 	want("1", "EXPIRE", "k", "1000000000000000")
 	want("1000000000000000", "TTL", "k")
-	// A number in the JSON array is its decimal spelling.
+	// A JSON number for the seconds is read as the integer it is.
 	want("1", "EXPIRE", "k", 5.0)
 	want("5", "TTL", "k")
 	// The most negative seconds that fit delete the key, as any negative does.
@@ -309,4 +309,64 @@ func TestVercelKVAnswersMalformedArguments(t *testing.T) {
 		refused(notInt, "INCR", "odd")
 		want(stored, "GET", "odd")
 	}
+}
+
+// A client may send an argument as a JSON number: @upstash/redis does, for
+// incrby("n", 1000000) and expire("k", 2592000). Redis receives its decimal
+// text, so a whole number is spelled in digits however large -- not in the
+// exponent form a float prints as from a million up.
+func TestVercelKVSpellsJSONNumbersInDecimal(t *testing.T) {
+	cmd := kvPack(t)
+	want := func(want string, argv ...any) {
+		t.Helper()
+		if got, err := cmd(argv...); err != nil || got != want {
+			t.Fatalf("%v: got %q, %v; want %q", argv, got, err, want)
+		}
+	}
+	// A value.
+	want("OK", "SET", "n", 1000000.0)
+	want("1000000", "GET", "n")
+	want("7", "STRLEN", "n")
+	// An increment and a decrement.
+	want("3000000", "INCRBY", "n", 2000000.0)
+	want("1500000", "DECRBY", "n", 1500000.0)
+	want("1499999", "DECRBY", "n", 1.0)
+	want("-8500001", "INCRBY", "n", -10000000.0)
+	// Seconds.
+	want("1", "EXPIRE", "n", 2592000.0)
+	want("2592000", "TTL", "n")
+	want("OK", "SETEX", "s", 31536000.0, 123456789.0)
+	want("31536000", "TTL", "s")
+	want("123456789", "GET", "s")
+	// Appended text.
+	want("OK", "SET", "a", "x")
+	want("8", "APPEND", "a", 1000000.0)
+	want("x1000000", "GET", "a")
+	// A key: the number and its digits are one key.
+	want("OK", "SET", 5000000.0, "by number")
+	want("by number", "GET", "5000000")
+	want("by number", "GET", 5000000.0)
+	want("1", "DEL", 5000000.0)
+	want("<nil>", "GET", "5000000")
+	// The largest whole number a JSON double holds exactly, and its negative.
+	want("OK", "SET", "big", 9007199254740992.0)
+	want("9007199254740992", "GET", "big")
+	want("OK", "SET", "big", -9007199254740992.0)
+	want("-9007199254740992", "GET", "big")
+	// A fraction is its own spelling, and no integer.
+	want("OK", "SET", "f", 1.5)
+	want("1.5", "GET", "f")
+	_, err := cmd("INCRBY", "n", 1.5)
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR value is not an integer or out of range" {
+		t.Fatalf("INCRBY by a fraction: %#v", err)
+	}
+	// Past 2^53 a JSON number no longer reaches the bundle digit for digit --
+	// it is decoded to a float before the bundle sees it -- so it is left in
+	// the float's own spelling and is not read as an integer. A client that
+	// needs such a number sends it as a string, which is exact.
+	_, err = cmd("INCRBY", "n", 1e19)
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR value is not an integer or out of range" {
+		t.Fatalf("INCRBY by 1e19: %#v", err)
+	}
+	want("-8500000", "INCRBY", "n", "1")
 }

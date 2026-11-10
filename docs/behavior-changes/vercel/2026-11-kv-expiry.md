@@ -61,3 +61,19 @@ evaluation error before unless said otherwise:
 - **Counting past 64 bits** is `ERR increment or decrement would overflow`,
   and `DECRBY` of the most negative number `ERR decrement would overflow`, as
   in Redis.
+
+## An argument sent as a JSON number is its decimal digits
+
+A client may send a command argument as a JSON number, and `@upstash/redis`
+does: `incrby("n", 1000000)`, `expire("k", 2592000)`. Redis is sent the
+number's text. A whole number up to 2^53 either way is now spelled in digits
+wherever it is read: as a key, a value, seconds or an increment.
+
+Before, a number from a million up was spelled in exponent form (`1e+06`):
+`SET n 1000000` then `GET n` answered `1e+06`, `INCRBY n 1000000` added
+nothing, and `EXPIRE k 2592000` answered `ERR invalid expire time in expire`.
+
+A fraction keeps its own spelling (`1.5`) and is not an integer. A number past
+2^53 is decoded to a float before the bundle sees it, so its digits are not
+all there to spell; it keeps the float's spelling and is not read as an
+integer. Sent as a string it is exact.

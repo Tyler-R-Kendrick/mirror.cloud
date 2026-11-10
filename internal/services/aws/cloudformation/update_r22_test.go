@@ -110,11 +110,14 @@ func TestCloudFormationARunningOperationKeepsItsStack(t *testing.T) {
 				}
 			}
 			reached, release := make(chan struct{}), make(chan struct{}) // the operation is held at its topic's write, or delete
-			var first sync.Once
+			var first atomic.Bool
 			if c.op == "DeleteStack" {
 				off := faultStore(h, func(op, col, k string) bool {
 					if op == "delete" && strings.Contains(k, "rv22held") {
-						first.Do(func() { close(reached); <-release })
+						if first.CompareAndSwap(false, true) { // the first only: a second delete of it passes, never waits
+							close(reached)
+							<-release
+						}
 					}
 					return false
 				})

@@ -57,10 +57,13 @@ func TestCloudFormationARetriedDeleteHoldsItsStack(t *testing.T) {
 			_ = h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "sd", []byte(spi.JSONText(legacy)))
 			h.fill("rv23sd", false)
 			reached, release := make(chan struct{}), make(chan struct{})
-			var first sync.Once
+			var first atomic.Bool
 			off := faultStore(h, func(op, col, k string) bool { // holds the retry at its bucket's delete
 				if op == "delete" && strings.Contains(k, "rv23sd") {
-					first.Do(func() { close(reached); <-release })
+					if first.CompareAndSwap(false, true) { // the first only: a second delete of it passes, never waits
+						close(reached)
+						<-release
+					}
 				}
 				return false
 			})

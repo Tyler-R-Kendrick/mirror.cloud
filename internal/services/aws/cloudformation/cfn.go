@@ -745,11 +745,7 @@ func (p *Pack) settle(ctx context.Context, req *spi.Request, seen, st stack, set
 // or by a process that ended: no operation will settle it, so the next one on the stack does (orphan).
 var ops sync.Map
 var opSeq, opKept atomic.Int64 // numbers them, and counts what they keep
-var opNonce = func() string {  // this process's: an id in a record another process left, or a restored one, is never one of ours
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
-}()
+var opNonce = rand.Text()      // this process's: an id in a record another process left, or a restored one, is never one of ours
 
 // hold registers a running operation, and answers its id, after a "/", and its release, which the
 // operation defers: given the record a failed operation could not settle, the release keeps it (of the
@@ -758,7 +754,8 @@ func (p *Pack) hold() (string, func(*stack)) {
 	id := opNonce + "-" + strconv.FormatInt(opSeq.Add(1), 10)
 	ops.Store(id, nil)
 	return "/" + id, func(left *stack) {
-		if ops.Delete(id); left != nil && opKept.Add(1) <= 1024 {
+		if ops.Delete(id); left != nil && opKept.Load() < 1024 { // counted as it is kept, and as it is written
+			opKept.Add(1)
 			ops.Store(id, *left)
 		}
 	}

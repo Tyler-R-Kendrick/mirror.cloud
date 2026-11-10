@@ -694,7 +694,9 @@ The oracle is AWS's documentation as it ships in the vendored model
     status codes, `UPDATE_COMPLETE_CLEANUP_IN_PROGRESS`). A failure of the
     engine's own in the cleanup abandons what it had not yet deleted, as a
     delete that fails does: the stack stays `UPDATE_COMPLETE` with the new
-    template, and each such resource is a `DELETE_FAILED` event. Before, such
+    template, and each such resource is a `DELETE_FAILED` event; the stack's
+    reason says the cleanup ended before it deleted every old resource, and
+    nothing of the failure. Before, such
     a failure ran the update's rollback over the finished stack: it deleted
     what the update had made and restored the old properties under an
     `UPDATE_COMPLETE` record, and after a replacement neither generation was
@@ -710,9 +712,18 @@ The oracle is AWS's documentation as it ships in the vendored model
     bucket's tags, public access block, ownership controls and stored
     configurations are deleted. A bucket's versioning is suspended, since
     "Once you version-enable a bucket, it can never return to an unversioned
-    state. You can, however, suspend versioning on that bucket". A rollback
-    clears what the failed update gave; `ContinueUpdateRollback`, which does
-    not know what that was, clears every such property the template lacks.
+    state. You can, however, suspend versioning on that bucket". Only what
+    the template the resource is updated from gave is cleared: an update
+    clears what the previous template gave and the new one does not, and a
+    rollback what the failed update gave and the previous template does not.
+    What was set on a resource outside its template stays, through an
+    update of another property, an update that changes nothing and a
+    rollback; a resource declared with no `Properties` was given nothing.
+    `ContinueUpdateRollback` is the one exception: what the failed update
+    gave is not recorded, so it clears every such property the template
+    lacks, one set outside the template included, and suspends a bucket's
+    versioning only where it is on. A table's `DeletionProtectionEnabled` is
+    not among these: the table service here keeps it false.
     One property cannot be cleared, in the service as here: a secret's
     value. Secrets Manager has no call that takes a value away (a new value
     is a new version, and `AWSCURRENT` is moved, never removed), so a secret
@@ -752,6 +763,17 @@ The oracle is AWS's documentation as it ships in the vendored model
     to resources with a deletion policy attribute of retain"), and
     `RetainExceptOnCreate`'s is deleted. Before, a rollback that was taken
     over listed both for `ContinueUpdateRollback`, which deleted both.
+  - A rollback that ends before it has put everything back leaves each
+    resource the update changed in place and it had not restored
+    `UPDATE_FAILED` on the record the next operation settles, so
+    `ContinueUpdateRollback` restores it. Before, such a resource was left
+    as it was listed, `ContinueUpdateRollback` answered
+    `UPDATE_ROLLBACK_COMPLETE`, and the resource kept the failed update's
+    values under the previous template.
+  - A change set whose template gives a logical id another type is `FAILED`
+    when it is made, with the refusal as its `StatusReason`, as every other
+    check its execution would make. Before, it was `AVAILABLE` and refused
+    only when it was executed.
   - A rollback that cannot delete what the failed update made leaves the
     stack `UPDATE_ROLLBACK_FAILED` with the resource listed, so that
     `ContinueUpdateRollback` and `DeleteStack` retry it and no other stack

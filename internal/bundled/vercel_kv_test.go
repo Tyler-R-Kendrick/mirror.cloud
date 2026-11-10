@@ -119,3 +119,58 @@ func TestVercelKVExpiryIsNotTruncated(t *testing.T) {
 	want("old entry without a TTL: GET", cmd("GET", "forever"), "v")
 	want("old entry without a TTL: TTL", cmd("TTL", "forever"), "-1")
 }
+
+func kvPack(t *testing.T) func(argv ...any) (string, error) {
+	t.Helper()
+	p, err := bundled.New("vercel.kv", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	return func(argv ...any) (string, error) {
+		res, err := p.Invoke(context.Background(), &spi.Request{ServiceID: "vercel.kv", Operation: "Command", Identity: id, Input: map[string]any{"body": argv}})
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprint(res.Output["result"]), nil
+	}
+}
+
+// Redis deletes a key whose EXPIRE is zero or in the past and answers 1, as
+// for any EXPIRE that found the key.
+func TestVercelKVExpireNowDeletesTheKey(t *testing.T) {
+	cmd := kvPack(t)
+	want := func(want string, argv ...any) {
+		t.Helper()
+		if got, err := cmd(argv...); err != nil || got != want {
+			t.Fatalf("%v: got %q, %v; want %q", argv, got, err, want)
+		}
+	}
+	for _, seconds := range []string{"0", "-1", "-100"} {
+		want("OK", "SET", "k", "v")
+		want("1", "EXPIRE", "k", seconds)
+		want("<nil>", "GET", "k")
+		want("0", "EXISTS", "k")
+		want("-2", "TTL", "k")
+		// Nothing to expire: 0, as for any EXPIRE of a missing key.
+		want("0", "EXPIRE", "k", seconds)
+	}
+	// A key with a TTL goes the same way.
+	want("OK", "SETEX", "k", "100", "v")
+	want("1", "EXPIRE", "k", "0")
+	want("<nil>", "GET", "k")
+	// SETEX still refuses a TTL that is not positive, as Redis does.
+	for _, seconds := range []string{"0", "-1"} {
+		_, err := cmd("SETEX", "k", seconds, "v")
+		if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR invalid expire time in setex" {
+			t.Fatalf("SETEX k %s v: %#v", seconds, err)
+		}
+	}
+	// And EXPIRE still refuses what is not a number of seconds.
+	want("OK", "SET", "k", "v")
+	_, err := cmd("EXPIRE", "k", "soon")
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 {
+		t.Fatalf("EXPIRE k soon: %#v", err)
+	}
+	want("v", "GET", "k")
+}

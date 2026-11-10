@@ -105,8 +105,10 @@ operations:
       setex_value: "size(cmd) > 3 ? string(cmd[3]) : ''"
       setex_ttl: >
         size(cmd) > 2 && string(cmd[2]).matches('^[0-9]+$') ? int(cmd[2]) : 0
-      expire_ttl: >
-        size(cmd) > 2 && string(cmd[2]).matches('^[0-9]+$') ? int(cmd[2]) : 0
+      # EXPIRE takes zero and negative seconds too: Redis deletes the key
+      # there and then, and answers 1 as for any EXPIRE that found it.
+      expire_ok: "size(cmd) > 2 && string(cmd[2]).matches('^-?[0-9]+$')"
+      expire_ttl: "expire_ok ? int(cmd[2]) : 0"
     reads:
       # Read unconditionally rather than per command: GET answers the value,
       # and DEL answers how many keys it removed, which is whether this read
@@ -129,7 +131,7 @@ operations:
       - { cond: "verb != 'TTL' || size(cmd) > 1", error: BadRequest, message: "TTL needs key" }
       - { cond: "verb != 'SETEX' || size(cmd) > 3", error: BadRequest, message: "SETEX needs key, seconds and value" }
       - { cond: "verb != 'SETEX' || setex_ttl > 0", error: BadRequest, message: "ERR invalid expire time in setex" }
-      - { cond: "verb != 'EXPIRE' || expire_ttl > 0", error: BadRequest, message: "ERR invalid expire time in expire" }
+      - { cond: "verb != 'EXPIRE' || expire_ok", error: BadRequest, message: "ERR invalid expire time in expire" }
       # INCR family on a live non-integer: Redis WRONGTYPE/ERR, not 501.
       - {
           cond: "!(verb == 'INCR' || verb == 'DECR' || verb == 'INCRBY' || verb == 'DECRBY') || !alive || string(entry.value).matches('^-?[0-9]+$')",
@@ -169,13 +171,13 @@ operations:
             expires_ms: "alive ? deadline_ms : 0"
       - put:
           resource: entry
-          when: "verb == 'EXPIRE' && alive"
+          when: "verb == 'EXPIRE' && alive && expire_ttl > 0"
           record:
             value: "string(entry.value)"
             expires_ms: "now_ms + 1000 * expire_ttl"
       - delete:
           resource: entry
-          when: "verb == 'DEL'"
+          when: "verb == 'DEL' || (verb == 'EXPIRE' && alive && expire_ttl <= 0)"
           # A DEL of a key that is not there is not an error; it answers 0.
           missing: ignore
     output:

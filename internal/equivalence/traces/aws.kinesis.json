@@ -250,7 +250,8 @@
       "operation": "UpdateShardCount",
       "input": {"StreamName": "s", "TargetShardCount": 2, "ScalingType": "UNIFORM_SCALING"},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {"StreamName": "s", "CurrentShardCount": 2, "TargetShardCount": 2}
+      "recut": "The pack answered the new count as the current one. UpdateShardCount's response is the count before and after: 'CurrentShardCount: The current number of shards. TargetShardCount: The updated number of shards.' (Kinesis API reference, UpdateShardCount; the wording is quoted from memory of the reference, the model file is not in the checkout). The stream had one shard and was asked for two.",
+      "output": {"StreamName": "s", "CurrentShardCount": 1, "TargetShardCount": 2}
     },
     {
       "operation": "SplitShard",
@@ -282,7 +283,8 @@
       "operation": "DescribeLimits",
       "input": {},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {"ShardLimit": 500, "OpenShardCount": 1, "OnDemandStreamCount": 0, "OnDemandStreamCountLimit": 50}
+      "recut": "The pack answered a constant 1. DescribeLimits' OpenShardCount is 'The number of open shards' the account has (Kinesis API reference, DescribeLimits; quoted from memory): the two streams here hold two shards each, one created with ShardCount 2, the other moved to 2 by UpdateShardCount, a split and a merge.",
+      "output": {"ShardLimit": 500, "OpenShardCount": 4, "OnDemandStreamCount": 0, "OnDemandStreamCountLimit": 50}
     },
     {
       "operation": "DescribeAccountSettings",

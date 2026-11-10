@@ -68,6 +68,7 @@ operations:
           resource: stream
           record:
             Seq: 0
+            OpenShardCount: "'ShardCount' in input && int(input.ShardCount) > 0 ? int(input.ShardCount) : 1"
     output: {}
 
   # A recreated stream starts again at sequence 0, so its predecessor's
@@ -102,8 +103,8 @@ operations:
                      'HashKeyRange': {'StartingHashKey': '0', 'EndingHashKey': '340282366920938463463374607431768211455'},
                      'SequenceNumberRange': {'StartingSequenceNumber': '0'}}]}
 
-  # OpenShardCount is a constant 1 however many splits, merges or
-  # UpdateShardCount calls have run.
+  # OpenShardCount is the counter on the stream record: what CreateStream was
+  # given, moved by every split, merge and UpdateShardCount since.
   DescribeStreamSummary:
     reads:
       s: { resource: stream }
@@ -114,7 +115,7 @@ operations:
         {'StreamName': s.StreamName,
          'StreamARN': 'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + string(s.StreamName),
          'StreamStatus': 'ACTIVE',
-         'OpenShardCount': 1}
+         'OpenShardCount': 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1}
 
   ListShards:
     output:
@@ -316,7 +317,7 @@ operations:
             OpenShardCount: "int(input.TargetShardCount) > 0 ? int(input.TargetShardCount) : cur"
     output:
       StreamName: rec.StreamName
-      CurrentShardCount: rec.OpenShardCount
+      CurrentShardCount: cur
       TargetShardCount: rec.OpenShardCount
 
   # The pack reads EncryptionType from the operation name, not the request:
@@ -341,9 +342,13 @@ operations:
     output: {}
 
   DescribeLimits:
+    select:
+      binding: streams
+      resource: stream
+      filter: "true"
     output:
       ShardLimit: "500"
-      OpenShardCount: "1"
+      OpenShardCount: "sum(streams.map(s, 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1))"
       OnDemandStreamCount: "0"
       OnDemandStreamCountLimit: "50"
 
@@ -403,9 +408,10 @@ quirks:
   - operation: CreateStream
     note: >
       An absent StreamName faults ValidationException from the engine's model
-      check, the same code the pack answered. ShardCount, StreamModeDetails,
-      Tags, MaxRecordSizeInKiB and WarmThroughputMiBps are accepted and
-      discarded. Creating over an existing name replaces the record wholesale,
+      check, the same code the pack answered. ShardCount is recorded as the
+      stream's open shard count, one when it is absent or not positive.
+      StreamModeDetails, Tags, MaxRecordSizeInKiB and WarmThroughputMiBps are
+      accepted and discarded. Creating over an existing name replaces the record wholesale,
       resetting the record-plane sequence counter to 0.
   - operation: DescribeStream
     note: >
@@ -413,9 +419,13 @@ quirks:
       DescribeStreamSummary -- the pack's main switch resolves StreamName
       alone, so a describe addressed by ARN alone faults ResourceNotFound.
       The description is built from the name: the stored record's status,
-      retention, encryption and shard count never appear, HasMoreShards is
-      never set, and there is always exactly one shard with a full-range hash
-      key. DescribeStreamSummary's OpenShardCount is a constant 1.
+      retention and encryption never appear, HasMoreShards is never set, and
+      DescribeStream and ListShards always list exactly one shard with a
+      full-range hash key, whatever the count: shards are not records here,
+      and the record plane writes to that one shard. The count itself is
+      answered from the record by DescribeStreamSummary's OpenShardCount,
+      UpdateShardCount and DescribeLimits, which sums it over the caller's
+      streams.
   - operation: AddTagsToStream
     note: >
       One stream has two tag sets: the stream-named operations key the tag

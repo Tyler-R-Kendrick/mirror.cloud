@@ -289,8 +289,24 @@ func TestCloudFormationEveryKindKeepsWhatWasSetOutsideItsTemplate(t *testing.T) 
 				}
 			},
 			func(h *stacks, id string) string {
+				return fmt.Sprint("shards=", asMap(rv31Get(h, "aws.kinesis", "DescribeStreamSummary", map[string]any{"StreamName": id})["StreamDescriptionSummary"])["OpenShardCount"])
+			}},
+		// The count the template gives is the count the stream is made with, and
+		// stays the template's through every step; the encryption is set outside.
+		{"stream-with-count",
+			map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": map[string]any{"ShardCount": 3, "RetentionPeriodHours": 24}},
+			map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": map[string]any{"ShardCount": 3, "RetentionPeriodHours": 48}},
+			func(t *testing.T, h *stacks, id string) {
+				if got := asMap(rv31Get(h, "aws.kinesis", "DescribeStreamSummary", map[string]any{"StreamName": id})["StreamDescriptionSummary"])["OpenShardCount"]; fmt.Sprint(got) != "3" {
+					t.Errorf("a stream whose template gives three shards was made with %v", got)
+				}
+				if _, err := h.service("aws.kinesis", "StartStreamEncryption", map[string]any{"StreamName": id, "EncryptionType": "KMS", "KeyId": "alias/outside"}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			func(h *stacks, id string) string {
 				raw, _, _ := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("kinesis").Get(h.ctx, id)
-				return fmt.Sprint("shards=", max(spi.Integer(spi.JSONObject(raw)["OpenShardCount"]), 1))
+				return fmt.Sprint("shards=", asMap(rv31Get(h, "aws.kinesis", "DescribeStreamSummary", map[string]any{"StreamName": id})["StreamDescriptionSummary"])["OpenShardCount"], " key=", spi.JSONObject(raw)["KeyId"])
 			}},
 		{"rule",
 			map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"ScheduleExpression": "rate(5 minutes)"}},

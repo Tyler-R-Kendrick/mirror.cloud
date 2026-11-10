@@ -157,3 +157,75 @@ func TestKinesisPublishesRecordsAndStartsAtTimestamp(t *testing.T) {
 		t.Fatalf("recreated stream answered %#v", stale)
 	}
 }
+
+// A stream has the shards it was created with. CreateStream used to accept a
+// ShardCount and drop it, so a stream made with three shards said it had
+// one, and UpdateShardCount answered the new count as the current one.
+//
+// CreateStream: "ShardCount: The number of shards that the stream will use."
+// DescribeStreamSummary: "OpenShardCount: The number of open shards in the
+// stream." UpdateShardCount: "CurrentShardCount: The current number of
+// shards. TargetShardCount: The updated number of shards." DescribeLimits:
+// "OpenShardCount: The number of open shards." (Kinesis API reference.)
+func TestKinesisAStreamHasTheShardsItWasCreatedWith(t *testing.T) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.kinesis"}
+	cfg.Seed = "kin-shards"
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	defer ts.Close()
+	call := func(op, body string) map[string]any {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+		req.Header.Set("X-Amz-Target", "Kinesis_20131202."+op)
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/kinesis/aws4_request, SignedHeaders=host, Signature=00")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		raw, _ := io.ReadAll(res.Body)
+		if res.StatusCode >= 300 {
+			t.Fatalf("%s answered %d %s", op, res.StatusCode, raw)
+		}
+		out := map[string]any{}
+		_ = json.Unmarshal(raw, &out)
+		return out
+	}
+	open := func(stream string) any {
+		t.Helper()
+		summary, _ := call("DescribeStreamSummary", `{"StreamName":"`+stream+`"}`)["StreamDescriptionSummary"].(map[string]any)
+		return summary["OpenShardCount"]
+	}
+	if got := call("DescribeLimits", `{}`)["OpenShardCount"]; got != float64(0) {
+		t.Errorf("an account with no stream reports %v open shards", got)
+	}
+	call("CreateStream", `{"StreamName":"three","ShardCount":3}`)
+	call("CreateStream", `{"StreamName":"plain"}`)
+	if got := open("three"); got != float64(3) {
+		t.Errorf("a stream created with three shards reports %v open", got)
+	}
+	if got := open("plain"); got != float64(1) {
+		t.Errorf("a stream created with no count reports %v open; want the one shard it has", got)
+	}
+	if got := call("DescribeLimits", `{}`)["OpenShardCount"]; got != float64(4) {
+		t.Errorf("the account reports %v open shards; want the four its two streams have", got)
+	}
+	moved := call("UpdateShardCount", `{"StreamName":"three","TargetShardCount":5,"ScalingType":"UNIFORM_SCALING"}`)
+	if moved["CurrentShardCount"] != float64(3) || moved["TargetShardCount"] != float64(5) {
+		t.Errorf("UpdateShardCount answered %v; want the count it found, 3, and the count asked for, 5", moved)
+	}
+	call("SplitShard", `{"StreamName":"three","ShardToSplit":"shardId-000000000000","NewStartingHashKey":"1"}`)
+	if got := open("three"); got != float64(6) {
+		t.Errorf("after an update to five and a split the stream reports %v open", got)
+	}
+	// Creating over the name replaces the stream, count included.
+	call("CreateStream", `{"StreamName":"three","ShardCount":2}`)
+	if got := open("three"); got != float64(2) {
+		t.Errorf("a stream created again with two shards reports %v open", got)
+	}
+}

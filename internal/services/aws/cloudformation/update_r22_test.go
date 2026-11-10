@@ -63,7 +63,7 @@ func TestCloudFormationTakesOverAStackItsOperationLeft(t *testing.T) {
 		if st, reason, _ := h.status(name); st != c.settled || !strings.Contains(reason, "ended before it settled") || h.record(name)["Op"] != nil {
 			t.Errorf("%s: the stack is %s (%q), held by %v; want %s, with why, held by none", name, st, reason, h.record(name)["Op"], c.settled)
 		}
-		refused := c.settled == "ROLLBACK_FAILED" || c.settled == "DELETE_FAILED" // as UpdateStack takes each state
+		refused := strings.HasSuffix(c.settled, "_FAILED") // as UpdateStack takes each state: UPDATE_ROLLBACK_FAILED takes a delete, no update
 		_, err := h.invoke("UpdateStack", map[string]any{"StackName": name, "TemplateBody": rv19Body(map[string]any{"Resources": map[string]any{"K": rv22Topic, "N": rv22Topic}})})
 		if refused != (err != nil && strings.Contains(err.Error(), "is in "+c.settled+" state")) || !refused && err != nil {
 			t.Errorf("%s: UpdateStack answered %v; want it refused: %v", name, err, refused)

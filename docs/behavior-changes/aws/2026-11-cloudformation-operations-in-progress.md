@@ -39,6 +39,15 @@
   process holds in memory. A record another process left is therefore taken
   over at once: the emulator is one process, and a second one sharing its
   store would have its running operations taken over.
-- A create whose process ended lists none of what it made: the record is
-  written when the create ends. Within one process, what a failed operation
-  could not write is kept and written by the operation that takes over.
+- A create or an update whose process ended lists none of what it made: the
+  record is written when the operation ends. Within one process, what a
+  failed operation could not write is kept in memory (for the last thousand
+  or so such operations) until the operation that takes over has written it.
+- An update's record from before operations carried ids is settled
+  `UPDATE_ROLLBACK_FAILED`, which takes `DeleteStack` and refuses
+  `UpdateStack`, as the service does; this branch has no
+  `ContinueUpdateRollback`.
+- An operation's id is this process's own (a random value and a counter),
+  never the emulator's seed: an id in a restored snapshot is not a running
+  operation's. It is on the stored record only while the stack is in
+  progress, and in no API answer.

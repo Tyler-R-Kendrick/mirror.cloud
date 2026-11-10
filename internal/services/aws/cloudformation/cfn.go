@@ -4,6 +4,7 @@ package cloudformation
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -65,7 +66,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (out *spi.Response,
 		}
 	}()
 	if slices.Contains(natives[:5], req.Operation) { // each takes over a stack its last operation left in progress
-		_ = recovered(func() error { p.orphan(ctx, req, name); return nil })
+		p.orphan(ctx, req, name)
 	}
 	switch req.Operation {
 	case "ValidateTemplate":
@@ -346,7 +347,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		}
 		if found && !update {
 			return fault("AlreadyExistsException", "Stack ["+name+"] already exists")
-		} else if found && (strings.HasPrefix(old.Status, "ROLLBACK_") || strings.HasSuffix(old.Status, "_IN_PROGRESS") || old.Status == "DELETE_FAILED") {
+		} else if found && (strings.HasPrefix(old.Status, "ROLLBACK_") || strings.HasSuffix(old.Status, "_IN_PROGRESS") || strings.HasSuffix(old.Status, "_FAILED")) { // UPDATE_ROLLBACK_FAILED takes a delete, no update
 			return invalid("Stack:" + old.ID + " is in " + old.Status + " state and can not be updated.")
 		} else if id, held = cmp.Or(old.ID, id), old; update { // "is in UPDATE_IN_PROGRESS state" to another change
 			held.Status, held.Op = "UPDATE_IN_PROGRESS", old.Status+op
@@ -387,7 +388,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			}
 			_, _, _ = p.settle(ctx, req, name, as(held, old))
 		}
-		if cur, _ := p.load(ctx, req, name); cur.Op != old.Status+op { // settled: nothing is left
+		if raw, _, err := p.col(req, "cfn").Get(ctx, name); err == nil && spi.Decode[stack](raw).Op != old.Status+op { // settled: nothing is left
 			leave = nil
 		}
 		p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", cause)
@@ -398,7 +399,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		if recover() != nil {
 			out, err = nil, internalFailure()
 			if st.Reason, old.Reason = err.Error(), err.Error(); leave == nil { // not one in the cleanup itself
-				_ = recovered(func() error { _, _ = fail(err); return nil })
+				_, _ = fail(err) // a panic of its own is Invoke's to answer, and what remains the next operation's
 			}
 		}
 	}()
@@ -421,7 +422,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		if err == nil {
 			n, err = p.claim(ctx, req, st, old, logical, typ, props) // again: a name may come from a resource made before it
 		}
-		if i := slices.IndexFunc(old.Left, func(r res) bool { return r.Logical == logical && r.Name == n }); err == nil {
+		if i := slices.IndexFunc(old.Left, func(r res) bool { return r.Logical == logical }); err == nil {
 			existing := old.Refs[logical]
 			if i >= 0 { // one its failed update left is its own: taken back, as one it holds is
 				existing = old.Left[i].Physical
@@ -477,6 +478,9 @@ func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take f
 		raw, _, _ := tx.Get(name)
 		cur = spi.Decode[stack](raw)
 		next, yes := take(cur)
+		if !strings.HasSuffix(next.Status, "_IN_PROGRESS") { // a settled record is no operation's
+			next.Op = ""
+		}
 		if wrote = yes; !yes {
 			return nil
 		} else if next.Status == "DELETE_COMPLETE" { // its change sets go with it: retire, keyed by no change set
@@ -499,16 +503,21 @@ func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take f
 // *_IN_PROGRESS record whose operation is not among them was left by one that ended without settling it,
 // or by a process that ended: no operation will settle it, so the next one on the stack does (orphan).
 var ops sync.Map
-var opSeq atomic.Int64 // numbers them
+var opSeq, opKept atomic.Int64 // numbers them, and counts what they keep
+var opNonce = func() string {  // this process's: an id in a record another process left, or a restored one, is never one of ours
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}()
 
 // hold registers a running operation, and answers its id (after a "/": an update writes the status it
 // found before it) and its release, which the operation defers: given the record a failed operation could
-// not settle, the release keeps it for the operation that takes the stack over.
+// not settle, the release keeps it (of the last thousand or so) for the operation that takes the stack over.
 func (p *Pack) hold() (string, func(*stack)) {
-	id := p.deps.Rand.Derive("cloudformation-op").Hex(8) + "-" + strconv.FormatInt(opSeq.Add(1), 10)
+	id := opNonce + "-" + strconv.FormatInt(opSeq.Add(1), 10)
 	ops.Store(id, nil)
 	return "/" + id, func(left *stack) {
-		if ops.Delete(id); left != nil {
+		if ops.Delete(id); left != nil && opKept.Add(1) <= 1024 {
 			ops.Store(id, *left)
 		}
 	}
@@ -518,22 +527,24 @@ func (p *Pack) hold() (string, func(*stack)) {
 // failure: a create ROLLBACK_FAILED, a delete DELETE_FAILED, an update the status it found, each with why.
 // The operation that meets it goes on from that state.
 func (p *Pack) orphan(ctx context.Context, req *spi.Request, name string) {
-	_, _, _ = p.settle(ctx, req, name, func(cur stack) (stack, bool) {
-		found, id, _ := strings.Cut(cur.Op, "/")
-		v, known := ops.Load(id)
-		next, kept := v.(stack) // what its operation, ended in this process, could not write
-		if kept {
-			ops.Delete(id)
-		} else {
+	id, kept := "", false
+	if _, wrote, err := p.settle(ctx, req, name, func(cur stack) (stack, bool) {
+		found, op, _ := strings.Cut(cur.Op, "/")
+		v, known := ops.Load(op)
+		next, mine := v.(stack) // what its operation, ended in this process, could not write
+		if id, kept = op, mine && next.ID == cur.ID; !kept {
 			next = cur
 			next.Status = cmp.Or(found, map[string]string{"CREATE_IN_PROGRESS": "ROLLBACK_FAILED"}[cur.Status], "UPDATE_ROLLBACK_FAILED")
 			next.Reason = "The operation on the stack ended before it settled the stack." // the wording is a reading
 		}
-		if next.Op = ""; cur.Status == "DELETE_IN_PROGRESS" {
+		if next.Protect = cur.Protect; cur.Status == "DELETE_IN_PROGRESS" {
 			next.Status = "DELETE_FAILED"
 		}
 		return next, strings.HasSuffix(cur.Status, "_IN_PROGRESS") && cur.Status != "REVIEW_IN_PROGRESS" && (kept || !known)
-	})
+	}); wrote && err == nil && kept { // kept until it is written
+		ops.Delete(id)
+		opKept.Add(-1)
+	}
 }
 
 // holders maps each physical id a stack's record holds to the stack: what a failed update must not delete,
@@ -688,7 +699,7 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 	} else if was, del := st.Status, st; err == nil && was != "DELETE_IN_PROGRESS" {
 		op, release := p.hold() // the create's, when it ends a create: that create ends this delete
 		defer release(nil)
-		del.Status, del.Op = "DELETE_IN_PROGRESS", cmp.Or(st.Op, op)
+		del.Status, del.Op = "DELETE_IN_PROGRESS", map[bool]string{true: st.Op, false: op}[was == "CREATE_IN_PROGRESS"]
 		_, started, settleErr := p.settle(ctx, req, name, func(cur stack) (stack, bool) { return del, reflect.DeepEqual(cur, st) })
 		if err = settleErr; err == nil && !started { // it changed since it was read
 			return p.drop(ctx, req, name)

@@ -98,37 +98,41 @@ func invoked(t *testing.T, h *stacks, op string, in map[string]any) (err error) 
 	return err
 }
 
-// A panic of the engine's own, not a service's, fails the operation as InternalFailure, and never leaves
-// the stack in progress: a create's or an update's store write of a bucket configuration (configureBucket
-// writes it itself), a store list in a failed create's or update's rollback, and one in a DeleteStack's.
-// The stack can be deleted after. (Round 21's BLOCKER 1, and SHOULD 4: a failed update's release is
-// deferred, past its cleanup's panic.)
+// A panic of the engine's own, not a service's, fails the operation as InternalFailure, and the stack is
+// never left in progress for good: a create's or an update's store write of a bucket configuration
+// (configureBucket writes it itself), which the ordinary cleanup follows, deleting the bucket made before
+// it; a store list in a failed create's or update's rollback, or in a DeleteStack's, after which the next
+// operation on the stack settles it (as the refusal of an UpdateStack then names it) and DeleteStack
+// deletes it; and an update's final write. (Round 21's BLOCKER 1; round 22's takeover, S3 and N7.)
 func TestCloudFormationAnEnginePanicEndsTheOperation(t *testing.T) {
 	t.Parallel()
 	cors := func(op, c, k string) bool { return op == "put" && strings.HasSuffix(k, "rv21cors/cors") }
 	holders := func(op, c, k string) bool { return op == "list" && c == "cfn" }
 	bad := map[string]any{"Type": "AWS::SQS::Queue", "Properties": map[string]any{"QueueName": "rv21-nofifo", "FifoQueue": true}}
-	bucket := map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "rv21cors", "CorsConfiguration": map[string]any{"CorsRules": []any{}}}}
+	bucket := map[string]any{"Type": "AWS::S3::Bucket", "DependsOn": "K", "Properties": map[string]any{"BucketName": "rv21cors", "CorsConfiguration": map[string]any{"CorsRules": []any{}}}}
 	for name, c := range map[string]struct {
-		op   string // CreateStack, UpdateStack or DeleteStack, of a stack holding a topic K
-		pick func(op, collection, key string) bool
-		tpl  map[string]any
+		op    string // CreateStack, UpdateStack or DeleteStack, of a stack holding a topic K
+		pick  func(op, collection, key string) bool
+		tpl   map[string]any
+		now   string // the stack's status as the operation leaves it
+		later string // and as the next operation settles it, when an UpdateStack's refusal names it
 	}{
-		"create":          {"CreateStack", cors, map[string]any{"B": bucket}},
-		"update":          {"UpdateStack", cors, map[string]any{"B": bucket}},
-		"create-rollback": {"CreateStack", once(holders), map[string]any{"Z": bad}},
-		"update-rollback": {"UpdateStack", once(holders), map[string]any{"Z": bad}},
-		"delete":          {"DeleteStack", once(holders), nil},
+		"create":          {"CreateStack", cors, map[string]any{"B": bucket}, "ROLLBACK_COMPLETE", "ROLLBACK_COMPLETE"},
+		"update":          {"UpdateStack", cors, map[string]any{"B": bucket}, "CREATE_COMPLETE", ""},
+		"create-rollback": {"CreateStack", once(holders), map[string]any{"Z": bad}, "CREATE_IN_PROGRESS", "ROLLBACK_FAILED"},
+		"update-rollback": {"UpdateStack", once(holders), map[string]any{"Z": bad}, "UPDATE_IN_PROGRESS", ""},
+		"delete":          {"DeleteStack", once(holders), nil, "DELETE_IN_PROGRESS", "DELETE_FAILED"},
 		// the engine panics, and then its rollback does too
 		"create-twice": {"CreateStack", func() func(op, c, k string) bool {
-			first := once(holders)
-			return func(op, c, k string) bool { return cors(op, c, k) || first(op, c, k) }
-		}(), map[string]any{"B": bucket}},
-		// the update's final write panics once: written again, the update completes
+			var fired atomic.Bool // the rollback's first list of the stacks, once the write has panicked
+			first := once(func(op, c, k string) bool { return fired.Load() && holders(op, c, k) })
+			return func(op, c, k string) bool { return cors(op, c, k) && (fired.Swap(true) || true) || first(op, c, k) }
+		}(), map[string]any{"B": bucket}, "CREATE_IN_PROGRESS", "ROLLBACK_FAILED"},
+		// the update's final write panics once: the update fails, and puts the stack back
 		"settle": {"UpdateStack", func() func(op, c, k string) bool {
 			var n atomic.Int32
 			return func(op, c, k string) bool { return op == "txput" && c == "cfn" && k == "ep" && n.Add(1) == 2 }
-		}(), map[string]any{"N": map[string]any{"Type": "AWS::SNS::Topic"}}},
+		}(), map[string]any{"N": map[string]any{"Type": "AWS::SNS::Topic"}}, "CREATE_COMPLETE", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -150,17 +154,29 @@ func TestCloudFormationAnEnginePanicEndsTheOperation(t *testing.T) {
 			}
 			err := invoked(t, h, c.op, in)
 			off()
-			if name == "settle" && err != nil || name != "settle" && (err == nil || !strings.Contains(name, "rollback") && !isInternalFailure(err)) {
-				t.Errorf("%s answered %v; want it failed (InternalFailure, where the engine's panic is what failed it)", c.op, err)
+			if !isInternalFailure(err) {
+				t.Errorf("%s answered %v; want InternalFailure, saying nothing of the panic", c.op, err)
 			}
-			if st, reason, _ := h.status("ep"); strings.HasSuffix(st, "_IN_PROGRESS") || strings.Contains(reason, "panic") {
-				t.Errorf("the stack is %s (%q) after the panic; want it ended, not saying what panicked", st, reason)
+			if st, reason, _ := h.status("ep"); st != c.now || strings.Contains(reason, "panic") {
+				t.Errorf("the stack is %s (%q) after the panic; want %s, not saying what panicked", st, reason, c.now)
+			}
+			if _, err := h.service("aws.s3", "HeadBucket", map[string]any{"Bucket": "rv21cors"}); err == nil && !strings.HasSuffix(c.now, "_IN_PROGRESS") {
+				t.Errorf("bucket rv21cors, made before the panic, survives the operation's cleanup")
+			}
+			err = invoked(t, h, "UpdateStack", map[string]any{"StackName": "ep", "TemplateBody": rv19Body(map[string]any{"Resources": topic})})
+			if st, reason, _ := h.status("ep"); c.later != "" && (err == nil || !strings.Contains(err.Error(), "is in "+c.later+" state") || st != c.later || !strings.Contains(reason, "InternalFailure") && !strings.Contains(reason, "ended before it settled")) {
+				t.Errorf("the next operation answered %v and the stack is %s (%q); want it settled %s, with why", err, st, reason, c.later)
+			} else if strings.HasSuffix(st, "_IN_PROGRESS") {
+				t.Errorf("the stack is still %s after the next operation", st)
 			}
 			if err := invoked(t, h, "DeleteStack", map[string]any{"StackName": "ep"}); err != nil {
 				t.Errorf("DeleteStack after the panic answered %v", err)
 			}
 			if _, held := h.stored("ep"); held {
 				t.Errorf("stack ep is still stored after DeleteStack")
+			}
+			if _, err := h.service("aws.s3", "HeadBucket", map[string]any{"Bucket": "rv21cors"}); err == nil {
+				t.Errorf("bucket rv21cors survives the stack")
 			}
 		})
 	}

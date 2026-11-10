@@ -16,6 +16,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -55,8 +57,16 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 }
 
 // Invoke serves one native operation.
-func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (out *spi.Response, err error) {
 	name := str(req.Input["StackName"])
+	defer func() { // no panic of the engine's own escapes an operation: the service's InternalFailure
+		if recover() != nil {
+			out, err = nil, internalFailure()
+		}
+	}()
+	if slices.Contains(natives[:5], req.Operation) { // each takes over a stack its last operation left in progress
+		_ = recovered(func() error { p.orphan(ctx, req, name); return nil })
+	}
 	switch req.Operation {
 	case "ValidateTemplate":
 		_, tpl, _, _, err := p.template(ctx, req, "", "")
@@ -259,7 +269,8 @@ type stack struct {
 	Name, ID, Status, Template string
 	Reason                     string `json:",omitempty"` // StackStatusReason
 	Resources                  []res
-	Left                       []res `json:",omitempty"` // what a failed update made and could not delete
+	Left                       []res  `json:",omitempty"` // what a failed update made and could not delete
+	Op                         string `json:",omitempty"` // while *_IN_PROGRESS: the status an update found, "/", and the operation's id (ops)
 	Outputs                    []any
 	Refs                       map[string]string
 	NotificationARNs, Tags     []any
@@ -315,6 +326,14 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	// old is what an update finds, and held the record it reserves it with, UPDATE_IN_PROGRESS; a create
 	// reserves the name, CREATE_IN_PROGRESS, in the same transaction.
 	var old, held stack
+	var todo []res   // what a failed update has yet to delete, so a panic part way keeps what remains
+	var leave *stack // what a failing operation leaves, until it has settled it: the next operation's to settle (orphan)
+	op, release := p.hold()
+	defer func() {
+		st := cmp.Or(leave, &stack{})
+		st.Status, st.Left = cmp.Or(map[bool]string{true: old.Status}[update], "ROLLBACK_FAILED"), append(st.Left, todo...)
+		release(leave)
+	}()
 	if err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
 		tx := stx.Collection("cfn")
 		raw, found, _ := tx.Get(name)
@@ -330,10 +349,10 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		} else if found && (strings.HasPrefix(old.Status, "ROLLBACK_") || strings.HasSuffix(old.Status, "_IN_PROGRESS") || old.Status == "DELETE_FAILED") {
 			return invalid("Stack:" + old.ID + " is in " + old.Status + " state and can not be updated.")
 		} else if id, held = cmp.Or(old.ID, id), old; update { // "is in UPDATE_IN_PROGRESS state" to another change
-			held.Status = "UPDATE_IN_PROGRESS"
+			held.Status, held.Op = "UPDATE_IN_PROGRESS", old.Status+op
 			return tx.Put(name, []byte(spi.JSONText(held)))
 		}
-		return tx.Put(name, []byte(spi.JSONText(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags})))
+		return tx.Put(name, []byte(spi.JSONText(stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags, Op: op})))
 	}); errors.Is(err, errStale) && rereads < 3 {
 		req.Input = given
 		return p.upsert(context.WithValue(ctx, staleKey{}, rereads+1), req, name, update, "", cs)
@@ -344,38 +363,43 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	}
 	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: refs,
 		Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags} // never null: every read of a stack lists them
-	fail := func(cause error) (_ *spi.Response, err error) {
-		err, st.Reason = cause, cause.Error()
-		defer func() { // the reservation ends whatever the cleanup below does, a panic of its own included
-			_ = recover()
-			st.Status = "ROLLBACK_FAILED" // where a create's rollback that panicked leaves it; else unwind settled it
-			_, _, _ = p.settle(ctx, req, name, map[bool]func(stack) (stack, bool){false: from(st, "CREATE_IN_PROGRESS"), true: as(held, old)}[update])
-			p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", err)
-		}()
-		if !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
-			_ = p.unwind(ctx, req, st, "CREATE_IN_PROGRESS", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
-			return nil, err
-		} // what the update made that no stack's record holds goes, newest first; what cannot is left on the
-		// record (DELETE_FAILED), which it puts back as it found it, over its reservation only
-		owned, was, unrestored := p.holders(ctx, req), stored(old.Template), []string{}
-		for _, r := range st.Resources {
-			if owned[r.Physical] == name && strings.Contains(" AWS::SecretsManager::Secret AWS::Events::Rule AWS::SSM::Parameter ", " "+r.Type+" ") {
-				p.tpl = was // one it changed in place takes its properties back, as a rollback does
-				if _, perr := p.provision(ctx, req, r.Type, r.Logical, r.Name, asMap(p.resolve(asMap(asMap(was["Resources"])[r.Logical])["Properties"], old.Refs, req, name)), r.Physical, old.ID); perr != nil {
-					unrestored = append(unrestored, r.Logical)
+	fail := func(cause error) (*spi.Response, error) {
+		if leave = map[bool]*stack{true: &old, false: &st}[update]; !update { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
+			st.Reason = cause.Error()
+			_ = p.unwind(ctx, req, &st, "CREATE_IN_PROGRESS", "ROLLBACK_COMPLETE", "ROLLBACK_FAILED")
+		} else { // what the update made that no stack's record holds goes, newest first; what cannot is left on
+			// the record (DELETE_FAILED), which it puts back as it found it, over its reservation only
+			was, unrestored := stored(old.Template), []string{}
+			todo = slices.DeleteFunc(slices.Clone(st.Resources), func(r res) bool { // not what the stack held, or had left
+				return slices.ContainsFunc(append(slices.Clone(old.Resources), old.Left...), func(o res) bool { return o.Physical == r.Physical })
+			})
+			for _, r := range st.Resources {
+				if old.Refs[r.Logical] == r.Physical && strings.Contains(" AWS::SecretsManager::Secret AWS::Events::Rule AWS::SSM::Parameter ", " "+r.Type+" ") {
+					p.tpl = was // one it changed in place takes its properties back, as a rollback does
+					if _, perr := p.provision(ctx, req, r.Type, r.Logical, r.Name, asMap(p.resolve(asMap(asMap(was["Resources"])[r.Logical])["Properties"], old.Refs, req, name)), r.Physical, old.ID); perr != nil {
+						unrestored = append(unrestored, r.Logical)
+					}
 				}
+			} // what it cannot delete is left apart from its resources: a logical id is listed once
+			_ = p.remove(ctx, req, name, &todo)
+			if old.Left, todo = append(old.Left, todo...), nil; len(unrestored) > 0 { // the service's words for a resource a rollback could not update back
+				old.Reason = "The following resource(s) failed to update: [" + strings.Join(unrestored, ", ") + "]."
 			}
-		} // what it cannot delete is left apart from its resources: a logical id is listed once
-		left, _ := p.remove(ctx, req, name, slices.DeleteFunc(slices.Clone(st.Resources), func(r res) bool { return owned[r.Physical] == name }))
-		old.Left = append(old.Left, left...)
-		if len(unrestored) > 0 { // the service's words for a resource a rollback could not update back
-			old.Reason = "The following resource(s) failed to update: [" + strings.Join(unrestored, ", ") + "]."
+			_, _, _ = p.settle(ctx, req, name, as(held, old))
 		}
-		return nil, err
+		if cur, _ := p.load(ctx, req, name); cur.Op != old.Status+op { // settled: nothing is left
+			leave = nil
+		}
+		p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", cause)
+		return nil, cause
 	}
-	defer func() { // a panic of the engine's own, after the reservation, fails the operation as any failure does
+	defer func() { // a panic of the engine's own, after the reservation, fails the operation as any failure does;
+		// one in that cleanup leaves what remains, with why, for the next operation to settle
 		if recover() != nil {
-			out, err = fail(internalFailure())
+			out, err = nil, internalFailure()
+			if st.Reason, old.Reason = err.Error(), err.Error(); leave == nil { // not one in the cleanup itself
+				_ = recovered(func() error { _, _ = fail(err); return nil })
+			}
 		}
 	}()
 	planned := maps.Clone(st.Refs)
@@ -397,13 +421,20 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		if err == nil {
 			n, err = p.claim(ctx, req, st, old, logical, typ, props) // again: a name may come from a resource made before it
 		}
-		if err == nil {
-			phys, err = p.provision(ctx, req, typ, logical, n, props, old.Refs[logical], id)
+		if i := slices.IndexFunc(old.Left, func(r res) bool { return r.Logical == logical && r.Name == n }); err == nil {
+			existing := old.Refs[logical]
+			if i >= 0 { // one its failed update left is its own: taken back, as one it holds is
+				existing = old.Left[i].Physical
+			}
+			phys, err = p.provision(ctx, req, typ, logical, n, props, existing, id)
 		}
-		if phys != "" { // recorded once it exists, so a rollback finds a half-made one too
+		if phys != "" { // recorded once it exists, before anything is set on it, so a rollback finds a half-made one too
 			st.Refs[logical] = phys
 			attribute(st.Refs, req, typ, logical, phys)
 			st.Resources = append(st.Resources, res{Logical: logical, Physical: phys, Type: typ, Name: n})
+		}
+		if err == nil && typ == "AWS::S3::Bucket" {
+			err = p.configureBucket(ctx, req, phys, props)
 		}
 		if err != nil {
 			return fail(err)
@@ -416,14 +447,15 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		}
 		st.Outputs = append(st.Outputs, map[string]any{"OutputKey": k, "OutputValue": text(v)})
 	}
-	st.Left, _ = p.remove(ctx, req, name, slices.DeleteFunc(slices.Clone(old.Left), func(r res) bool { // what a failed update left goes now,
-		return slices.ContainsFunc(st.Resources, func(n res) bool { return n.Physical == r.Physical }) // or is left again; not one the stack holds again
-	}))
+	st.Left = slices.DeleteFunc(slices.Clone(old.Left), func(r res) bool { // what a failed update left goes now, or is left
+		return slices.ContainsFunc(st.Resources, func(n res) bool { return n.Physical == r.Physical }) // again; not one the stack holds again
+	})
+	_ = p.remove(ctx, req, name, &st.Left)
 	if !update { // a DeleteStack begun during the create ends here: what it made goes, and then the stack
 		if _, wrote, err := p.settle(ctx, req, name, from(st, "CREATE_IN_PROGRESS"), retire(name, cs)); err != nil {
 			return fail(err) // the final write failed: an error, never success
 		} else if !wrote {
-			_ = p.unwind(ctx, req, st, "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED")
+			_ = p.unwind(ctx, req, &st, "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED")
 		}
 	} else if cur, wrote, err := p.settle(ctx, req, name, as(held, st), retire(name, cs)); err != nil {
 		return fail(err) // the final write failed: an error, never success
@@ -439,33 +471,69 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 // settle answers the record it found and whether it wrote.
 func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take func(stack) (stack, bool), sets ...func(spi.Tx) error) (stack, bool, error) {
 	var cur stack
-	var err error
 	wrote := false
-	for try := 0; try < 2 && (try == 0 || err != nil); try++ { // a store that failed, or panicked, is tried once more
-		err = recovered(func() error {
-			return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
-				tx, cs := stx.Collection("cfn"), stx.Collection("cfn-cs")
-				raw, _, _ := tx.Get(name)
-				cur = spi.Decode[stack](raw)
-				next, yes := take(cur)
-				if wrote = yes; !yes {
-					return nil
-				} else if next.Status == "DELETE_COMPLETE" { // its change sets go with it: retire, keyed by no change set
-					if err := retire(name, changeSet{key: name})(cs); err != nil {
-						return err
-					}
-					return tx.Delete(name)
-				}
-				for _, write := range sets {
-					if err := write(cs); err != nil {
-						return err
-					}
-				}
-				return tx.Put(name, []byte(spi.JSONText(next)))
-			})
-		})
-	}
+	err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
+		tx, cs := stx.Collection("cfn"), stx.Collection("cfn-cs")
+		raw, _, _ := tx.Get(name)
+		cur = spi.Decode[stack](raw)
+		next, yes := take(cur)
+		if wrote = yes; !yes {
+			return nil
+		} else if next.Status == "DELETE_COMPLETE" { // its change sets go with it: retire, keyed by no change set
+			if err := retire(name, changeSet{key: name})(cs); err != nil {
+				return err
+			}
+			return tx.Delete(name)
+		}
+		for _, write := range sets {
+			if err := write(cs); err != nil {
+				return err
+			}
+		}
+		return tx.Put(name, []byte(spi.JSONText(next)))
+	})
 	return cur, wrote, err
+}
+
+// ops are the operations running in this process, by the id each writes on the record it holds (Op). An
+// *_IN_PROGRESS record whose operation is not among them was left by one that ended without settling it,
+// or by a process that ended: no operation will settle it, so the next one on the stack does (orphan).
+var ops sync.Map
+var opSeq atomic.Int64 // numbers them
+
+// hold registers a running operation, and answers its id (after a "/": an update writes the status it
+// found before it) and its release, which the operation defers: given the record a failed operation could
+// not settle, the release keeps it for the operation that takes the stack over.
+func (p *Pack) hold() (string, func(*stack)) {
+	id := p.deps.Rand.Derive("cloudformation-op").Hex(8) + "-" + strconv.FormatInt(opSeq.Add(1), 10)
+	ops.Store(id, nil)
+	return "/" + id, func(left *stack) {
+		if ops.Delete(id); left != nil {
+			ops.Store(id, *left)
+		}
+	}
+}
+
+// orphan settles a record left *_IN_PROGRESS by an operation that is not running as that operation's
+// failure: a create ROLLBACK_FAILED, a delete DELETE_FAILED, an update the status it found, each with why.
+// The operation that meets it goes on from that state.
+func (p *Pack) orphan(ctx context.Context, req *spi.Request, name string) {
+	_, _, _ = p.settle(ctx, req, name, func(cur stack) (stack, bool) {
+		found, id, _ := strings.Cut(cur.Op, "/")
+		v, known := ops.Load(id)
+		next, kept := v.(stack) // what its operation, ended in this process, could not write
+		if kept {
+			ops.Delete(id)
+		} else {
+			next = cur
+			next.Status = cmp.Or(found, map[string]string{"CREATE_IN_PROGRESS": "ROLLBACK_FAILED"}[cur.Status], "UPDATE_ROLLBACK_FAILED")
+			next.Reason = "The operation on the stack ended before it settled the stack." // the wording is a reading
+		}
+		if next.Op = ""; cur.Status == "DELETE_IN_PROGRESS" {
+			next.Status = "DELETE_FAILED"
+		}
+		return next, strings.HasSuffix(cur.Status, "_IN_PROGRESS") && cur.Status != "REVIEW_IN_PROGRESS" && (kept || !known)
+	})
 }
 
 // holders maps each physical id a stack's record holds to the stack: what a failed update must not delete,
@@ -618,14 +686,14 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 	} else if err == nil && strings.HasPrefix(st.Status, "UPDATE_") && strings.HasSuffix(st.Status, "_IN_PROGRESS") { // the wording is the service's
 		err = invalid("Stack [" + name + "] cannot be deleted while in status " + st.Status)
 	} else if was, del := st.Status, st; err == nil && was != "DELETE_IN_PROGRESS" {
-		del.Status = "DELETE_IN_PROGRESS"
+		op, release := p.hold() // the create's, when it ends a create: that create ends this delete
+		defer release(nil)
+		del.Status, del.Op = "DELETE_IN_PROGRESS", cmp.Or(st.Op, op)
 		_, started, settleErr := p.settle(ctx, req, name, func(cur stack) (stack, bool) { return del, reflect.DeepEqual(cur, st) })
 		if err = settleErr; err == nil && !started { // it changed since it was read
 			return p.drop(ctx, req, name)
 		} else if err == nil && was != "CREATE_IN_PROGRESS" {
-			err = recovered(func() error { return p.unwind(ctx, req, del, "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED") })
-			del.Status, del.Reason = "DELETE_FAILED", cmp.Or(err, error(internalFailure())).Error() // where an unwind that panicked leaves it
-			_, _, _ = p.settle(ctx, req, name, from(del, "DELETE_IN_PROGRESS"))
+			err = p.unwind(ctx, req, &del, "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED")
 		}
 	}
 	return &spi.Response{Output: map[string]any{}}, err
@@ -636,35 +704,38 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 // stack is done, keeping st's reason (a DELETE_COMPLETE stack is removed); else failed, the resources left
 // listed as DELETE_FAILED for the next DeleteStack to try again and the first error, which unwind answers,
 // its StackStatusReason. A create's rollback that finds a DeleteStack begun ends that delete instead.
-func (p *Pack) unwind(ctx context.Context, req *spi.Request, st stack, was, done, failed string) error {
-	left, first := p.remove(ctx, req, st.Name, st.Resources)
-	kept, err := p.remove(ctx, req, st.Name, st.Left) // what a failed update left stays apart
-	st.Resources, st.Status, st.Left, first = left, done, kept, cmp.Or(first, err)
-	if first != nil {
+func (p *Pack) unwind(ctx context.Context, req *spi.Request, st *stack, was, done, failed string) error {
+	first := p.remove(ctx, req, st.Name, &st.Resources)
+	first = cmp.Or(first, p.remove(ctx, req, st.Name, &st.Left)) // what a failed update left stays apart
+	if st.Status = done; first != nil {
 		st.Status, st.Reason = failed, first.Error()
 	}
-	_, wrote, err := p.settle(ctx, req, st.Name, from(st, was))
+	_, wrote, err := p.settle(ctx, req, st.Name, from(*st, was))
 	if !wrote && err == nil && was == "CREATE_IN_PROGRESS" {
 		st.Status = map[bool]string{true: "DELETE_COMPLETE", false: "DELETE_FAILED"}[first == nil]
-		_, _, err = p.settle(ctx, req, st.Name, from(st, "DELETE_IN_PROGRESS"))
+		_, _, err = p.settle(ctx, req, st.Name, from(*st, "DELETE_IN_PROGRESS"))
 	}
 	return cmp.Or(first, err)
 }
 
-// remove deletes rs, newest first, but what another stack's record holds, and answers those it could not
-// delete, DELETE_FAILED with the error as their reason (never null: every read of a stack lists them), and
-// the first error.
-func (p *Pack) remove(ctx context.Context, req *spi.Request, name string, rs []res) (left []res, first error) {
-	owned, left := p.holders(ctx, req), []res{}
-	for _, r := range slices.Backward(rs) {
-		if o := owned[r.Physical]; o != "" && o != name { // another stack's
-			continue
-		} else if err := p.deprovision(ctx, req, r); err != nil {
-			r.Status, r.Reason, first = "DELETE_FAILED", err.Error(), cmp.Or(first, err)
-			left = append([]res{r}, left...)
-		}
+// remove deletes *rs, newest first, but what another stack's record holds, and leaves in *rs those it has
+// not deleted, DELETE_FAILED with why, at every step: a panic part way keeps what remains. It answers the
+// first error.
+func (p *Pack) remove(ctx context.Context, req *spi.Request, name string, rs *[]res) (first error) {
+	for i := range *rs {
+		(*rs)[i].Status, (*rs)[i].Reason = "DELETE_FAILED", "not deleted: the operation ended first"
 	}
-	return left, first
+	owned := p.holders(ctx, req)
+	for i := len(*rs) - 1; i >= 0; i-- {
+		r := (*rs)[i]
+		if o := owned[r.Physical]; o != "" && o != name { // another stack's
+		} else if err := p.deprovision(ctx, req, r); err != nil {
+			(*rs)[i].Reason, first = err.Error(), cmp.Or(first, err)
+			continue
+		}
+		*rs = slices.Delete(*rs, i, i+1)
+	}
+	return first
 }
 
 func (p *Pack) load(ctx context.Context, req *spi.Request, name string) (stack, error) {
@@ -1020,7 +1091,7 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 	}
 	groups, list := out["logGroups"].([]any) // DescribeLogGroups answers a list by prefix, never a fault
 	if err != nil || list && !slices.ContainsFunc(groups, func(g any) bool { return str(asMap(g)["logGroupName"]) == n }) ||
-		slices.ContainsFunc(old.Resources, func(r res) bool { // a record from before res.Name: by the physical id, which ends in the name
+		slices.ContainsFunc(append(slices.Clone(old.Resources), old.Left...), func(r res) bool { // its own, one it left too; a record from before res.Name: by the physical id, which ends in the name
 			return r.Logical == logical && (r.Name == n || r.Name == "" && (r.Physical == n || strings.HasSuffix(r.Physical, "/"+n) || strings.HasSuffix(r.Physical, ":"+n)))
 		}) {
 		return n, nil
@@ -1073,10 +1144,8 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	}
 	switch typ {
 	case "AWS::S3::Bucket":
-		if _, err := p.call(ctx, req, "aws.s3", "CreateBucket", map[string]any{"Bucket": n}); err != nil {
-			return "", err
-		}
-		return n, p.configureBucket(ctx, req, n, props)
+		_, err := p.call(ctx, req, "aws.s3", "CreateBucket", map[string]any{"Bucket": n}) // upsert configures it, once recorded
+		return map[bool]string{true: n}[err == nil], err
 	case "AWS::SQS::Queue":
 		in := map[string]any{"QueueName": n}
 		if fifo(props) {

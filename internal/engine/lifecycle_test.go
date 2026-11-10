@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -386,13 +387,18 @@ func (c *steppingClock) AfterTime(at time.Time) <-chan time.Time {
 // deadline inside the nth reading of it, for every n the poll makes before it
 // parks. Left to the scheduler the window is hit a few times in a thousand.
 func TestLongPollDoesNotLoseADeadlineThatPassesWhileItLooks(t *testing.T) {
+	var clk *steppingClock
+	f := newSQS(t, func(c *clock.Controllable) spi.Clock {
+		clk = &steppingClock{Controllable: c, parked: make(chan struct{}, 1)}
+		return clk
+	})
 	for n := 1; ; n++ {
-		var clk *steppingClock
-		f := newSQS(t, func(c *clock.Controllable) spi.Clock {
-			clk = &steppingClock{Controllable: c, parked: make(chan struct{}, 1)}
-			return clk
-		})
-		url := f.queue("q", nil)
+		// A queue a round, on one engine: building one costs more than the round.
+		url := f.queue(fmt.Sprintf("q%d", n), nil)
+		select {
+		case <-clk.parked:
+		default:
+		}
 		f.must("SendMessage", map[string]any{"QueueUrl": url, "MessageBody": "hello"})
 		if got := f.must("ReceiveMessage", map[string]any{"QueueUrl": url, "VisibilityTimeout": 1})["Messages"].([]any); len(got) != 1 {
 			t.Fatalf("receive got %d messages, want 1", len(got))

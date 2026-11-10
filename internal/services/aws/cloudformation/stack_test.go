@@ -1698,6 +1698,11 @@ func TestCloudFormationReplacesAResourceWithNoName(t *testing.T) {
 	key := func(spec string) map[string]any {
 		return map[string]any{"Type": "AWS::KMS::Key", "Properties": map[string]any{"KeySpec": spec}}
 	}
+	for _, stream := range []string{"one", "two"} { // a policy is an existing stream's
+		if _, err := h.service("aws.kinesis", "CreateStream", map[string]any{"StreamName": stream}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	h.mustCreate("unnamed", map[string]map[string]any{"Key": key("SYMMETRIC_DEFAULT"), "Policy": policy("one")})
 	before := map[string]string{}
 	for _, r := range h.resources("unnamed") {

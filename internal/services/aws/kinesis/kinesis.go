@@ -33,7 +33,20 @@ func (p records) col(req *spi.Request, n string) spi.Collection {
 }
 
 func (p records) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := first(req.Input, "StreamName")
+	name := first(req.Input, "StreamName", "StreamARN") // "you must use either the StreamARN or the StreamName parameter, or both"
+	name = name[strings.LastIndex(name, "/")+1:]        // an ARN's last segment is the stream's name, and no name holds a slash
+	at, whole := "", true
+	if req.Operation == "GetRecords" { // whose stream is its iterator's, which is "stream|seq"
+		raw, _ := base64.StdEncoding.DecodeString(str(req.Input["ShardIterator"]))
+		name, at, whole = strings.Cut(string(raw), "|")
+	}
+	if _, found, _ := p.col(req, "kinesis").Get(ctx, name); !whole {
+		return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	} else if name == "" {
+		return nil, &spi.Fault{Code: "InvalidArgumentException", Message: "Either StreamName or StreamARN must be specified.", HTTPStatus: 400, Fault: "client"}
+	} else if !found { // never made, or deleted since the iterator was given
+		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Stream " + name + " under account " + req.Identity.Account + " not found.", HTTPStatus: 400, Fault: "client"}
+	}
 	switch req.Operation {
 	case "PutRecord":
 		return p.put(ctx, req, name, req.Input["Data"], str(req.Input["PartitionKey"]))
@@ -42,11 +55,7 @@ func (p records) invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		var out []any
 		for _, r := range recs {
 			m, _ := r.(map[string]any)
-			resp, err := p.put(ctx, req, name, m["Data"], str(m["PartitionKey"]))
-			if err != nil {
-				out = append(out, map[string]any{"ErrorCode": "InternalFailure"})
-				continue
-			}
+			resp, _ := p.put(ctx, req, name, m["Data"], str(m["PartitionKey"]))
 			out = append(out, resp.Output)
 		}
 		return &spi.Response{Output: map[string]any{"Records": out, "FailedRecordCount": 0}}, nil
@@ -68,21 +77,12 @@ func (p records) invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		it := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s|%d", name, seq)))
 		return &spi.Response{Output: map[string]any{"ShardIterator": it}}, nil
 	default: // GetRecords
-		raw, err := base64.StdEncoding.DecodeString(str(req.Input["ShardIterator"]))
-		if err != nil {
-			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-		}
-		parts := strings.SplitN(string(raw), "|", 2)
-		if len(parts) != 2 {
-			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-		}
-		stream := parts[0]
-		start, _ := strconv.Atoi(parts[1])
+		start, _ := strconv.Atoi(at)
 		limit := asInt(req.Input["Limit"])
 		if limit <= 0 {
 			limit = 1000
 		}
-		kvs, _, _ := p.col(req, "kinesis:"+stream).List(ctx, "", "", 0)
+		kvs, _, _ := p.col(req, "kinesis:"+name).List(ctx, "", "", 0)
 		type rec struct {
 			n int
 			m map[string]any
@@ -108,15 +108,12 @@ func (p records) invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 				break
 			}
 		}
-		next := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s|%d", stream, maxSeq)))
+		next := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s|%d", name, maxSeq)))
 		return &spi.Response{Output: map[string]any{"Records": recs, "NextShardIterator": next, "MillisBehindLatest": 0}}, nil
 	}
 }
 
 func (p records) put(ctx context.Context, req *spi.Request, name string, data any, pk string) (*spi.Response, error) {
-	if _, ok, _ := p.col(req, "kinesis").Get(ctx, name); !ok {
-		return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
-	}
 	seq := p.nextSeq(ctx, req, name)
 	seqStr := strconv.Itoa(seq)
 	rec := map[string]any{"SequenceNumber": seqStr, "PartitionKey": pk, "Data": data, "ApproximateArrivalTimestamp": float64(p.deps.Clock.Now().UnixMilli()) / 1000}

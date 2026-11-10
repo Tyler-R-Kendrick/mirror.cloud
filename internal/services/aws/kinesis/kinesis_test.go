@@ -99,6 +99,9 @@ func TestBootedServerKinesisPutGet(t *testing.T) {
 	call("UpdateShardCount", `{"StreamName":"s","TargetShardCount":2,"ScalingType":"UNIFORM_SCALING"}`)
 	call("StartStreamEncryption", `{"StreamName":"s","EncryptionType":"KMS","KeyId":"alias/aws/kinesis"}`)
 	call("DescribeLimits", `{}`)
+	// A split and a merge are a provisioned stream's: before the stream is made on-demand.
+	call("SplitShard", `{"StreamName":"s","ShardToSplit":"shardId-000000000000","NewStartingHashKey":"1"}`)
+	call("MergeShards", `{"StreamName":"s","ShardToMerge":"shardId-000000000000","AdjacentShardToMerge":"shardId-000000000001"}`)
 	call("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
 	call("TagResource", `{"ResourceARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s","Tags":{"a":"b"}}`)
 	call("ListTagsForResource", `{"ResourceARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s"}`)
@@ -106,8 +109,6 @@ func TestBootedServerKinesisPutGet(t *testing.T) {
 	call("DecreaseStreamRetentionPeriod", `{"StreamName":"s","RetentionPeriodHours":24}`)
 	call("DeleteResourcePolicy", `{"ResourceARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s"}`)
 	call("DisableEnhancedMonitoring", `{"StreamName":"s","ShardLevelMetrics":["IncomingBytes"]}`)
-	call("SplitShard", `{"StreamName":"s","ShardToSplit":"shardId-000000000000","NewStartingHashKey":"1"}`)
-	call("MergeShards", `{"StreamName":"s","ShardToMerge":"shardId-000000000000","AdjacentShardToMerge":"shardId-000000000001"}`)
 	call("StopStreamEncryption", `{"StreamName":"s","EncryptionType":"KMS","KeyId":"alias/aws/kinesis"}`)
 	call("DescribeAccountSettings", `{}`)
 	call("UpdateAccountSettings", `{"MinimumThroughputBillingCommitment":{"Status":"DISABLED"}}`)
@@ -517,7 +518,7 @@ func TestKinesisAStreamModeIsReadWhole(t *testing.T) {
 		{"CreateStream", `{"StreamName":"a","StreamModeDetails":"ON_DEMAND"}`, shape},
 		{"CreateStream", `{"StreamName":"a","StreamModeDetails":{"StreamMode":7}}`, enum("7")},
 		{"CreateStream", `{"StreamName":"a","StreamModeDetails":{"StreamMode":["ON_DEMAND"]}}`, enum(`["ON_DEMAND"]`)},
-		{"DescribeStreamSummary", `{"StreamName":"a"}`, "400 ResourceNotFoundException: "},
+		{"DescribeStreamSummary", `{"StreamName":"a"}`, "400 ResourceNotFoundException: Stream a under account 000000000000 not found."},
 		{"CreateStream", `{"StreamName":"a","StreamModeDetails":null}`, "200"},
 	} {
 		if got := answer(row.op, row.body); got != row.want {
@@ -574,5 +575,173 @@ func TestKinesisAnOlderRecordsModeIsProvisioned(t *testing.T) {
 	request("UpdateStreamMode", map[string]any{"StreamARN": "arn:aws:kinesis:us-east-1:123456789012:stream/text", "StreamModeDetails": map[string]any{"StreamMode": "ON_DEMAND"}})
 	if limits := request("DescribeLimits", map[string]any{}); fmt.Sprint(limits["OpenShardCount"], limits["OnDemandStreamCount"]) != "22 2" {
 		t.Errorf("after one older record is made on-demand the limits read %v", limits)
+	}
+}
+
+// SplitShard and MergeShards are a provisioned stream's, and an existing one's. Each "is only supported
+// for the data streams with the provisioned capacity mode" (API reference), and "If the specified stream
+// does not exist, MergeShards returns a ResourceNotFoundException"; SplitShard lists the same error. Both
+// moved the count of any stream, an on-demand one included, and made a record for a stream that did not
+// exist. Which of their errors answers an on-demand stream is not stated: ValidationException and the
+// message are a reading, as for UpdateShardCount.
+func TestKinesisSplitAndMergeAreAnExistingProvisionedStreams(t *testing.T) {
+	answer := kinesisAnswers(t)
+	split := func(stream string) string {
+		return answer("SplitShard", `{"StreamName":"`+stream+`","ShardToSplit":"shardId-000000000000","NewStartingHashKey":"10"}`)
+	}
+	merge := func(stream string) string {
+		return answer("MergeShards", `{"StreamName":"`+stream+`","ShardToMerge":"shardId-000000000000","AdjacentShardToMerge":"shardId-000000000001"}`)
+	}
+	const missing = "400 ResourceNotFoundException: Stream ghost under account 000000000000 not found."
+	if got := split("ghost") + " | " + merge("ghost"); got != missing+" | "+missing {
+		t.Errorf("a split and a merge of a stream that does not exist answered %s", got)
+	}
+	if got := answer("DescribeStreamSummary", `{"StreamName":"ghost"}`); !strings.HasPrefix(got, "400 ResourceNotFoundException") {
+		t.Errorf("the stream that does not exist is described: %s", got)
+	}
+	answer("CreateStream", `{"StreamName":"od","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
+	answer("CreateStream", `{"StreamName":"p","ShardCount":2}`)
+	if got := split("od") + " | " + merge("od"); got != "400 ValidationException: SplitShard is only supported for data streams with the provisioned capacity mode. | 400 ValidationException: MergeShards is only supported for data streams with the provisioned capacity mode." {
+		t.Errorf("a split and a merge of an on-demand stream answered %s", got)
+	}
+	if got := split("p") + " " + split("p") + " " + merge("p"); got != "200 200 200" {
+		t.Errorf("two splits and a merge of a provisioned stream answered %s", got)
+	}
+	if got := answer("UpdateShardCount", `{"StreamName":"od","TargetShardCount":4,"ScalingType":"UNIFORM_SCALING"}`); !strings.HasPrefix(got, "400 ValidationException") {
+		t.Errorf("the on-demand stream's count: %s", got)
+	}
+	// What the provisioned stream has after two splits and a merge, and the on-demand one untouched: the
+	// account's provisioned shards are the first's three.
+	if got := answer("UpdateShardCount", `{"StreamName":"p","TargetShardCount":3,"ScalingType":"UNIFORM_SCALING"}`); got != "200" {
+		t.Errorf("UpdateShardCount: %s", got)
+	}
+}
+
+// A retention period is an existing stream's. IncreaseStreamRetentionPeriod and
+// DecreaseStreamRetentionPeriod list ResourceNotFoundException, "The requested resource could not be
+// found. The stream might not be specified correctly." (API reference); each made a record for a stream
+// that did not exist, which DescribeStream then answered as a stream.
+func TestKinesisARetentionPeriodIsAnExistingStreams(t *testing.T) {
+	answer := kinesisAnswers(t)
+	const missing = "400 ResourceNotFoundException: Stream ghost under account 000000000000 not found."
+	for _, op := range []string{"IncreaseStreamRetentionPeriod", "DecreaseStreamRetentionPeriod"} {
+		if got := answer(op, `{"StreamName":"ghost","RetentionPeriodHours":48}`); got != missing {
+			t.Errorf("%s of a stream that does not exist answered %s", op, got)
+		}
+		if got := answer(op, `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/ghost","RetentionPeriodHours":48}`); got != missing {
+			t.Errorf("%s by the ARN of a stream that does not exist answered %s", op, got)
+		}
+	}
+	if got := answer("DescribeStream", `{"StreamName":"ghost"}`) + " " + answer("ListStreams", `{}`); !strings.HasPrefix(got, "400 ResourceNotFoundException") || !strings.HasSuffix(got, " 200") {
+		t.Errorf("the stream that does not exist is described: %s", got)
+	}
+	answer("CreateStream", `{"StreamName":"s"}`)
+	if got := answer("IncreaseStreamRetentionPeriod", `{"StreamName":"s","RetentionPeriodHours":48}`) + " " + answer("DecreaseStreamRetentionPeriod", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s","RetentionPeriodHours":24}`); got != "200 200" {
+		t.Errorf("the retention period of a stream that exists answered %s", got)
+	}
+}
+
+// Every ResourceNotFoundException names what was not found. The fault "provides information about the
+// error" in its message (API reference, ResourceNotFoundException), and the service's for a stream is
+// "Stream <name> under account <id> not found.", as its clients report it; DescribeStream,
+// DescribeStreamSummary, PutRecord and DescribeStreamConsumer answered the code with no message. That a
+// consumer's is worded as a stream's, with its ARN, is a reading.
+func TestKinesisEveryNotFoundNamesWhatWasNotFound(t *testing.T) {
+	answer := kinesisAnswers(t)
+	const stream = "400 ResourceNotFoundException: Stream ghost under account 000000000000 not found."
+	for op, body := range map[string]string{
+		"DescribeStream":                `{"StreamName":"ghost"}`,
+		"DescribeStreamSummary":         `{"StreamName":"ghost"}`,
+		"PutRecord":                     `{"StreamName":"ghost","PartitionKey":"k","Data":"aGk="}`,
+		"UpdateShardCount":              `{"StreamName":"ghost","TargetShardCount":2,"ScalingType":"UNIFORM_SCALING"}`,
+		"UpdateStreamMode":              `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/ghost","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`,
+		"SplitShard":                    `{"StreamName":"ghost","ShardToSplit":"shardId-000000000000","NewStartingHashKey":"10"}`,
+		"MergeShards":                   `{"StreamName":"ghost","ShardToMerge":"shardId-000000000000","AdjacentShardToMerge":"shardId-000000000001"}`,
+		"IncreaseStreamRetentionPeriod": `{"StreamName":"ghost","RetentionPeriodHours":48}`,
+		"DecreaseStreamRetentionPeriod": `{"StreamName":"ghost","RetentionPeriodHours":24}`,
+	} {
+		if got := answer(op, body); got != stream {
+			t.Errorf("%s of a stream that does not exist answered %s", op, got)
+		}
+	}
+	const arn = "arn:aws:kinesis:us-east-1:000000000000:stream/s/consumer/none:1"
+	if got := answer("DescribeStreamConsumer", `{"ConsumerARN":"`+arn+`"}`); got != "400 ResourceNotFoundException: Consumer "+arn+" under account 000000000000 not found." {
+		t.Errorf("DescribeStreamConsumer of a consumer that does not exist answered %s", got)
+	}
+	// A consumer that exists is still described, as it was.
+	try := kinesisTries(t)
+	try("CreateStream", `{"StreamName":"s"}`)
+	_, made := try("RegisterStreamConsumer", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s","ConsumerName":"c"}`)
+	consumer, _ := made["Consumer"].(map[string]any)
+	_, described := try("DescribeStreamConsumer", `{"ConsumerARN":"`+fmt.Sprint(consumer["ConsumerARN"])+`"}`)
+	if description, _ := described["ConsumerDescription"].(map[string]any); description["ConsumerName"] != "c" || description["ConsumerARN"] != consumer["ConsumerARN"] {
+		t.Errorf("a consumer that exists is described %v; registered as %v", described, made)
+	}
+}
+
+// A stream changes mode twice in 24 hours and no more: "For each data stream in your AWS account, you
+// can switch between the on-demand and provisioned capacity modes twice within 24 hours" (Developer
+// Guide, Quotas and limits). Any number of changes was taken. A third within 24 hours of the first of
+// two is refused; a call that asks for the mode the stream has is no change and is not counted; and the
+// window is each stream's own, and moves: 24 hours after a change it no longer counts. The guide names
+// no error: LimitExceededException, which UpdateStreamMode lists for "the requested resource exceeds
+// the maximum number allowed", its message, and that the 24 hours are a moving window, are a reading.
+func TestKinesisAStreamChangesModeTwiceInADay(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := bundled.Handler("aws.kinesis", deps)
+	mode := func(stream, to string) string {
+		t.Helper()
+		_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "UpdateStreamMode", Input: map[string]any{
+			"StreamARN": "arn:aws:kinesis:us-east-1:123456789012:stream/" + stream, "StreamModeDetails": map[string]any{"StreamMode": to}}})
+		if err != nil {
+			return err.Error()
+		}
+		out, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "DescribeStreamSummary", Input: map[string]any{"StreamName": stream}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fmt.Sprint(out.Output["StreamDescriptionSummary"].(map[string]any)["StreamModeDetails"].(map[string]any)["StreamMode"])
+	}
+	after := func(d time.Duration) {
+		t.Helper()
+		if err := deps.Clock.Advance(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, stream := range []string{"a", "b"} {
+		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateStream", Input: map[string]any{"StreamName": stream, "ShardCount": 1}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const refused = "LimitExceededException: Stream a under account 123456789012 has changed its capacity mode twice in the last 24 hours."
+	for _, step := range []struct {
+		wait       time.Duration
+		stream, to string
+		want       string
+	}{
+		{0, "a", "PROVISIONED", "PROVISIONED"},                     // the mode it has: no change
+		{0, "a", "ON_DEMAND", "ON_DEMAND"},                         // the first, at 0h
+		{0, "a", "ON_DEMAND", "ON_DEMAND"},                         // no change
+		{10 * time.Hour, "a", "PROVISIONED", "PROVISIONED"},        // the second, at 10h
+		{0, "a", "ON_DEMAND", refused},                             // a third, the same hour
+		{0, "a", "PROVISIONED", "PROVISIONED"},                     // the mode it has is still answered
+		{0, "b", "ON_DEMAND", "ON_DEMAND"},                         // another stream has its own two
+		{13*time.Hour + 59*time.Minute, "a", "ON_DEMAND", refused}, // 23h59 after the first
+		{time.Minute, "a", "ON_DEMAND", "ON_DEMAND"},               // 24h after the first: it no longer counts
+		{0, "a", "PROVISIONED", "LimitExceededException: Stream a under account 123456789012 has changed its capacity mode twice in the last 24 hours."},
+		{10 * time.Hour, "a", "PROVISIONED", "PROVISIONED"}, // 24h after the second
+	} {
+		after(step.wait)
+		if got := mode(step.stream, step.to); got != step.want {
+			t.Errorf("at %s, stream %s to %s: %s; want %s", deps.Clock.Now().Format("15:04 Jan 2"), step.stream, step.to, got, step.want)
+		}
+	}
+	// A stream created again over its name is a new stream, with its own two.
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateStream", Input: map[string]any{"StreamName": "a", "ShardCount": 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mode("a", "ON_DEMAND") + " " + mode("a", "PROVISIONED") + " " + mode("a", "ON_DEMAND"); got != "ON_DEMAND PROVISIONED "+refused {
+		t.Errorf("a stream created again changed mode: %s", got)
 	}
 }

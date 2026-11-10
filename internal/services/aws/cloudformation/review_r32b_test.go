@@ -396,7 +396,7 @@ func TestCloudFormationReview5BRecordRoundTrip(t *testing.T) {
 	}
 	// gave: on values. A number and a Boolean are their text (A, E: a Number parameter's Ref is a String), a
 	// list is its members in order (C), an object its members in any order (D), and nothing given is nothing (F).
-	names, targets, _ := gave(map[string]any{"A": 3, "B": "3", "C": []any{1, 2}, "D": map[string]any{"x": 1, "y": 2}, "E": true, "F": nil, "G": "same"},
+	names, targets, _, _ := gave(map[string]any{"A": 3, "B": "3", "C": []any{1, 2}, "D": map[string]any{"x": 1, "y": 2}, "E": true, "F": nil, "G": "same"},
 		map[string]any{"A": "3", "B": "3", "C": []any{2, 1}, "D": map[string]any{"y": 2, "x": 1}, "E": "true", "G": "same", "H": "only-now"})
 	t.Logf("gave: %v %v", *names, targets)
 	if fmt.Sprint(*names) != "[C]" || targets != nil {

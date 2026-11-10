@@ -137,7 +137,7 @@ func TestCloudFormationAStringThatReadsAsNothingIsAValue(t *testing.T) {
 			t.Errorf("same(%#v, %#v) is %v", c.a, c.b, got)
 		}
 	}
-	names, _, took := gave(map[string]any{"A": 3.0, "B": "null", "C": "[1]", "G": "same"}, map[string]any{"A": "3", "C": []any{1.0}, "G": "same", "H": "only-now"})
+	names, _, took, _ := gave(map[string]any{"A": 3.0, "B": "null", "C": "[1]", "G": "same"}, map[string]any{"A": "3", "C": []any{1.0}, "G": "same", "H": "only-now"})
 	if fmt.Sprint(*names, *took) != "[B C] [H]" {
 		t.Errorf("gave lists %v as changed and %v as taken away; want [B C] and [H]", *names, *took)
 	}

@@ -160,7 +160,8 @@
       "operation": "GetResourcePolicy",
       "input": {"ResourceARN": "arn:aws:kinesis:us-east-1:000000000000:stream/absent"},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {"Policy": ""}
+      "recut": "The pack answered an empty policy for any ARN. GetResourcePolicy 'Returns a policy attached to the specified data stream or consumer' and lists ResourceNotFoundException, 'The requested resource could not be found. The stream might not be specified correctly.' (Kinesis API reference, GetResourcePolicy, read 2026-11): no stream is named absent.",
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
     },
     {
       "operation": "DeleteResourcePolicy",
@@ -331,26 +332,22 @@
       "operation": "IncreaseStreamRetentionPeriod",
       "input": {"StreamName": "ghost", "RetentionPeriodHours": 48},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {}
+      "recut": "The pack made a stream record for a name that had none. IncreaseStreamRetentionPeriod lists ResourceNotFoundException, 'The requested resource could not be found. The stream might not be specified correctly.' (Kinesis API reference, IncreaseStreamRetentionPeriod, read 2026-11): a retention period is an existing stream's, and no stream is named ghost.",
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
     },
     {
       "operation": "DescribeStream",
       "input": {"StreamName": "ghost"},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {"StreamDescription": {
-        "StreamName": "ghost",
-        "StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/ghost",
-        "StreamStatus": "ACTIVE",
-        "Shards": [{"ShardId": "shardId-000000000000",
-                    "HashKeyRange": {"StartingHashKey": "0", "EndingHashKey": "340282366920938463463374607431768211455"},
-                    "SequenceNumberRange": {"StartingSequenceNumber": "0"}}]
-      }}
+      "recut": "The pack described the record the step before had made. With no such record there is no stream: DescribeStream lists ResourceNotFoundException, 'The requested resource could not be found. The stream might not be specified correctly.' (Kinesis API reference).",
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
     },
     {
       "operation": "DeleteStream",
       "input": {"StreamName": "ghost"},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {}
+      "recut": "The pack deleted whatever it was asked to, there or not. DeleteStream lists ResourceNotFoundException, 'The requested resource could not be found. The stream might not be specified correctly.' (Kinesis API reference, DeleteStream, read 2026-11): no stream is named ghost, since the retention call two steps before no longer makes one.",
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
     },
     {
       "operation": "DeregisterStreamConsumer",
@@ -362,7 +359,8 @@
       "operation": "DeregisterStreamConsumer",
       "input": {"ConsumerARN": {"$fromStep": 27, "$fromPath": "Consumer.ConsumerARN"}},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {}
+      "recut": "The pack deregistered a consumer whether or not there was one. This is the second deregistration of the consumer the step before removed, and DeregisterStreamConsumer lists ResourceNotFoundException, 'The requested resource could not be found.' (Kinesis API reference, DeregisterStreamConsumer, read 2026-11).",
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
     },
     {
       "operation": "DeleteStream",
@@ -374,7 +372,8 @@
       "operation": "DeleteStream",
       "input": {"StreamName": "t"},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {}
+      "recut": "The pack deleted whatever it was asked to, there or not. This is the second deletion of the stream the step before deleted, and DeleteStream lists ResourceNotFoundException (Kinesis API reference, DeleteStream, read 2026-11); 'If an application attempts to operate on a deleted stream, it receives the exception ResourceNotFoundException.'",
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
     },
     {
       "operation": "DeleteStream",

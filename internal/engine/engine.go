@@ -26,8 +26,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"math"
+	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -190,6 +194,9 @@ func (e *Engine) invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	// exist with NonExistentQueue whether or not MessageBody came with it. So
 	// the fault is held until the requires have had their say, and nothing
 	// between here and there writes.
+	if fault := e.checkKinds(modelOp, req); fault != nil {
+		return nil, fault
+	}
 	inputFault := e.validateInput(modelOp, req)
 	if inputFault != nil && len(op.Require) == 0 {
 		return nil, inputFault
@@ -436,6 +443,65 @@ func (e *Engine) validateInput(op model.Operation, req *spi.Request) *spi.Fault 
 		}
 		if fault := checkConstraints(e.model, name, m, v); fault != nil {
 			return fault
+		}
+	}
+	return nil
+}
+
+// checkKinds reads a request, for a bundle that names malformed_input_error,
+// as the JSON protocols read one. A member that is null is absent: it is
+// dropped here, before anything looks, so a required one is then missing and
+// no expression sees a null (Smithy's awsJson1.1 server test
+// AwsJson11ServersDontDeserializeNullStructureValues sends {"string": null}
+// and expects no member). A member the model declares a string or an integer
+// whose value could be neither is refused: an object, an array, and for an
+// integer also a boolean, a fraction, text that is not a number, or a number
+// no int64 holds. A bundle converts such members with string() and int(),
+// which have no answer for those values, so without this the caller's mistake
+// is reported as the service's. Unlike a missing member this outranks the
+// operation's own rules: a request that cannot be read names nothing for them
+// to judge. A number written as text passes, because the query and REST
+// protocols carry every scalar that way; a JSON number is a float64 by the
+// time it is here, so 2^63-1 written as a number has become 2^63 and is
+// refused where the same digits as text pass.
+func (e *Engine) checkKinds(op model.Operation, req *spi.Request) *spi.Fault {
+	if e.ir.MalformedInput == "" {
+		return nil
+	}
+	req.Input = maps.Clone(req.Input) // the caller's map is not this request's to edit
+	maps.DeleteFunc(req.Input, func(_ string, v any) bool { return v == nil })
+	names := make([]string, 0, len(req.Input))
+	for name := range req.Input {
+		names = append(names, name)
+	}
+	sort.Strings(names) // deterministic, as validateInput is
+	for _, name := range names {
+		want := ""
+		switch v := req.Input[name]; e.model.Shapes[e.model.Shapes[op.Input].Members[name].Shape].Kind {
+		case model.KindString, model.KindEnum:
+			switch v.(type) {
+			case map[string]any, []any:
+				want = "a string"
+			}
+		case model.KindInteger, model.KindLong:
+			n, isNum := 0.0, false
+			switch r := reflect.ValueOf(v); { // every Go number an in-process caller might pass
+			case r.CanInt():
+				isNum = true
+			case r.CanUint():
+				isNum = r.Uint() < 1<<63
+			case r.CanFloat():
+				n, isNum = r.Float(), true
+			case r.Kind() == reflect.String:
+				_, err := strconv.ParseInt(r.String(), 10, 64)
+				isNum = err == nil
+			}
+			if !isNum || n != math.Trunc(n) || math.Abs(n) >= 1<<63 {
+				want = "an integer"
+			}
+		}
+		if want != "" {
+			return e.fault(e.ir.MalformedInput, name+" must be "+want)
 		}
 	}
 	return nil

@@ -180,6 +180,12 @@ func Validate(s *Service, svc *model.Service) error {
 				"%s: missing_input_error: unknown error %q; add it to the error table", s.ServiceID, ref))
 		}
 	}
+	if ref := s.MalformedInput; ref != "" {
+		if _, ok := s.Errors[ref]; !ok {
+			problems = append(problems, fmt.Errorf(
+				"%s: malformed_input_error: unknown error %q; add it to the error table", s.ServiceID, ref))
+		}
+	}
 
 	// Declared primitives must exist in the registry at the pinned version.
 	// A bundle calling what nothing implements fails at request time rather

@@ -174,6 +174,9 @@ func merge(dst, src *Service, name string) error {
 	if src.MissingInput != "" {
 		dst.MissingInput = src.MissingInput
 	}
+	if src.MalformedInput != "" {
+		dst.MalformedInput = src.MalformedInput
+	}
 	dst.Quirks = append(dst.Quirks, src.Quirks...)
 
 	for k, v := range src.Primitives {

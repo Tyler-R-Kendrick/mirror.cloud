@@ -16282,6 +16282,23 @@ var mutants = []mutant{
 		run:  "TestKinesisAMemberThatCannotBeReadIsRefused",
 	},
 	{
+		// The check is a bundle's to ask for: one that names no error keeps the answers its own expressions give.
+		name: "kinesis-a-bundle-that-names-no-malformed-input-error-is-judged",
+		file: filepath.Join("internal", "engine", "engine.go"),
+		old:  `if e.ir.MalformedInput == "" {`,
+		new:  `if false {`,
+		pkg:  "./internal/engine",
+		run:  "TestABundleThatNamesNoMalformedInputErrorIsNotJudged",
+	},
+	{
+		name: "kinesis-a-malformed-member-is-answered-with-another-error",
+		file: filepath.Join("internal", "engine", "engine.go"),
+		old:  `return e.fault(e.ir.MalformedInput, name+" must be "+want)`,
+		new:  `return e.fault(e.ir.MissingInput, name+" must be "+want)`,
+		pkg:  "./internal/engine",
+		run:  "TestAMalformedMemberIsAnsweredWithTheBundlesError",
+	},
+	{
 		name: "kinesis-reverse-at-timestamp-selection",
 		file: filepath.Join("internal", "services", "aws", "kinesis", "kinesis.go"),
 		old:  `asFloat(record["ApproximateArrivalTimestamp"]) >= timestamp`,

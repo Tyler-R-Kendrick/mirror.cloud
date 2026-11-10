@@ -166,11 +166,15 @@
   provisioned stream to every operation.
 - `DescribeStream` and `ListShards` still list exactly one shard,
   `shardId-000000000000`, with the full hash-key range, whatever the count.
-  Shards are not records here: listing a stream's real shards needs one
-  record per shard with its hash-key range (a 128-bit split the bundle's
-  expressions cannot compute), parent and adjacent shards for splits and
-  merges, and a record plane that routes a partition key to a shard and
-  hands out one iterator per shard. `PutRecord` writes to that one shard.
+  This is a known limitation, left as it is. Shards are not records here:
+  listing a stream's real shards needs one record per shard with its
+  hash-key range (a 128-bit split the bundle's expressions cannot compute),
+  parent and adjacent shards for splits and merges, and a record plane that
+  routes a partition key to a shard and hands out one iterator per shard.
+  `PutRecord` writes to that one shard, and an iterator does not read the
+  shard it was asked for, so listing more shards than the record plane has
+  would be worse than listing one: a consumer that reads every listed
+  shard would be given every record once per shard.
 - "For each data stream in your AWS account, you can switch between the
   on-demand and provisioned capacity modes twice within 24 hours" (Quotas
   and limits). A third change within 24 hours of the first of two is

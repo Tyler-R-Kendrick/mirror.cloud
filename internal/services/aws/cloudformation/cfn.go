@@ -1183,7 +1183,7 @@ func physicalName(stack, logical, stackID, typ string, props map[string]any) str
 	return cfntemplate.PhysicalName(stack, logical, stackID, typ, kinds[typ].max, props)
 }
 
-// countRefused is, whole, the error of UpdateShardCount on an on-demand stream: the one a restore passes.
+// countRefused is, whole, the error of UpdateShardCount on an on-demand stream: the one a restore passes. Only a stream's can equal it, so the type beside it where it is matched says whose it is and decides nothing.
 const countRefused = "ValidationException: UpdateShardCount is only supported for data streams with the provisioned capacity mode."
 const shardCountCall, putTargetsCall = "aws.kinesis UpdateShardCount StreamName={id} ScalingType=UNIFORM_SCALING TargetShardCount=@ShardCount", "aws.events PutTargets Rule={n} Targets EventBusName=$EventBusName" // a stream's count and a rule's targets: calls of their own, beside the kind's update
 

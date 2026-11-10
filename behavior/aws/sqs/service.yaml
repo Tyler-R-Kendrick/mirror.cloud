@@ -151,6 +151,10 @@ resources:
       derive: "'QueueName' in input ? string(input.QueueName) : lastSegment(string(input.QueueUrl), '/')"
     record:
       at: "int(now)"
+      # What the 60-second window is measured from. Whole seconds dropped the
+      # part of the second already spent, and the window closed up to a second
+      # early. A record without it (a restored snapshot) is read on `at`.
+      atMs: "now_ms"
 
   message:
     # Parent-scoped: each queue's messages are their own collection, named for
@@ -373,7 +377,7 @@ operations:
       # The window outranks everything about the attributes: a name inside it
       # cannot be created however well-formed the request is, and the pack
       # checked it the moment the name validated.
-      - cond: "!gone_found || int(now) - int(gone.at) >= 60"
+      - cond: "!gone_found || now_ms - (has(gone.atMs) ? int(gone.atMs) : int(gone.at) * 1000) >= 60000"
         error: QueueDeletedRecently
       - cond: >
           !name.endsWith('.fifo')
@@ -1050,7 +1054,8 @@ operations:
           has_http && (!('X-Amz-Target' in headers) || string(headers['X-Amz-Target']) == '')
             ? 'The specified queue does not exist for this wsdl version.'
             : 'The specified queue does not exist.'
-      - cond: "!has(q.purgedAt) || int(now) - int(q.purgedAt) >= 60"
+      # In milliseconds, for the reason `deleted.atMs` gives.
+      - cond: "!has(q.purgedAt) || now_ms - (has(q.purgedAtMs) ? int(q.purgedAtMs) : int(q.purgedAt) * 1000) >= 60000"
         error: PurgeQueueInProgress
         message_expr: '"Only one PurgeQueue operation on " + string(q.name) + " is allowed every 60 seconds."'
     select: { binding: msgs, resource: message }
@@ -1060,7 +1065,7 @@ operations:
       - delete: { resource: rhandle, where: "true" }
       - patch:
           resource: queue
-          record: { purgedAt: "int(now)" }
+          record: { purgedAt: "int(now)", purgedAtMs: "now_ms" }
 
   # The access policy is a JSON document inside a queue attribute, so these two
   # read it, amend the statement list and write the attribute back. Everything

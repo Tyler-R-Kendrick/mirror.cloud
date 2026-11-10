@@ -966,7 +966,9 @@ func (w prior) differs(property string, now any) bool {
 // it did not (took), whose values a restore carries back.
 func gave(failed, now map[string]any) (names, targets, took *[]string) {
 	changed, lost := []string{}, []string{}
-	for _, property := range slices.Compact(slices.Sorted(slices.Values(slices.Concat(slices.Collect(maps.Keys(failed)), slices.Collect(maps.Keys(now)))))) { // of either, each once, in order
+	properties := slices.Concat(slices.Collect(maps.Keys(failed)), slices.Collect(maps.Keys(now))) // of either, each once, in order
+	slices.Sort(properties)
+	for _, property := range slices.Compact(properties) {
 		if failed[property] == nil && now[property] != nil {
 			lost = append(lost, property)
 		} else if !same(failed[property], now[property]) {
@@ -1214,11 +1216,6 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		props["SecretString"] = value
 	} else if isTrue(props["FifoQueue"]) && typ == "AWS::SQS::Queue" {
 		props["Attributes"] = map[string]any{"FifoQueue": "true"}
-	}
-	if typ == "AWS::Kinesis::Stream" && existing != "" && str(asMap(props["StreamModeDetails"])["StreamMode"]) == "ON_DEMAND" && (was.differs("StreamModeDetails", props["StreamModeDetails"]) || was.differs("ShardCount", props["ShardCount"])) {
-		if _, err := p.do(ctx, req, shardCountCall, n, existing, map[string]any{"ShardCount": cmp.Or(props["ShardCount"], any(4))}); err != nil { // the count a create gives an on-demand stream, set before the mode, while it is still provisioned
-			return existing, err
-		}
 	}
 	out, err := p.do(ctx, req, spec, n, existing, props)
 	for _, member := range strings.Split(k.id, ".") { // where a create's answer holds the id

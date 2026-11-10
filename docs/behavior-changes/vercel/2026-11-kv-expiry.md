@@ -39,3 +39,25 @@ canonical spelling. Answers that change:
   refused as `ERR invalid expire time in setex` / `in expire` only when they
   cannot be turned into milliseconds and added to the clock, as in Redis.
   Before, every number of sixteen digits or more was refused.
+
+## A malformed command is a 400
+
+The command array is the client's, and an element of it may be any JSON
+value. Answers that change, all of which were a 500 `InternalFailure` or an
+evaluation error before unless said otherwise:
+
+- **A null, list or object where a word belongs** is 400 `redis command
+  arguments must be strings or numbers`: as the verb, the key, a value, or a
+  trailing argument. This message is this emulator's own; no reading of
+  Upstash's answer for it has been taken.
+- **Where seconds or an increment belong** (`SETEX`, `EXPIRE`, `INCRBY`,
+  `DECRBY`), it is `ERR value is not an integer or out of range`, as any text
+  that is not an integer is.
+- **`INCRBY` / `DECRBY` read their number as Redis reads an integer**, the
+  same spelling as the seconds above. `INCRBY n soon` was accepted and counted
+  as zero, and `INCRBY n 007` as seven; both are now `ERR value is not an
+  integer or out of range`. So is counting on a stored value in another
+  spelling (`007`), which was counted with before.
+- **Counting past 64 bits** is `ERR increment or decrement would overflow`,
+  and `DECRBY` of the most negative number `ERR decrement would overflow`, as
+  in Redis.

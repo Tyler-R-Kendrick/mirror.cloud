@@ -35,8 +35,13 @@ resources:
       # empty key rather than an evaluation error, because the `require` rules
       # below are what answer such a request and they cannot run if addressing
       # the resource has already failed.
+      #
+      # And over what the key is: a JSON null, list or object there has no
+      # spelling, and the rule that refuses it runs after this.
       derive: >
-        ('body' in input && input.body != null && size(input.body) > 1)
+        ('body' in input && input.body != null && size(input.body) > 1
+          && (type(input.body[1]) == string || type(input.body[1]) == int || type(input.body[1]) == uint
+              || type(input.body[1]) == double || type(input.body[1]) == bool))
           ? string(input.body[1]) : ''
     record:
       value: >
@@ -77,8 +82,15 @@ operations:
     let:
       # Upstash upper-cases the command, so ["get","k"] and ["GET","k"] are one
       # command. The pack did the same.
-      cmd: "('body' in input && input.body != null) ? input.body : []"
-      verb: "size(cmd) > 0 ? upper(string(cmd[0])) : ''"
+      #
+      # The array is the client's, so an element may be anything JSON has. A
+      # word or a number is its spelling; a null, list or object has none and
+      # reads as '' here, so that every expression below is total, and
+      # args_ok is what refuses the command for it.
+      raw: "('body' in input && input.body != null) ? input.body : []"
+      args_ok: "raw.all(a, type(a) == string || type(a) == int || type(a) == uint || type(a) == double || type(a) == bool)"
+      cmd: "raw.map(a, (type(a) == string || type(a) == int || type(a) == uint || type(a) == double || type(a) == bool) ? string(a) : '')"
+      verb: "size(cmd) > 0 ? upper(cmd[0]) : ''"
       # A key past its deadline is a miss for every read path, matching Redis
       # lazy expiry. A deadline of 0 / absent means no TTL. entry is {} on a
       # miss, so every field access sits behind entry_found / alive.
@@ -90,17 +102,35 @@ operations:
           : (('expires_ms' in entry && entry.expires_ms != null) ? int(entry.expires_ms)
           : (('expires_at' in entry && entry.expires_at != null) ? int(entry.expires_at) * 1000 : 0))
       alive: "entry_found && (deadline_ms == 0 || deadline_ms > now_ms)"
-      # Numeric payload for INCR family. Missing key starts at 0; a live
-      # non-integer is refused below as BadRequest. matches-guards keep int()
-      # from running in let before require can answer 400.
-      base_num: >
-        alive && string(entry.value).matches('^-?[0-9]+$') ? int(entry.value) : 0
+      # Numeric payload for INCR family. Missing key starts at 0; a live value
+      # that is not an integer is refused below as BadRequest. An integer is
+      # what Redis counts with: the spelling ttl_is_int describes below. int()
+      # runs only on text that has passed it, so that require can answer 400.
+      base_text: "alive ? string(entry.value) : '0'"
+      base_is_int: >
+        base_text.matches('^(0|-?[1-9][0-9]{0,17})$')
+          || (base_text.matches('^[1-9][0-9]{18}$') && base_text <= '9223372036854775807')
+          || (base_text.matches('^-[1-9][0-9]{18}$') && base_text <= '-9223372036854775808')
+      base_num: "base_is_int ? int(base_text) : 0"
+      by_text: "size(cmd) > 2 ? cmd[2] : ''"
+      by_is_int: >
+        by_text.matches('^(0|-?[1-9][0-9]{0,17})$')
+          || (by_text.matches('^[1-9][0-9]{18}$') && by_text <= '9223372036854775807')
+          || (by_text.matches('^-[1-9][0-9]{18}$') && by_text <= '-9223372036854775808')
+      by: "by_is_int ? int(by_text) : 0"
+      # The most negative number has no negation, so DECRBY of it is refused
+      # by its own rule and counts as nothing here.
       delta: >
         verb == 'INCR' ? 1
           : (verb == 'DECR' ? -1
-          : (verb == 'INCRBY' && size(cmd) > 2 && string(cmd[2]).matches('^-?[0-9]+$') ? int(cmd[2])
-          : (verb == 'DECRBY' && size(cmd) > 2 && string(cmd[2]).matches('^-?[0-9]+$') ? -int(cmd[2]) : 0)))
-      next_num: "base_num + delta"
+          : (verb == 'INCRBY' ? by
+          : (verb == 'DECRBY' && by != -9223372036854775808 ? -by : 0)))
+      # Checked before the sum is taken: the sum itself would be an
+      # evaluation error.
+      overflows: >
+        delta > 0 ? base_num > 9223372036854775807 - delta
+          : (delta < 0 ? base_num < -9223372036854775808 - delta : false)
+      next_num: "overflows ? 0 : base_num + delta"
       # SETEX key seconds value -- value is argv[3], not the schema's body[2].
       setex_value: "size(cmd) > 3 ? string(cmd[3]) : ''"
       # SETEX's and EXPIRE's seconds, read as Redis reads an integer argument:
@@ -108,7 +138,7 @@ operations:
       # zero, no minus zero, no space. Eighteen digits always fit; nineteen
       # are compared with the largest as text, which orders them by value at
       # equal length. int() runs only on text this has passed.
-      ttl_text: "size(cmd) > 2 ? string(cmd[2]) : ''"
+      ttl_text: "size(cmd) > 2 ? cmd[2] : ''"
       ttl_is_int: >
         ttl_text.matches('^(0|-?[1-9][0-9]{0,17})$')
           || (ttl_text.matches('^[1-9][0-9]{18}$') && ttl_text <= '9223372036854775807')
@@ -144,12 +174,23 @@ operations:
       - { cond: "!(verb == 'SETEX' || verb == 'EXPIRE') || ttl_is_int", error: BadRequest, message: "ERR value is not an integer or out of range" }
       - { cond: "verb != 'SETEX' || (ttl > 0 && ttl_fits)", error: BadRequest, message: "ERR invalid expire time in setex" }
       - { cond: "verb != 'EXPIRE' || ttl_fits", error: BadRequest, message: "ERR invalid expire time in expire" }
+      - { cond: "!(verb == 'INCRBY' || verb == 'DECRBY') || by_is_int", error: BadRequest, message: "ERR value is not an integer or out of range" }
+      - { cond: "verb != 'DECRBY' || by != -9223372036854775808", error: BadRequest, message: "ERR decrement would overflow" }
       # INCR family on a live non-integer: Redis WRONGTYPE/ERR, not 501.
       - {
-          cond: "!(verb == 'INCR' || verb == 'DECR' || verb == 'INCRBY' || verb == 'DECRBY') || !alive || string(entry.value).matches('^-?[0-9]+$')",
+          cond: "!(verb == 'INCR' || verb == 'DECR' || verb == 'INCRBY' || verb == 'DECRBY') || base_is_int",
           error: BadRequest,
           message: "ERR value is not an integer or out of range"
         }
+      - {
+          cond: "!(verb == 'INCR' || verb == 'DECR' || verb == 'INCRBY' || verb == 'DECRBY') || !overflows",
+          error: BadRequest,
+          message: "ERR increment or decrement would overflow"
+        }
+      # After the rules for a number, so that a null where seconds or an
+      # increment belong is told it is not an integer; before the rule for an
+      # unserved verb, so that a malformed command is not told it is one.
+      - { cond: args_ok, error: BadRequest, message: "redis command arguments must be strings or numbers" }
       # Last, so a malformed SET still reads as malformed rather than as an
       # unimplemented command. String + control verbs below; hashes/lists/sets
       # and pipelines stay 501 until there is evidence for them.

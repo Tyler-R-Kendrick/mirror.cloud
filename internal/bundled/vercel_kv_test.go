@@ -246,3 +246,67 @@ func TestVercelKVSetIgnoresItsOptions(t *testing.T) {
 		t.Fatalf("TTL after SET with EX: %q, %v", got, err)
 	}
 }
+
+// Whatever a client puts in the command array, the answer is the service's:
+// a JSON null, list or object where a word belongs, or a number that cannot
+// be counted with, is a 400 and never an evaluation error.
+func TestVercelKVAnswersMalformedArguments(t *testing.T) {
+	cmd := kvPack(t)
+	refused := func(message string, argv ...any) {
+		t.Helper()
+		_, err := cmd(argv...)
+		if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != message {
+			t.Fatalf("%v: got %#v, want 400 %q", argv, err, message)
+		}
+	}
+	want := func(want string, argv ...any) {
+		t.Helper()
+		if got, err := cmd(argv...); err != nil || got != want {
+			t.Fatalf("%v: got %q, %v; want %q", argv, got, err, want)
+		}
+	}
+	const notInt = "ERR value is not an integer or out of range"
+	const notScalar = "redis command arguments must be strings or numbers"
+	want("OK", "SET", "k", "v")
+	want("OK", "SET", "n", "5")
+
+	// Seconds that are no word at all are not an integer.
+	for _, seconds := range []any{nil, []any{1.0}, map[string]any{"s": 1.0}, true} {
+		refused(notInt, "EXPIRE", "k", seconds)
+		refused(notInt, "SETEX", "k", seconds, "v")
+	}
+	// Nor is such an increment.
+	for _, by := range []any{nil, []any{}, map[string]any{}, "007", "+1", "-0", "1.5", "", "9223372036854775808"} {
+		refused(notInt, "INCRBY", "n", by)
+		refused(notInt, "DECRBY", "n", by)
+	}
+	// Anywhere else it is a malformed command.
+	for _, argv := range [][]any{
+		{nil}, {[]any{"GET"}, "k"}, {"GET", nil}, {"SET", nil, "v"}, {"SET", "k", nil}, {"SET", "k", []any{}},
+		{"SET", "k", map[string]any{}}, {"APPEND", "k", nil}, {"SETEX", "k", "5", nil}, {"DEL", []any{"k"}},
+		{"SET", "k", "v", nil}, {"EXISTS", map[string]any{}}, {"INCR", nil}, {"HSET", "h", nil, "v"},
+	} {
+		refused(notScalar, argv...)
+	}
+	want("v", "GET", "k")
+	want("-1", "TTL", "k")
+	want("5", "GET", "n")
+
+	// Counting past 64 bits is refused, as Redis refuses it, and counts nothing.
+	want("OK", "SET", "top", "9223372036854775807")
+	refused("ERR increment or decrement would overflow", "INCR", "top")
+	refused("ERR increment or decrement would overflow", "INCRBY", "top", "1")
+	refused("ERR increment or decrement would overflow", "DECRBY", "top", "-1")
+	want("9223372036854775806", "DECR", "top")
+	want("OK", "SET", "bottom", "-9223372036854775808")
+	refused("ERR increment or decrement would overflow", "DECR", "bottom")
+	refused("ERR increment or decrement would overflow", "INCRBY", "bottom", "-1")
+	refused("ERR decrement would overflow", "DECRBY", "n", "-9223372036854775808")
+	want("-1", "INCRBY", "bottom", "9223372036854775807")
+	// A stored value Redis would not count with is not an integer.
+	for _, stored := range []string{"007", "9223372036854775808", "-0", "+1"} {
+		want("OK", "SET", "odd", stored)
+		refused(notInt, "INCR", "odd")
+		want(stored, "GET", "odd")
+	}
+}

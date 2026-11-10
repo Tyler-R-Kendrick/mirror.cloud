@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"io"
 	"net/http"
@@ -168,34 +169,7 @@ func TestKinesisPublishesRecordsAndStartsAtTimestamp(t *testing.T) {
 // shards. TargetShardCount: The updated number of shards." DescribeLimits:
 // "OpenShardCount: The number of open shards." (Kinesis API reference.)
 func TestKinesisAStreamHasTheShardsItWasCreatedWith(t *testing.T) {
-	cfg := config.Default()
-	cfg.Services = []string{"aws.kinesis"}
-	cfg.Seed = "kin-shards"
-	rt, err := rtpkg.Boot(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ts := httptest.NewServer(rt.Handler())
-	defer ts.Close()
-	call := func(op, body string) map[string]any {
-		t.Helper()
-		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(body))
-		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
-		req.Header.Set("X-Amz-Target", "Kinesis_20131202."+op)
-		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/kinesis/aws4_request, SignedHeaders=host, Signature=00")
-		res, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer res.Body.Close()
-		raw, _ := io.ReadAll(res.Body)
-		if res.StatusCode >= 300 {
-			t.Fatalf("%s answered %d %s", op, res.StatusCode, raw)
-		}
-		out := map[string]any{}
-		_ = json.Unmarshal(raw, &out)
-		return out
-	}
+	call := kinesisCalls(t)
 	open := func(stream string) any {
 		t.Helper()
 		summary, _ := call("DescribeStreamSummary", `{"StreamName":"`+stream+`"}`)["StreamDescriptionSummary"].(map[string]any)
@@ -227,5 +201,147 @@ func TestKinesisAStreamHasTheShardsItWasCreatedWith(t *testing.T) {
 	call("CreateStream", `{"StreamName":"three","ShardCount":2}`)
 	if got := open("three"); got != float64(2) {
 		t.Errorf("a stream created again with two shards reports %v open", got)
+	}
+}
+
+// kinesisCalls boots the service alone and answers a call that fails the test on an error.
+func kinesisCalls(t *testing.T) func(op, body string) map[string]any {
+	try := kinesisTries(t)
+	return func(op, body string) map[string]any {
+		t.Helper()
+		status, out := try(op, body)
+		if status >= 300 {
+			t.Fatalf("%s answered %d %v", op, status, out)
+		}
+		return out
+	}
+}
+
+// kinesisTries boots the service alone and answers a call's status and body.
+func kinesisTries(t *testing.T) func(op, body string) (int, map[string]any) {
+	cfg := config.Default()
+	cfg.Services = []string{"aws.kinesis"}
+	cfg.Seed = "kin-" + t.Name()
+	rt, err := rtpkg.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(rt.Handler())
+	t.Cleanup(ts.Close)
+	return func(op, body string) (int, map[string]any) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-amz-json-1.1")
+		req.Header.Set("X-Amz-Target", "Kinesis_20131202."+op)
+		req.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/kinesis/aws4_request, SignedHeaders=host, Signature=00")
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		raw, _ := io.ReadAll(res.Body)
+		out := map[string]any{}
+		_ = json.Unmarshal(raw, &out)
+		return res.StatusCode, out
+	}
+}
+
+// An on-demand stream is recorded as one. CreateStream dropped StreamModeDetails, so a stream created
+// on-demand was a provisioned stream of one shard, no summary said which mode a stream has, and the
+// account's count of on-demand streams was a constant 0.
+//
+// CreateStream: "StreamModeDetails: Indicates the capacity mode of the data stream. Currently, in Kinesis
+// Data Streams, you can choose between an on-demand capacity mode and a provisioned capacity mode".
+// StreamDescriptionSummary: "StreamModeDetails: Specifies the capacity mode to which you want to set your
+// data stream." DescribeLimits: "OnDemandStreamCount: Indicates the number of data streams with the
+// on-demand capacity mode." (Kinesis API reference, as remembered.) That a new on-demand stream has four
+// open shards is the Developer Guide's, also as remembered: "by default ... 4 MB/s write and 8 MB/s read
+// throughput", one shard a megabyte of writes.
+func TestKinesisAnOnDemandStreamIsRecordedAsOne(t *testing.T) {
+	call := kinesisCalls(t)
+	summary := func(stream string) string {
+		t.Helper()
+		s, _ := call("DescribeStreamSummary", `{"StreamName":"`+stream+`"}`)["StreamDescriptionSummary"].(map[string]any)
+		mode, _ := s["StreamModeDetails"].(map[string]any)
+		return fmt.Sprint(mode["StreamMode"], " ", s["OpenShardCount"])
+	}
+	limits := func() string {
+		l := call("DescribeLimits", `{}`)
+		return fmt.Sprint("open=", l["OpenShardCount"], " on-demand=", l["OnDemandStreamCount"])
+	}
+	call("CreateStream", `{"StreamName":"od","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
+	call("CreateStream", `{"StreamName":"od6","ShardCount":6,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
+	call("CreateStream", `{"StreamName":"named","ShardCount":2,"StreamModeDetails":{"StreamMode":"PROVISIONED"}}`)
+	call("CreateStream", `{"StreamName":"plain","ShardCount":3}`)
+	for stream, want := range map[string]string{"od": "ON_DEMAND 4", "od6": "ON_DEMAND 6", "named": "PROVISIONED 2", "plain": "PROVISIONED 3"} {
+		if got := summary(stream); got != want {
+			t.Errorf("stream %s is summarized %s; want %s", stream, got, want)
+		}
+	}
+	if got := limits(); got != "open=15 on-demand=2" {
+		t.Errorf("the account's limits read %s; want 15 open shards and 2 on-demand streams", got)
+	}
+	call("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/plain","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
+	call("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/od","StreamModeDetails":{"StreamMode":"PROVISIONED"}}`)
+	if got := summary("plain") + ", " + summary("od") + ", " + limits(); got != "ON_DEMAND 3, PROVISIONED 4, open=15 on-demand=2" {
+		t.Errorf("after each of two streams changed mode: %s", got)
+	}
+	call("DeleteStream", `{"StreamName":"od6"}`)
+	if got := limits(); got != "open=9 on-demand=1" {
+		t.Errorf("after an on-demand stream is deleted the limits read %s", got)
+	}
+}
+
+// A shard count is an existing stream's, within the account's limit. UpdateShardCount on a stream that
+// does not exist answered 200 and made a record of one; and nothing held the ShardLimit DescribeLimits
+// reports. UpdateShardCount lists ResourceNotFoundException and LimitExceededException among its errors,
+// CreateStream LimitExceededException: "The requested resource exceeds the maximum number allowed"
+// (Kinesis API reference, as remembered). The message here is this emulator's. Shards of on-demand
+// streams are counted against the limit with the others, which is a reading.
+func TestKinesisAShardCountIsAnExistingStreamsWithinTheLimit(t *testing.T) {
+	try := kinesisTries(t)
+	code := func(op, body string) string { // of try as it is when called: a second service is booted below
+		t.Helper()
+		status, out := try(op, body)
+		return fmt.Sprint(status, " ", out["__type"])
+	}
+	if got := code("UpdateShardCount", `{"StreamName":"ghost","TargetShardCount":2,"ScalingType":"UNIFORM_SCALING"}`); got != "400 ResourceNotFoundException" {
+		t.Errorf("UpdateShardCount on a stream that does not exist answered %s", got)
+	}
+	if got := code("DescribeStreamSummary", `{"StreamName":"ghost"}`); got != "400 ResourceNotFoundException" {
+		t.Errorf("the stream that does not exist is described: %s", got)
+	}
+	for _, step := range []struct{ op, body, want string }{
+		{"CreateStream", `{"StreamName":"a","ShardCount":300}`, "200 <nil>"},
+		{"CreateStream", `{"StreamName":"b","ShardCount":201}`, "400 LimitExceededException"},
+		{"CreateStream", `{"StreamName":"b","ShardCount":200}`, "200 <nil>"},
+		{"CreateStream", `{"StreamName":"c"}`, "400 LimitExceededException"},
+		{"CreateStream", `{"StreamName":"c","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "400 LimitExceededException"},
+		{"UpdateShardCount", `{"StreamName":"a","TargetShardCount":301,"ScalingType":"UNIFORM_SCALING"}`, "400 LimitExceededException"},
+		{"UpdateShardCount", `{"StreamName":"a","TargetShardCount":296,"ScalingType":"UNIFORM_SCALING"}`, "200 <nil>"},
+		{"CreateStream", `{"StreamName":"c","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "200 <nil>"},
+		{"CreateStream", `{"StreamName":"a","ShardCount":296}`, "200 <nil>"}, // over its own name: its 296 shards are not counted twice
+		{"CreateStream", `{"StreamName":"a","ShardCount":297}`, "400 LimitExceededException"},
+	} {
+		if got := code(step.op, step.body); got != step.want {
+			t.Errorf("%s %s answered %s; want %s", step.op, step.body, got, step.want)
+		}
+	}
+	if _, limits := try("DescribeLimits", `{}`); fmt.Sprint(limits["OpenShardCount"], limits["ShardLimit"]) != "500 500" {
+		t.Errorf("the limits read %v; want every one of the 500 shards open", limits)
+	}
+
+	// The on-demand streams have their own limit, the OnDemandStreamCountLimit DescribeLimits reports.
+	try = kinesisTries(t)
+	for i := range 50 {
+		if got := code("CreateStream", fmt.Sprintf(`{"StreamName":"od%d","ShardCount":1,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, i)); got != "200 <nil>" {
+			t.Fatalf("on-demand stream %d of 50 answered %s", i+1, got)
+		}
+	}
+	if got := code("CreateStream", `{"StreamName":"od50","ShardCount":1,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`); got != "400 LimitExceededException" {
+		t.Errorf("a 51st on-demand stream answered %s", got)
+	}
+	if got := code("CreateStream", `{"StreamName":"od7","ShardCount":2,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`) + ", " + code("CreateStream", `{"StreamName":"p","ShardCount":1}`); got != "200 <nil>, 200 <nil>" {
+		t.Errorf("an on-demand stream created over its own name, and a provisioned one beside fifty on-demand, answered %s", got)
 	}
 }

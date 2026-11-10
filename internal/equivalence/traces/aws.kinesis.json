@@ -57,10 +57,12 @@
       "operation": "DescribeStreamSummary",
       "input": {"StreamName": "s"},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
+      "recut": "The pack answered no capacity mode. StreamDescriptionSummary has 'StreamModeDetails: Specifies the capacity mode to which you want to set your data stream. Currently, in Kinesis Data Streams, you can choose between an on-demand capacity mode and a provisioned capacity mode' (Kinesis API reference, StreamDescriptionSummary; quoted from memory of the reference, the model file is not in the checkout). The stream was created with no StreamModeDetails, which is a provisioned stream.",
       "output": {"StreamDescriptionSummary": {
         "StreamName": "s",
         "StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/s",
         "StreamStatus": "ACTIVE",
+        "StreamModeDetails": {"StreamMode": "PROVISIONED"},
         "OpenShardCount": 1
       }}
     },

@@ -46,9 +46,13 @@ The oracle is AWS's documentation as it ships in the vendored model
   empty string was seated as the secret's first version. The same holds for
   a secret whose versions hold no `AWSCURRENT` stage (a stored record from
   before `UpdateSecretVersionStage` refused to remove it; see the next
-  entry), and the refusal says so: "The secret has no
-  value to rotate: it has no AWSCURRENT version." checks for that stage, not
-  for any version. A secret that is both without a value and scheduled for
+  entry): the rule checks for that stage, not for any version, and the
+  refusal says so, "The secret has no value to rotate: it has no AWSCURRENT
+  version." The refusal also applies when the request names a
+  `RotationLambdaARN`. That too is the emulator's reading: AWS would accept
+  the call and start the rotation asynchronously, and the function would make
+  the first version. Here no function runs, so there would be no value to
+  seat. A secret that is both without a value and scheduled for
   deletion is refused for the deletion ("You can't perform this operation on
   the secret because it was marked for deletion."), as every other write to
   it is: that rule comes first.

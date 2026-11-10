@@ -1142,6 +1142,10 @@ func TestSecretsManagerRotateSecretRefusesASecretWithNoValue(t *testing.T) {
 	ok(t, "CreateSecret", map[string]any{"Name": "empty"})
 	_, err := call("RotateSecret", map[string]any{"SecretId": "empty"})
 	fault(t, err, "InvalidRequestException")
+	// Naming a rotation function changes nothing here: none runs. (AWS would
+	// start the rotation asynchronously.)
+	_, err = call("RotateSecret", map[string]any{"SecretId": "empty", "RotationLambdaARN": "arn:aws:lambda:us-east-1:000000000000:function:rotate"})
+	fault(t, err, "InvalidRequestException")
 	if versions, _ := ok(t, "ListSecretVersionIds", map[string]any{"SecretId": "empty", "IncludeDeprecated": true})["Versions"].([]any); len(versions) != 0 {
 		t.Fatalf("a refused rotation left %d versions: %#v", len(versions), versions)
 	}

@@ -112,21 +112,27 @@
   that stops giving a mode leaves a provisioned stream, cleared only when
   the previous template gave one.
 - A CloudFormation stream's shard count is sent only when its template's
-  `ShardCount` differs from what the previous template gave, after the mode.
-  A stream made on-demand in place has the count a stream created so has,
-  the template's or four, set before the mode while it is still
-  provisioned; so a rollback to on-demand puts its count back. That the
-  service's handler orders the calls so, and gives a stream switched in
-  place a created one's count, is a reading: Kinesis itself leaves a
-  stream's shards as they are when its mode changes.
+  `ShardCount` differs from what the previous template gave, after the mode,
+  and never to a stream whose template makes it on-demand. A change of mode
+  in place leaves the stream's shards as they are, as Kinesis itself does.
+  Two consequences are readings of what the service's handler would do,
+  pinned as they are: a stream made on-demand in place keeps the count it
+  had (a provisioned stream of one shard given `ON_DEMAND` and a
+  `ShardCount` of 7 is on-demand with one), where a stream created from the
+  same template has the template's count or four; and a rollback to
+  on-demand, after an update that had made the stream provisioned with five
+  shards, leaves five. An on-demand stream's count is the service's, not
+  the template's: a `ShardCount` added to, changed in or taken out of such
+  a template is not sent.
 - A stream whose mode was set to on-demand outside a template that gives a
   count and no mode is updated as any other; before, every update of it
   failed and the stack was left `UPDATE_ROLLBACK_FAILED`. An update that
-  changes the count of a stream that is on-demand, by its template or
-  outside it, fails with Kinesis's refusal and rolls back to
-  `UPDATE_ROLLBACK_COMPLETE`: a restore's count refused the same way was
-  refused the update too, so nothing is left to put back, and neither a
-  rollback nor `ContinueUpdateRollback` is stopped by it.
+  changes that template's count fails with Kinesis's refusal and rolls back
+  to `UPDATE_ROLLBACK_COMPLETE`: the restore's count is refused as the
+  update's was, and since the update's never applied there is nothing to
+  put back, so that one refusal, of the count call alone, does not stop a
+  rollback or `ContinueUpdateRollback`. Any other restore that fails is a
+  failed rollback.
 - A request's `StreamModeDetails` that is absent or null is not given:
   `CreateStream` makes a provisioned stream and `UpdateStreamMode` answers
   "StreamModeDetails is required", as for any required member, before

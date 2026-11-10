@@ -726,9 +726,13 @@ The oracle is AWS's documentation as it ships in the vendored model
     rule's targets are removed only when the previous template gave them.
     A resource that is `UPDATE_FAILED` records the names of the properties
     the failed update gave another value than its template's (names, never
-    values; none is recorded as an empty list), and the ids of the targets
-    it gave a rule, so `ContinueUpdateRollback` clears, and removes
-    targets, by the same rule. A record written before the names were kept
+    values; none is recorded as an empty list), the ids of the targets it
+    gave a rule, and, apart from what it gave, the names of the properties
+    its template gives that the failed update did not. So
+    `ContinueUpdateRollback` clears, and removes targets, by the same rule,
+    and puts back a value the failed update took away as the rollback
+    itself does: a secret whose `SecretString` the failed update dropped
+    has the template's value again on both paths. A record written before the names were kept
     has none: for it alone `ContinueUpdateRollback` clears every such
     property the template lacks, removes every target the template does not
     give, and suspends a bucket's versioning only where it is on. A resource

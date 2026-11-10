@@ -10,6 +10,7 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 )
 
 // rv34Stream is the stream's capacity mode and open shards, as DescribeStreamSummary answers them.
@@ -151,5 +152,59 @@ func TestCloudFormationCreateAndUpdateTypeAPropertyAlike(t *testing.T) {
 	_, named := rv34Sent(t, "aws.kinesis CreateStream StreamName=@ShardCount")
 	if count["ShardCount"] != "Integer" || named["ShardCount"] != "String" {
 		t.Errorf("the walk reads ShardCount as %q, and as %q where it is sent as the stream's name; want Integer and String", count["ShardCount"], named["ShardCount"])
+	}
+}
+
+// A stream whose mode was set to on-demand outside its template is updated, and rolled back, as any other.
+// The engine sent the template's shard count on every update in place, which Kinesis refuses for an
+// on-demand stream, so such a stream failed every update, its rollback and ContinueUpdateRollback, and
+// the stack stayed UPDATE_ROLLBACK_FAILED. The count is sent only when it differs from what the previous
+// template gave. An update that does change it fails, as Kinesis refuses it, and rolls back to
+// UPDATE_ROLLBACK_COMPLETE: the restore's count, refused the same way, is nothing left to put back.
+func TestCloudFormationAStreamMadeOnDemandOutsideItsTemplateIsUpdated(t *testing.T) {
+	t.Parallel()
+	stream := func(properties map[string]any) map[string]any {
+		return map[string]any{"R": map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": properties}}
+	}
+	for _, continued := range []bool{false, true} {
+		h := newStacks(t)
+		if err := rveCreate(h, "a1", stream(map[string]any{"ShardCount": 2})); err != nil {
+			t.Fatal(err)
+		}
+		id := rv31IDs(h, "a1")["R"]
+		if _, err := h.service("aws.kinesis", "UpdateStreamMode", map[string]any{"StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/" + id, "StreamModeDetails": rv34Mode("ON_DEMAND")}); err != nil {
+			t.Fatal(err)
+		}
+		state := func() string {
+			st, _, _ := h.status("a1")
+			return st + ", " + rv34Stream(h, id)
+		}
+		if err := rv28Update(h, "a1", stream(map[string]any{"ShardCount": 2, "RetentionPeriodHours": 48})); err != nil || state() != "UPDATE_COMPLETE, ON_DEMAND 2" {
+			t.Fatalf("continued=%v: an update of another property answered %v and left %s", continued, err, state())
+		}
+		// The same change with a failure after it: rolled back.
+		failing := stream(map[string]any{"ShardCount": 2, "RetentionPeriodHours": 72})
+		failing["Z"] = rv31Dep(rv31Bad, "R")
+		if err := rv28Update(h, "a1", failing); err == nil || state() != "UPDATE_ROLLBACK_COMPLETE, ON_DEMAND 2" {
+			t.Errorf("continued=%v: the failed update answered %v and left %s; want it rolled back", continued, err, state())
+		}
+		if continued { // and as a rollback that could not put back a count the update gave leaves it, for ContinueUpdateRollback
+			rec := h.record("a1")
+			rec["Status"], asMap(spi.Slice(rec["Resources"])[0])["Status"], asMap(spi.Slice(rec["Resources"])[0])["Gave"] = "UPDATE_ROLLBACK_FAILED", "UPDATE_FAILED", []any{"ShardCount"}
+			if err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "a1", []byte(spi.JSONText(rec))); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.invoke("ContinueUpdateRollback", map[string]any{"StackName": "a1"}); err != nil || state() != "UPDATE_ROLLBACK_COMPLETE, ON_DEMAND 2" {
+				t.Errorf("ContinueUpdateRollback of the stream answered %v and left %s", err, state())
+			}
+		}
+		// A count the template changes is Kinesis's to refuse: the update fails, and rolls back clean.
+		err := rv28Update(h, "a1", stream(map[string]any{"ShardCount": 3, "RetentionPeriodHours": 48}))
+		if err == nil || !strings.Contains(err.Error(), "provisioned capacity mode") || state() != "UPDATE_ROLLBACK_COMPLETE, ON_DEMAND 2" {
+			t.Errorf("continued=%v: an update of the count answered %v and left %s; want Kinesis's refusal and a clean rollback", continued, err, state())
+		}
+		if _, err := h.invoke("ContinueUpdateRollback", map[string]any{"StackName": "a1"}); err == nil {
+			t.Errorf("continued=%v: a stack rolled back clean took a ContinueUpdateRollback", continued)
+		}
 	}
 }

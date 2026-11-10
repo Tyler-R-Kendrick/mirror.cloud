@@ -291,6 +291,16 @@ func TestCloudFormationEveryKindKeepsWhatWasSetOutsideItsTemplate(t *testing.T) 
 			func(h *stacks, id string) string {
 				return fmt.Sprint("shards=", asMap(rv31Get(h, "aws.kinesis", "DescribeStreamSummary", map[string]any{"StreamName": id})["StreamDescriptionSummary"])["OpenShardCount"])
 			}},
+		// A mode set outside a template that gives a count and no mode: the count is not sent again.
+		{"stream-count-and-mode",
+			map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": map[string]any{"ShardCount": 2, "RetentionPeriodHours": 24}},
+			map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": map[string]any{"ShardCount": 2, "RetentionPeriodHours": 48}},
+			func(t *testing.T, h *stacks, id string) {
+				if _, err := h.service("aws.kinesis", "UpdateStreamMode", map[string]any{"StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/" + id, "StreamModeDetails": rv34Mode("ON_DEMAND")}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			rv34Stream},
 		// A mode set outside a template that gives none.
 		{"stream-mode",
 			map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": map[string]any{"RetentionPeriodHours": 24}},

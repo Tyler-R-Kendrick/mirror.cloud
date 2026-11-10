@@ -214,7 +214,6 @@ func TestAzureQueueLifetimesAreNotTruncated(t *testing.T) {
 		t.Fatalf("0.2s after put: dequeue %#v", dq)
 	}
 	shortID, receipt := fmt.Sprint(dq[0].(map[string]any)["id"]), fmt.Sprint(dq[0].(map[string]any)["pop_receipt"])
-	upd := inv("UpdateMessage", map[string]any{"queue": "q", "messageid": shortID, "popreceipt": receipt, "visibilitytimeout": "1", "message": "short"})
 
 	// 0.999 s after the put: still a millisecond of TTL and of delay left.
 	advance(799 * time.Millisecond)
@@ -233,7 +232,7 @@ func TestAzureQueueLifetimesAreNotTruncated(t *testing.T) {
 	if got := count(); got != "1" {
 		t.Fatalf("1s after put: approx count %s, want 1", got)
 	}
-	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"queue": "q", "messageid": shortID, "popreceipt": fmt.Sprint(upd.Output["pop_receipt"])}})
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"queue": "q", "messageid": shortID, "popreceipt": receipt}})
 	if f, ok := err.(*spi.Fault); !ok || f.Code != "MessageNotFound" {
 		t.Fatalf("delete of an expired message: %#v", err)
 	}
@@ -320,7 +319,7 @@ func TestAzureQueueLifetimesAreNotTruncated(t *testing.T) {
 	if rec := stored(oldID); rec["visible_ms"] == nil || rec["expires_ms"] != nil {
 		t.Fatalf("dequeued old record %v", rec)
 	}
-	upd = inv("UpdateMessage", map[string]any{"queue": "q", "messageid": oldID, "popreceipt": oldReceipt, "visibilitytimeout": "1", "message": "old"})
+	upd := inv("UpdateMessage", map[string]any{"queue": "q", "messageid": oldID, "popreceipt": oldReceipt, "visibilitytimeout": "1", "message": "old"})
 	advance(999 * time.Millisecond)
 	if got := peeked(); got != "old-delayed" {
 		t.Fatalf("old record 0.999s after its update: peek %q", got)
@@ -458,6 +457,24 @@ func TestAzureQueueUpdateOfAVisibleMessage(t *testing.T) {
 	if got := peeked(); got != "" || len(inv("PeekMessages", map[string]any{})["_list"].([]any)) != 1 {
 		t.Fatalf("after an update to an empty text: peek %q", got)
 	}
+
+	// A message cannot be hidden past its own expiry.
+	short := inv("PutMessage", map[string]any{"message": "short", "messagettl": "10"})
+	sid, sr := fmt.Sprint(short["id"]), fmt.Sprint(short["pop_receipt"])
+	advance(500 * time.Millisecond)
+	for _, vt := range []string{"10", "11", "604800"} {
+		in := map[string]any{"queue": "q", "messageid": sid, "popreceipt": sr, "visibilitytimeout": vt}
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "UpdateMessage", Input: in})
+		if f, ok := err.(*spi.Fault); !ok || f.Code != "OutOfRangeQueryParameterValue" || f.HTTPStatus != 400 {
+			t.Fatalf("update hiding a 10s message for %ss, 0.5s in: %#v", vt, err)
+		}
+	}
+	sr = fmt.Sprint(inv("UpdateMessage", map[string]any{"messageid": sid, "popreceipt": sr, "visibilitytimeout": "9"})["pop_receipt"])
+	inv("DeleteMessage", map[string]any{"messageid": sid, "popreceipt": sr})
+	// A message that never expires can be hidden for the full seven days.
+	forever := inv("PutMessage", map[string]any{"message": "forever", "messagettl": "-1"})
+	fr := fmt.Sprint(inv("UpdateMessage", map[string]any{"messageid": fmt.Sprint(forever["id"]), "popreceipt": fmt.Sprint(forever["pop_receipt"]), "visibilitytimeout": "604800"})["pop_receipt"])
+	inv("DeleteMessage", map[string]any{"messageid": fmt.Sprint(forever["id"]), "popreceipt": fr})
 
 	// A dequeue spends it.
 	dq := inv("GetMessages", map[string]any{"visibilitytimeout": "1"})["_list"].([]any)

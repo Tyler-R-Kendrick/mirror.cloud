@@ -35,3 +35,11 @@ Update Message).
   `messageText` is "Optional". A worker renewing its hold on a message sends a
   new timeout and no body. Before, such an update emptied the message. An
   update that sends a `MessageText`, empty or not, still replaces the text.
+- **Update Message refuses a timeout past the message's expiry.** Update
+  Message documents that "the visibility timeout of a message can't be set to
+  a value later than the expiry time". The reference names no error for it,
+  and the Queue Storage error-code table has none; the bundle answers what the
+  reference gives a visibility timeout it will not take, 400
+  `OutOfRangeQueryParameterValue`. Before, the update was accepted and the
+  message stayed hidden until it expired. Put Message documents the same rule
+  and still accepts such a timeout here.

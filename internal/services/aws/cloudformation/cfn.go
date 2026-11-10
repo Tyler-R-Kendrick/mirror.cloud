@@ -305,7 +305,8 @@ type stack struct {
 type res struct {
 	Logical, Physical, Type string
 	Name, Status, Reason    string    `json:",omitempty"`
-	Gave                    *[]string `json:",omitempty"` // while UPDATE_FAILED: the names of the properties the failed update gave it
+	Gave                    *[]string `json:",omitempty"` // while UPDATE_FAILED: the names of the properties the failed update gave another value than the template's; none is [], and absent is a record from before they were kept
+	Targets                 *[]string `json:",omitempty"` // and the ids of the targets it gave a rule
 }
 
 // upsert makes the stack named name, or updates it, in two phases that share no recover. apply is the
@@ -394,8 +395,9 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 	defer func() {
 		if leave == &old { // an update whose rollback did not settle: what it had not restored and what it made are ContinueUpdateRollback's
 			for i, o := range old.Resources {
-				if gave := applied[o.Logical]; gave != nil { // changed in place, and not put back
-					old.Resources[i].Status, old.Resources[i].Reason, old.Resources[i].Gave = "UPDATE_FAILED", old.Reason, names(gave)
+				if failed := applied[o.Logical]; failed != nil { // changed in place, and not put back
+					old.Resources[i].Status, old.Resources[i].Reason = "UPDATE_FAILED", old.Reason
+					old.Resources[i].Gave, old.Resources[i].Targets = gave(failed, p.Props(stored(old.Template), o.Logical, old.Refs, old.Name))
 				}
 			}
 			for _, r := range st.Resources {
@@ -874,13 +876,6 @@ func retyped(old stack, resources map[string]any) error {
 	return nil
 }
 
-// names is the names of the properties props holds, sorted: what is recorded of what a failed update gave
-// a resource, never a value.
-func names(props map[string]any) *[]string {
-	list := slices.Sorted(maps.Keys(props))
-	return &list
-}
-
 // retains answers whether tpl's policy attr keeps a resource rather than deleting it: it is one of keep.
 func retains(tpl map[string]any, attr string, keep ...string) func(res) bool {
 	return func(r res) bool { return slices.Contains(keep, str(asMap(asMap(tpl["Resources"])[r.Logical])[attr])) }
@@ -942,16 +937,74 @@ var kinds = map[string]kind{
 }
 
 // prior is what the template a resource is updated from gave it: its properties, none for a resource the
-// template declared without any, or unknown. A continued rollback knows them by name alone (res.Gave), and
-// passes unknown only for a record written before the names were kept; only then is every property the
-// template lacks read as given before. A resource with no Properties is known, to have been given nothing.
+// template declared without any (it is known, to have been given nothing), or unknown. A continued rollback
+// knows them by name alone, from what its resource recorded (res.Gave, res.Targets): changed holds the
+// properties the failed update gave another value than the template's, and props only its rule targets,
+// by id. It passes unknown only for a record written before the names were kept; only then is every
+// property the template lacks read as given before, and every value as changed.
 type prior struct {
 	props   map[string]any
+	changed map[string]bool
 	unknown bool
 }
 
 // gave is whether the template the resource is updated from gave it property.
-func (w prior) gave(property string) bool { return w.unknown || w.props[property] != nil }
+func (w prior) gave(property string) bool {
+	return w.unknown || w.props[property] != nil || w.changed[property]
+}
+
+// differs is whether the template the resource is updated from gave property another value than now.
+func (w prior) differs(property string, now any) bool {
+	if w.changed != nil {
+		return w.changed[property]
+	}
+	return w.unknown || spi.JSONText(w.props[property]) != spi.JSONText(now)
+}
+
+// gave is what is recorded on a resource left UPDATE_FAILED of what the failed update gave it, which its
+// template (now) does not: the names of those properties, never a value, [] for none, and the ids of the
+// targets it gave a rule.
+func gave(failed, now map[string]any) (names, targets *[]string) {
+	changed := []string{}
+	for _, property := range slices.Sorted(maps.Keys(failed)) {
+		if spi.JSONText(failed[property]) != spi.JSONText(now[property]) {
+			changed = append(changed, property)
+		}
+	}
+	if list, listed := failed["Targets"].([]any); listed {
+		ids := []string{}
+		for _, t := range list {
+			ids = append(ids, str(asMap(t)["Id"]))
+		}
+		targets = &ids
+	}
+	return &changed, targets
+}
+
+// recorded is the prior a continued rollback has of the resource r: what gave recorded.
+func recorded(r res) prior {
+	if r.Gave == nil {
+		return prior{unknown: true}
+	}
+	was := prior{changed: map[string]bool{}, props: map[string]any{}}
+	for _, property := range *r.Gave {
+		was.changed[property] = true
+	}
+	if r.Targets != nil {
+		ids := []any{}
+		for _, id := range *r.Targets {
+			ids = append(ids, map[string]any{"Id": id})
+		}
+		was.props["Targets"] = ids
+	}
+	return was
+}
+
+// under is the name the resource r of the stack st, with the properties props, was made under: the one
+// recorded, or, for a record from before names were, the template's or the generated one, as claim finds it.
+func under(st stack, r res, props map[string]any) string {
+	return cmp.Or(r.Name, str(props[kinds[r.Type].member]), physicalName(st.Name, r.Logical, st.ID, r.Type, props))
+}
 
 // clears are what a type's update call sends for a property the template it is updated from gave and the
 // template gives no longer, so that an update, and a rollback's restore, leave exactly the template's
@@ -960,9 +1013,10 @@ func (w prior) gave(property string) bool { return w.unknown || w.props[property
 // Timeout "The default is 3 seconds", MemorySize "The default value is 128 MB"; DynamoDB's StreamEnabled
 // false, BillingMode PROVISIONED, TableClass STANDARD; an empty description; a stream's one shard). An
 // entry is the member to send, named as its property, or property>member where the names differ. A
-// bucket's are bucketOps, and a rule's targets provision's. Three updates send what the template gives
-// whatever was there, because the template must give it and the call is a whole replacement: a parameter's
-// value and type (PutParameter), a role's trust policy, and a rule (PutRule: "If you omit arguments in
+// bucket's are bucketOps, a rule's targets provision's, and a secret's value is sent only when the
+// template's differs (provision). Four updates send what the template gives whatever was there, because
+// the template must give it and the call is a whole replacement: a parameter's value and type
+// (PutParameter), a role's trust policy, a stream's resource policy, and a rule (PutRule: "If you omit arguments in
 // PutRule, the old values for those arguments are not kept"), so a rule's description or state set outside
 // the template does not outlive an update of the rule, in the service as here. A table's
 // DeletionProtectionEnabled is not sent at all: the table service here keeps it false.
@@ -1148,6 +1202,11 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 			}
 		}
 	}
+	if typ == "AWS::SecretsManager::Secret" && existing != "" && !was.differs("SecretString", props["SecretString"]) && !was.differs("GenerateSecretString", props["GenerateSecretString"]) {
+		props = maps.Clone(props) // the value is the template's as it was: not sent, so one put there since stays
+		delete(props, "SecretString")
+		delete(props, "GenerateSecretString")
+	}
 	if _, gen := props["GenerateSecretString"]; gen && typ == "AWS::SecretsManager::Secret" {
 		value, err := generated(props, stackID+"/"+logical)
 		if err != nil {
@@ -1205,8 +1264,9 @@ func (p *Pack) rollback(ctx context.Context, req *spi.Request, seen, old stack, 
 			continue
 		}
 		props := maps.Collect(maps.All(p.Props(tpl, r.Logical, old.Refs, old.Name)))
-		if _, err := p.provision(ctx, req, r.Type, r.Logical, r.Name, props, prior{props: was}, r.Physical, old.ID); err != nil { // UPDATE_FAILED, for ContinueUpdateRollback
-			old.Resources[i].Status, old.Resources[i].Reason, old.Resources[i].Gave = "UPDATE_FAILED", err.Error(), names(was) // the stack's reason in the service's words
+		if _, err := p.provision(ctx, req, r.Type, r.Logical, under(old, r, props), props, prior{props: was}, r.Physical, old.ID); err != nil { // UPDATE_FAILED, for ContinueUpdateRollback
+			old.Resources[i].Status, old.Resources[i].Reason = "UPDATE_FAILED", err.Error() // the stack's reason in the service's words
+			old.Resources[i].Gave, old.Resources[i].Targets = gave(was, props)
 			first = cmp.Or(first, error(invalid("The following resource(s) failed to update: ["+r.Logical+"].")))
 		}
 		delete(applied, r.Logical) // put back, or marked here: no longer a takeover's to mark
@@ -1254,16 +1314,12 @@ func (p *Pack) resume(ctx context.Context, req *spi.Request, name string) (*spi.
 			doomed = append(doomed, r)
 			continue
 		} else if r.Status == "UPDATE_FAILED" && !slices.Contains(skip, any(r.Logical)) {
-			was := prior{unknown: r.Gave == nil, props: map[string]any{}} // unknown for a record from before the names were kept
-			for _, property := range *cmp.Or(r.Gave, &[]string{}) {
-				was.props[property] = true
-			}
-			_, err = p.provision(ctx, req, r.Type, r.Logical, r.Name, props, was, r.Physical, st.ID)
+			_, err = p.provision(ctx, req, r.Type, r.Logical, under(st, r, props), props, recorded(r), r.Physical, st.ID)
 		}
 		if r.Status == "UPDATE_FAILED" && err != nil {
 			r.Reason, first, err = err.Error(), cmp.Or(first, err), nil
 		} else if r.Status == "UPDATE_FAILED" {
-			r.Status, r.Reason, r.Gave = "UPDATE_COMPLETE", "", nil
+			r.Status, r.Reason, r.Gave, r.Targets = "UPDATE_COMPLETE", "", nil, nil
 		}
 		kept = append(kept, r)
 	}

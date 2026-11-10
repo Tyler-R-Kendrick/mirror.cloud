@@ -15664,8 +15664,8 @@ var mutants = []mutant{
 	{
 		name: "kinesis-update-shard-count-makes-a-stream",
 		file: filepath.Join("behavior", "aws", "kinesis", "service.yaml"),
-		old:  "      - { cond: s_found, error: NotFound }\n      - cond: \"('StreamModeDetails' in s",
-		new:  `      - cond: "('StreamModeDetails' in s`,
+		old:  "      - { cond: s_found, error: NotFound }\n      - cond: \"!('StreamModeDetails' in s",
+		new:  `      - cond: "!('StreamModeDetails' in s`,
 		pkg:  "./internal/services/aws/kinesis",
 		run:  "TestKinesisAShardCountIsAnExistingStreamsWithinTheLimit",
 	},
@@ -15740,6 +15740,14 @@ var mutants = []mutant{
 		new:  `      OpenShardCount: "sum(streams.filter(s, true || !(`,
 		pkg:  "./internal/services/aws/kinesis",
 		run:  "TestKinesisAnOnDemandStreamIsRecordedAsOne",
+	},
+	{
+		name: "kinesis-update-shard-count-sets-an-on-demand-streams-count",
+		file: filepath.Join("behavior", "aws", "kinesis", "service.yaml"),
+		old:  "      - cond: \"!('StreamModeDetails' in s && 'StreamMode' in s.StreamModeDetails && string(s.StreamModeDetails.StreamMode) == 'ON_DEMAND')\"\n        error: Validation\n        message: UpdateShardCount",
+		new:  "      - cond: \"true\"\n        error: Validation\n        message: UpdateShardCount",
+		pkg:  "./internal/services/aws/kinesis",
+		run:  "TestKinesisAnOnDemandStreamsShardCountIsNotUpdated",
 	},
 	{
 		name: "kinesis-reverse-at-timestamp-selection",

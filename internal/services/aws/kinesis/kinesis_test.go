@@ -349,3 +349,38 @@ func TestKinesisAShardCountIsAnExistingStreamsWithinTheLimit(t *testing.T) {
 		t.Errorf("an on-demand stream created over its own name, and a provisioned one beside fifty on-demand, answered %s", got)
 	}
 }
+
+// kinesisAnswers boots the service alone and answers a call as "status code: message".
+func kinesisAnswers(t *testing.T) func(op, body string) string {
+	try := kinesisTries(t)
+	return func(op, body string) string {
+		t.Helper()
+		status, out := try(op, body)
+		if status < 300 {
+			return fmt.Sprint(status)
+		}
+		return fmt.Sprint(status, " ", out["__type"], ": ", out["message"])
+	}
+}
+
+// An on-demand stream's shard count is not the caller's to set: UpdateShardCount "is only supported for
+// the data streams with the provisioned capacity mode" (API reference). It was applied to any stream.
+// The reference does not say which of the operation's errors answers; ValidationException, "The request
+// failed data validation for this data stream", and the message are a reading.
+func TestKinesisAnOnDemandStreamsShardCountIsNotUpdated(t *testing.T) {
+	answer := kinesisAnswers(t)
+	answer("CreateStream", `{"StreamName":"od","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
+	answer("CreateStream", `{"StreamName":"p","ShardCount":2}`)
+	const refused = "400 ValidationException: UpdateShardCount is only supported for data streams with the provisioned capacity mode."
+	if got := answer("UpdateShardCount", `{"StreamName":"od","TargetShardCount":8,"ScalingType":"UNIFORM_SCALING"}`); got != refused {
+		t.Errorf("UpdateShardCount on an on-demand stream answered %s", got)
+	}
+	if got := answer("UpdateShardCount", `{"StreamName":"p","TargetShardCount":3,"ScalingType":"UNIFORM_SCALING"}`); got != "200" {
+		t.Errorf("UpdateShardCount on a provisioned stream answered %s", got)
+	}
+	answer("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/p","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
+	answer("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/od","StreamModeDetails":{"StreamMode":"PROVISIONED"}}`)
+	if got := answer("UpdateShardCount", `{"StreamName":"p","TargetShardCount":4,"ScalingType":"UNIFORM_SCALING"}`) + ", " + answer("UpdateShardCount", `{"StreamName":"od","TargetShardCount":5,"ScalingType":"UNIFORM_SCALING"}`); got != refused+", 200" {
+		t.Errorf("after each stream changed mode, the two updates answered %s", got)
+	}
+}

@@ -60,6 +60,7 @@
 | `CreateStream` or `UpdateShardCount` of a provisioned stream that would take the caller's provisioned shards past `ShardLimit` (500) | Accepted | `LimitExceededException` |
 | `DescribeLimits.OpenShardCount` with on-demand streams | 1 | The provisioned streams' shards; an on-demand stream's are not counted |
 | A 51st on-demand stream (`OnDemandStreamCountLimit` 50) | Accepted | `LimitExceededException` |
+| `UpdateShardCount` on an on-demand stream | The count set | `ValidationException` |
 
 ## Readings
 
@@ -79,6 +80,12 @@
   and leaves on-demand shards out, is a reading. The messages of both
   `LimitExceededException`s are this emulator's, and so is the limit of 500
   (the guide's defaults are 1,000, 6,000 or 20,000 by Region).
+- `UpdateShardCount` "is only supported for the data streams with the
+  provisioned capacity mode" (API reference). Which of its errors answers an
+  on-demand stream is not stated: `ValidationException` ("The request failed
+  data validation for this data stream") and the message are a reading.
+  `SplitShard` and `MergeShards`, "Only applicable for provisioned" (Quotas
+  and limits), still move an on-demand stream's count.
 - `SplitShard`, `MergeShards` and the retention operations still make a
   record for a stream that does not exist, as the recorded trace has them.
 - A CloudFormation `AWS::Kinesis::Stream` does not pass its

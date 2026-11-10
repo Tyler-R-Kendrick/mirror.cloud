@@ -64,6 +64,10 @@ errors:
     code: LimitExceededException
     http: 400
     fault: client
+  Validation:
+    code: ValidationException
+    http: 400
+    fault: client
 
 operations:
   # A stream has the mode and the shards it is created with: the ShardCount
@@ -342,7 +346,10 @@ operations:
       target: "int(input.TargetShardCount) > 0 ? int(input.TargetShardCount) : cur"
     require:
       - { cond: s_found, error: NotFound }
-      - cond: "('StreamModeDetails' in s && 'StreamMode' in s.StreamModeDetails && string(s.StreamModeDetails.StreamMode) == 'ON_DEMAND') || sum(others.filter(o, !('StreamModeDetails' in o && 'StreamMode' in o.StreamModeDetails && string(o.StreamModeDetails.StreamMode) == 'ON_DEMAND')).map(o, 'OpenShardCount' in o && int(o.OpenShardCount) > 0 ? int(o.OpenShardCount) : 1)) + target <= 500"
+      - cond: "!('StreamModeDetails' in s && 'StreamMode' in s.StreamModeDetails && string(s.StreamModeDetails.StreamMode) == 'ON_DEMAND')"
+        error: Validation
+        message: UpdateShardCount is only supported for data streams with the provisioned capacity mode.
+      - cond: "sum(others.filter(o, !('StreamModeDetails' in o && 'StreamMode' in o.StreamModeDetails && string(o.StreamModeDetails.StreamMode) == 'ON_DEMAND')).map(o, 'OpenShardCount' in o && int(o.OpenShardCount) > 0 ? int(o.OpenShardCount) : 1)) + target <= 500"
         error: LimitExceeded
         message: This request would exceed the shard limit for the account.
     effects:

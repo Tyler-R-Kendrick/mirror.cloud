@@ -1,8 +1,15 @@
 package cloudformation
 
 import (
+	"cmp"
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 	"testing"
+
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 )
 
 // rv34Stream is the stream's capacity mode and open shards, as DescribeStreamSummary answers them.
@@ -63,5 +70,86 @@ func TestCloudFormationAStreamHasTheModeItsTemplateGives(t *testing.T) {
 			t.Fatal(err)
 		}
 		step("another property, with a mode set outside the template", map[string]any{"ShardCount": 3, "RetentionPeriodHours": 48}, map[string]any{"ShardCount": 2}, "PROVISIONED 3, ON_DEMAND 2")
+	}
+}
+
+// rv34Sent is, for a call spelled as the kinds table spells one, the member each property is sent as
+// with the type its operation's model declares: nothing for a property sent as text ($, %) or not at all.
+func rv34Sent(t *testing.T, spec string) (operation string, members map[string]string) {
+	t.Helper()
+	f := strings.Fields(spec)
+	svc := specboot.Bundle().ServiceByID(f[0])
+	op := svc.OperationByName(f[1])
+	if op == nil {
+		t.Fatalf("%s %s is no operation of the model", f[0], f[1])
+	}
+	members = map[string]string{}
+	for _, arg := range f[2:] {
+		member, value, set := strings.Cut(arg, "=")
+		if arg == "*" { // every property, under its own name
+			for name := range svc.Shapes[op.Input].Members {
+				members[name] = rv34Typing(svc, svc.Shapes[op.Input].Members[name].Shape, 0)
+			}
+		} else if !set || strings.HasPrefix(value, "@") { // a property as it is given: typed by the model
+			members[cmp.Or(strings.TrimPrefix(value, "@"), member)] = rv34Typing(svc, svc.Shapes[op.Input].Members[member].Shape, 0)
+		}
+	}
+	return f[0] + " " + f[1], members
+}
+
+// rv34Typing is how typed reads a value of the shape: the kinds it coerces a scalar to, through
+// structures, lists and maps.
+func rv34Typing(svc *model.Service, shape string, depth int) string {
+	sh := svc.Shapes[shape]
+	switch {
+	case depth > 6:
+		return "..."
+	case sh.Kind == model.KindMap || sh.Member != "":
+		return fmt.Sprint(sh.Kind, "<", rv34Typing(svc, sh.Member, depth+1), ">")
+	case len(sh.Members) > 0:
+		parts := []string{}
+		for _, name := range slices.Sorted(maps.Keys(sh.Members)) {
+			parts = append(parts, name+":"+rv34Typing(svc, sh.Members[name].Shape, depth+1))
+		}
+		return "{" + strings.Join(parts, " ") + "}"
+	}
+	return map[model.ShapeKind]string{model.KindString: "String", model.KindEnum: "String", model.KindInteger: "Integer", model.KindLong: "Integer", model.KindBoolean: "Boolean"}[sh.Kind]
+}
+
+// An update compares two templates' properties typed by the create operation's model (change), and
+// sends them typed by the update operation's (call). The two agree only while a property both operations
+// take is typed alike by both: an integer for one and a string for the other would make a value judged
+// unchanged, or changed, against what is sent. Every kind's create is walked against each call its update
+// makes, the ones provision spells itself included.
+func TestCloudFormationCreateAndUpdateTypeAPropertyAlike(t *testing.T) {
+	updates := map[string][]string{ // the calls an update makes beside the kind's own
+		"AWS::Kinesis::Stream": {"aws.kinesis UpdateShardCount StreamName={id} ScalingType=UNIFORM_SCALING TargetShardCount=@ShardCount"},
+		"AWS::Events::Rule":    {"aws.events PutTargets Rule={n} Targets"},
+	}
+	compared := 0
+	for _, typ := range slices.Sorted(maps.Keys(kinds)) {
+		create, made := rv34Sent(t, kinds[typ].create)
+		for _, spec := range append(updates[typ], kinds[typ].update) {
+			if spec == "" {
+				continue
+			}
+			update, sent := rv34Sent(t, spec)
+			for _, property := range slices.Sorted(maps.Keys(sent)) {
+				if was, both := made[property]; both && was != sent[property] {
+					t.Errorf("%s: %s is typed %s by %s and %s by %s", typ, property, was, create, sent[property], update)
+				} else if both {
+					compared++
+				}
+			}
+		}
+	}
+	if compared < 10 { // a walk that compares nothing proves nothing
+		t.Errorf("only %d properties are taken by both a create and an update", compared)
+	}
+	// The walk tells a difference when there is one: a count sent as a stream's name would be a string.
+	_, count := rv34Sent(t, "aws.kinesis CreateStream ShardCount")
+	_, named := rv34Sent(t, "aws.kinesis CreateStream StreamName=@ShardCount")
+	if count["ShardCount"] != "Integer" || named["ShardCount"] != "String" {
+		t.Errorf("the walk reads ShardCount as %q, and as %q where it is sent as the stream's name; want Integer and String", count["ShardCount"], named["ShardCount"])
 	}
 }

@@ -1111,7 +1111,7 @@ func (p *Pack) change(req *spi.Request, old stack, logical, typ string, props ma
 	if i < 0 {
 		return res{}, "create"
 	}
-	create := strings.Fields(kinds[typ].create) // compared as the service is sent them: what its model types, typed
+	create := strings.Fields(kinds[typ].create) // compared as the service is sent them, typed by the create's model: the update's types what both take alike (a test walks every kind)
 	before, how := input(create[0], create[1], p.Props(stored(old.Template), logical, old.Refs, old.Name)), ""
 	props = input(create[0], create[1], props)
 	for _, k := range slices.Concat(slices.Collect(maps.Keys(before)), slices.Collect(maps.Keys(props))) {

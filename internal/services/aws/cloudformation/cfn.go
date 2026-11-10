@@ -959,7 +959,34 @@ func (w prior) differs(property string, now any) bool {
 	if w.changed != nil {
 		return w.changed[property] || w.took[property]
 	}
-	return w.unknown || spi.JSONText(w.props[property]) != spi.JSONText(now)
+	return w.unknown || !same(w.props[property], now)
+}
+
+// same is whether a and b are one property value: both absent, or both given and alike member for member, a
+// number or a Boolean being its text (a Number parameter's Ref is a String). Each is compared inside a
+// list, where a string is quoted: it is its own value, never the list, the object or the nothing it reads as.
+func same(a, b any) bool {
+	return spi.JSONText([]any{plain(a)}) == spi.JSONText([]any{plain(b)})
+}
+
+func plain(v any) any {
+	switch v := v.(type) {
+	case map[string]any:
+		out := map[string]any{}
+		for k, member := range v {
+			out[k] = plain(member)
+		}
+		return out
+	case []any:
+		out := make([]any, len(v))
+		for i, member := range v {
+			out[i] = plain(member)
+		}
+		return out
+	case nil:
+		return nil
+	}
+	return str(v)
 }
 
 // gave is what is recorded on a resource left UPDATE_FAILED of what the failed update gave it, which its
@@ -975,7 +1002,7 @@ func gave(failed, now map[string]any) (names, targets, took *[]string) {
 	}
 	changed := []string{}
 	for _, property := range slices.Sorted(maps.Keys(failed)) {
-		if spi.JSONText(failed[property]) != spi.JSONText(now[property]) {
+		if !same(failed[property], now[property]) {
 			changed = append(changed, property)
 		}
 	}
@@ -1121,7 +1148,7 @@ func (p *Pack) change(req *spi.Request, old stack, logical, typ string, props ma
 	tpl := stored(old.Template)
 	before, how := p.Props(tpl, logical, old.Refs, old.Name), ""
 	for _, k := range slices.Concat(slices.Collect(maps.Keys(before)), slices.Collect(maps.Keys(props))) {
-		if spi.JSONText(before[k]) == spi.JSONText(props[k]) {
+		if same(before[k], props[k]) {
 			continue
 		} else if how = "update"; slices.Contains(strings.Fields(kinds[typ].replace), k) {
 			return old.Resources[i], "replace"

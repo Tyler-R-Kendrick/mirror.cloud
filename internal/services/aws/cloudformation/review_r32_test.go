@@ -1,6 +1,7 @@
 package cloudformation
 
 import (
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -114,5 +115,49 @@ func TestCloudFormationATakeoverMarksWhatTheFailedUpdateChanged(t *testing.T) {
 	cors, _, _ := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("bktcfg").Get(h.ctx, ids["A"]+"/cors")
 	if st, _, _ := h.status("tk"); st != "UPDATE_ROLLBACK_COMPLETE" || value != "ROT" || described != "one" || len(targets) != 2 || !strings.Contains(strings.Join(targets, " "), "outside") || !strings.Contains(string(cors), `"one"`) {
 		t.Errorf("the stack is %s, the secret %v described %v, the rule's targets %v and the bucket's CORS %s; want UPDATE_ROLLBACK_COMPLETE, the rotated value, the description one, the targets a and outside, the origin one", st, value, described, targets, cors)
+	}
+}
+
+// A property's value is compared as a value. The comparison was of JSON text with a string's own text
+// standing for it, so the string "null" was the absent property, and a string that reads as a list or an
+// object was that list or object: an update that took such a property away, or gave one, was judged to
+// change nothing. A number and a Boolean are still their text: "the parameter value becomes a string"
+// when a Number parameter is referenced (User Guide, Parameters), so 3 and "3" are one value.
+func TestCloudFormationAStringThatReadsAsNothingIsAValue(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		a, b any
+		want bool
+	}{{nil, nil, true}, {"null", nil, false}, {nil, "null", false}, {"", nil, false}, {"[1,2]", []any{1.0, 2.0}, false}, {`{"x":1}`, map[string]any{"x": 1.0}, false},
+		{3.0, "3", true}, {true, "true", true}, {"3", "3", true}, {[]any{1.0, 2.0}, []any{2.0, 1.0}, false}, {[]any{1.0, "a"}, []any{"1", "a"}, true},
+		{map[string]any{"x": 1.0, "y": []any{true}}, map[string]any{"y": []any{"true"}, "x": "1"}, true}, {map[string]any{"x": nil}, map[string]any{}, false}} {
+		if got := same(c.a, c.b); got != c.want {
+			t.Errorf("same(%#v, %#v) is %v", c.a, c.b, got)
+		}
+	}
+	names, _, took := gave(map[string]any{"A": 3.0, "B": "null", "C": "[1]", "G": "same"}, map[string]any{"A": "3", "C": []any{1.0}, "G": "same", "H": "only-now"})
+	if fmt.Sprint(*names, *took) != "[B C] [H]" {
+		t.Errorf("gave lists %v as changed and %v as taken away; want [B C] and [H]", *names, *took)
+	}
+	if was := (prior{props: map[string]any{"D": "null"}}); !was.differs("D", nil) || was.differs("D", "null") {
+		t.Errorf(`a template that gave "null" differs from nothing: %v, and from "null": %v`, was.differs("D", nil), was.differs("D", "null"))
+	}
+
+	// End to end: a description that is the text "null", then taken away by an update.
+	h := newStacks(t)
+	secret := func(properties map[string]any) map[string]any {
+		return map[string]any{"S": map[string]any{"Type": "AWS::SecretsManager::Secret", "Properties": properties}}
+	}
+	if err := rvMake(t, h, "nl", map[string]any{"Resources": secret(map[string]any{"SecretString": "v", "Description": "null"})}); err != nil {
+		t.Fatal(err)
+	}
+	described := func() any {
+		return rv31Get(h, "aws.secretsmanager", "DescribeSecret", map[string]any{"SecretId": rv31IDs(h, "nl")["S"]})["Description"]
+	}
+	if described() != "null" {
+		t.Fatalf("the secret is described %v", described())
+	}
+	if err := rv28Update(h, "nl", secret(map[string]any{"SecretString": "v"})); err != nil || described() != nil {
+		t.Errorf("the update that takes the description away answered %v and left %v", err, described())
 	}
 }

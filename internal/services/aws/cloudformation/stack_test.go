@@ -445,7 +445,7 @@ func TestCloudFormationARollbackDeletesAHalfMadeResource(t *testing.T) {
 			t.Errorf("%s: the queue made before the bucket outlived the rollback", stack)
 		}
 	}
-	rule := map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"Name": "half-rule", "ScheduleExpression": "rate(5 minutes)", "Targets": "notalist"}}
+	rule := map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"Name": "half-rule", "ScheduleExpression": "rate(5 minutes)", "Targets": []any{}}}
 	if err := h.create("rule", map[string]map[string]any{"R": rule}); code(err) != "ValidationException" {
 		t.Fatalf("a rule whose targets EventBridge refused answered %v, want its ValidationException", err)
 	}
@@ -706,7 +706,7 @@ func TestCloudFormationAFailedUpdateKeepsWhatItCouldNotRollBack(t *testing.T) {
 	update, _ := json.Marshal(map[string]any{"Resources": map[string]any{
 		"A": secret("v2"),
 		"B": map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "landed-u"}},
-		"C": map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"Name": "half-u", "ScheduleExpression": "rate(5 minutes)", "Targets": "notalist"}},
+		"C": map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"Name": "half-u", "ScheduleExpression": "rate(5 minutes)", "Targets": []any{}}},
 	}})
 	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "u", "TemplateBody": string(update)}); code(err) != "ValidationException" {
 		t.Fatalf("the update answered %v, want EventBridge's ValidationException for the targets", err)

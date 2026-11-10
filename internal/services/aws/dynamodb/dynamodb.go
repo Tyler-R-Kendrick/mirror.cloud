@@ -510,7 +510,7 @@ func (p *Pack) prepareTableMetadata(ctx context.Context, req *spi.Request, table
 	if billing == "" {
 		billing = spi.Str(spi.Object(table["BillingModeSummary"])["BillingMode"])
 	}
-	if billing == "PAY_PER_REQUEST" {
+	if billing == "PAY_PER_REQUEST" || table["BillingModeSummary"] != nil { // a table that was on-demand keeps a summary, of the mode it has now
 		table["BillingModeSummary"] = map[string]any{"BillingMode": billing}
 	}
 	delete(table, "BillingMode")

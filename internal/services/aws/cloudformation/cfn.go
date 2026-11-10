@@ -50,6 +50,7 @@ type Pack struct {
 // The template library's readers of a value, under the names the engine calls them by.
 var (
 	str, text, coerce, isTrue     = cfntemplate.Str, cfntemplate.Text, cfntemplate.Coerce, cfntemplate.IsTrue
+	same                          = cfntemplate.Same
 	encode, stored, parseTemplate = cfntemplate.Encode, cfntemplate.Stored, cfntemplate.Parse
 	parameters                    = cfntemplate.Parameters
 )
@@ -111,10 +112,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (out *spi.Response,
 			}
 			return err
 		})
-		if err != nil {
-			return nil, err
-		}
-		return &spi.Response{Output: map[string]any{"StackId": st.ID}}, nil
+		return &spi.Response{Output: map[string]any{"StackId": st.ID}}, err
 	case "GetTemplateSummary":
 		_, tpl, _, _, err := p.template(ctx, req, "", "")
 		if st, loadErr := p.load(ctx, req, name); err != nil && name != "" && loadErr == nil && cmp.Or(str(req.Input["TemplateBody"]), str(req.Input["TemplateURL"])) == "" {
@@ -307,6 +305,7 @@ type res struct {
 	Name, Status, Reason    string    `json:",omitempty"`
 	Gave                    *[]string `json:",omitempty"` // while UPDATE_FAILED: the names of the properties the failed update gave another value than the template's; none is [], and absent is a record from before they were kept
 	Targets                 *[]string `json:",omitempty"` // and the ids of the targets it gave a rule
+	Took                    *[]string `json:",omitempty"` // and the names of the properties its template gives that the failed update did not
 }
 
 // upsert makes the stack named name, or updates it, in two phases that share no recover. apply is the
@@ -397,7 +396,7 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 			for i, o := range old.Resources {
 				if failed := applied[o.Logical]; failed != nil { // changed in place, and not put back
 					old.Resources[i].Status, old.Resources[i].Reason = "UPDATE_FAILED", old.Reason
-					old.Resources[i].Gave, old.Resources[i].Targets = gave(failed, p.Props(stored(old.Template), o.Logical, old.Refs, old.Name))
+					old.Resources[i].Gave, old.Resources[i].Targets, old.Resources[i].Took = gave(failed, p.Props(stored(old.Template), o.Logical, old.Refs, old.Name))
 				}
 			}
 			for _, r := range st.Resources {
@@ -439,7 +438,7 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 	planned := maps.Clone(st.Refs)
 	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
-		typ, props := str(rm["Type"]), asMap(p.Resolve(rm["Properties"], planned, name))
+		typ, props := str(rm["Type"]), p.Given(rm["Properties"], planned, name)
 		prev, how, n, err := p.next(ctx, req, st, old, logical, typ, props)
 		if err != nil {
 			return fail(err)
@@ -450,7 +449,7 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 	}
 	for _, logical := range order {
 		rm := asMap(resources[logical]) // props is never nil: provision adds to it
-		typ, props := str(rm["Type"]), maps.Collect(maps.All(asMap(p.Resolve(rm["Properties"], st.Refs, name))))
+		typ, props := str(rm["Type"]), p.Given(rm["Properties"], st.Refs, name)
 		prev, how, n, err := p.next(ctx, req, st, old, logical, typ, props)  // again: a name may come from a resource made before it
 		phys := map[string]string{"": prev.Physical}[how]                    // one an update keeps as it is
 		if err = cmp.Or(err, encode(props)); how == "update" && err == nil { // recorded before it is called: a half-made change is put back too
@@ -943,33 +942,41 @@ var kinds = map[string]kind{
 // by id. It passes unknown only for a record written before the names were kept; only then is every
 // property the template lacks read as given before, and every value as changed.
 type prior struct {
-	props   map[string]any
-	changed map[string]bool
-	unknown bool
+	props         map[string]any
+	changed, took []string // took: what the template gives that the failed update did not, a change that gave nothing
+	unknown       bool
 }
 
 // gave is whether the template the resource is updated from gave it property.
 func (w prior) gave(property string) bool {
-	return w.unknown || w.props[property] != nil || w.changed[property]
+	return w.unknown || w.props[property] != nil || slices.Contains(w.changed, property)
 }
 
 // differs is whether the template the resource is updated from gave property another value than now.
 func (w prior) differs(property string, now any) bool {
 	if w.changed != nil {
-		return w.changed[property]
+		return slices.Contains(w.changed, property) || slices.Contains(w.took, property)
 	}
-	return w.unknown || spi.JSONText(w.props[property]) != spi.JSONText(now)
+	return !same(w.props[property], now) // with nothing known, whatever the template gives
 }
 
 // gave is what is recorded on a resource left UPDATE_FAILED of what the failed update gave it, which its
 // template (now) does not: the names of those properties, never a value, [] for none, and the ids of the
-// targets it gave a rule.
-func gave(failed, now map[string]any) (names, targets *[]string) {
-	changed := []string{}
-	for _, property := range slices.Sorted(maps.Keys(failed)) {
-		if spi.JSONText(failed[property]) != spi.JSONText(now[property]) {
+// targets it gave a rule; and, apart from what it gave, the names of the properties the template gives that
+// it did not (took), whose values a restore carries back.
+func gave(failed, now map[string]any) (names, targets, took *[]string) {
+	changed, lost := []string{}, []string{}
+	properties := slices.Concat(slices.Collect(maps.Keys(failed)), slices.Collect(maps.Keys(now))) // of either, each once, in order
+	slices.Sort(properties)
+	for _, property := range slices.Compact(properties) {
+		if failed[property] == nil && now[property] != nil {
+			lost = append(lost, property)
+		} else if !same(failed[property], now[property]) {
 			changed = append(changed, property)
 		}
+	}
+	if len(lost) > 0 {
+		took = &lost
 	}
 	if list, listed := failed["Targets"].([]any); listed {
 		ids := []string{}
@@ -978,7 +985,7 @@ func gave(failed, now map[string]any) (names, targets *[]string) {
 		}
 		targets = &ids
 	}
-	return &changed, targets
+	return &changed, targets, took
 }
 
 // recorded is the prior a continued rollback has of the resource r: what gave recorded.
@@ -986,10 +993,7 @@ func recorded(r res) prior {
 	if r.Gave == nil {
 		return prior{unknown: true}
 	}
-	was := prior{changed: map[string]bool{}, props: map[string]any{}}
-	for _, property := range *r.Gave {
-		was.changed[property] = true
-	}
+	was := prior{changed: append([]string{}, *r.Gave...), took: *cmp.Or(r.Took, &[]string{}), props: map[string]any{}}
 	if r.Targets != nil {
 		ids := []any{}
 		for _, id := range *r.Targets {
@@ -1107,10 +1111,11 @@ func (p *Pack) change(req *spi.Request, old stack, logical, typ string, props ma
 	if i < 0 {
 		return res{}, "create"
 	}
-	tpl := stored(old.Template)
-	before, how := p.Props(tpl, logical, old.Refs, old.Name), ""
+	create := strings.Fields(kinds[typ].create) // compared as the service is sent them: what its model types, typed
+	before, how := input(create[0], create[1], p.Props(stored(old.Template), logical, old.Refs, old.Name)), ""
+	props = input(create[0], create[1], props)
 	for _, k := range slices.Concat(slices.Collect(maps.Keys(before)), slices.Collect(maps.Keys(props))) {
-		if spi.JSONText(before[k]) == spi.JSONText(props[k]) {
+		if same(before[k], props[k]) {
 			continue
 		} else if how = "update"; slices.Contains(strings.Fields(kinds[typ].replace), k) {
 			return old.Resources[i], "replace"
@@ -1125,7 +1130,10 @@ func (p *Pack) change(req *spi.Request, old stack, logical, typ string, props ma
 // one the template does not name, a KMS key's or a resource policy's none, is replaced as any other.
 func (p *Pack) next(ctx context.Context, req *spi.Request, st, old stack, logical, typ string, props map[string]any) (res, string, string, error) {
 	prev, how := p.change(req, old, logical, typ, props)
-	if how == "" || how == "update" && prev.Name != "" {
+	if _, list := props["Targets"].([]any); how != "" && typ == "AWS::Events::Rule" && props["Targets"] != nil && !list {
+		// "Array of Target": refused as a template gives it, before anything is made, never as a stored one is restored
+		return prev, how, "", invalid("Properties validation failed for resource " + logical + ": Targets must be a list, not " + spi.JSONText(props["Targets"]))
+	} else if how == "" || how == "update" && prev.Name != "" {
 		return prev, how, prev.Name, nil
 	} else if how == "replace" {
 		st.ID += "/" + prev.Physical
@@ -1251,13 +1259,8 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 // listed, for ContinueUpdateRollback and DeleteStack. Only a finished update deletes what it replaced.
 func (p *Pack) rollback(ctx context.Context, req *spi.Request, seen, old stack, made []res, applied map[string]map[string]any, skip func(res) bool) error {
 	tpl := stored(old.Template)
-	var doomed []res
 	var first error
-	for _, r := range made {
-		if old.Refs[r.Logical] != r.Physical {
-			doomed = append(doomed, r)
-		}
-	}
+	doomed := slices.DeleteFunc(slices.Clone(made), func(r res) bool { return old.Refs[r.Logical] == r.Physical })
 	for i, r := range old.Resources { // each the update changed in place, a change it did not finish included
 		was := applied[r.Logical]
 		if was == nil {
@@ -1266,7 +1269,7 @@ func (p *Pack) rollback(ctx context.Context, req *spi.Request, seen, old stack, 
 		props := maps.Collect(maps.All(p.Props(tpl, r.Logical, old.Refs, old.Name)))
 		if _, err := p.provision(ctx, req, r.Type, r.Logical, under(old, r, props), props, prior{props: was}, r.Physical, old.ID); err != nil { // UPDATE_FAILED, for ContinueUpdateRollback
 			old.Resources[i].Status, old.Resources[i].Reason = "UPDATE_FAILED", err.Error() // the stack's reason in the service's words
-			old.Resources[i].Gave, old.Resources[i].Targets = gave(was, props)
+			old.Resources[i].Gave, old.Resources[i].Targets, old.Resources[i].Took = gave(was, props)
 			first = cmp.Or(first, error(invalid("The following resource(s) failed to update: ["+r.Logical+"].")))
 		}
 		delete(applied, r.Logical) // put back, or marked here: no longer a takeover's to mark
@@ -1319,7 +1322,7 @@ func (p *Pack) resume(ctx context.Context, req *spi.Request, name string) (*spi.
 		if r.Status == "UPDATE_FAILED" && err != nil {
 			r.Reason, first, err = err.Error(), cmp.Or(first, err), nil
 		} else if r.Status == "UPDATE_FAILED" {
-			r.Status, r.Reason, r.Gave, r.Targets = "UPDATE_COMPLETE", "", nil, nil
+			r.Status, r.Reason, r.Gave, r.Targets, r.Took = "UPDATE_COMPLETE", "", nil, nil, nil
 		}
 		kept = append(kept, r)
 	}
@@ -1328,10 +1331,7 @@ func (p *Pack) resume(ctx context.Context, req *spi.Request, name string) (*spi.
 	if raw, _, readErr := p.col(req, "cfn").Get(ctx, st.Name); readErr == nil && spi.Decode[stack](raw).Op != op { // settled: nothing is left
 		left = nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	return &spi.Response{Output: map[string]any{}}, nil
+	return &spi.Response{Output: map[string]any{}}, err
 }
 
 // ruleBus is the event bus in a rule's id, <bus>|<name>, or its ARN, rule/<bus>/<name> (a stack recorded

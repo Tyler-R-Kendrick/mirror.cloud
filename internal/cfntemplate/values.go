@@ -34,6 +34,19 @@ func Coerce(v any, want string) (any, bool) {
 // Str is a String property's value: a scalar's text (coerce), nothing for anything else.
 func Str(v any) string { s, _ := Coerce(v, "String"); t, _ := s.(string); return t }
 
+// Same is whether a and b are one property value. Two scalars are one when their text is, as Coerce reads
+// a String (3 and "3": a Number parameter's Ref is a String). Anything else is compared as it is, member
+// for member: a string is quoted, so it is never the list, the object or the nothing it reads as; a scalar
+// inside a list or an object keeps its type ([3] is not ["3"], which a JSON document tells apart); and a
+// value of a type no template holds is its JSON.
+func Same(a, b any) bool {
+	x, scalar := Coerce(a, "String")
+	if y, both := Coerce(b, "String"); scalar && both {
+		return x == y
+	}
+	return spi.JSONText([]any{a}) == spi.JSONText([]any{b})
+}
+
 // Text is a value as a String holds it, an output's OutputValue (the model's String) or a ${Name} in a
 // Fn::Sub: a list's members comma-joined, as a CommaDelimitedList is written, anything else its text.
 func Text(v any) string {

@@ -60,14 +60,39 @@ errors:
     code: ResourceNotFoundException
     http: 400
     fault: client
+  LimitExceeded:
+    code: LimitExceededException
+    http: 400
+    fault: client
 
 operations:
+  # A stream has the mode and the shards it is created with: the ShardCount
+  # given, or four for an on-demand stream and one for a provisioned one. The
+  # account's ShardLimit, the one DescribeLimits reports, holds over every
+  # stream's shards but those of the name being created over; so does the
+  # limit on on-demand streams.
   CreateStream:
+    select:
+      binding: streams
+      resource: stream
+      filter: "string(item.StreamName) != string(input.StreamName)"
+    let:
+      mode: "'StreamModeDetails' in input && type(input.StreamModeDetails) == map && 'StreamMode' in input.StreamModeDetails ? string(input.StreamModeDetails.StreamMode) : 'PROVISIONED'"
+      shards: "'ShardCount' in input && int(input.ShardCount) > 0 ? int(input.ShardCount) : (mode == 'ON_DEMAND' ? 4 : 1)"
+    require:
+      - cond: "sum(streams.map(s, 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1)) + shards <= 500"
+        error: LimitExceeded
+        message: This request would exceed the shard limit for the account.
+      - cond: "mode != 'ON_DEMAND' || size(streams.filter(s, 'StreamModeDetails' in s && string(s.StreamModeDetails.StreamMode) == 'ON_DEMAND')) < 50"
+        error: LimitExceeded
+        message: This request would exceed the limit of on-demand streams for the account.
     effects:
       - create:
           resource: stream
           record:
             Seq: 0
+            OpenShardCount: shards
+            StreamModeDetails: "{'StreamMode': mode}"
     output: {}
 
   # A recreated stream starts again at sequence 0, so its predecessor's
@@ -102,8 +127,8 @@ operations:
                      'HashKeyRange': {'StartingHashKey': '0', 'EndingHashKey': '340282366920938463463374607431768211455'},
                      'SequenceNumberRange': {'StartingSequenceNumber': '0'}}]}
 
-  # OpenShardCount is a constant 1 however many splits, merges or
-  # UpdateShardCount calls have run.
+  # OpenShardCount is the counter on the stream record: what CreateStream was
+  # given, moved by every split, merge and UpdateShardCount since.
   DescribeStreamSummary:
     reads:
       s: { resource: stream }
@@ -114,7 +139,8 @@ operations:
         {'StreamName': s.StreamName,
          'StreamARN': 'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + string(s.StreamName),
          'StreamStatus': 'ACTIVE',
-         'OpenShardCount': 1}
+         'StreamModeDetails': {'StreamMode': 'StreamModeDetails' in s && 'StreamMode' in s.StreamModeDetails ? string(s.StreamModeDetails.StreamMode) : 'PROVISIONED'},
+         'OpenShardCount': 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1}
 
   ListShards:
     output:
@@ -306,18 +332,28 @@ operations:
   UpdateShardCount:
     reads:
       s: { resource: stream, key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))" }
+    select:
+      binding: others
+      resource: stream
+      filter: "string(item.StreamName) != ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))"
     let:
       cur: "s_found && 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1"
+      target: "int(input.TargetShardCount) > 0 ? int(input.TargetShardCount) : cur"
+    require:
+      - { cond: s_found, error: NotFound }
+      - cond: "sum(others.map(o, 'OpenShardCount' in o && int(o.OpenShardCount) > 0 ? int(o.OpenShardCount) : 1)) + target <= 500"
+        error: LimitExceeded
+        message: This request would exceed the shard limit for the account.
     effects:
       - patch:
           resource: stream
           key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
           record:
-            OpenShardCount: "int(input.TargetShardCount) > 0 ? int(input.TargetShardCount) : cur"
+            OpenShardCount: target
     output:
       StreamName: rec.StreamName
-      CurrentShardCount: rec.OpenShardCount
-      TargetShardCount: rec.OpenShardCount
+      CurrentShardCount: cur
+      TargetShardCount: target
 
   # The pack reads EncryptionType from the operation name, not the request:
   # Start is always KMS, Stop always NONE.
@@ -341,10 +377,14 @@ operations:
     output: {}
 
   DescribeLimits:
+    select:
+      binding: streams
+      resource: stream
+      filter: "true"
     output:
       ShardLimit: "500"
-      OpenShardCount: "1"
-      OnDemandStreamCount: "0"
+      OpenShardCount: "sum(streams.map(s, 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1))"
+      OnDemandStreamCount: "size(streams.filter(s, 'StreamModeDetails' in s && 'StreamMode' in s.StreamModeDetails && string(s.StreamModeDetails.StreamMode) == 'ON_DEMAND'))"
       OnDemandStreamCountLimit: "50"
 
   # The pack stores the request verbatim under a fixed key and answers it
@@ -403,9 +443,14 @@ quirks:
   - operation: CreateStream
     note: >
       An absent StreamName faults ValidationException from the engine's model
-      check, the same code the pack answered. ShardCount, StreamModeDetails,
-      Tags, MaxRecordSizeInKiB and WarmThroughputMiBps are accepted and
-      discarded. Creating over an existing name replaces the record wholesale,
+      check, the same code the pack answered. StreamModeDetails is recorded,
+      PROVISIONED when absent, and ShardCount as the stream's open shard
+      count: when it is absent or not positive, four for an on-demand stream
+      and one for a provisioned one. A create that would take the account's
+      open shards past the ShardLimit DescribeLimits reports, or its
+      on-demand streams past their limit, faults LimitExceededException;
+      every stream's shards count, on-demand ones included. Tags,
+      MaxRecordSizeInKiB and WarmThroughputMiBps are accepted and discarded. Creating over an existing name replaces the record wholesale,
       resetting the record-plane sequence counter to 0.
   - operation: DescribeStream
     note: >
@@ -413,9 +458,13 @@ quirks:
       DescribeStreamSummary -- the pack's main switch resolves StreamName
       alone, so a describe addressed by ARN alone faults ResourceNotFound.
       The description is built from the name: the stored record's status,
-      retention, encryption and shard count never appear, HasMoreShards is
-      never set, and there is always exactly one shard with a full-range hash
-      key. DescribeStreamSummary's OpenShardCount is a constant 1.
+      retention and encryption never appear, HasMoreShards is never set, and
+      DescribeStream and ListShards always list exactly one shard with a
+      full-range hash key, whatever the count: shards are not records here,
+      and the record plane writes to that one shard. The count itself is
+      answered from the record by DescribeStreamSummary's OpenShardCount,
+      UpdateShardCount and DescribeLimits, which sums it over the caller's
+      streams.
   - operation: AddTagsToStream
     note: >
       One stream has two tag sets: the stream-named operations key the tag
@@ -456,7 +505,11 @@ quirks:
       it, and the consumer named is not checked to exist.
   - operation: UpdateShardCount
     note: >
-      The count is a number on the stream record with a floor of 1; Split and
+      A stream that does not exist faults ResourceNotFoundException, and a
+      target that would take the account's open shards past its ShardLimit
+      LimitExceededException; none of the service's other rules on how far or
+      how often a count moves is applied, and the answer is the count found
+      and the target. The count is a number on the stream record with a floor of 1; Split and
       Merge answer StreamName, CurrentShardCount and TargetShardCount where
       their output shapes are Unit, so the bundle answers nothing there and
       the recorded steps are superseded. ScalingType is required by the model

@@ -160,7 +160,19 @@ func (p *Reader) Resolve(v any, refs map[string]string, stack string) any {
 func (p *Reader) Props(tpl map[string]any, logical string, refs map[string]string, stack string) map[string]any {
 	defer func(given map[string]any) { p.tpl = given }(p.tpl)
 	p.tpl = tpl
-	return asMap(p.Resolve(asMap(asMap(tpl["Resources"])[logical])["Properties"], refs, stack))
+	return p.Given(asMap(asMap(tpl["Resources"])[logical])["Properties"], refs, stack)
+}
+
+// Given are a resource's Properties resolved, never nil, without those given as null: a null is a property
+// not given, as a Ref to AWS::NoValue is, for everything that reads what a template gave.
+func (p *Reader) Given(properties any, refs map[string]string, stack string) map[string]any {
+	given := map[string]any{}
+	for property, v := range asMap(p.Resolve(properties, refs, stack)) {
+		if v != nil {
+			given[property] = v
+		}
+	}
+	return given
 }
 
 // ref is what a Ref to name answers, a pseudo parameter's value, a parameter's or a resource's, and

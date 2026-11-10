@@ -711,7 +711,13 @@ The oracle is AWS's documentation as it ships in the vendored model
     `Layers`, `KMSKeyArn`, `DeadLetterConfig`, `TracingConfig` and
     `EphemeralStorage` are the values a function made without them has; a
     bucket's tags, public access block, ownership controls and stored
-    configurations are deleted. A bucket's versioning is suspended, since
+    configurations are deleted. What the service's bucket handler does when
+    a template stops giving a public access block or ownership controls was
+    not established, so the deletion is a reading, and it has a known
+    consequence: a new bucket has S3's own block (all four settings on) and
+    `BucketOwnerEnforced`, and after such a clear, a rollback of an update
+    that gave the bucket a block included, it has none.
+    A bucket's versioning is suspended, since
     "Once you version-enable a bucket, it can never return to an unversioned
     state. You can, however, suspend versioning on that bucket". Only what
     the template the resource is updated from gave is cleared: an update
@@ -724,11 +730,34 @@ The oracle is AWS's documentation as it ships in the vendored model
     cleared only when the previous template gave one, a stream goes back to
     one shard only when the previous template gave a `ShardCount`, and a
     rule's targets are removed only when the previous template gave them.
+    Two property values are compared as the service is sent them. A number
+    or a Boolean that is a property's whole value is its text ("the
+    parameter value becomes a string" when a Number parameter is
+    referenced), and so is one in a member the resource's create operation
+    types: a table's `ReadCapacityUnits` of 5 and of a `Ref` to a Number
+    parameter are one value, and no update. Inside a document the model
+    does not type, an event pattern or a policy, a scalar keeps its type:
+    `[3]` and `["3"]` are a change, and the rule is updated. A string is
+    never the list, the object or the nothing it reads as: a property whose
+    value is the text `null` is a property given. A property given as null
+    itself is a property not given, as a `Ref` to `AWS::NoValue` leaves
+    one, for everything that reads what a template gave (the service
+    refuses such a template, "'null' values are not allowed in templates",
+    as users report it; that refusal is not made here). A rule's `Targets`
+    that is not a list is refused as the update plans the rule, before
+    anything is made (the wording is this emulator's), and only for a rule
+    the update makes or changes: a rollback, and a continued one, restore a
+    stored template as it was always read, the rule written and its targets
+    EventBridge's to judge.
     A resource that is `UPDATE_FAILED` records the names of the properties
     the failed update gave another value than its template's (names, never
-    values; none is recorded as an empty list), and the ids of the targets
-    it gave a rule, so `ContinueUpdateRollback` clears, and removes
-    targets, by the same rule. A record written before the names were kept
+    values; none is recorded as an empty list), the ids of the targets it
+    gave a rule, and, apart from what it gave, the names of the properties
+    its template gives that the failed update did not. So
+    `ContinueUpdateRollback` clears, and removes targets, by the same rule,
+    and puts back a value the failed update took away as the rollback
+    itself does: a secret whose `SecretString` the failed update dropped
+    has the template's value again on both paths. A record written before the names were kept
     has none: for it alone `ContinueUpdateRollback` clears every such
     property the template lacks, removes every target the template does not
     give, and suspends a bucket's versioning only where it is on. A resource

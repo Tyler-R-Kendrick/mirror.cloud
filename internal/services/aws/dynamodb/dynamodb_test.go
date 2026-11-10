@@ -1072,3 +1072,48 @@ func expire(t *testing.T, deps spi.Deps, id spi.Identity) int {
 	}
 	return n
 }
+
+// A table switched to on-demand and back reads PROVISIONED. BillingModeSummary "contains the details
+// for the read/write capacity mode" and its BillingMode is PROVISIONED or PAY_PER_REQUEST (API
+// reference, BillingModeSummary); the summary was written only for PAY_PER_REQUEST, so a table switched
+// back kept reading on-demand beside its provisioned throughput. A table that was never on-demand has
+// no summary, before and after an update that names PROVISIONED: that the service omits it there is a
+// reading of its DescribeTable answers, not a sentence of the reference.
+func TestDynamoDBATableSwitchedBackReadsProvisioned(t *testing.T) {
+	pack := New(spitest.Deps(t))
+	req := func(op string, in map[string]any) map[string]any {
+		t.Helper()
+		out, err := pack.Invoke(context.Background(), &spi.Request{Operation: op, Input: in, Identity: spi.Identity{Account: "000000000000", Region: "us-east-1"}})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return out.Output
+	}
+	throughput := map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}
+	key := []any{map[string]any{"AttributeName": "id", "KeyType": "HASH"}}
+	state := func(table string) string {
+		described := spi.Object(req("DescribeTable", map[string]any{"TableName": table})["Table"])
+		return spi.JSONText(described["BillingModeSummary"]) + " " + spi.JSONText(spi.Object(described["ProvisionedThroughput"])["ReadCapacityUnits"])
+	}
+	req("CreateTable", map[string]any{"TableName": "back", "KeySchema": key, "ProvisionedThroughput": throughput})
+	req("CreateTable", map[string]any{"TableName": "never", "KeySchema": key, "ProvisionedThroughput": throughput})
+	if got := state("back"); got != "null 5" {
+		t.Fatalf("a provisioned table reads %s", got)
+	}
+	req("UpdateTable", map[string]any{"TableName": "back", "BillingMode": "PAY_PER_REQUEST"})
+	if got := state("back"); got != `{"BillingMode":"PAY_PER_REQUEST"} 0` {
+		t.Fatalf("the table switched to on-demand reads %s", got)
+	}
+	req("UpdateTable", map[string]any{"TableName": "back", "BillingMode": "PROVISIONED", "ProvisionedThroughput": throughput})
+	if got := state("back"); got != `{"BillingMode":"PROVISIONED"} 5` {
+		t.Errorf("the table switched back reads %s; want PROVISIONED and its five units", got)
+	}
+	req("UpdateTable", map[string]any{"TableName": "back", "ProvisionedThroughput": map[string]any{"ReadCapacityUnits": 6, "WriteCapacityUnits": 6}})
+	if got := state("back"); got != `{"BillingMode":"PROVISIONED"} 6` {
+		t.Errorf("after an update that names no mode the table reads %s", got)
+	}
+	req("UpdateTable", map[string]any{"TableName": "never", "BillingMode": "PROVISIONED", "ProvisionedThroughput": throughput})
+	if got := state("never"); got != "null 5" {
+		t.Errorf("a table that was never on-demand reads %s after an update that names PROVISIONED", got)
+	}
+}

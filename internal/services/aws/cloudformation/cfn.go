@@ -301,11 +301,11 @@ type stack struct {
 // res is a resource a stack made, the name it was made under and, once a
 // delete of it failed, DELETE_FAILED with the error as its reason.
 type res struct {
-	Logical, Physical, Type string
-	Name, Status, Reason    string    `json:",omitempty"`
-	Gave                    *[]string `json:",omitempty"` // while UPDATE_FAILED: the names of the properties the failed update gave another value than the template's; none is [], and absent is a record from before they were kept
-	Targets                 *[]string `json:",omitempty"` // and the ids of the targets it gave a rule
-	Took                    *[]string `json:",omitempty"` // and the names of the properties its template gives that the failed update did not
+	Logical, Physical, Type        string
+	Name, Status, Reason, GaveMode string    `json:",omitempty"` // GaveMode, while UPDATE_FAILED: the capacity mode the failed update gave a stream, the one value kept, since a restore's count turns on it
+	Gave                           *[]string `json:",omitempty"` // while UPDATE_FAILED: the names of the properties the failed update gave another value than the template's; none is [], and absent is a record from before they were kept
+	Targets                        *[]string `json:",omitempty"` // and the ids of the targets it gave a rule
+	Took                           *[]string `json:",omitempty"` // and the names of the properties its template gives that the failed update did not
 }
 
 // upsert makes the stack named name, or updates it, in two phases that share no recover. apply is the
@@ -396,7 +396,7 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 			for i, o := range old.Resources {
 				if failed := applied[o.Logical]; failed != nil { // changed in place, and not put back
 					old.Resources[i].Status, old.Resources[i].Reason = "UPDATE_FAILED", old.Reason
-					old.Resources[i].Gave, old.Resources[i].Targets, old.Resources[i].Took = gave(failed, p.Props(stored(old.Template), o.Logical, old.Refs, old.Name))
+					old.Resources[i].Gave, old.Resources[i].Targets, old.Resources[i].Took, old.Resources[i].GaveMode = gave(failed, p.Props(stored(old.Template), o.Logical, old.Refs, old.Name))
 				}
 			}
 			for _, r := range st.Resources {
@@ -942,9 +942,9 @@ var kinds = map[string]kind{
 // by id. It passes unknown only for a record written before the names were kept; only then is every
 // property the template lacks read as given before, and every value as changed.
 type prior struct {
-	props         map[string]any
-	changed, took []string // took: what the template gives that the failed update did not, a change that gave nothing
-	unknown       bool
+	props             map[string]any
+	changed, took     []string // took: what the template gives that the failed update did not, a change that gave nothing
+	unknown, onDemand bool     // onDemand: a continued rollback's, that the failed update had made the stream on-demand (res.GaveMode)
 }
 
 // gave is whether the template the resource is updated from gave it property.
@@ -963,8 +963,8 @@ func (w prior) differs(property string, now any) bool {
 // gave is what is recorded on a resource left UPDATE_FAILED of what the failed update gave it, which its
 // template (now) does not: the names of those properties, never a value, [] for none, and the ids of the
 // targets it gave a rule; and, apart from what it gave, the names of the properties the template gives that
-// it did not (took), whose values a restore carries back.
-func gave(failed, now map[string]any) (names, targets, took *[]string) {
+// it did not (took), whose values a restore carries back. The one value kept is a stream's capacity mode.
+func gave(failed, now map[string]any) (names, targets, took *[]string, mode string) {
 	changed, lost := []string{}, []string{}
 	properties := slices.Concat(slices.Collect(maps.Keys(failed)), slices.Collect(maps.Keys(now))) // of either, each once, in order
 	slices.Sort(properties)
@@ -985,7 +985,7 @@ func gave(failed, now map[string]any) (names, targets, took *[]string) {
 		}
 		targets = &ids
 	}
-	return &changed, targets, took
+	return &changed, targets, took, str(asMap(failed["StreamModeDetails"])["StreamMode"])
 }
 
 // recorded is the prior a continued rollback has of the resource r: what gave recorded.
@@ -993,7 +993,7 @@ func recorded(r res) prior {
 	if r.Gave == nil {
 		return prior{unknown: true}
 	}
-	was := prior{changed: append([]string{}, *r.Gave...), took: *cmp.Or(r.Took, &[]string{}), props: map[string]any{}}
+	was := prior{changed: append([]string{}, *r.Gave...), took: *cmp.Or(r.Took, &[]string{}), props: map[string]any{}, onDemand: r.GaveMode == "ON_DEMAND"}
 	if r.Targets != nil {
 		ids := []any{}
 		for _, id := range *r.Targets {
@@ -1238,8 +1238,8 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 			}
 			err = putErr
 		}
-	} else if err == nil && typ == "AWS::Kinesis::Stream" && existing != "" && str(asMap(props["StreamModeDetails"])["StreamMode"]) != "ON_DEMAND" && (was.differs("ShardCount", props["ShardCount"]) || props["ShardCount"] != nil && (str(asMap(was.props["StreamModeDetails"])["StreamMode"]) == "ON_DEMAND" || slices.Contains(was.changed, "StreamModeDetails"))) {
-		_, err = p.do(ctx, req, shardCountCall, n, existing, map[string]any{"ShardCount": cmp.Or(props["ShardCount"], any(1))}) // after its mode: a count is a provisioned stream's, and is sent when the template's changed, or the stream was on-demand by its template, which was sent none (a continued rollback knows only that the mode changed, and takes that for it)
+	} else if err == nil && typ == "AWS::Kinesis::Stream" && existing != "" && str(asMap(props["StreamModeDetails"])["StreamMode"]) != "ON_DEMAND" && (was.differs("ShardCount", props["ShardCount"]) || props["ShardCount"] != nil && (str(asMap(was.props["StreamModeDetails"])["StreamMode"]) == "ON_DEMAND" || was.onDemand)) {
+		_, err = p.do(ctx, req, shardCountCall, n, existing, map[string]any{"ShardCount": cmp.Or(props["ShardCount"], any(1))}) // after its mode: a count is a provisioned stream's, and is sent when the template's changed, or the stream was on-demand by its template, which was sent none (a continued rollback has that from its record)
 	} else if err == nil && typ == "AWS::S3::Bucket" && existing != "" { // one it makes, upsert configures once it is recorded
 		err = p.configureBucket(ctx, req, n, props, was)
 	} else if err != nil && existing == "" { // none once a create failed
@@ -1266,7 +1266,7 @@ func (p *Pack) rollback(ctx context.Context, req *spi.Request, seen, old stack, 
 		props := maps.Collect(maps.All(p.Props(tpl, r.Logical, old.Refs, old.Name)))
 		if _, err := p.provision(ctx, req, r.Type, r.Logical, under(old, r, props), props, prior{props: was}, r.Physical, old.ID); err != nil && !(r.Type == "AWS::Kinesis::Stream" && err.Error() == countRefused) { // UPDATE_FAILED, for ContinueUpdateRollback; but the count call's refusal of an on-demand stream, and that alone, was the update's too: nothing is left to put back
 			old.Resources[i].Status, old.Resources[i].Reason = "UPDATE_FAILED", err.Error() // the stack's reason in the service's words
-			old.Resources[i].Gave, old.Resources[i].Targets, old.Resources[i].Took = gave(was, props)
+			old.Resources[i].Gave, old.Resources[i].Targets, old.Resources[i].Took, old.Resources[i].GaveMode = gave(was, props)
 			first = cmp.Or(first, error(invalid("The following resource(s) failed to update: ["+r.Logical+"].")))
 		}
 		delete(applied, r.Logical) // put back, or marked here: no longer a takeover's to mark
@@ -1320,7 +1320,7 @@ func (p *Pack) resume(ctx context.Context, req *spi.Request, name string) (*spi.
 		if r.Status == "UPDATE_FAILED" && err != nil {
 			r.Reason, first, err = err.Error(), cmp.Or(first, err), nil
 		} else if r.Status == "UPDATE_FAILED" {
-			r.Status, r.Reason, r.Gave, r.Targets, r.Took = "UPDATE_COMPLETE", "", nil, nil, nil
+			r.Status, r.Reason, r.Gave, r.Targets, r.Took, r.GaveMode = "UPDATE_COMPLETE", "", nil, nil, nil, ""
 		}
 		kept = append(kept, r)
 	}

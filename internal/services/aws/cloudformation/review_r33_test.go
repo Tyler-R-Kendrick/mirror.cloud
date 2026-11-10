@@ -169,7 +169,7 @@ func TestCloudFormationAPropertyGivenAsNullIsNotGiven(t *testing.T) {
 	if err := rv28Update(h, "nu", resources(nil, nil, nil, nil)); err != nil || !strings.HasPrefix(state(), "value=v targets=0 ") || !strings.Contains(state(), "block=none") || !strings.HasSuffix(state(), "tags=none") {
 		t.Errorf("the update that gives each property as null answered %v and left %s", err, state())
 	}
-	names, _, took := gave(h.pack.Given(map[string]any{"A": nil, "B": "b"}, nil, "nu"), h.pack.Given(map[string]any{"A": "a", "B": nil}, nil, "nu"))
+	names, _, took, _ := gave(h.pack.Given(map[string]any{"A": nil, "B": "b"}, nil, "nu"), h.pack.Given(map[string]any{"A": "a", "B": nil}, nil, "nu"))
 	if fmt.Sprint(*names, *took) != "[B] [A]" {
 		t.Errorf("what a failed update gave is %v, and took away %v; want [B] and [A]", *names, *took)
 	}

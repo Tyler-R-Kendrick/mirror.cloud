@@ -124,10 +124,17 @@
   with one shard, and `ON_DEMAND` with 7, then with 9, then `PROVISIONED`
   with 9 ended with seven. A restore does the same, so a rollback from
   on-demand to a provisioned template puts that template's count back. A
-  continued rollback knows only that the mode changed, not what it was,
-  and takes a changed mode for a stream that was on-demand (a reading: it
-  can send a count the stream already has). A template that gives no count
-  is sent none on leaving on-demand, and keeps the shards it has. A change of mode
+  continued rollback does the same, exactly: the record of a stream left
+  `UPDATE_FAILED` keeps the mode the failed update gave it (beside the
+  names of what changed; a capacity mode is no secret), so the count is sent when that was
+  `ON_DEMAND` and not when the update only spelled out `PROVISIONED`. A
+  record written before the mode was kept continues as before this rule:
+  its count is sent only when the count itself changed. A template that
+  gives no count is sent none on leaving on-demand, and keeps the shards
+  it has, when the on-demand template gave no count either; when that one
+  did, the count has been taken out, and the stream is given one shard, as
+  a count taken out of any template is (`ON_DEMAND` with 7, then with 9,
+  then `{}` ends `PROVISIONED` with one). A change of mode
   in place leaves the stream's shards as they are, as Kinesis itself does.
   Two consequences are readings of what the service's handler would do,
   pinned as they are: a stream made on-demand in place keeps the count it

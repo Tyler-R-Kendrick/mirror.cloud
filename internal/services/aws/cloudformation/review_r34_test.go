@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -577,5 +578,125 @@ func TestCloudFormationAStreamsCountIsAtLeastOne(t *testing.T) {
 		if st, reason, _ := h.status("up"); err == nil || st != "UPDATE_ROLLBACK_COMPLETE" || rv34Stream(h, id) != "PROVISIONED 3" {
 			t.Errorf("%d: the update answered %v and left the stack %s (%s), the stream %s; want UPDATE_ROLLBACK_COMPLETE and PROVISIONED 3", low, err, st, reason, rv34Stream(h, id))
 		}
+	}
+}
+
+// A continued rollback sends a stream's count exactly when the rollback would have. It knew what the
+// failed update changed by name alone, and took a changed mode for a stream the update had made
+// on-demand; an update that only spelled out PROVISIONED changed the mode too. So the continued rollback
+// of {ShardCount: 2} from a failed {PROVISIONED, ShardCount: 2} sent the two again: over a count of four
+// set outside the stack meanwhile, and, with the account's other shards at the limit, to be refused,
+// leaving the stack UPDATE_ROLLBACK_FAILED. The record of a resource left UPDATE_FAILED keeps the mode the
+// failed update gave it, so the count is sent on leaving on-demand and not otherwise. The control is the
+// rollback itself, with the same done outside the stack before the update rather than after its restore
+// failed. A record without the mode, as the build before this one wrote, sends the count only when the
+// count itself changed.
+func TestCloudFormationAContinuedRollbackSendsTheCountARollbackWould(t *testing.T) {
+	t.Parallel()
+	stream := func(properties map[string]any) map[string]any {
+		return map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": properties}
+	}
+	for name, c := range map[string]struct {
+		count, beside int
+		want          string
+	}{
+		"a count set outside the stack":                  {4, 0, "PROVISIONED 4"},
+		"a count lowered, the account then at its limit": {1, 499, "PROVISIONED 1"},
+	} {
+		for _, path := range []string{"rolled back", "continued", "continued from a record without the mode"} {
+			t.Run(name+", "+path, func(t *testing.T) {
+				h := newStacks(t)
+				if err := rveCreate(h, "cr", map[string]any{"R": stream(map[string]any{"ShardCount": 2})}); err != nil {
+					t.Fatal(err)
+				}
+				id := rv31IDs(h, "cr")["R"]
+				outside := func() {
+					t.Helper()
+					if _, err := h.service("aws.kinesis", "UpdateShardCount", map[string]any{"StreamName": id, "TargetShardCount": c.count, "ScalingType": "UNIFORM_SCALING"}); err != nil {
+						t.Fatal(err)
+					}
+					if c.beside > 0 {
+						if _, err := h.service("aws.kinesis", "CreateStream", map[string]any{"StreamName": "beside", "ShardCount": c.beside}); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				if path == "rolled back" {
+					outside()
+				}
+				rveFailed(t, h, "cr", stream(map[string]any{"StreamModeDetails": rv34Mode("PROVISIONED"), "ShardCount": 2}), path != "rolled back")
+				if path != "rolled back" {
+					rec := h.record("cr")
+					resource := asMap(spi.Slice(rec["Resources"])[0])
+					if got := spi.JSONText(resource["Gave"]) + " " + spi.JSONText(resource["GaveMode"]); got != `["StreamModeDetails"] PROVISIONED` {
+						t.Fatalf("the stream's record has %s; want the name of what changed and the mode the failed update gave", got)
+					}
+					if strings.HasSuffix(path, "without the mode") {
+						delete(resource, "GaveMode")
+						if err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "cr", []byte(spi.JSONText(rec))); err != nil {
+							t.Fatal(err)
+						}
+					}
+					outside()
+					rveContinue(t, h, "cr")
+					if resource := asMap(spi.Slice(h.record("cr")["Resources"])[0]); resource["GaveMode"] != nil || resource["Gave"] != nil {
+						t.Errorf("put back, the stream's record still has %s", spi.JSONText(resource))
+					}
+				}
+				if st, reason, _ := h.status("cr"); st != "UPDATE_ROLLBACK_COMPLETE" || rv34Stream(h, id) != c.want {
+					t.Errorf("the stack is %s (%s), the stream %s; want UPDATE_ROLLBACK_COMPLETE and %s", st, reason, rv34Stream(h, id), c.want)
+				}
+			})
+		}
+	}
+}
+
+// A rollback that did not settle keeps the mode too: the record a takeover writes is the one a continued
+// rollback reads. The update makes the stream on-demand and fails after it; the engine panics as the
+// rollback restores the bucket before it, so the stream is not put back; the stream is made provisioned
+// outside the stack, with five shards. The continued rollback sends the template's two, as a rollback from
+// on-demand does.
+func TestCloudFormationATakeoverKeepsTheModeTheFailedUpdateGave(t *testing.T) {
+	t.Parallel()
+	h := newStacks(t)
+	stream := func(properties map[string]any) map[string]any {
+		return map[string]any{"Type": "AWS::Kinesis::Stream", "DependsOn": "B", "Properties": properties}
+	}
+	bucket := func(origin string) map[string]any {
+		return map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"CorsConfiguration": map[string]any{"CorsRules": []any{map[string]any{"AllowedOrigins": []any{origin}}}}}}
+	}
+	if err := rveCreate(h, "tk", map[string]any{"B": bucket("one"), "R": stream(map[string]any{"ShardCount": 2})}); err != nil {
+		t.Fatal(err)
+	}
+	id := rv31IDs(h, "tk")["R"]
+	var n atomic.Int32 // the bucket's CORS is stored twice: by the update, and by the rollback, which panics
+	off := faultStore(h, func(op, c, k string) bool { return op == "put" && c == "bktcfg" && n.Add(1) == 2 })
+	err := invoked(t, h, "UpdateStack", map[string]any{"StackName": "tk", "TemplateBody": rv19Body(map[string]any{"Resources": map[string]any{
+		"B": bucket("two"), "R": stream(map[string]any{"StreamModeDetails": rv34Mode("ON_DEMAND"), "ShardCount": 2}), "Z": rv31Dep(rv31Bad, "R")}})})
+	off()
+	if !isInternalFailure(err) {
+		t.Fatalf("the update whose rollback panics answered %v", err)
+	}
+	_, _ = h.invoke("UpdateStack", map[string]any{"StackName": "tk", "TemplateBody": rv19Body(map[string]any{"Resources": map[string]any{"B": bucket("one")}})}) // refused: it takes the stack over
+	resource := map[string]any{}
+	for _, r := range spi.Slice(h.record("tk")["Resources"]) {
+		if asMap(r)["Logical"] == "R" {
+			resource = asMap(r)
+		}
+	}
+	if status, _, _ := h.status("tk"); status != "UPDATE_ROLLBACK_FAILED" || resource["Status"] != "UPDATE_FAILED" || resource["GaveMode"] != "ON_DEMAND" || rv34Stream(h, id) != "ON_DEMAND 2" {
+		t.Fatalf("the stack taken over is %s, the stream %s, its record %s; want UPDATE_ROLLBACK_FAILED with the stream UPDATE_FAILED and the mode it was given", status, rv34Stream(h, id), spi.JSONText(resource))
+	}
+	if _, err := h.service("aws.kinesis", "UpdateStreamMode", map[string]any{"StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/" + id, "StreamModeDetails": rv34Mode("PROVISIONED")}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service("aws.kinesis", "UpdateShardCount", map[string]any{"StreamName": id, "TargetShardCount": 5, "ScalingType": "UNIFORM_SCALING"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("ContinueUpdateRollback", map[string]any{"StackName": "tk"}); err != nil {
+		t.Fatal(err)
+	}
+	if status, _, _ := h.status("tk"); status != "UPDATE_ROLLBACK_COMPLETE" || rv34Stream(h, id) != "PROVISIONED 2" {
+		t.Errorf("the stack is %s, the stream %s; want UPDATE_ROLLBACK_COMPLETE and PROVISIONED 2", status, rv34Stream(h, id))
 	}
 }

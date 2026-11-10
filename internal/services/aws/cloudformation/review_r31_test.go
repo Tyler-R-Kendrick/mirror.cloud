@@ -658,8 +658,8 @@ func TestCloudFormationASkippedResourceForgetsWhatTheUpdateGave(t *testing.T) {
 // reads back empty, and is not taken for the older record.
 func TestCloudFormationWhatAFailedUpdateGaveSurvivesARoundTrip(t *testing.T) {
 	t.Parallel()
-	none, _, _ := gave(map[string]any{}, map[string]any{"Tags": "t"})
-	some, targets, _ := gave(map[string]any{"Description": "new", "Same": 1, "Targets": []any{map[string]any{"Id": "a"}}}, map[string]any{"Description": "old", "Same": 1})
+	none, _, _, _ := gave(map[string]any{}, map[string]any{"Tags": "t"})
+	some, targets, _, _ := gave(map[string]any{"Description": "new", "Same": 1, "Targets": []any{map[string]any{"Id": "a"}}}, map[string]any{"Description": "old", "Same": 1})
 	for name, c := range map[string]struct {
 		r       res
 		stored  string

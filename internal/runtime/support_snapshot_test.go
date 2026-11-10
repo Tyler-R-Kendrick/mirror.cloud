@@ -9,5 +9,6 @@ import (
 )
 
 func TestSupportMatrixSnapshot(t *testing.T) {
+	needEveryService(t)
 	golden.Assert(t, []byte(SupportMatrix()))
 }

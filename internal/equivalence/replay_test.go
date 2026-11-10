@@ -11,6 +11,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/equivalence"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/racegate"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
@@ -33,6 +34,7 @@ const tracesDir = "traces"
 // the cassette cited — but that is a visible decision, which is exactly what
 // this test forces.
 func TestBundlesMatchRecordedPacks(t *testing.T) {
+	racegate.SkipUnderRaceOnPullRequest(t, "replays every recorded trace through its bundle")
 	files, err := equivalence.LoadDir(os.DirFS("."), tracesDir)
 	if err != nil {
 		t.Fatalf("load recordings: %v", err)

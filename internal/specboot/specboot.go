@@ -15,10 +15,16 @@ var (
 	once sync.Once
 	got  *model.Bundle
 
-	// slim is set by the file scripts/slim-overlay.py adds to a build of some of
-	// the services, and by nothing else; see derive.
-	slim bool
+	// complete is set by complete.go, which is in the tree only when the tree
+	// holds every service: a build made of some of them (scripts/slim-overlay.py)
+	// and a sparse checkout (scripts/sparse.py) both lack it. See derive.
+	complete bool
 )
+
+// Complete reports whether this tree holds every service. A sparse checkout
+// does not (scripts/sparse.py), and a test that compares the whole catalog with
+// something committed skips there instead of failing.
+func Complete() bool { return complete }
 
 // Bundle returns the model the runtime serves.
 //
@@ -50,10 +56,10 @@ func derive() *model.Bundle {
 		served[id] = id
 	}
 	for wire, spec := range servedAs {
-		// A build made of some of the services (scripts/slim-overlay.py) has no
-		// model for a wire name whose service it left out. The full build keeps
-		// the panic below, which is what catches a model gone missing.
-		if slim {
+		// A build made of some of the services has no model for a wire name
+		// whose service it left out. The full build keeps the panic below, which
+		// is what catches a model gone missing.
+		if !complete {
 			if _, err := generated.Model(spec); err != nil {
 				continue
 			}

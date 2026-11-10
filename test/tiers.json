@@ -1,0 +1,50 @@
+{
+  "_comment": "Which tier each test is reported under, and what each promotion stage runs. scripts/test-tiers.py reads tiers; test/ci (TestTiersPartitionPackages, TestEveryCIJobHasAStage) checks both against the module and the workflows. A test lands in the first tier whose rule matches it: packages is a package pattern (relative to the module, or test/sdk/go; every package when absent), tests a test-name pattern (every test when absent). A rule with tests cuts tests out of whichever tier their package is in; a rule with packages alone is a package tier.",
+  "tiers": [
+    {"name": "fuzz seeds", "tests": "^Fuzz"},
+    {"name": "snapshot", "tests": "Characterization$|^TestNamedBucketConfigurations$|^TestUploadPartCopyConditionsAndRange$"},
+    {"name": "chaos", "packages": "^internal/chaos$"},
+    {"name": "bdd", "packages": "^test/behavior(/.*)?$|^test/terraform$"},
+    {"name": "contract", "packages": "^internal/conformance$|^internal/proto(/.*)?$|^test/sdk/go(/.*)?$"},
+    {"name": "equivalence", "packages": "^internal/equivalence$"},
+    {"name": "equivalence", "packages": "^internal/bundled$", "tests": "^(TestEveryBundleBuilds|TestBundlesAreRegistered|TestShadowBundlesAreStillGated)$", "_comment": "what make equivalence runs of internal/bundled; the rest of it is unit"},
+    {"name": "snapshot", "packages": "^internal/(edge|identity|mock|runtime|specdiff)$"},
+    {"name": "unit", "packages": ".*"}
+  ],
+  "stages": {
+    "pull_request": {
+      "plan": "computes the selection: cmd/affected over the files the pull request changes",
+      "check": "full: vet, gofmt, the ratchet",
+      "unit": "every package, each read from main's result cache unless its inputs changed",
+      "coverage": "full and uncached: the 80% floor",
+      "race": "the affected packages whose tests link changed code or whose tests changed, -race -short (internal/racegate skips single-goroutine large-input tests)",
+      "fuzz": "the targets in the packages race takes",
+      "mutation": "every mutant whose tests are in a package internal/affected selects, whose file or a file beside it changed, or whose entry changed (internal/mutation select_test.go)",
+      "image": "when cmd/mirror, a Dockerfile or a profile changes",
+      "generated-models": "when specs, internal/generated or cmd/mirrorgen change",
+      "sparse": "when a service, its model or bundle, profiles/graph.txt, scripts/sparse.py or what ./cmd/mirror links changes: a partial clone of each of five service sets must build, vet and pass every test it holds",
+      "cloudflare-miniflare": "when a package the -tags miniflare suite compiles, test/behavior/cloudflare or tools/cloudflare-runtime change",
+      "test": "fails unless every required job passed or was skipped as unaffected"
+    },
+    "main": {
+      "plan": "selects everything",
+      "check": "full",
+      "unit": "every package, writing the result cache pull requests read",
+      "coverage": "full and uncached",
+      "race": "every package, -race, strict",
+      "fuzz": "every target",
+      "mutation": "every mutant",
+      "image": "always",
+      "generated-models": "always",
+      "sparse": "always",
+      "cloudflare-miniflare": "always",
+      "test": "fails unless every required job passed"
+    },
+    "nightly": {
+      "unit": "every package, -count=1",
+      "coverage": "full and uncached",
+      "race": "every package, -race, -count=1",
+      "report": "when a job above fails, adds the run to the one open issue titled nightly failed"
+    }
+  }
+}

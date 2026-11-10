@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/scheduleexpr"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/eventhttp"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/lambda" // natives the Lambda bundle serves
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/scheduleexpr"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states" // natives the Step Functions bundle serves
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"

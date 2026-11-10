@@ -533,6 +533,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"runtime"
 	"sort"
 	"sync"
 
@@ -554,18 +555,34 @@ var files embed.FS
 // the embed pattern above describes.
 func FS() fs.FS { return files }
 
+// A service is decoded once, by whoever asks first, and the others wait for that
+// one service and for nothing else: a single lock around every decode would make
+// the hundred and sixty-five models of a full binary decode one after another.
+type entry struct {
+	once sync.Once
+	svc  *model.Service
+	err  error
+}
+
 var (
-	mu     sync.Mutex
-	cached = map[string]*model.Service{}
+	mu    sync.Mutex
+	cache = map[string]*entry{}
 )
 
 // Model returns the canonical model for a service ID, parsed on first use.
 func Model(serviceID string) (*model.Service, error) {
 	mu.Lock()
-	defer mu.Unlock()
-	if svc, ok := cached[serviceID]; ok {
-		return svc, nil
+	e := cache[serviceID]
+	if e == nil {
+		e = new(entry)
+		cache[serviceID] = e
 	}
+	mu.Unlock()
+	e.once.Do(func() { e.svc, e.err = decode(serviceID) })
+	return e.svc, e.err
+}
+
+func decode(serviceID string) (*model.Service, error) {
 	provider, pkg := ServicePath(serviceID)
 	raw, err := files.ReadFile(path.Join(provider, pkg, "model.json.gz"))
 	if err != nil {
@@ -584,13 +601,13 @@ func Model(serviceID string) (*model.Service, error) {
 	if err := json.Unmarshal(plain, svc); err != nil {
 		return nil, err
 	}
-	cached[serviceID] = svc
 	return svc, nil
 }
 
-// ServiceIDs lists every generated service, sorted.
+// ServiceIDs lists every generated service, sorted. It decodes them all, on as
+// many cores as there are, because a model's ID is read from the model.
 func ServiceIDs() []string {
-	var out []string
+	var names []string
 	providers, err := fs.ReadDir(files, ".")
 	if err != nil {
 		return nil
@@ -604,13 +621,29 @@ func ServiceIDs() []string {
 			continue
 		}
 		for _, s := range svcs {
-			if !s.IsDir() {
-				continue
+			if s.IsDir() {
+				names = append(names, p.Name()+"."+s.Name())
 			}
-			svc, err := Model(p.Name() + "." + s.Name())
-			if err == nil {
-				out = append(out, svc.ID)
+		}
+	}
+	ids := make([]string, len(names))
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, runtime.GOMAXPROCS(0))
+	for i, name := range names {
+		wg.Add(1)
+		slots <- struct{}{}
+		go func() {
+			defer func() { <-slots; wg.Done() }()
+			if svc, err := Model(name); err == nil {
+				ids[i] = svc.ID
 			}
+		}()
+	}
+	wg.Wait()
+	var out []string
+	for _, id := range ids {
+		if id != "" {
+			out = append(out, id)
 		}
 	}
 	sort.Strings(out)

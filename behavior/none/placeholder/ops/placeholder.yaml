@@ -1,0 +1,4 @@
+# Keeps the //go:embed pattern in behaviors.go matching when the tree holds no
+# bundle that splits its operations (a sparse checkout, scripts/sparse.py): an
+# embed pattern that matches nothing is a build error. There is no service.yaml
+# beside it, so nothing loads it and it names no service.

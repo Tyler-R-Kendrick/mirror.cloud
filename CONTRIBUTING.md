@@ -14,11 +14,44 @@ cd mirror.cloud
 go build ./...
 ```
 
+### Only the services you work on
+
+Most of the repository is services: models, bundles, packs, vendored specs and
+the suites that exercise them. To check out just the ones you touch, clone
+without file contents and let `scripts/sparse.py` choose what to download:
+
+```bash
+git clone --filter=blob:none --no-checkout https://github.com/tyler-r-kendrick/mirror.cloud.git
+cd mirror.cloud
+git show HEAD:scripts/sparse.py | python3 - aws.s3 aws.sqs 'vercel.*'   # quoted: every Vercel service
+go build ./... && make test-service SERVICES="aws.s3 aws.sqs"
+```
+
+| | full clone | `aws.s3` (and the seven services it needs) | `aws.dynamodb` |
+|---|---|---|---|
+| working tree | 67 MB, 1,469 files | 10 MB, 677 files | 8 MB, 549 files |
+| `.git` | 38 MB | 5 MB | 5 MB |
+
+The checkout holds all of the code that is not a service, and for each service
+you ask for its pack, model and bundle, the services that one needs to build and
+to run its own tests (S3 notifies SNS, Lambda and EventBridge, so those come
+too), and nothing else. `scripts/sparse.py --list aws.s3` shows what that is
+without changing anything; run it again with a different list to change the set,
+and `scripts/sparse.py --all` returns to the whole tree. The set is fixed when you run it, so run it again after a `git pull` that gave one of your services a new dependency (the build says which package is missing). Plain `go build ./...`,
+`go vet ./...` and `go test ./...` work in it, so editors do too. The one thing
+it leaves out is a test that names a service that is not there (most of
+`internal/runtime`, `internal/bundled`, `internal/edge` and the suites in `test/`
+that span services): CI runs those on the full tree, and a `sparse` job proves
+that every kind of set above still builds and passes. If you add a dependency
+between services, `make graph` rebuilds `profiles/graph.txt`, which is what
+decides what comes along; a test checks it is current.
+
 ## Test
 
 ```bash
+make test-service SERVICES="aws.s3"   # just those services' own tests, in any tree
 make test             # unit tests (includes determinism lint + import-graph checks)
-make test-coverage    # unit tests with the coverage floor
+make test-coverage    # every unit test under -coverpkg=./... (never cached), 80% floor
 make test-race        # race detector
 gofmt -l .            # must print nothing
 go vet ./...          # must be clean

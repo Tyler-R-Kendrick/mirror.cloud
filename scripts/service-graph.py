@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Print which services each directory of the tree needs: profiles/graph.txt.
+
+    python3 scripts/service-graph.py > profiles/graph.txt     # make graph
+
+One line per directory that needs a service other than its own, as
+`dir: provider/service ...` for what its production code needs and
+`dir [test]: provider/service ...` for what only its tests need. A directory
+needs a service when it imports the service's pack or names the service in a
+string ("aws.sqs": a service reached through the registry shows no import).
+Production code is read only in packs, because the runtime names a hundred and
+sixty services in a table. A pack and its helper packages (aws/dynamodb/expr)
+are one entry, the pack's directory. allservices is left out: it is one file per
+pack. `service => pack` says a pack serves a service under another name
+(gcp.storage is in gcp/gcs).
+
+scripts/sparse.py reads this file instead of the sources, so a sparse checkout
+can decide what to leave out without downloading what it leaves out.
+test/ci checks the committed file against the tree.
+"""
+import os
+import re
+import subprocess
+import sys
+
+MOD = "github.com/tyler-r-kendrick/mirror.cloud/"
+PACK = re.compile(r"^internal/services/([a-z0-9]+)/([a-z0-9]+)")
+
+# Go tokens that can hold a quote. A comment and a rune literal ('"') are matched
+# and thrown away, so a quote in either cannot shift which text is a string.
+# findall gives (interpreted string, raw string); the other two give ("", "").
+literal = re.compile(
+    r"//[^\n]*"
+    r"|/\*.*?\*/"
+    r"|'(?:\\.[^']*|[^'\\])'"
+    r'|"((?:[^"\\\n]|\\.)*)"'
+    r"|`([^`]*)`",
+    re.S,
+)
+
+
+def string_text(src):
+    """The text of the string literals in Go source, and nothing else."""
+    return " ".join(a or b for a, b in literal.findall(src))
+
+
+# ---- end of the tokenizer (test/ci runs everything above this line); the rest reads the tree ----
+
+
+def key_of(service_id):
+    provider, _, rest = service_id.partition(".")
+    return f"{provider}/{re.sub(r'[^a-z0-9]', '', rest.lower())}"
+
+
+modeled = {f"{p}/{d}" for base in ("internal/generated", "behavior") if os.path.isdir(base)
+           for p in os.listdir(base) if p != "none" and os.path.isdir(f"{base}/{p}")
+           for d in os.listdir(f"{base}/{p}") if os.path.isdir(f"{base}/{p}/{d}")}
+providers = sorted({k.split("/")[0] for k in modeled})
+named = re.compile(r"(?<![\w/.\-])((?:%s)\.[a-z0-9][a-z0-9.\-]*)" % "|".join(providers))
+
+prod, test = {}, {}
+
+
+def add(kind, home, k, imported=False):
+    own = PACK.match(home)
+    if (imported or k in modeled) and not (own and f"{own.group(1)}/{own.group(2)}" == k):
+        kind.setdefault(home, set()).add(k)
+
+
+# What each directory imports.
+fmt = '{{.ImportPath}}|{{join .Imports " "}}|{{join .TestImports " "}}|{{join .XTestImports " "}}'
+for line in subprocess.run(["go", "list", "-e", "-f", fmt, "./..."], check=True, capture_output=True, text=True).stdout.splitlines():
+    path, *imports = line.split("|")
+    me = path.removeprefix(MOD)
+    if me == "internal/allservices":
+        continue
+    own = PACK.match(me)
+    home = f"internal/services/{own.group(1)}/{own.group(2)}" if own else me
+    for kind, group in ((prod, imports[:1]), (test, imports[1:])):
+        for imp in " ".join(group).split():
+            m = PACK.match(imp.removeprefix(MOD)) if imp.startswith(MOD) else None
+            if m:
+                add(kind, home, f"{m.group(1)}/{m.group(2)}", imported=True)  # helper packs have no model
+
+# What each directory names: everywhere in tests, and in packs in production too.
+skip = {".git", "specs", "node_modules", "bin"}
+for here, dirs, files in os.walk("."):
+    dirs[:] = [d for d in dirs if d not in skip and os.path.join(here, d) not in ("./internal/generated", "./behavior")]
+    rel = os.path.normpath(here)
+    own = PACK.match(rel)
+    home = f"internal/services/{own.group(1)}/{own.group(2)}" if own else rel
+    for f in files:
+        # test/ci's tests name services as examples for the scripts they test.
+        if not f.endswith(".go") or rel in ("internal/allservices", "test/ci"):
+            continue
+        is_test = f.endswith("_test.go")
+        if not (is_test or own):
+            continue
+        text = open(os.path.join(here, f), errors="ignore").read()
+        strings = string_text(text)
+        for name in set(named.findall(strings)):
+            add(test if is_test else prod, home, key_of(name.rstrip(".-")))
+
+# A pack under another name than its service's.
+alias = {}
+for provider in sorted(os.listdir("internal/services")):
+    for d in sorted(os.listdir(f"internal/services/{provider}")):
+        if f"{provider}/{d}" not in modeled:
+            for k in prod.get(f"internal/services/{provider}/{d}", ()):
+                if not os.path.isdir(f"internal/services/{k}"):
+                    alias[k] = f"{provider}/{d}"
+
+sys.stdout.write("# Generated by scripts/service-graph.py (make graph); do not edit.\n")
+for k in sorted(alias):
+    sys.stdout.write(f"{k} => {alias[k]}\n")
+for d in sorted(set(prod) | set(test)):
+    if d in prod:
+        sys.stdout.write(f"{d}: {' '.join(sorted(prod[d]))}\n")
+    only = sorted(test.get(d, set()) - prod.get(d, set()))
+    if only:
+        sys.stdout.write(f"{d} [test]: {' '.join(only)}\n")

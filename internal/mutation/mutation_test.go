@@ -5450,6 +5450,22 @@ var mutants = []mutant{
 		run:  "TestCloudFormationARollbackAndAContinuedOneAgreeOnAValueTakenAway",
 	},
 	{
+		name: "cloudformation-a-takeover-records-every-property-given",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `gave(failed, p.Props(stored(old.Template), o.Logical, old.Refs, old.Name))`,
+		new:  `gave(failed, nil)`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationATakeoverMarksWhatTheFailedUpdateChanged",
+	},
+	{
+		name: "cloudformation-a-takeover-reads-the-template-with-the-failed-updates-values",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `gave(failed, p.Props(stored(old.Template), o.Logical, old.Refs, old.Name))`,
+		new:  `gave(failed, p.Props(stored(old.Template), o.Logical, st.Refs, old.Name))`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationATakeoverMarksWhatTheFailedUpdateChanged",
+	},
+	{
 		name: "cloudformation-what-is-kept-has-no-bound",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
 		old:  `opKept.Load() < 1024 {`,

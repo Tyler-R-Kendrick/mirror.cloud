@@ -124,8 +124,8 @@ func TestCloudFormationNotificationARNsAreTheStacks(t *testing.T) {
 		"Outputs": map[string]any{"N": map[string]any{"Value": map[string]any{"Fn::Join": []any{",", map[string]any{"Ref": "AWS::NotificationARNs"}}}}}})
 	a, b := "arn:aws:sns:us-east-1:000000000000:a", "arn:aws:sns:us-east-1:000000000000:b"
 	six := []any{a, a, a, a, a, a}
-	for _, op := range []string{"CreateStack", "UpdateStack"} {
-		if _, err := h.invoke(op, map[string]any{"StackName": "six", "TemplateBody": string(body), "NotificationARNs": six}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Member must have length less than or equal to 5") {
+	for _, op := range []string{"CreateStack", "UpdateStack", "CreateChangeSet"} {
+		if _, err := h.invoke(op, map[string]any{"StackName": "six", "ChangeSetName": "c", "ChangeSetType": "CREATE", "TemplateBody": string(body), "NotificationARNs": six}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Member must have length less than or equal to 5") {
 			t.Errorf("%s with six NotificationARNs answered %v, want ValidationError", op, err)
 		}
 	}

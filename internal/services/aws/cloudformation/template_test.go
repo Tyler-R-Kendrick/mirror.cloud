@@ -880,7 +880,9 @@ func TestCloudFormationMakesOnlyWhatItsConditionAllows(t *testing.T) {
 			"Resources": resources, "Outputs": outputs})
 		return string(body)
 	}
-	resources := map[string]any{"A": param("No", "a"), "B": param("Yes", map[string]any{"Ref": "A"}), "C": param("Yes", "c"), "D": param("", "d")}
+	// A's value could not be made (AWS::NoValue as a Fn::Join's separator), and is not checked: A is not made.
+	unmakeable := map[string]any{"Fn::Join": []any{map[string]any{"Ref": "AWS::NoValue"}, []any{"a", "b"}}}
+	resources := map[string]any{"A": param("No", unmakeable), "B": param("Yes", map[string]any{"Ref": "A"}), "C": param("Yes", "c"), "D": param("", "d")}
 	outputs := map[string]any{"OA": map[string]any{"Condition": "No", "Value": map[string]any{"Ref": "A"}}, "OC": map[string]any{"Value": map[string]any{"Ref": "C"}}}
 	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "cnd", "TemplateBody": template(outputs, resources)}); err != nil {
 		t.Fatal(err)

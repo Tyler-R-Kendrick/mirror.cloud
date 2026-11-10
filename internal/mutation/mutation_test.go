@@ -4611,8 +4611,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-a-running-operation-is-taken-over",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `(kept || !known)`,
-		new:  `(kept || !known || true)`,
+		old:  `(mine || !known)`,
+		new:  `(mine || !known || true)`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationARunningOperationKeepsItsStack",
 	},

@@ -247,8 +247,8 @@ func TestCloudFormationAnOperationIdIsItsProcesss(t *testing.T) {
 	}
 	_ = h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "pa", []byte(spi.JSONText(rec)))
 	_, _ = h.invoke("CreateChangeSet", map[string]any{"StackName": "pa", "ChangeSetName": "c", "TemplateBody": topicTpl()})
-	if pa := h.record("pa"); pa["Name"] != "pa" || !strings.Contains(spi.JSONText(pa["Resources"]), "rv23-pa") {
-		t.Errorf("stack pa's record is now %v's, holding %v; want it left pa's", pa["Name"], pa["Resources"])
+	if pa := h.record("pa"); pa["Name"] != "pa" || !strings.Contains(spi.JSONText(pa["Resources"]), "rv23-pa") || pa["Status"] != "CREATE_COMPLETE" {
+		t.Errorf("stack pa's record is now %v's, %v, holding %v; want it left pa's, and settled as its update found it", pa["Name"], pa["Status"], pa["Resources"])
 	}
 }
 

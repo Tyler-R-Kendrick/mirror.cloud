@@ -540,7 +540,7 @@ func (p *Pack) orphan(ctx context.Context, req *spi.Request, name string) {
 		if next.Protect = cur.Protect; cur.Status == "DELETE_IN_PROGRESS" {
 			next.Status = "DELETE_FAILED"
 		}
-		return next, strings.HasSuffix(cur.Status, "_IN_PROGRESS") && cur.Status != "REVIEW_IN_PROGRESS" && (kept || !known)
+		return next, strings.HasSuffix(cur.Status, "_IN_PROGRESS") && cur.Status != "REVIEW_IN_PROGRESS" && (mine || !known)
 	}); wrote && err == nil && kept { // kept until it is written
 		ops.Delete(id)
 		opKept.Add(-1)

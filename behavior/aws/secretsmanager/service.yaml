@@ -258,7 +258,8 @@ operations:
       - *scheduled
       # "the operation starts a rotation with the values already stored in the
       # secret", its AWSCURRENT version's: a secret created without a value has
-      # none, nor does one whose AWSCURRENT stage was removed, and no rotation
+      # none, nor does a stored record none of whose versions holds AWSCURRENT
+      # (no call leaves one so; see UpdateSecretVersionStage), and no rotation
       # function runs here to make one. Refused with the error for the
       # secret's current state rather than seating an empty value.
       - cond: "vers.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))"
@@ -319,10 +320,20 @@ operations:
     require:
       - { cond: s_found, error: NotFound }
       - *scheduled
-      # A secret created without a value has no version to answer.
-      - cond: "size(vers) > 0"
+      # A secret created without a value has no version to answer, and one
+      # none of whose versions holds AWSCURRENT has no current value: asked
+      # for it, by name or by default, there is nothing to find. No call
+      # leaves a secret that way (UpdateSecretVersionStage); a store written
+      # before it refused can hold one, and RotateSecret and
+      # BatchGetSecretValue read it the same.
+      # The message names what was asked for: the VersionId, or the staging
+      # label, AWSCURRENT when none was given.
+      - cond: "size(vers) > 0 && (vid != '' || effstage != 'AWSCURRENT' || vers.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')))"
         error: NotFound
-        message: "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"
+        message_expr: >-
+          vid != ''
+          ? "Secrets Manager can't find the specified secret value for VersionId: " + vid
+          : "Secrets Manager can't find the specified secret value for staging label: " + effstage
     output:
       ARN: s.ARN
       Name: s.Name
@@ -591,8 +602,13 @@ operations:
       - *maxIsInteger
       - *maxIn100
       - *tokenNotEmpty
+      # IncludeDeprecated is a BooleanType: the string "true" is not one, nor
+      # is "yes" or 1. Refused as a MaxResults that is no integer is.
+      - cond: "!('IncludeDeprecated' in input && input.IncludeDeprecated != null) || type(input.IncludeDeprecated) == bool"
+        error: Serialization
+        message: "IncludeDeprecated must be a Boolean."
     let:
-      deprecated: "'IncludeDeprecated' in input && (input.IncludeDeprecated == true || input.IncludeDeprecated == 'true')"
+      deprecated: "'IncludeDeprecated' in input && input.IncludeDeprecated == true"
     output:
       Versions: >-
         s_found && 'Versions' in s
@@ -731,9 +747,10 @@ operations:
         ? input.SecretIdList
         : (('SecretId' in input && input.SecretId != null && input.SecretId != '') ? [input.SecretId] : [])
       gone: "bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b) && 'Deleted' in x && x.Deleted == true))"
-      # A secret created without a value has nothing to answer: not found,
-      # as GetSecretValue answers it.
-      valueless: "bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b) && !('Versions' in x && size(x.Versions) > 0)))"
+      # A secret with no AWSCURRENT version -- one created without a value,
+      # or a stored record whose versions hold no such label -- has no
+      # current value to answer: not found, as GetSecretValue answers it.
+      valueless: "bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b) && !('Versions' in x && x.Versions.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')))))"
     select:
       binding: bs
       resource: secret
@@ -741,14 +758,15 @@ operations:
     output:
       SecretValues: >-
         ('Filters' in input && input.Filters != null
-          ? items.filter(m, 'Versions' in m && size(m.Versions) > 0)
+          ? items.filter(m, 'Versions' in m && m.Versions.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')))
           : bids.filter(b, bs.exists(x, 'Name' in x && string(x.Name) == string(b)) && !(b in gone) && !(b in valueless))
               .map(b, bs.filter(x, 'Name' in x && string(x.Name) == string(b))[0]))
             .map(m, {'m': m, 'p': (('Versions' in m && m.Versions.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))) ? m.Versions.filter(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))[0] : m)})
             .map(pair, {'ARN': pair.m.ARN, 'Name': pair.m.Name, 'SecretString': pair.p.SecretString, 'VersionId': pair.p.VersionId})
       Errors: >-
         'Filters' in input && input.Filters != null
-        ? items.filter(m, !('Versions' in m && size(m.Versions) > 0)).map(m, {'SecretId': string(m.Name), 'ErrorCode': 'ResourceNotFoundException',
+        ? items.filter(m, !('Versions' in m && m.Versions.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))))
+            .map(m, {'SecretId': string(m.Name), 'ErrorCode': 'ResourceNotFoundException',
             'Message': "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"})
         : bids.filter(b, !bs.exists(x, 'Name' in x && string(x.Name) == string(b)) || b in gone || b in valueless)
             .map(b, b in gone
@@ -872,6 +890,22 @@ operations:
     require:
       - { cond: s_found, error: NotFound }
       - *scheduled
+      # AWSCURRENT is moved, never removed: "You can move the AWSCURRENT
+      # staging label to this version by including it in this call", and
+      # "Whenever you move AWSCURRENT, Secrets Manager automatically moves the
+      # label AWSPREVIOUS to the version that AWSCURRENT was removed from".
+      # The documentation says no more than that; the refusal and its text
+      # are the service's wire answer to a removal with no version to move
+      # to. A MoveToVersionId that names no version would take the label off
+      # and seat it nowhere, so it is refused the same way, which is this
+      # bundle's reading. With it, a secret that has a value always has a
+      # current one.
+      - cond: >-
+          stage != 'AWSCURRENT' || uvers.exists(v, 'VersionId' in v && string(v.VersionId) == moveTo)
+          || !uvers.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')
+               && ((removeFrom != '' && 'VersionId' in v && string(v.VersionId) == removeFrom) || (removeFrom == '' && moveTo != '')))
+        error: InvalidParameter
+        message: "You can only move staging label AWSCURRENT to a different secret version. It can't be completely removed."
     effects:
       - patch:
           resource: secret
@@ -954,7 +988,11 @@ quirks:
   - operation: UpdateSecretVersionStage
     note: >
       With neither MoveToVersionId nor RemoveFromVersionId the call is a
-      no-op that succeeds. An empty VersionStage means AWSCURRENT. The
+      no-op that succeeds. An empty VersionStage means AWSCURRENT. AWSCURRENT
+      is only moved: taking it off the version that holds it with no version
+      to seat it on is InvalidParameterException. Moving it does not move
+      AWSPREVIOUS to the version it left, which the documentation says the
+      service does. The
       record's top-level VersionId and VersionStages are not updated, so
       DescribeSecret's stage map and the top-level current version can
       disagree afterwards.

@@ -1061,6 +1061,36 @@ func TestSecretsManagerListSecretVersionIdsIncludesDeprecatedOnlyWhenAsked(t *te
 	}
 }
 
+// IncludeDeprecated is a BooleanType, so it is true or false: the string
+// "true" is not the Boolean, and neither is "yes" or 1. A value the awsJson1_1
+// codec cannot read as a Boolean is SerializationException, as a MaxResults
+// that is no integer is. Before, "true" listed the deprecated versions and
+// "yes" and 1 answered the listing without them.
+func TestSecretsManagerIncludeDeprecatedIsABoolean(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v1"})
+	ok(t, "PutSecretValue", map[string]any{"SecretId": "s", "SecretString": "v2"})
+	ok(t, "PutSecretValue", map[string]any{"SecretId": "s", "SecretString": "v3"})
+	for _, c := range []struct {
+		in   map[string]any
+		want int
+	}{
+		{map[string]any{"SecretId": "s"}, 2},
+		{map[string]any{"SecretId": "s", "IncludeDeprecated": false}, 2},
+		{map[string]any{"SecretId": "s", "IncludeDeprecated": true}, 3},
+	} {
+		if versions, _ := ok(t, "ListSecretVersionIds", c.in)["Versions"].([]any); len(versions) != c.want {
+			t.Errorf("%v listed %d versions, want %d", c.in, len(versions), c.want)
+		}
+	}
+	for _, v := range []any{"true", "yes", 1, 1.0} {
+		out, err := call("ListSecretVersionIds", map[string]any{"SecretId": "s", "IncludeDeprecated": v})
+		if f, isFault := err.(*spi.Fault); !isFault || f.Code != "SerializationException" {
+			t.Errorf("IncludeDeprecated %#v answered %v, %v, want SerializationException", v, out, err)
+		}
+	}
+}
+
 // APIErrorType is "The error Secrets Manager encountered while retrieving an
 // individual secret as part of BatchGetSecretValue": SecretId, ErrorCode and
 // Message, "A message describing the error". Every row carries the code and
@@ -1092,6 +1122,19 @@ func TestSecretsManagerBatchGetErrorsMatchGetSecretValue(t *testing.T) {
 			t.Errorf("the filter form's row for %s is %#v, want Message %q", id, filtered, f.Message)
 		}
 	}
+	// The documented exception: a full ARN in SecretIdList. The batch reads
+	// an id as the secret's name and does not strip an ARN's prefix, so the
+	// ARN of a secret GetSecretValue answers is a not-found row.
+	arn := ok(t, "CreateSecret", map[string]any{"Name": "kept", "SecretString": "v"})["ARN"]
+	if got := ok(t, "GetSecretValue", map[string]any{"SecretId": arn}); got["SecretString"] != "v" {
+		t.Errorf("GetSecretValue by ARN answered %#v, want the value", got)
+	}
+	byARN := ok(t, "BatchGetSecretValue", map[string]any{"SecretIdList": []any{arn}})
+	arnRows, _ := byARN["Errors"].([]any)
+	if values, _ := byARN["SecretValues"].([]any); len(values) != 0 || len(arnRows) != 1 || arnRows[0].(map[string]any)["ErrorCode"] != "ResourceNotFoundException" ||
+		arnRows[0].(map[string]any)["Message"] != "Secrets Manager can't find the specified secret." {
+		t.Errorf("BatchGetSecretValue by ARN answered %#v, want one not-found row and no value", byARN)
+	}
 	// The wire text, which the service answers for a secret it cannot find:
 	// the model's documentation of the exception ("can't find the resource
 	// that you asked for") is not what a client reads.
@@ -1111,6 +1154,10 @@ func TestSecretsManagerRotateSecretRefusesASecretWithNoValue(t *testing.T) {
 	call, ok, fault := secretsManager(t)
 	ok(t, "CreateSecret", map[string]any{"Name": "empty"})
 	_, err := call("RotateSecret", map[string]any{"SecretId": "empty"})
+	fault(t, err, "InvalidRequestException")
+	// Naming a rotation function changes nothing here: none runs. (AWS would
+	// start the rotation asynchronously.)
+	_, err = call("RotateSecret", map[string]any{"SecretId": "empty", "RotationLambdaARN": "arn:aws:lambda:us-east-1:000000000000:function:rotate"})
 	fault(t, err, "InvalidRequestException")
 	if versions, _ := ok(t, "ListSecretVersionIds", map[string]any{"SecretId": "empty", "IncludeDeprecated": true})["Versions"].([]any); len(versions) != 0 {
 		t.Fatalf("a refused rotation left %d versions: %#v", len(versions), versions)
@@ -1355,18 +1402,96 @@ func TestSecretsManagerListBoundsAndTokens(t *testing.T) {
 	ok(t, "ListSecrets", map[string]any{"MaxResults": 100})
 }
 
+// A secret with no value that is also scheduled for deletion is refused for
+// the deletion: both refusals are InvalidRequestException, and the documented
+// cause, "The secret is scheduled for deletion", is the one RestoreSecret
+// undoes and every other write to it answers. Restored, it is refused for
+// having no value.
+func TestSecretsManagerRotateOfAScheduledSecretWithNoValueNamesTheDeletion(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "empty"})
+	ok(t, "DeleteSecret", map[string]any{"SecretId": "empty"})
+	_, err := call("RotateSecret", map[string]any{"SecretId": "empty"})
+	if f, isFault := err.(*spi.Fault); !isFault || f.Code != "InvalidRequestException" || f.Message != "You can't perform this operation on the secret because it was marked for deletion." {
+		t.Errorf("RotateSecret of a scheduled secret with no value answered %v, want the deletion's InvalidRequestException", err)
+	}
+	ok(t, "RestoreSecret", map[string]any{"SecretId": "empty"})
+	_, err = call("RotateSecret", map[string]any{"SecretId": "empty"})
+	if f, isFault := err.(*spi.Fault); !isFault || f.Code != "InvalidRequestException" || !strings.Contains(f.Message, "no AWSCURRENT version") {
+		t.Errorf("RotateSecret of the restored secret answered %v, want InvalidRequestException: ... no AWSCURRENT version", err)
+	}
+}
+
+// GetSecretValue of a secret with no value names what it was asked for and
+// did not find: the staging label asked for, AWSCURRENT when none was, or the
+// VersionId ("Secrets Manager can't find the specified secret value for
+// VersionId: abc", the service's text). Before, every one of them said
+// "for staging label: AWSCURRENT".
+func TestSecretsManagerGetOfASecretWithNoValueNamesWhatWasAsked(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "empty"})
+	for _, c := range []struct {
+		in   map[string]any
+		want string
+	}{
+		{map[string]any{"SecretId": "empty"}, "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"},
+		{map[string]any{"SecretId": "empty", "VersionStage": "AWSPREVIOUS"}, "Secrets Manager can't find the specified secret value for staging label: AWSPREVIOUS"},
+		{map[string]any{"SecretId": "empty", "VersionId": "abc"}, "Secrets Manager can't find the specified secret value for VersionId: abc"},
+	} {
+		_, err := call("GetSecretValue", c.in)
+		if f, isFault := err.(*spi.Fault); !isFault || f.Code != "ResourceNotFoundException" || f.Message != c.want {
+			t.Errorf("GetSecretValue %v answered %v, want ResourceNotFoundException: %s", c.in, err, c.want)
+		}
+	}
+}
+
+// withoutAWSCURRENT rewrites a stored secret so that none of its versions
+// holds AWSCURRENT, and names the version that held it. No call makes such a
+// record (UpdateSecretVersionStage refuses to remove the label); a store
+// written before it refused, restored from a snapshot, can hold one.
+func withoutAWSCURRENT(t *testing.T, deps spi.Deps, name string) string {
+	t.Helper()
+	secrets := deps.Store.Scope("000000000000", "us-east-1").Collection("secrets")
+	raw, found, err := secrets.Get(context.Background(), name)
+	if err != nil || !found {
+		t.Fatalf("the stored secret %s: found %v, %v", name, found, err)
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(raw, &rec); err != nil {
+		t.Fatalf("the stored secret %s is %s: %v", name, raw, err)
+	}
+	held := ""
+	for _, v := range rec["Versions"].([]any) {
+		version := v.(map[string]any)
+		stages, _ := version["VersionStages"].([]any)
+		if slices.Contains(stages, any("AWSCURRENT")) {
+			held = version["VersionId"].(string)
+		}
+		version["VersionStages"] = slices.DeleteFunc(stages, func(st any) bool { return st == "AWSCURRENT" })
+	}
+	if held == "" {
+		t.Fatalf("no version of %s held AWSCURRENT: %s", name, raw)
+	}
+	if raw, err = json.Marshal(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := secrets.Put(context.Background(), name, raw); err != nil {
+		t.Fatal(err)
+	}
+	return held
+}
+
 // RotateSecret's refusal of a secret with nothing to rotate says "it has no
 // AWSCURRENT version", so that is what it checks: a secret whose versions
-// hold no AWSCURRENT stage (the stage removed from the one version that had
-// it) is refused, with that message, as a secret with no version is. Before,
-// the rule asked only for some version, so such a secret was rotated from
-// nothing in particular.
+// hold no AWSCURRENT stage is refused, with that message, as a secret with no
+// version is. UpdateSecretVersionStage no longer removes the label, so the
+// record is written to the store directly, as a snapshot from before would
+// restore it.
 func TestSecretsManagerRotateNeedsAnAWSCURRENTVersion(t *testing.T) {
-	call, ok, _ := secretsManager(t)
-	out := ok(t, "CreateSecret", map[string]any{"Name": "staged", "SecretString": "v"})
-	if _, err := call("UpdateSecretVersionStage", map[string]any{"SecretId": "staged", "VersionStage": "AWSCURRENT", "RemoveFromVersionId": out["VersionId"]}); err != nil {
-		t.Fatalf("removing AWSCURRENT: %v", err)
-	}
+	deps := spitest.Deps(t)
+	call, ok, _ := secretsManagerOn(t, deps)
+	ok(t, "CreateSecret", map[string]any{"Name": "staged", "SecretString": "v"})
+	withoutAWSCURRENT(t, deps, "staged")
 	for _, name := range []string{"staged", "valueless"} {
 		if name == "valueless" {
 			ok(t, "CreateSecret", map[string]any{"Name": name})
@@ -1375,6 +1500,113 @@ func TestSecretsManagerRotateNeedsAnAWSCURRENTVersion(t *testing.T) {
 		if f, isFault := err.(*spi.Fault); !isFault || f.Code != "InvalidRequestException" || !strings.Contains(f.Message, "no AWSCURRENT version") {
 			t.Errorf("RotateSecret of %s answered %v, want InvalidRequestException: ... no AWSCURRENT version", name, err)
 		}
+	}
+}
+
+// UpdateSecretVersionStage: "You can move the AWSCURRENT staging label to
+// this version by including it in this call. Whenever you move AWSCURRENT,
+// Secrets Manager automatically moves the label AWSPREVIOUS to the version
+// that AWSCURRENT was removed from." The documentation speaks of AWSCURRENT
+// only as moved; the service refuses to take it off a version without a
+// version to put it on: InvalidParameterException, "You can only move staging
+// label AWSCURRENT to a different secret version. It can't be completely
+// removed." So a secret with a value always has a current one, and
+// GetSecretValue, both forms of BatchGetSecretValue and RotateSecret agree
+// about it. Before, the label came off, RotateSecret refused the secret as
+// having no AWSCURRENT version, and the two reads still answered its value as
+// AWSCURRENT.
+func TestSecretsManagerAWSCURRENTIsMovedNotRemoved(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	first := ok(t, "CreateSecret", map[string]any{"Name": "staged", "SecretString": "v1"})["VersionId"]
+	second := ok(t, "PutSecretValue", map[string]any{"SecretId": "staged", "SecretString": "v2"})["VersionId"]
+	const wire = "You can only move staging label AWSCURRENT to a different secret version. It can't be completely removed."
+	for _, in := range []map[string]any{
+		{"SecretId": "staged", "VersionStage": "AWSCURRENT", "RemoveFromVersionId": second},
+		// A MoveToVersionId that names no version takes the label off the
+		// version that holds it and seats it nowhere.
+		{"SecretId": "staged", "VersionStage": "AWSCURRENT", "MoveToVersionId": "no-such-version"},
+		{"SecretId": "staged", "VersionStage": "AWSCURRENT", "RemoveFromVersionId": second, "MoveToVersionId": "no-such-version"},
+	} {
+		_, err := call("UpdateSecretVersionStage", in)
+		if f, isFault := err.(*spi.Fault); !isFault || f.Code != "InvalidParameterException" || f.Message != wire {
+			t.Errorf("%v answered %v, want InvalidParameterException: %s", in, err, wire)
+		}
+	}
+	current := func(want string) {
+		t.Helper()
+		got := ok(t, "GetSecretValue", map[string]any{"SecretId": "staged"})
+		if stages, _ := got["VersionStages"].([]any); got["SecretString"] != want || !slices.Contains(stages, any("AWSCURRENT")) {
+			t.Errorf("GetSecretValue answered %#v, want %q as AWSCURRENT", got, want)
+		}
+		for _, in := range []map[string]any{
+			{"SecretIdList": []any{"staged"}},
+			{"Filters": []any{map[string]any{"Key": "name", "Values": []any{"staged"}}}},
+		} {
+			out := ok(t, "BatchGetSecretValue", in)
+			values, _ := out["SecretValues"].([]any)
+			if errs, _ := out["Errors"].([]any); len(values) != 1 || len(errs) != 0 || values[0].(map[string]any)["SecretString"] != want {
+				t.Errorf("BatchGetSecretValue %v answered %#v, want the one value %q", in, out, want)
+			}
+		}
+	}
+	current("v2")
+
+	// Another label is removed as before, and a removal that names a version
+	// that does not hold AWSCURRENT takes nothing off.
+	ok(t, "UpdateSecretVersionStage", map[string]any{"SecretId": "staged", "VersionStage": "BLUE", "MoveToVersionId": first})
+	ok(t, "UpdateSecretVersionStage", map[string]any{"SecretId": "staged", "VersionStage": "BLUE", "RemoveFromVersionId": first})
+	ok(t, "UpdateSecretVersionStage", map[string]any{"SecretId": "staged", "VersionStage": "AWSCURRENT", "RemoveFromVersionId": first})
+	current("v2")
+
+	// Moved to another version, with or without naming the one it leaves.
+	ok(t, "UpdateSecretVersionStage", map[string]any{"SecretId": "staged", "VersionStage": "AWSCURRENT", "RemoveFromVersionId": second, "MoveToVersionId": first})
+	current("v1")
+	ok(t, "UpdateSecretVersionStage", map[string]any{"SecretId": "staged", "VersionStage": "AWSCURRENT", "MoveToVersionId": second})
+	current("v2")
+
+	// And RotateSecret rotates it: there is a current value to start from.
+	if rotated := ok(t, "RotateSecret", map[string]any{"SecretId": "staged"}); rotated["VersionId"] == nil {
+		t.Errorf("RotateSecret answered %#v, want a new version", rotated)
+	}
+	current("v2")
+}
+
+// A secret none of whose versions holds AWSCURRENT has no current value, and
+// every operation that reads the current value says so: GetSecretValue with
+// no VersionId or VersionStage, or with VersionStage AWSCURRENT, is
+// ResourceNotFoundException, "Secrets Manager can't find the specified secret
+// value for staging label: AWSCURRENT"; BatchGetSecretValue answers that as
+// an Errors row in both forms; RotateSecret refuses it as having no AWSCURRENT
+// version. A version is still answered by its id. Before, the two reads
+// answered the record's last value, labelled AWSCURRENT, while RotateSecret
+// refused. No call makes such a record now; see withoutAWSCURRENT.
+func TestSecretsManagerNoAWSCURRENTVersionIsNoCurrentValue(t *testing.T) {
+	deps := spitest.Deps(t)
+	call, ok, fault := secretsManagerOn(t, deps)
+	ok(t, "CreateSecret", map[string]any{"Name": "staged", "SecretString": "v"})
+	held := withoutAWSCURRENT(t, deps, "staged")
+	const message = "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"
+	for _, in := range []map[string]any{{"SecretId": "staged"}, {"SecretId": "staged", "VersionStage": "AWSCURRENT"}} {
+		_, err := call("GetSecretValue", in)
+		if f, isFault := err.(*spi.Fault); !isFault || f.Code != "ResourceNotFoundException" || f.Message != message {
+			t.Errorf("GetSecretValue %v answered %v, want ResourceNotFoundException: %s", in, err, message)
+		}
+	}
+	for _, in := range []map[string]any{
+		{"SecretIdList": []any{"staged"}},
+		{"Filters": []any{map[string]any{"Key": "name", "Values": []any{"staged"}}}},
+	} {
+		out := ok(t, "BatchGetSecretValue", in)
+		values, _ := out["SecretValues"].([]any)
+		errs, _ := out["Errors"].([]any)
+		if len(values) != 0 || len(errs) != 1 || errs[0].(map[string]any)["ErrorCode"] != "ResourceNotFoundException" || errs[0].(map[string]any)["Message"] != message {
+			t.Errorf("BatchGetSecretValue %v answered %#v, want no value and one ResourceNotFoundException row: %s", in, out, message)
+		}
+	}
+	_, err := call("RotateSecret", map[string]any{"SecretId": "staged"})
+	fault(t, err, "InvalidRequestException")
+	if got := ok(t, "GetSecretValue", map[string]any{"SecretId": "staged", "VersionId": held}); got["SecretString"] != "v" {
+		t.Errorf("GetSecretValue by VersionId answered %#v, want the version's value", got)
 	}
 }
 

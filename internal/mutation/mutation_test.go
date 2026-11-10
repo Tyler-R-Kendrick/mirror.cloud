@@ -4259,6 +4259,158 @@ var mutants = []mutant{
 		run: "TestBundlesMatchRecordedPacks/aws.secretsmanager",
 	},
 	{
+		// "By default, versions without staging labels aren't included" (ListSecretVersionIds, IncludeDeprecated).
+		name: "secretsmanager-list-version-ids-always-deprecated",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `deprecated: "'IncludeDeprecated' in input && input.IncludeDeprecated == true"`,
+		new:  `deprecated: "true"`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerListSecretVersionIdsIncludesDeprecatedOnlyWhenAsked",
+	},
+	{
+		// IncludeDeprecated is a BooleanType: "true", "yes" and 1 are not Booleans.
+		name: "secretsmanager-include-deprecated-of-any-type",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `|| type(input.IncludeDeprecated) == bool"`,
+		new:  `|| true"`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerIncludeDeprecatedIsABoolean",
+	},
+	{
+		// RotateSecret "starts a rotation with the values already stored in the secret": its AWSCURRENT version's, not any version's.
+		name: "secretsmanager-rotate-takes-any-version",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old: `- cond: "vers.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))"
+        error: InvalidRequest
+        message: "The secret has no value to rotate`,
+		new: `- cond: "size(vers) > 0"
+        error: InvalidRequest
+        message: "The secret has no value to rotate`,
+		pkg: "./internal/bundled",
+		run: "TestSecretsManagerRotateNeedsAnAWSCURRENTVersion",
+	},
+	{
+		// "You can only move staging label AWSCURRENT to a different secret version. It can't be completely removed."
+		name: "secretsmanager-awscurrent-removed-with-nowhere-to-go",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `stage != 'AWSCURRENT' || uvers.exists(v, 'VersionId' in v && string(v.VersionId) == moveTo)`,
+		new:  `true`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerAWSCURRENTIsMovedNotRemoved",
+	},
+	{
+		// A MoveToVersionId that names no version seats the label nowhere.
+		name: "secretsmanager-awscurrent-moved-to-no-version",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `stage != 'AWSCURRENT' || uvers.exists(v, 'VersionId' in v && string(v.VersionId) == moveTo)`,
+		new:  `stage != 'AWSCURRENT' || moveTo != ''`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerAWSCURRENTIsMovedNotRemoved",
+	},
+	{
+		// GetSecretValue of a secret with no AWSCURRENT version has no current value to answer, as RotateSecret reads it.
+		name: "secretsmanager-get-answers-a-current-value-with-no-awscurrent",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `cond: "size(vers) > 0 && (vid != '' || effstage != 'AWSCURRENT' || vers.exists(`,
+		new:  `cond: "size(vers) > 0 && (true || vers.exists(`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerNoAWSCURRENTVersionIsNoCurrentValue",
+	},
+	{
+		// BatchGetSecretValue's SecretIdList form reads it the same.
+		name: "secretsmanager-batch-list-answers-a-value-with-no-awscurrent",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `string(x.Name) == string(b) && !('Versions' in x && x.Versions.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')))))"`,
+		new:  `string(x.Name) == string(b) && !('Versions' in x && size(x.Versions) > 0)))"`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerNoAWSCURRENTVersionIsNoCurrentValue",
+	},
+	{
+		// And its Filters form.
+		name: "secretsmanager-batch-filters-answer-a-value-with-no-awscurrent",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `? items.filter(m, 'Versions' in m && m.Versions.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')))`,
+		new:  `? items.filter(m, 'Versions' in m && size(m.Versions) > 0)`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerNoAWSCURRENTVersionIsNoCurrentValue",
+	},
+	{
+		// A secret with no value that is scheduled for deletion is refused for the deletion: that rule comes first.
+		name: "secretsmanager-rotate-checks-the-value-before-the-deletion",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old: `      - *scheduled
+      # "the operation starts a rotation with the values already stored in the`,
+		new: `      - cond: "vers.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))"
+        error: InvalidRequest
+        message: "The secret has no value to rotate: it has no AWSCURRENT version."
+      - *scheduled
+      # "the operation starts a rotation with the values already stored in the`,
+		pkg: "./internal/bundled",
+		run: "TestSecretsManagerRotateOfAScheduledSecretWithNoValueNamesTheDeletion",
+	},
+	{
+		// GetSecretValue of a secret with no value names the staging label it was asked for.
+		name: "secretsmanager-get-not-found-always-names-awscurrent",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `: "Secrets Manager can't find the specified secret value for staging label: " + effstage`,
+		new:  `: "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerGetOfASecretWithNoValueNamesWhatWasAsked",
+	},
+	{
+		// Asked by VersionId, it names the VersionId.
+		name: "secretsmanager-get-not-found-ignores-the-version-id",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `? "Secrets Manager can't find the specified secret value for VersionId: " + vid`,
+		new:  `? "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerGetOfASecretWithNoValueNamesWhatWasAsked",
+	},
+	{
+		// A secret created without a value has none to rotate.
+		name: "secretsmanager-rotate-a-secret-with-no-value",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old: `- cond: "vers.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))"
+        error: InvalidRequest
+        message: "The secret has no value to rotate`,
+		new: `- cond: "true"
+        error: InvalidRequest
+        message: "The secret has no value to rotate`,
+		pkg: "./internal/bundled",
+		run: "TestSecretsManagerRotateSecretRefusesASecretWithNoValue",
+	},
+	{
+		// APIErrorType's Message, "A message describing the error": the one GetSecretValue answers for a missing secret.
+		name: "secretsmanager-batch-row-without-the-not-found-message",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `                   : "Secrets Manager can't find the specified secret."})`,
+		new:  `                   : ""})`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerBatchGetErrorsMatchGetSecretValue",
+	},
+	{
+		// The row of a secret with no value carries GetSecretValue's message for it.
+		name: "secretsmanager-batch-row-without-the-valueless-message",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old: `                 'Message': b in valueless
+                   ? "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"`,
+		new: `                 'Message': b in valueless
+                   ? ""`,
+		pkg: "./internal/bundled",
+		run: "TestSecretsManagerBatchGetErrorsMatchGetSecretValue",
+	},
+	{
+		// The service's wire text for a secret it cannot find, not the model's documentation of the exception.
+		name: "secretsmanager-not-found-in-the-models-words",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old: `    fault: client
+    message: "Secrets Manager can't find the specified secret."`,
+		new: `    fault: client
+    message: "Secrets Manager can't find the resource that you asked for."`,
+		pkg: "./internal/bundled",
+		run: "TestSecretsManagerBatchGetErrorsMatchGetSecretValue",
+	},
+	{
 		name: "dynamodb-ignore-tag-update",
 		file: filepath.Join("behavior", "aws", "dynamodb", "service.yaml"),
 		old:  `? input.Tags.filter(x, x.Key == t.Key)[0] : t)`,

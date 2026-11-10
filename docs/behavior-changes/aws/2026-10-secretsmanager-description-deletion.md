@@ -44,10 +44,55 @@ The oracle is AWS's documentation as it ships in the vendored model
   this note's reading: the model does not say what happens, and the real
   service would start the rotation function, which would fail. Before, the
   empty string was seated as the secret's first version. The same holds for
-  a secret whose versions hold no `AWSCURRENT` stage (removed with
-  `UpdateSecretVersionStage`), and the refusal says so: "The secret has no
-  value to rotate: it has no AWSCURRENT version." checks for that stage, not
-  for any version.
+  a secret whose versions hold no `AWSCURRENT` stage (a stored record from
+  before `UpdateSecretVersionStage` refused to remove it; see the next
+  entry): the rule checks for that stage, not for any version, and the
+  refusal says so, "The secret has no value to rotate: it has no AWSCURRENT
+  version." The refusal also applies when the request names a
+  `RotationLambdaARN`. That too is the emulator's reading: AWS would accept
+  the call and start the rotation asynchronously, and the function would make
+  the first version. Here no function runs, so there would be no value to
+  seat. A secret that is both without a value and scheduled for
+  deletion is refused for the deletion ("You can't perform this operation on
+  the secret because it was marked for deletion."), as every other write to
+  it is: that rule comes first.
+- **AWSCURRENT is moved, never removed.** `UpdateSecretVersionStage` that
+  would take `AWSCURRENT` off the version holding it without seating it on
+  another is `InvalidParameterException`, "You can only move staging label
+  AWSCURRENT to a different secret version. It can't be completely removed."
+  Before, the label came off, and the operations then disagreed about the
+  secret: `RotateSecret` refused it as having no `AWSCURRENT` version while
+  `GetSecretValue` and `BatchGetSecretValue` answered its last value with
+  `VersionStages: [AWSCURRENT]`. Of the two repairs, refusing the removal or
+  making the reads agree with `RotateSecret`, this is the one the
+  documentation supports best, and it removes the cause. What the model says:
+  "You can move the AWSCURRENT staging label to this version by including it
+  in this call", "Whenever you move AWSCURRENT, Secrets Manager automatically
+  moves the label AWSPREVIOUS to the version that AWSCURRENT was removed
+  from", its example of deleting a label deletes a custom one and its example
+  with `AWSCURRENT` names both `RemoveFromVersionId` and `MoveToVersionId`,
+  and `InvalidParameterException` is among the operation's errors. It speaks
+  of `AWSCURRENT` only as moved and nowhere says a removal is refused: the
+  refusal and its text are the service's wire answer, not a sentence of the
+  model. A `MoveToVersionId` that names no version of the secret would take
+  the label off and seat it nowhere, so it is refused with the same error;
+  that case is this note's reading. Removing any other label, and a removal
+  that names a version not holding `AWSCURRENT`, are unchanged.
+
+  So that the operations agree whatever the store holds, the reads were also
+  given `RotateSecret`'s rule: a secret none of whose versions holds
+  `AWSCURRENT` has no current value. `GetSecretValue` with no `VersionId` or
+  `VersionStage` (or with `VersionStage: AWSCURRENT`) is
+  `ResourceNotFoundException`, "Secrets Manager can't find the specified
+  secret value for staging label: AWSCURRENT", and `BatchGetSecretValue`
+  answers that as an `Errors` row in both of its forms. A version is still
+  answered by its `VersionId`. No call leaves a secret in that state any
+  more; a store written before this change and restored from a snapshot can
+  hold one, which is how the tests reach it
+  (`TestSecretsManagerRotateNeedsAnAWSCURRENTVersion` now writes the record
+  to the store instead of calling `UpdateSecretVersionStage`). Moving
+  `AWSCURRENT` still does not move `AWSPREVIOUS` to the version it left; that
+  sentence of the documentation is not implemented here.
 - **Description.** `CreateSecret` and `UpdateSecret` keep `Description`, and
   `DescribeSecret` answers it. Before, it was accepted and dropped. A write
   that names no description keeps the one already stored.
@@ -59,7 +104,10 @@ The oracle is AWS's documentation as it ships in the vendored model
   `DescribeSecret` leave such a version out; they answered it with `[]`.
   `ListSecretVersionIds` lists it only with `IncludeDeprecated` ("By
   default, versions without staging labels aren't included"); it listed
-  every version.
+  every version. `IncludeDeprecated` is a `BooleanType`: a value that is not
+  a Boolean (the string `"true"`, `"yes"`, `1`) is `SerializationException`,
+  the awsJson1_1 codec's answer to a member that is not of its shape's type,
+  as a `MaxResults` that is no integer is.
 - **ListSecrets answers both.** Each entry carries `Description` ("The
   user-provided description of the secret") and, for a secret scheduled for
   deletion listed with `IncludePlannedDeletion`, `DeletedDate` ("Not present on
@@ -810,7 +858,14 @@ The oracle is AWS's documentation as it ships in the vendored model
   is not answered; it is an `Errors` row, an `APIErrorType` of `SecretId`,
   `ErrorCode` `InvalidRequestException` and `Message`. Before, its value was
   answered in `SecretValues`. Every `Errors` row carries the code and message
-  `GetSecretValue` answers for that secret alone: a secret that does not
+  `GetSecretValue` answers for that secret alone, with one documented
+  exception: a full ARN in `SecretIdList`. `BatchGetSecretValue` reads each id
+  as the secret's name and does not strip an ARN's prefix, as every other
+  operation does, so the row for an ARN is `ResourceNotFoundException`,
+  "Secrets Manager can't find the specified secret.", whatever
+  `GetSecretValue` answers for that ARN (the value, or another error). That
+  is the hand-written pack's behaviour, kept and recorded among the bundle's
+  quirks. For a name: a secret that does not
   exist is `ResourceNotFoundException`, "Secrets Manager can't find the
   specified secret." (the service's wire text, which every
   `ResourceNotFoundException` of this service now carries; the model's
@@ -819,7 +874,11 @@ The oracle is AWS's documentation as it ships in the vendored model
   secret with no value "Secrets Manager can't find the specified secret value
   for staging label: AWSCURRENT". `GetSecretValue` of a scheduled secret
   answers the same message as the other refused calls. Before, a not-found
-  row had no `Message` and the single call's was empty.
+  row had no `Message` and the single call's was empty. `GetSecretValue` of a
+  secret with no value names what it was asked for: a `VersionStage` is "for
+  staging label: AWSPREVIOUS" (the label asked for), and a `VersionId` is
+  "Secrets Manager can't find the specified secret value for VersionId: abc".
+  It said "for staging label: AWSCURRENT" whatever was asked.
 - **A member with no value is left out.** `DescribeSecret` "only returns
   fields that have a value in the response", so `Description`, `DeletedDate`,
   `Tags`, `ReplicationStatus` and the rotation members are absent when unset,

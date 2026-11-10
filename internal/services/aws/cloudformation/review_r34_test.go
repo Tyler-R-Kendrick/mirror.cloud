@@ -550,3 +550,32 @@ func TestCloudFormationAContinuedRollbackLeavesAnOnDemandStreamsCount(t *testing
 		t.Errorf("the stack is %s (%s), the stream %s; want UPDATE_ROLLBACK_COMPLETE and ON_DEMAND 5", st, reason, rv34Stream(h, id))
 	}
 }
+
+// A stream's count is at least one, in a template as in a request ("Minimum: 1", Template Reference,
+// AWS::Kinesis::Stream ShardCount; "Valid Range: Minimum value of 1", Kinesis API reference). Kinesis took
+// a count of 0 or -1 as no count, so a stack was made with a stream of one shard, and an update to such a
+// count was reported complete with the stream as it was. The create fails, and the update fails and
+// rolls back to the count the stream had.
+func TestCloudFormationAStreamsCountIsAtLeastOne(t *testing.T) {
+	t.Parallel()
+	stream := func(count int) map[string]any {
+		return map[string]any{"R": map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": map[string]any{"ShardCount": count}}}
+	}
+	for _, low := range []int{0, -1} {
+		h := newStacks(t)
+		if err := rveCreate(h, "lo", stream(low)); err == nil {
+			t.Errorf("a stream of %d shards was created", low)
+		}
+		if st, reason, _ := h.status("lo"); st != "ROLLBACK_COMPLETE" || !strings.Contains(reason+spi.JSONText(h.record("lo")), "greater than or equal to 1") {
+			t.Errorf("%d: the stack is %s (%s); want ROLLBACK_COMPLETE with Kinesis's reason", low, st, reason)
+		}
+		if err := rveCreate(h, "up", stream(3)); err != nil {
+			t.Fatal(err)
+		}
+		id := rv31IDs(h, "up")["R"]
+		err := rv28Update(h, "up", stream(low))
+		if st, reason, _ := h.status("up"); err == nil || st != "UPDATE_ROLLBACK_COMPLETE" || rv34Stream(h, id) != "PROVISIONED 3" {
+			t.Errorf("%d: the update answered %v and left the stack %s (%s), the stream %s; want UPDATE_ROLLBACK_COMPLETE and PROVISIONED 3", low, err, st, reason, rv34Stream(h, id))
+		}
+	}
+}

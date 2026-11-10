@@ -68,7 +68,16 @@
 | `DescribeStream`, `DescribeStreamSummary`, `PutRecord` or `DescribeStreamConsumer` of what does not exist | `ResourceNotFoundException` with no message | The same, with the message |
 | A third change of a stream's mode within 24 hours | Accepted | `LimitExceededException` |
 | `CreateStream` with a `ShardCount`, or `UpdateShardCount` with a `TargetShardCount`, of 0 or less | The default made (one shard, or four on-demand); 200 and nothing changed | `ValidationException`, "1 validation error detected: Value '0' at 'shardCount' failed to satisfy constraint: Member must have value greater than or equal to 1" (`targetShardCount` for the other) |
-| Any operation with a member that should be a string given null, an object or a list, or one that should be an integer given anything but a whole number | `InternalFailure` (500) wherever the member was read | `ValidationException`, "<Member> must be a string" or "<Member> must be an integer", before any other rule |
+| Any operation with a member that should be a string given an object or a list, or one that should be an integer given anything but a whole number | `InternalFailure` (500) wherever the member was read | `ValidationException`, "<Member> must be a string" or "<Member> must be an integer", before any other rule |
+| Any operation with a member given as JSON `null` | `InternalFailure` (500) wherever a string or integer member was read; otherwise read as present | Read as absent: the answer is the one without the member, and a required member is missing ("<Member> is required") |
+| An operation on a stream that does not exist: `DeleteStream`, `ListShards`, `StartStreamEncryption`, `StopStreamEncryption`, `EnableEnhancedMonitoring`, `DisableEnhancedMonitoring`, `UpdateStreamWarmThroughput`, `UpdateMaxRecordSize`, `AddTagsToStream`, `RemoveTagsFromStream`, `ListTagsForStream`, `RegisterStreamConsumer`, `ListStreamConsumers`, `GetShardIterator` | 200, and for most a stream or tag record | `ResourceNotFoundException`, "Stream <name> under account <id> not found."; nothing is written |
+| `PutRecords` to a stream that does not exist | 200, `FailedRecordCount` 0, and `InternalFailure` for each record | `ResourceNotFoundException` |
+| `GetRecords` through the iterator of a stream since deleted | 200, with the records of a stream made again under the name | `ResourceNotFoundException` |
+| `TagResource`, `UntagResource`, `ListTagsForResource`, `PutResourcePolicy`, `GetResourcePolicy` or `DeleteResourcePolicy` with the ARN of a stream, or of a consumer, that does not exist | 200, and a tag or policy record (an empty policy for `GetResourcePolicy`) | `ResourceNotFoundException`, naming the stream or the consumer |
+| `DeregisterStreamConsumer` or `SubscribeToShard` of a consumer that does not exist | 200 | `ResourceNotFoundException`, "Consumer <ARN> under account <id> not found." |
+| `DescribeStream`, `DescribeStreamSummary`, `DeleteStream`, `PutRecord`, `PutRecords` or `GetShardIterator` of a stream that exists, addressed by `StreamARN` alone | `ResourceNotFoundException`, with no name in its message | The stream, as by its name |
+| `DescribeStreamConsumer` or `DeregisterStreamConsumer` by `StreamARN` and `ConsumerName` | Not found, with no name in its message | The consumer, as by its ARN |
+| An operation that takes a `StreamName` or a `StreamARN`, given neither | `ResourceNotFoundException`, "Stream  under account ..." | `InvalidArgumentException`, "Either StreamName or StreamARN must be specified." (for a consumer: "Either ConsumerARN, or StreamARN and ConsumerName, must be specified.") |
 | `UpdateStreamMode` with no `StreamModeDetails`, or a null one | `ValidationException`, "StreamModeDetails is required" | The same (it was `InternalFailure`, 500, between the two changes of this note) |
 | `CreateStream` or `UpdateStreamMode` with a `StreamModeDetails` that is `{}`, holds a null `StreamMode`, or is no structure | Taken as provisioned, or `InternalFailure` | `ValidationException` |
 | `UpdateStreamMode` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException` |
@@ -76,8 +85,9 @@
 
 ## Readings
 
-- A provisioned stream created with no `ShardCount`, or one that is not
-  positive, has one shard; the service requires a count there. An on-demand
+- A provisioned stream created with no `ShardCount` has one shard; the
+  service requires a count there. (A count below one is refused; see the
+  table.) An on-demand
   stream has four: "By default, new data streams created with the on-demand
   capacity mode have 4 MB/s of write and 8 MB/s of read throughput", and
   "Each shard can support up to 1 MB/sec ... write throughput" (Quotas and
@@ -205,15 +215,60 @@
   its create, or its update, which rolls back to the count it had.
 - A member that cannot be what the model declares is refused by the engine
   for this bundle (`malformed_input_error`, a bundle option; no other
-  service is changed): null, an object or a list for a string, and for an
+  service is changed): an object or a list for a string, and for an
   integer also a Boolean, a fraction, text that is not a whole number, or a
   number no 64-bit integer holds. The service itself refuses such a request
   when it reads it; `ValidationException` and the two messages are this
   emulator's, a reading, and so are two leniencies: a string member given a
   number or a Boolean is read as its text, and an integer written as text
   ("3") is read as the number. Every operation of the model is swept with
-  each such value in each member, with a provisioned and an on-demand
-  stream present: none answers a 5xx.
+  each such value in each member, and in each spelling the bundle reads
+  that the operation's model does not declare (`StreamArn`, `ResourceArn`,
+  `ConsumerArn`, and a `StreamName` or `ResourceARN` where there is none),
+  with a provisioned and an on-demand stream present: none answers a 5xx.
+- A member that is JSON `null` is absent, with the same option. This one
+  is not a reading: Smithy's awsJson1.1 compliance test for servers,
+  `AwsJson11ServersDontDeserializeNullStructureValues` ("Null structure
+  values are dropped", `smithy-aws-protocol-tests`,
+  `model/awsJson1_1/null.smithy`, read 2026-11), sends `{"string": null}`
+  and expects no member. The null is dropped before the required-member
+  check, the check above and the operation's rules, so a required member
+  that is null is missing. Only top-level members: a null inside a
+  structure or a list is not judged, nor is any nested member's type, apart
+  from `StreamModeDetails.StreamMode`, which the bundle reads itself.
+- 2^63-1 written as a JSON number is refused as an integer where the same
+  digits as text pass: a JSON number is a 64-bit float by the time it is
+  judged, and 2^63-1 has become 2^63, which no int64 holds. Left so; no
+  count the service takes is near it.
+- A stream is found by its name or by its ARN: "When you invoke this API,
+  you must use either the StreamARN or the StreamName parameter, or both"
+  (API reference, on each operation that takes the two; read on
+  `DeleteStream`). A consumer "provide its ARN. Alternatively, you can
+  provide the ARN of the data stream and the name you gave the consumer"
+  (`DeregisterStreamConsumer`). A request that gives neither is refused
+  with `InvalidArgumentException`, "A specified parameter exceeds its
+  restrictions, is not supported, or can't be used", which each of these
+  operations lists; that it is that error, and both messages, are
+  readings.
+- Every operation that takes a stream, a resource ARN or a consumer lists
+  `ResourceNotFoundException` in the service's model, which is what the
+  API reference's Errors sections print (read on `DeleteStream`,
+  `DeregisterStreamConsumer` and `GetResourcePolicy`: "The requested
+  resource could not be found. The stream might not be specified
+  correctly."), so none was left answering 200 for what is not there;
+  "If an application attempts to operate on a deleted stream, it receives
+  the exception ResourceNotFoundException" (`DeleteStream`). The message
+  of a consumer that is not found, and that a resource ARN which is no
+  stream's ARN is reported as a stream not found, are readings. A
+  CloudFormation stack whose stream is gone still deletes: a delete that
+  finds its resource gone is done.
+- `CreateStream` over a name that exists replaces the record, as the pack
+  did (the service lists `ResourceInUseException` for `CreateStream`; that
+  a name in use is what it answers is a reading); so the stream's
+  shards, mode and the window of its mode changes start afresh. Left so.
+- The emulator's consumer ARN has no creation timestamp after the name,
+  which the service's has; a stream's tags by name and by resource ARN are
+  two sets; a deleted stream's tags, policy and consumers stay. Left so.
 - `UpdateShardCount` and `UpdateStreamMode` apply at once: the stream is
   never `UPDATING`, and none of the service's limits on how far or how
   often a count may move is applied.
@@ -221,9 +276,13 @@
 ## Recorded trace
 
 `internal/equivalence/traces/aws.kinesis.json` was recorded from the pack the
-bundle replaced. Five steps are re-cut, each with its reason on the step:
+bundle replaced. Nine steps are re-cut, each with its reason on the step:
 `DescribeStreamSummary` (step 7, `StreamModeDetails` added),
 `UpdateShardCount` (step 35, `CurrentShardCount` 2 to 1), `DescribeLimits`
-(step 40, `OpenShardCount` 1 to 4), and `IncreaseStreamRetentionPeriod` and
-`DescribeStream` on a stream that does not exist (steps 47 and 48, success
-to `ResourceNotFoundException`). All are still compared in full.
+(step 40, `OpenShardCount` 1 to 4), and six that succeeded on what was not
+there and now answer `ResourceNotFoundException`: `GetResourcePolicy` of a
+stream that does not exist (step 23, an empty policy),
+`IncreaseStreamRetentionPeriod` and `DescribeStream` of one (steps 47 and
+48), `DeleteStream` of it (step 49), the second `DeregisterStreamConsumer`
+of a consumer (step 51) and the second `DeleteStream` of a stream (step
+53). All are still compared in full.

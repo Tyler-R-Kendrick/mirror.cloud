@@ -700,3 +700,31 @@ func TestCloudFormationATakeoverKeepsTheModeTheFailedUpdateGave(t *testing.T) {
 		t.Errorf("the stack is %s, the stream %s; want UPDATE_ROLLBACK_COMPLETE and PROVISIONED 2", status, rv34Stream(h, id))
 	}
 }
+
+// A stack whose stream is gone still deletes. Kinesis now answers ResourceNotFoundException for a stream,
+// its policy or its tags that do not exist, where it answered 200; a delete that finds its resource
+// already gone is done, so a stream deleted outside its stack, and the policy on it, do not hold the
+// stack's deletion.
+func TestCloudFormationAStackWhoseStreamIsGoneDeletes(t *testing.T) {
+	t.Parallel()
+	h := newStacks(t)
+	if err := rveCreate(h, "sg", map[string]any{
+		"S": map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": map[string]any{"Name": "sg-stream"}},
+		"P": map[string]any{"Type": "AWS::Kinesis::ResourcePolicy", "DependsOn": "S", "Properties": map[string]any{"ResourceArn": "arn:aws:kinesis:us-east-1:000000000000:stream/sg-stream",
+			"ResourcePolicy": map[string]any{"Version": "2012-10-17", "Statement": []any{}}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service("aws.kinesis", "DeleteStream", map[string]any{"StreamName": "sg-stream"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service("aws.kinesis", "DeleteStream", map[string]any{"StreamName": "sg-stream"}); err == nil || !strings.Contains(err.Error(), "ResourceNotFoundException: Stream sg-stream under account") {
+		t.Fatalf("a second DeleteStream answered %v", err)
+	}
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "sg"}); err != nil {
+		t.Fatal(err)
+	}
+	if rec, live := h.live("sg"); live {
+		t.Errorf("the stack whose stream was gone is still there: %s", spi.JSONText(rec))
+	}
+}

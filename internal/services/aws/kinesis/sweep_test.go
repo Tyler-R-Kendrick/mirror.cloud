@@ -11,18 +11,21 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 )
 
+// kinesisSound is a sound value for each member the model's operations take, of a stream named s.
+const kinesisARN = "arn:aws:kinesis:us-east-1:000000000000:stream/s"
+
+var kinesisSound = map[string]any{"StreamName": "s", "StreamARN": kinesisARN, "ResourceARN": kinesisARN, "ShardCount": 2, "TargetShardCount": 2, "ScalingType": "UNIFORM_SCALING",
+	"RetentionPeriodHours": 48, "StreamModeDetails": map[string]any{"StreamMode": "PROVISIONED"}, "ShardToSplit": "shardId-000000000000", "NewStartingHashKey": "10",
+	"ShardToMerge": "shardId-000000000000", "AdjacentShardToMerge": "shardId-000000000001", "PartitionKey": "k", "Data": "aGk=", "ShardId": "shardId-000000000000",
+	"ShardIteratorType": "TRIM_HORIZON", "Tags": map[string]any{"a": "b"}, "TagKeys": []any{"a"}, "ConsumerName": "c", "Policy": "{}", "EncryptionType": "KMS", "KeyId": "alias/k",
+	"ShardLevelMetrics": []any{"IncomingBytes"}, "MaxRecordSizeInKiB": 1024, "WarmThroughputMiBps": 1, "Records": []any{map[string]any{"PartitionKey": "k", "Data": "aGk="}}}
+
 // No request makes the service fail. Every operation of the model is sent a request that is well formed
 // but for one member, which is in turn null, an object, a list, a Boolean, a string, a number no integer
 // holds, zero and a negative number; whatever the service answers, it is not a failure of its own (5xx).
 // A stream exists throughout, on-demand in a second pass, so the checks that read a stream's record are
 // reached too.
 func TestKinesisNoMalformedMemberIsAFailureOfTheService(t *testing.T) {
-	const arn = "arn:aws:kinesis:us-east-1:000000000000:stream/s"
-	sound := map[string]any{"StreamName": "s", "StreamARN": arn, "ResourceARN": arn, "ShardCount": 2, "TargetShardCount": 2, "ScalingType": "UNIFORM_SCALING",
-		"RetentionPeriodHours": 48, "StreamModeDetails": map[string]any{"StreamMode": "PROVISIONED"}, "ShardToSplit": "shardId-000000000000", "NewStartingHashKey": "10",
-		"ShardToMerge": "shardId-000000000000", "AdjacentShardToMerge": "shardId-000000000001", "PartitionKey": "k", "Data": "aGk=", "ShardId": "shardId-000000000000",
-		"ShardIteratorType": "TRIM_HORIZON", "Tags": map[string]any{"a": "b"}, "TagKeys": []any{"a"}, "ConsumerName": "c", "Policy": "{}", "EncryptionType": "KMS", "KeyId": "alias/k",
-		"ShardLevelMetrics": []any{"IncomingBytes"}, "MaxRecordSizeInKiB": 1024, "WarmThroughputMiBps": 1, "Records": []any{map[string]any{"PartitionKey": "k", "Data": "aGk="}}}
 	malformed := []string{`null`, `{}`, `[]`, `true`, `"x"`, `1e30`, `0`, `-1`, `1.5`, `{"StreamMode":null}`, `[null]`, `""`}
 	service := specboot.Bundle().ServiceByID("aws.kinesis")
 	sent, failures := 0, []string{}
@@ -32,7 +35,7 @@ func TestKinesisNoMalformedMemberIsAFailureOfTheService(t *testing.T) {
 			t.Fatal(status, out)
 		}
 		if onDemand {
-			if status, out := try("UpdateStreamMode", `{"StreamARN":"`+arn+`","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`); status != 200 {
+			if status, out := try("UpdateStreamMode", `{"StreamARN":"`+kinesisARN+`","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`); status != 200 {
 				t.Fatal(status, out)
 			}
 		}
@@ -40,11 +43,12 @@ func TestKinesisNoMalformedMemberIsAFailureOfTheService(t *testing.T) {
 			members := slices.Sorted(maps.Keys(service.Shapes[op.Input].Members))
 			whole := map[string]any{}
 			for _, member := range members {
-				if v, known := sound[member]; known {
+				if v, known := kinesisSound[member]; known {
 					whole[member] = v
 				}
 			}
-			for _, member := range members {
+			// And the spellings the bundle reads that an operation's model does not declare.
+			for _, member := range slices.Compact(slices.Sorted(slices.Values(slices.Concat(members, []string{"StreamName", "StreamARN", "StreamArn", "ResourceARN", "ResourceArn", "ConsumerARN", "ConsumerArn", "ConsumerName"})))) {
 				for _, bad := range malformed {
 					request := maps.Clone(whole)
 					request[member] = json.RawMessage(bad)
@@ -57,14 +61,16 @@ func TestKinesisNoMalformedMemberIsAFailureOfTheService(t *testing.T) {
 			}
 		}
 	}
-	if len(failures) > 0 || sent < 1000 {
+	if len(failures) > 0 || sent < 6000 {
 		t.Errorf("%d of %d requests were answered as a failure of the service:\n%s", len(failures), sent, strings.Join(failures, "\n"))
 	}
 }
 
 // A member that cannot be what the model declares is the caller's mistake, named. The bundle's expressions
 // convert a stream's name and ARN with string() and a count with int(), which have no answer for null, an
-// object or a list, so each of these was InternalFailure (500). And a count below one, which the reference
+// object or a list, so each of these was InternalFailure (500). A member that is null is another matter:
+// it is absent, as awsJson1.1 has a server read it, so the member is missing where it is required and
+// simply not there where it is not. And a count below one, which the reference
 // rules out ("Valid Range: Minimum value of 1", CreateStream's ShardCount and UpdateShardCount's
 // TargetShardCount), was taken as no count: CreateStream made the default, UpdateShardCount answered 200
 // and changed nothing. The messages are a reading; the reference prints neither.
@@ -87,14 +93,14 @@ func TestKinesisAMemberThatCannotBeReadIsRefused(t *testing.T) {
 		return "400 ValidationException: 1 validation error detected: Value '" + value + "' at '" + member + "' failed to satisfy constraint: Member must have value greater than or equal to 1"
 	}
 	rows := []struct{ op, body, want string }{}
-	for _, bad := range []string{`null`, `{}`, `[]`} {
+	for _, bad := range []string{`{}`, `[]`} {
 		rows = append(rows,
 			struct{ op, body, want string }{"UpdateStreamMode", `{"StreamARN":` + bad + `,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, text("StreamARN")},
 			struct{ op, body, want string }{"CreateStream", `{"StreamName":` + bad + `,"ShardCount":1}`, text("StreamName")},
 			struct{ op, body, want string }{"UpdateShardCount", `{"StreamName":` + bad + `,"TargetShardCount":3,"ScalingType":"UNIFORM_SCALING"}`, text("StreamName")},
 			struct{ op, body, want string }{"ListTagsForStream", `{"StreamName":` + bad + `}`, text("StreamName")})
 	}
-	for _, bad := range []string{`null`, `"x"`, `true`, `{}`, `[]`, `1e30`, `1.5`, `""`} {
+	for _, bad := range []string{`"x"`, `true`, `{}`, `[]`, `1e30`, `1.5`, `""`, `9223372036854775807`} {
 		rows = append(rows,
 			struct{ op, body, want string }{"CreateStream", `{"StreamName":"n","ShardCount":` + bad + `}`, whole("ShardCount")},
 			struct{ op, body, want string }{"UpdateShardCount", `{"StreamName":"s","ScalingType":"UNIFORM_SCALING","TargetShardCount":` + bad + `}`, whole("TargetShardCount")})
@@ -108,6 +114,14 @@ func TestKinesisAMemberThatCannotBeReadIsRefused(t *testing.T) {
 			struct{ op, body, want string }{"UpdateShardCount", `{"StreamName":"ghost","ScalingType":"UNIFORM_SCALING","TargetShardCount":` + low + `}`, least("targetShardCount", low)})
 	}
 	rows = append(rows,
+		// A member that is null is absent, so a required one is missing and an optional one is not there.
+		struct{ op, body, want string }{"UpdateStreamMode", `{"StreamARN":null,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "400 ValidationException: StreamARN is required"},
+		struct{ op, body, want string }{"CreateStream", `{"StreamName":null,"ShardCount":1}`, "400 ValidationException: StreamName is required"},
+		struct{ op, body, want string }{"UpdateShardCount", `{"StreamName":null,"TargetShardCount":3,"ScalingType":"UNIFORM_SCALING"}`, "400 InvalidArgumentException: Either StreamName or StreamARN must be specified."},
+		struct{ op, body, want string }{"ListTagsForStream", `{"StreamName":null}`, "400 InvalidArgumentException: Either StreamName or StreamARN must be specified."},
+		struct{ op, body, want string }{"UpdateShardCount", `{"StreamName":"s","ScalingType":"UNIFORM_SCALING","TargetShardCount":null}`, "400 ValidationException: TargetShardCount is required"},
+		struct{ op, body, want string }{"CreateStream", `{"StreamName":"nulled","ShardCount":null}`, "200"},
+		struct{ op, body, want string }{"UpdateShardCount", `{"StreamName":"s","StreamARN":null,"ScalingType":"UNIFORM_SCALING","TargetShardCount":"9223372036854775807"}`, "400 LimitExceededException: This request would exceed the shard limit for the account."},
 		// What is sound still is: a count of one, a whole number written with a fraction of zero, and the
 		// members left out.
 		struct{ op, body, want string }{"UpdateShardCount", `{"StreamName":"s","ScalingType":"UNIFORM_SCALING","TargetShardCount":1}`, "200"},

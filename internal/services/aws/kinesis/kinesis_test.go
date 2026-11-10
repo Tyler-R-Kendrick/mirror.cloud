@@ -669,8 +669,8 @@ func TestKinesisEveryNotFoundNamesWhatWasNotFound(t *testing.T) {
 		t.Errorf("DescribeStreamConsumer of a consumer that does not exist answered %s", got)
 	}
 	// A consumer that exists is still described, as it was.
-	answer("CreateStream", `{"StreamName":"s"}`)
 	try := kinesisTries(t)
+	try("CreateStream", `{"StreamName":"s"}`)
 	_, made := try("RegisterStreamConsumer", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s","ConsumerName":"c"}`)
 	consumer, _ := made["Consumer"].(map[string]any)
 	_, described := try("DescribeStreamConsumer", `{"ConsumerARN":"`+fmt.Sprint(consumer["ConsumerARN"])+`"}`)

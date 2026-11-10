@@ -190,6 +190,11 @@ func TestCloudFormationWhatAFailedUpdateLeftIsTheStacks(t *testing.T) {
 	arn := "arn:aws:kinesis:us-east-1:000000000000:stream/rv21str"
 	policy := map[string]any{"Type": "AWS::Kinesis::ResourcePolicy", "Properties": map[string]any{"ResourceArn": arn,
 		"ResourcePolicy": map[string]any{"Version": "2012-10-17", "Statement": []any{}}}}
+	for _, stream := range []string{"rv21str"} { // a policy is an existing stream's
+		if _, err := h.service("aws.kinesis", "CreateStream", map[string]any{"StreamName": stream}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	topic := map[string]any{"Type": "AWS::SNS::Topic"}
 	if err := rvMake(t, h, "x", map[string]any{"Resources": map[string]any{"K": topic}}); err != nil {
 		t.Fatal(err)

@@ -112,12 +112,17 @@ type Service struct {
 
 	// MalformedInput names the error table entry the engine answers with when
 	// a member the model declares a string or an integer is given a value that
-	// could be neither -- null, an object, an array, or for an integer anything
-	// that is not a whole number. Left unset nothing is checked and the value
-	// reaches the bundle's expressions as it came: services that have their own
-	// answer for such a value (Secrets Manager's MaxResults) give it there, and
-	// one that converts with string() and int() and has none fails. A bundle
-	// names it to be answered for instead.
+	// could be neither -- an object, an array, or for an integer anything that
+	// is not a whole number. Naming it also has the request read as the JSON
+	// protocols read one: a top-level member that is null is absent, dropped
+	// before the required-member check, this check and the operation's rules,
+	// so a required member that is null is missing and no expression sees a
+	// null. The two go together because both are what reading a request means;
+	// a bundle cannot ask for one without the other. Left unset nothing is
+	// checked or dropped and every value reaches the bundle's expressions as it
+	// came: services that have their own answer for such a value (Secrets
+	// Manager's MaxResults) give it there, and one that converts with string()
+	// and int() and has none fails. Nested members are not judged.
 	MalformedInput string `yaml:"malformed_input_error,omitempty"`
 
 	// MissingInputMessages maps a required member name to the wording the

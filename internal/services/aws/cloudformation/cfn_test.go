@@ -66,10 +66,13 @@ func TestKinesisResourcePolicyLifecycle(t *testing.T) {
 	arn := "arn:aws:kinesis:us-east-1:000000000000:stream/events"
 	template := `{"Resources":{"Policy":{"Type":"AWS::Kinesis::ResourcePolicy","Properties":{"ResourceArn":"` + arn + `","ResourcePolicy":{"Version":"2012-10-17","Statement":[]}}}}}`
 	p := bundled.Handler("aws.cloudformation", deps)
+	kinesisPack := bundled.Handler("aws.kinesis", deps)
+	if _, err := kinesisPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStream", Input: map[string]any{"StreamName": "events"}}); err != nil { // a policy is an existing stream's
+		t.Fatal(err)
+	}
 	if _, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStack", Input: map[string]any{"StackName": "policy", "TemplateBody": template}}); err != nil {
 		t.Fatal(err)
 	}
-	kinesisPack := bundled.Handler("aws.kinesis", deps)
 	get := func() string {
 		resp, err := kinesisPack.Invoke(ctx, &spi.Request{Identity: id, Operation: "GetResourcePolicy", Input: map[string]any{"ResourceARN": arn}})
 		if err != nil {
@@ -368,6 +371,9 @@ func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 		"Joined":    map[string]any{"Value": map[string]any{"Fn::Join": []any{"/", []any{map[string]any{"Ref": "AWS::Region"}, map[string]any{"Ref": "Bucket"}}}}},
 		"Subbed":    map[string]any{"Value": map[string]any{"Fn::Sub": "${AWS::StackName}-${Bucket}"}},
 	}})
+	if _, err := bundled.Handler("aws.kinesis", deps).Invoke(ctx, &spi.Request{Identity: id, Operation: "CreateStream", Input: map[string]any{"StreamName": "events"}}); err != nil { // the policy's
+		t.Fatal(err)
+	}
 	created, err := p.Invoke(ctx, &spi.Request{Identity: id, HTTP: &http.Request{Host: "localhost:4566"}, Operation: "CreateStack", Input: map[string]any{
 		"StackName": "all", "TemplateBody": string(template), "Capabilities": []any{"CAPABILITY_IAM"},
 	}})

@@ -99,6 +99,11 @@ func TestCloudFormationACleanupThatPanicsRollsNothingBack(t *testing.T) {
 			return map[string]any{"Type": "AWS::Kinesis::ResourcePolicy", "Properties": map[string]any{
 				"ResourceArn": "arn:aws:kinesis:us-east-1:000000000000:stream/" + stream, "ResourcePolicy": map[string]any{"Version": "2012-10-17", "Statement": []any{}}}}
 		}
+		for _, stream := range []string{"one", "two"} { // a policy is an existing stream's
+			if _, err := h.service("aws.kinesis", "CreateStream", map[string]any{"StreamName": stream}); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if err := rvMake(t, h, "cr", map[string]any{"Resources": map[string]any{"P": policy("one")}}); err != nil {
 			t.Fatal(err)
 		}

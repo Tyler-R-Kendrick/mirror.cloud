@@ -15,17 +15,20 @@ provenance: authored
 # record collection below, numeric-key ordering and Limit pagination.
 native: [PutRecord, PutRecords, GetShardIterator, GetRecords]
 
-# A member that should be a string or an integer and could be neither is the
-# caller's mistake, answered before any rule: the expressions below convert
-# with string() and int(), which have no answer for null, an object or a list.
+# A request is read as awsJson1.1 has a server read it: a member that is null
+# is absent, and one that should be a string or an integer and could be
+# neither is the caller's mistake, answered before any rule. The expressions
+# below convert with string() and int(), which have no answer for an object or
+# a list, and never see a null. The spellings they read that a model does not
+# declare (StreamArn, ResourceArn, ConsumerArn, and a StreamName or ResourceARN
+# where an operation has none) are guarded where they are read.
 malformed_input_error: Validation
 
 resources:
-  # Streams are keyed by StreamName alone for the operations the pack's main
-  # switch serves (CreateStream, DeleteStream, DescribeStream,
-  # DescribeStreamSummary): those never look at StreamARN. The operations the
-  # pack's extra() serves fall back to the last segment of StreamARN or
-  # ResourceARN, which those operations spell out as an explicit key.
+  # A stream is keyed by its name. Every operation that takes a StreamName or
+  # a StreamARN finds it by the name, or by the last segment of the ARN, which
+  # each spells out as an explicit key; only CreateStream, which takes no ARN,
+  # uses the id below.
   stream:
     collection: kinesis
     id:
@@ -73,6 +76,10 @@ errors:
     code: ValidationException
     http: 400
     fault: client
+  InvalidArgument:
+    code: InvalidArgumentException
+    http: 400
+    fault: client
 
 operations:
   # A stream has the mode and the shards it is created with: the ShardCount
@@ -105,7 +112,7 @@ operations:
       - cond: "!('ShardCount' in input) || int(input.ShardCount) >= 1"
         error: Validation
         message_expr: "'1 validation error detected: Value \\'' + string(int(input.ShardCount)) + '\\' at \\'shardCount\\' failed to satisfy constraint: Member must have value greater than or equal to 1'"
-      - cond: "mode == 'ON_DEMAND' || sum(streams.filter(s, !('StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND')).map(s, 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1)) + shards <= 500"
+      - cond: "mode == 'ON_DEMAND' || shards <= 500 && sum(streams.filter(s, !('StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND')).map(s, 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1)) + shards <= 500"
         error: LimitExceeded
         message: This request would exceed the shard limit for the account.
       - cond: "mode != 'ON_DEMAND' || size(streams.filter(s, 'StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND')) < 50"
@@ -124,10 +131,17 @@ operations:
   # records have to go with it or GetRecords would answer them.
   DeleteStream:
     reads:
-      stream: { resource: stream }
+      stream: { resource: stream, key: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))" }
+    require:
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
+      - cond: stream_found
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - delete: { resource: record, where: "true" }
-      - delete: { resource: stream, missing: ignore }
+      - delete: { resource: stream, key: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))" }
     output: {}
 
   ListStreams:
@@ -140,11 +154,14 @@ operations:
   # status ACTIVE, nothing read from the record.
   DescribeStream:
     reads:
-      s: { resource: stream }
+      s: { resource: stream, key: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))" }
     require:
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
       - cond: s_found
         error: NotFound
-        message_expr: "'Stream ' + ('StreamName' in input ? string(input.StreamName) : '') + ' under account ' + identity.account + ' not found.'"
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
     output:
       StreamDescription: >
         {'StreamName': s.StreamName,
@@ -158,11 +175,14 @@ operations:
   # given, moved by every split, merge and UpdateShardCount since.
   DescribeStreamSummary:
     reads:
-      s: { resource: stream }
+      s: { resource: stream, key: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))" }
     require:
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
       - cond: s_found
         error: NotFound
-        message_expr: "'Stream ' + ('StreamName' in input ? string(input.StreamName) : '') + ' under account ' + identity.account + ' not found.'"
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
     output:
       StreamDescriptionSummary: >
         {'StreamName': s.StreamName,
@@ -172,40 +192,82 @@ operations:
          'OpenShardCount': 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1}
 
   ListShards:
+    reads:
+      s: { resource: stream, key: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))" }
+    require:
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != '' || 'NextToken' in input"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
+      - cond: "s_found || ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) == ''"
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
     output:
       Shards: "[{'ShardId': 'shardId-000000000000'}]"
 
   AddTagsToStream:
     reads:
-      t: { resource: tag, key: "'ResourceARN' in input && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))" }
+      t: { resource: tag, key: "'ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))" }
+      s: { resource: stream, key: "('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))))" }
+    require:
+      - cond: "('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - patch:
           resource: tag
-          key: "'ResourceARN' in input && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))"
+          key: "'ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))"
           record:
             Tags: "merge(t_found && 'Tags' in t ? t.Tags : {}, 'Tags' in input ? input.Tags : {})"
     output: {}
 
   RemoveTagsFromStream:
     reads:
-      t: { resource: tag, key: "'ResourceARN' in input && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))" }
+      t: { resource: tag, key: "'ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))" }
+      s: { resource: stream, key: "('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))))" }
+    require:
+      - cond: "('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - patch:
           resource: tag
-          key: "'ResourceARN' in input && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))"
+          key: "'ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))"
           record:
             Tags: "without(t_found && 'Tags' in t ? t.Tags : {}, 'TagKeys' in input ? input.TagKeys : [])"
     output: {}
 
   ListTagsForStream:
     reads:
-      t: { resource: tag, key: "'ResourceARN' in input && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))" }
+      t: { resource: tag, key: "'ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? string(input.ResourceARN) : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? string(input.ResourceArn) : ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))" }
+      s: { resource: stream, key: "('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))))" }
+    require:
+      - cond: "('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))))) + ' under account ' + identity.account + ' not found.'"
     output:
       Tags: "t_found && 'Tags' in t ? t.Tags : dyn({})"
 
   TagResource:
     reads:
       t: { resource: tag, key: "string(input.ResourceARN)" }
+      s: { resource: stream, key: "(size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '')" }
+      c: { resource: consumer, key: "string(input.ResourceARN)" }
+    require:
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ((size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '') != '' ? (size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '') : string(input.ResourceARN)) + ' under account ' + identity.account + ' not found.'"
+      - cond: "!string(input.ResourceARN).contains('/consumer/') || c_found"
+        error: NotFound
+        message_expr: "'Consumer ' + string(input.ResourceARN) + ' under account ' + identity.account + ' not found.'"
     effects:
       - patch:
           resource: tag
@@ -217,6 +279,15 @@ operations:
   UntagResource:
     reads:
       t: { resource: tag, key: "string(input.ResourceARN)" }
+      s: { resource: stream, key: "(size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '')" }
+      c: { resource: consumer, key: "string(input.ResourceARN)" }
+    require:
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ((size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '') != '' ? (size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '') : string(input.ResourceARN)) + ' under account ' + identity.account + ' not found.'"
+      - cond: "!string(input.ResourceARN).contains('/consumer/') || c_found"
+        error: NotFound
+        message_expr: "'Consumer ' + string(input.ResourceARN) + ' under account ' + identity.account + ' not found.'"
     effects:
       - patch:
           resource: tag
@@ -228,43 +299,68 @@ operations:
   ListTagsForResource:
     reads:
       t: { resource: tag, key: "string(input.ResourceARN)" }
-    output:
-      Tags: "t_found && 'Tags' in t ? t.Tags : dyn({})"
-
-  # The pack defaults an absent or non-positive period to 24, and writes the
-  # stream record even when the stream does not exist -- a retention call on a
-  # name that was never created conjures an ACTIVE stream.
-  IncreaseStreamRetentionPeriod:
-    reads:
-      s: { resource: stream, key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))" }
+      s: { resource: stream, key: "(size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '')" }
+      c: { resource: consumer, key: "string(input.ResourceARN)" }
     require:
       - cond: s_found
         error: NotFound
-        message_expr: "'Stream ' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))) + ' under account ' + identity.account + ' not found.'"
+        message_expr: "'Stream ' + ((size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '') != '' ? (size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '') : string(input.ResourceARN)) + ' under account ' + identity.account + ' not found.'"
+      - cond: "!string(input.ResourceARN).contains('/consumer/') || c_found"
+        error: NotFound
+        message_expr: "'Consumer ' + string(input.ResourceARN) + ' under account ' + identity.account + ' not found.'"
+    output:
+      Tags: "t_found && 'Tags' in t ? t.Tags : dyn({})"
+
+  # The pack defaults an absent or non-positive period to 24. A retention
+  # period is an existing stream's: the pack wrote the record whether or not
+  # there was a stream.
+  IncreaseStreamRetentionPeriod:
+    reads:
+      s: { resource: stream, key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))" }
+    require:
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - patch:
           resource: stream
-          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))"
+          key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))"
           record:
             RetentionPeriodHours: "int(input.RetentionPeriodHours) > 0 ? int(input.RetentionPeriodHours) : 24"
     output: {}
 
   DecreaseStreamRetentionPeriod:
     reads:
-      s: { resource: stream, key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))" }
+      s: { resource: stream, key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))" }
     require:
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
       - cond: s_found
         error: NotFound
-        message_expr: "'Stream ' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))) + ' under account ' + identity.account + ' not found.'"
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - patch:
           resource: stream
-          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))"
+          key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && type(input.ResourceARN) != map && type(input.ResourceARN) != list && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && type(input.ResourceArn) != map && type(input.ResourceArn) != list && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))"
           record:
             RetentionPeriodHours: "int(input.RetentionPeriodHours) > 0 ? int(input.RetentionPeriodHours) : 24"
     output: {}
 
   PutResourcePolicy:
+    reads:
+      s: { resource: stream, key: "(size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '')" }
+      c: { resource: consumer, key: "string(input.ResourceARN)" }
+    require:
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ((size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '') != '' ? (size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '') : string(input.ResourceARN)) + ' under account ' + identity.account + ' not found.'"
+      - cond: "!string(input.ResourceARN).contains('/consumer/') || c_found"
+        error: NotFound
+        message_expr: "'Consumer ' + string(input.ResourceARN) + ' under account ' + identity.account + ' not found.'"
     effects:
       - create:
           resource: policy
@@ -276,10 +372,29 @@ operations:
   GetResourcePolicy:
     reads:
       p: { resource: policy, key: "string(input.ResourceARN)" }
+      s: { resource: stream, key: "(size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '')" }
+      c: { resource: consumer, key: "string(input.ResourceARN)" }
+    require:
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ((size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '') != '' ? (size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '') : string(input.ResourceARN)) + ' under account ' + identity.account + ' not found.'"
+      - cond: "!string(input.ResourceARN).contains('/consumer/') || c_found"
+        error: NotFound
+        message_expr: "'Consumer ' + string(input.ResourceARN) + ' under account ' + identity.account + ' not found.'"
     output:
       Policy: "p_found ? string(p.Policy) : ''"
 
   DeleteResourcePolicy:
+    reads:
+      s: { resource: stream, key: "(size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '')" }
+      c: { resource: consumer, key: "string(input.ResourceARN)" }
+    require:
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ((size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '') != '' ? (size(split(string(input.ResourceARN), '/')) > 1 ? string(split(string(input.ResourceARN), '/')[1]) : '') : string(input.ResourceARN)) + ' under account ' + identity.account + ' not found.'"
+      - cond: "!string(input.ResourceARN).contains('/consumer/') || c_found"
+        error: NotFound
+        message_expr: "'Consumer ' + string(input.ResourceARN) + ' under account ' + identity.account + ' not found.'"
     effects:
       - delete: { resource: policy, key: "string(input.ResourceARN)", missing: ignore }
     output: {}
@@ -288,50 +403,90 @@ operations:
   # identity, and derives the stream name from StreamName first (a member this
   # operation's input shape does not declare) before the StreamARN suffix.
   RegisterStreamConsumer:
+    reads:
+      s: { resource: stream, key: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))" }
+    require:
+      - cond: "s_found || ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) == ''"
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - create:
           resource: consumer
-          key: "'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : lastSegment(string(input.StreamARN), '/')) + '/consumer/' + string(input.ConsumerName)"
+          key: "'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : lastSegment(string(input.StreamARN), '/')) + '/consumer/' + string(input.ConsumerName)"
           record:
             ConsumerName: "string(input.ConsumerName)"
-            ConsumerARN: "'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : lastSegment(string(input.StreamARN), '/')) + '/consumer/' + string(input.ConsumerName)"
+            ConsumerARN: "'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : lastSegment(string(input.StreamARN), '/')) + '/consumer/' + string(input.ConsumerName)"
             ConsumerStatus: "'ACTIVE'"
             StreamARN: "string(input.StreamARN)"
     output:
       Consumer: rec
 
   DeregisterStreamConsumer:
+    reads:
+      c: { resource: consumer, key: "('ConsumerARN' in input && type(input.ConsumerARN) != map && type(input.ConsumerARN) != list && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && type(input.ConsumerArn) != map && type(input.ConsumerArn) != list && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : ('ConsumerName' in input && type(input.ConsumerName) != map && type(input.ConsumerName) != list && string(input.ConsumerName) != '' && ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != '' ? 'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + '/consumer/' + string(input.ConsumerName) : '')))" }
+    require:
+      - cond: "('ConsumerARN' in input && type(input.ConsumerARN) != map && type(input.ConsumerARN) != list && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && type(input.ConsumerArn) != map && type(input.ConsumerArn) != list && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : ('ConsumerName' in input && type(input.ConsumerName) != map && type(input.ConsumerName) != list && string(input.ConsumerName) != '' && ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != '' ? 'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + '/consumer/' + string(input.ConsumerName) : ''))) != ''"
+        error: InvalidArgument
+        message: Either ConsumerARN, or StreamARN and ConsumerName, must be specified.
+      - cond: c_found
+        error: NotFound
+        message_expr: "'Consumer ' + ('ConsumerARN' in input && type(input.ConsumerARN) != map && type(input.ConsumerARN) != list && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && type(input.ConsumerArn) != map && type(input.ConsumerArn) != list && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : ('ConsumerName' in input && type(input.ConsumerName) != map && type(input.ConsumerName) != list && string(input.ConsumerName) != '' && ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != '' ? 'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + '/consumer/' + string(input.ConsumerName) : ''))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - delete:
           resource: consumer
-          key: "'ConsumerARN' in input && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : '')"
-          missing: ignore
+          key: "('ConsumerARN' in input && type(input.ConsumerARN) != map && type(input.ConsumerARN) != list && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && type(input.ConsumerArn) != map && type(input.ConsumerArn) != list && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : ('ConsumerName' in input && type(input.ConsumerName) != map && type(input.ConsumerName) != list && string(input.ConsumerName) != '' && ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != '' ? 'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + '/consumer/' + string(input.ConsumerName) : '')))"
     output: {}
 
+  # A consumer is named by its ARN, or by its stream's ARN and its own name.
   DescribeStreamConsumer:
     reads:
-      c: { resource: consumer, key: "'ConsumerARN' in input && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : '')" }
+      c: { resource: consumer, key: "('ConsumerARN' in input && type(input.ConsumerARN) != map && type(input.ConsumerARN) != list && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && type(input.ConsumerArn) != map && type(input.ConsumerArn) != list && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : ('ConsumerName' in input && type(input.ConsumerName) != map && type(input.ConsumerName) != list && string(input.ConsumerName) != '' && ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != '' ? 'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + '/consumer/' + string(input.ConsumerName) : '')))" }
     require:
+      - cond: "('ConsumerARN' in input && type(input.ConsumerARN) != map && type(input.ConsumerARN) != list && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && type(input.ConsumerArn) != map && type(input.ConsumerArn) != list && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : ('ConsumerName' in input && type(input.ConsumerName) != map && type(input.ConsumerName) != list && string(input.ConsumerName) != '' && ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != '' ? 'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + '/consumer/' + string(input.ConsumerName) : ''))) != ''"
+        error: InvalidArgument
+        message: Either ConsumerARN, or StreamARN and ConsumerName, must be specified.
       - cond: c_found
         error: NotFound
-        message_expr: "'Consumer ' + ('ConsumerARN' in input && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : '')) + ' under account ' + identity.account + ' not found.'"
+        message_expr: "'Consumer ' + ('ConsumerARN' in input && type(input.ConsumerARN) != map && type(input.ConsumerARN) != list && string(input.ConsumerARN) != '' ? string(input.ConsumerARN) : ('ConsumerArn' in input && type(input.ConsumerArn) != map && type(input.ConsumerArn) != list && string(input.ConsumerArn) != '' ? string(input.ConsumerArn) : ('ConsumerName' in input && type(input.ConsumerName) != map && type(input.ConsumerName) != list && string(input.ConsumerName) != '' && ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != '' ? 'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + '/consumer/' + string(input.ConsumerName) : ''))) + ' under account ' + identity.account + ' not found.'"
     output:
       ConsumerDescription: c
+
   # The pack ignores the StreamARN it is asked about: every consumer in the
   # account and region is listed, whichever stream the request names.
   ListStreamConsumers:
+    reads:
+      s: { resource: stream, key: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))" }
+    require:
+      - cond: "s_found || ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) == ''"
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
     list: { resource: consumer, member: Consumers, paginate: model }
 
   # The pack answers an empty event stream and never sends anything on it.
   SubscribeToShard:
+    reads:
+      c: { resource: consumer, key: "string(input.ConsumerARN)" }
+    require:
+      - cond: c_found
+        error: NotFound
+        message_expr: "'Consumer ' + string(input.ConsumerARN) + ' under account ' + identity.account + ' not found.'"
     output:
       EventStream: "[]"
 
   EnableEnhancedMonitoring:
+    reads:
+      s: { resource: stream, key: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))" }
+    require:
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - patch:
           resource: stream
-          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
           record:
             EnhancedMonitoring: true
     output:
@@ -339,10 +494,19 @@ operations:
       CurrentShardLevelMetrics: "input.ShardLevelMetrics"
 
   DisableEnhancedMonitoring:
+    reads:
+      s: { resource: stream, key: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))" }
+    require:
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - patch:
           resource: stream
-          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
           record:
             EnhancedMonitoring: false
     output:
@@ -355,51 +519,57 @@ operations:
   # shape (Unit) does not declare, so the bundle answers nothing there.
   SplitShard:
     reads:
-      s: { resource: stream, key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))" }
+      s: { resource: stream, key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))" }
     let:
       cur: "s_found && 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1"
     require:
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
       - cond: s_found
         error: NotFound
-        message_expr: "'Stream ' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
       - cond: "!('StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND')"
         error: Validation
         message: SplitShard is only supported for data streams with the provisioned capacity mode.
     effects:
       - patch:
           resource: stream
-          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
           record:
             OpenShardCount: "cur + 1"
     output: {}
 
   MergeShards:
     reads:
-      s: { resource: stream, key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))" }
+      s: { resource: stream, key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))" }
     let:
       cur: "s_found && 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1"
     require:
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
       - cond: s_found
         error: NotFound
-        message_expr: "'Stream ' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
       - cond: "!('StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND')"
         error: Validation
         message: MergeShards is only supported for data streams with the provisioned capacity mode.
     effects:
       - patch:
           resource: stream
-          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
           record:
             OpenShardCount: "cur > 1 ? cur - 1 : cur"
     output: {}
 
   UpdateShardCount:
     reads:
-      s: { resource: stream, key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))" }
+      s: { resource: stream, key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))" }
     select:
       binding: others
       resource: stream
-      filter: "string(item.StreamName) != ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))"
+      filter: "string(item.StreamName) != ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))"
     let:
       cur: "s_found && 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1"
       target: "int(input.TargetShardCount) > 0 ? int(input.TargetShardCount) : cur"
@@ -407,19 +577,22 @@ operations:
       - cond: "!('TargetShardCount' in input) || int(input.TargetShardCount) >= 1"
         error: Validation
         message_expr: "'1 validation error detected: Value \\'' + string(int(input.TargetShardCount)) + '\\' at \\'targetShardCount\\' failed to satisfy constraint: Member must have value greater than or equal to 1'"
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
       - cond: s_found
         error: NotFound
-        message_expr: "'Stream ' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
       - cond: "!('StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND')"
         error: Validation
         message: UpdateShardCount is only supported for data streams with the provisioned capacity mode.
-      - cond: "sum(others.filter(o, !('StreamModeDetails' in o && type(o.StreamModeDetails) == map && 'StreamMode' in o.StreamModeDetails && o.StreamModeDetails.StreamMode == 'ON_DEMAND')).map(o, 'OpenShardCount' in o && int(o.OpenShardCount) > 0 ? int(o.OpenShardCount) : 1)) + target <= 500"
+      - cond: "target <= 500 && sum(others.filter(o, !('StreamModeDetails' in o && type(o.StreamModeDetails) == map && 'StreamMode' in o.StreamModeDetails && o.StreamModeDetails.StreamMode == 'ON_DEMAND')).map(o, 'OpenShardCount' in o && int(o.OpenShardCount) > 0 ? int(o.OpenShardCount) : 1)) + target <= 500"
         error: LimitExceeded
         message: This request would exceed the shard limit for the account.
     effects:
       - patch:
           resource: stream
-          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
           record:
             OpenShardCount: target
     output:
@@ -430,20 +603,38 @@ operations:
   # The pack reads EncryptionType from the operation name, not the request:
   # Start is always KMS, Stop always NONE.
   StartStreamEncryption:
+    reads:
+      s: { resource: stream, key: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))" }
+    require:
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - patch:
           resource: stream
-          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
           record:
             EncryptionType: "'KMS'"
             KeyId: "string(input.KeyId)"
     output: {}
 
   StopStreamEncryption:
+    reads:
+      s: { resource: stream, key: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))" }
+    require:
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - patch:
           resource: stream
-          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
           record:
             EncryptionType: "'NONE'"
     output: {}
@@ -478,10 +669,19 @@ operations:
   # UpdateStreamMode are Unit); the bundle answers the declared subset and the
   # recorded steps are superseded with that reason.
   UpdateMaxRecordSize:
+    reads:
+      s: { resource: stream, key: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))" }
+    require:
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - patch:
           resource: stream
-          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
           record:
             MaxRecordSizeInKiB: "input.MaxRecordSizeInKiB"
     output: {}
@@ -493,11 +693,11 @@ operations:
   # for the mode it has is no change.
   UpdateStreamMode:
     reads:
-      s: { resource: stream, key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))" }
+      s: { resource: stream, key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))" }
     select:
       binding: others
       resource: stream
-      filter: "string(item.StreamName) != ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))"
+      filter: "string(item.StreamName) != ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))"
     let:
       given: "'StreamModeDetails' in input && input.StreamModeDetails != null"
       structure: "given && type(input.StreamModeDetails) == map"
@@ -507,9 +707,6 @@ operations:
       changing: "s_found && mode != (('StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND') ? 'ON_DEMAND' : 'PROVISIONED')"
       recent: "s_found && 'ModeChanges' in s && type(s.ModeChanges) == list ? s.ModeChanges.filter(t, now_ms - int(t) < 86400000) : []"
     require:
-      - cond: "given || !('StreamModeDetails' in input)"
-        error: Validation
-        message: StreamModeDetails is required
       - cond: "!given || structure"
         error: Validation
         message: "1 validation error detected: Value at 'streamModeDetails' failed to satisfy constraint: Member must be a structure with a StreamMode"
@@ -528,23 +725,32 @@ operations:
       - cond: "!asked || mode != 'ON_DEMAND' || size(others.filter(o, 'StreamModeDetails' in o && type(o.StreamModeDetails) == map && 'StreamMode' in o.StreamModeDetails && o.StreamModeDetails.StreamMode == 'ON_DEMAND')) < 50"
         error: LimitExceeded
         message: This request would exceed the limit of on-demand streams for the account.
-      - cond: "!asked || mode != 'PROVISIONED' || sum(others.filter(o, !('StreamModeDetails' in o && type(o.StreamModeDetails) == map && 'StreamMode' in o.StreamModeDetails && o.StreamModeDetails.StreamMode == 'ON_DEMAND')).map(o, 'OpenShardCount' in o && int(o.OpenShardCount) > 0 ? int(o.OpenShardCount) : 1)) + ('OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1) <= 500"
+      - cond: "!asked || mode != 'PROVISIONED' || ('OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1) <= 500 && sum(others.filter(o, !('StreamModeDetails' in o && type(o.StreamModeDetails) == map && 'StreamMode' in o.StreamModeDetails && o.StreamModeDetails.StreamMode == 'ON_DEMAND')).map(o, 'OpenShardCount' in o && int(o.OpenShardCount) > 0 ? int(o.OpenShardCount) : 1)) + ('OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1) <= 500"
         error: LimitExceeded
         message: This request would exceed the shard limit for the account.
     effects:
       - patch:
           resource: stream
-          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
           record:
             StreamModeDetails: "{'StreamMode': mode}"
             ModeChanges: "changing ? recent + [now_ms] : recent"
     output: {}
 
   UpdateStreamWarmThroughput:
+    reads:
+      s: { resource: stream, key: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))" }
+    require:
+      - cond: "('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) != ''"
+        error: InvalidArgument
+        message: Either StreamName or StreamARN must be specified.
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - patch:
           resource: stream
-          key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
+          key: "'StreamName' in input && type(input.StreamName) != map && type(input.StreamName) != list && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && type(input.StreamARN) != map && type(input.StreamARN) != list && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && type(input.StreamArn) != map && type(input.StreamArn) != list && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
           record:
             WarmThroughput: "'WarmThroughputMiBPerSecond' in input ? input.WarmThroughputMiBPerSecond : null"
     output:
@@ -557,6 +763,15 @@ quirks:
       is not transcribed; see the shadow. DeleteStream still drops the stream
       record, but the pack's cleanup of the stream's per-stream record
       collection is part of the shadow plane and goes with it.
+  - note: >
+      Every operation on a stream that does not exist faults
+      ResourceNotFoundException, "Stream <name> under account <id> not
+      found.", and writes nothing; the pack answered 200 for most and made a
+      record for many. A stream is found by its StreamName or by its
+      StreamARN, and a request that gives neither faults
+      InvalidArgumentException. A resource ARN (tags, policy) is its
+      stream's, or a consumer's, which must exist too. The record plane does
+      the same, GetRecords for the stream its iterator names.
   - operation: CreateStream
     note: >
       An absent StreamName faults ValidationException from the engine's model
@@ -574,9 +789,9 @@ quirks:
       resetting the record-plane sequence counter to 0.
   - operation: DescribeStream
     note: >
-      StreamARN is ignored here and by DeleteStream, ListStreams and
-      DescribeStreamSummary -- the pack's main switch resolves StreamName
-      alone, so a describe addressed by ARN alone faults ResourceNotFound.
+      The pack's main switch resolved StreamName alone, so a describe or a
+      delete addressed by ARN alone did not find a stream that was there; the
+      bundle finds it by either.
       The description is built from the name: the stored record's status,
       retention and encryption never appear, HasMoreShards is never set, and
       DescribeStream and ListShards always list exactly one shard with a
@@ -595,15 +810,16 @@ quirks:
       member the model does not declare; the key expressions keep that.
   - operation: IncreaseStreamRetentionPeriod
     note: >
-      A retention call on a stream that does not exist succeeds and writes a
-      phantom ACTIVE stream record, which then describes and lists as a real
-      stream. An absent or non-positive RetentionPeriodHours stores 24; the
-      model requires the member, so the absence path is now the engine's
-      ValidationException. Enhanced-monitoring, shard-count, encryption and
-      the stream-option updates phantom-create the same way.
+      The pack let a retention call on a stream that does not exist succeed
+      and write a phantom ACTIVE stream record, which then described and
+      listed as a real stream; so did enhanced monitoring, the shard count,
+      encryption and the stream-option updates. None does here. An absent or
+      non-positive RetentionPeriodHours stores 24; the model requires the
+      member, so the absence path is now the engine's ValidationException.
   - operation: GetResourcePolicy
     note: >
-      An absent policy answers an empty string, never a fault. The pack fell
+      An absent policy of a stream that exists answers an empty string; of
+      one that does not, ResourceNotFoundException. The pack fell
       back to the stream name when ResourceARN was absent; the model requires
       ResourceARN on all three policy operations, so that fallback is dead.
   - operation: RegisterStreamConsumer
@@ -616,13 +832,13 @@ quirks:
       does not declare but the pack answers with.
   - operation: ListStreamConsumers
     note: >
-      The StreamARN the request names is ignored: every consumer in the
-      account and region is listed. MaxResults and NextToken are accepted and
+      The StreamARN the request names must be a stream's, and is otherwise
+      ignored: every consumer in the account and region is listed. MaxResults and NextToken are accepted and
       ignored by the pack; the engine paginates only when the request asks.
   - operation: SubscribeToShard
     note: >
       Answers an empty event stream immediately; nothing is ever delivered on
-      it, and the consumer named is not checked to exist.
+      it. A consumer that does not exist faults ResourceNotFoundException.
   - operation: UpdateShardCount
     note: >
       A target below 1 faults ValidationException before the stream is looked
@@ -641,8 +857,8 @@ quirks:
   - operation: UpdateStreamMode
     note: >
       StreamARN and StreamModeDetails are required, and a missing one is
-      answered before anything else, a StreamModeDetails that is null as a
-      missing one. The mode must be PROVISIONED or ON_DEMAND, in a structure,
+      answered before anything else, one that is null as a missing one (the
+      engine drops a null member). The mode must be PROVISIONED or ON_DEMAND, in a structure,
       or the fault is ValidationException. A stream that does not exist faults
       ResourceNotFoundException; a change to ON_DEMAND is held to the
       on-demand streams' limit and one to PROVISIONED to the ShardLimit for

@@ -129,8 +129,9 @@ func TestCloudFormationAnUpdateClearsOnlyWhatItsTemplateGave(t *testing.T) {
 	})
 }
 
-// ContinueUpdateRollback does not know what the failed update gave a resource, so it clears every property
-// the template lacks: a bucket's tags and public access block go. Its versioning is suspended only where it
+// For a record written before the names of what a failed update gave were kept, ContinueUpdateRollback does
+// not know what that was, so it clears every property the template lacks: a bucket's tags and public
+// access block go. (The record here is made by hand, in that older shape.) Its versioning is suspended only where it
 // is on: a bucket never versioned stays so, since suspended is not unversioned.
 func TestCloudFormationAContinuedRollbackClearsABucket(t *testing.T) {
 	t.Parallel()

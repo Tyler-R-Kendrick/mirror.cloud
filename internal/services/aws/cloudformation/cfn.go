@@ -304,7 +304,8 @@ type stack struct {
 // delete of it failed, DELETE_FAILED with the error as its reason.
 type res struct {
 	Logical, Physical, Type string
-	Name, Status, Reason    string `json:",omitempty"`
+	Name, Status, Reason    string    `json:",omitempty"`
+	Gave                    *[]string `json:",omitempty"` // while UPDATE_FAILED: the names of the properties the failed update gave it
 }
 
 // upsert makes the stack named name, or updates it, in two phases that share no recover. apply is the
@@ -393,8 +394,8 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 	defer func() {
 		if leave == &old { // an update whose rollback did not settle: what it had not restored and what it made are ContinueUpdateRollback's
 			for i, o := range old.Resources {
-				if applied[o.Logical] != nil { // changed in place, and not put back
-					old.Resources[i].Status, old.Resources[i].Reason = "UPDATE_FAILED", old.Reason
+				if gave := applied[o.Logical]; gave != nil { // changed in place, and not put back
+					old.Resources[i].Status, old.Resources[i].Reason, old.Resources[i].Gave = "UPDATE_FAILED", old.Reason, names(gave)
 				}
 			}
 			for _, r := range st.Resources {
@@ -757,8 +758,8 @@ func sameStore(a, b spi.Store) (same bool) {
 }
 
 // hold registers a running operation, and answers its id, after a "/", and its release, which the
-// operation defers: given the record a failed operation could not settle, the release keeps it (of the
-// last thousand or so) for the operation that takes the stack over.
+// operation defers: given the record a failed operation could not settle, the release keeps it for the
+// operation that takes the stack over, while fewer than 1024 are kept: with that many waiting, no more is.
 func (p *Pack) hold() (string, func(*stack)) {
 	id := opNonce + "-" + strconv.FormatInt(opSeq.Add(1), 10)
 	ops.Store(id, nil)
@@ -783,8 +784,7 @@ func (p *Pack) orphan(ctx context.Context, req *spi.Request, name string) {
 	id := strings.TrimPrefix(cur.Op, "/")
 	ops.Range(func(k, v any) bool { // a record kept for this stack by an operation it is no longer held by is no one's now
 		if left, isKept := v.(kept); isKept && strings.HasPrefix(left.ID, stackARN(req, named(name))) && k != id && sameStore(left.store, p.deps.Store) {
-			ops.Delete(k)
-			opKept.Add(-1)
+			unkeep(k)
 		}
 		return true
 	})
@@ -802,7 +802,13 @@ func (p *Pack) orphan(ctx context.Context, req *spi.Request, name string) {
 		next.Status = "DELETE_FAILED"
 	}
 	if _, wrote, err := p.settle(ctx, req, cur, next); wrote && err == nil && kept { // kept until it is written
-		ops.Delete(id)
+		unkeep(id)
+	}
+}
+
+// unkeep releases the record kept under id, counted once however many operations come to release it.
+func unkeep(id any) {
+	if _, was := ops.LoadAndDelete(id); was {
 		opKept.Add(-1)
 	}
 }
@@ -868,6 +874,13 @@ func retyped(old stack, resources map[string]any) error {
 	return nil
 }
 
+// names is the names of the properties props holds, sorted: what is recorded of what a failed update gave
+// a resource, never a value.
+func names(props map[string]any) *[]string {
+	list := slices.Sorted(maps.Keys(props))
+	return &list
+}
+
 // retains answers whether tpl's policy attr keeps a resource rather than deleting it: it is one of keep.
 func retains(tpl map[string]any, attr string, keep ...string) func(res) bool {
 	return func(r res) bool { return slices.Contains(keep, str(asMap(asMap(tpl["Resources"])[r.Logical])[attr])) }
@@ -915,23 +928,23 @@ var kinds = map[string]kind{
 	"AWS::S3::Bucket":              {"BucketName", 63, "aws.s3 HeadBucket Bucket={n}", "BucketAlreadyOwnedByYou", "{n}", "BucketName BucketNamePrefix BucketNamespace ObjectLockEnabled", "aws.s3 CreateBucket Bucket={n}", "Bucket", "", "aws.s3 DeleteBucket Bucket={id}", "Arn=arn:aws:s3:::{id} DomainName={id}.s3.amazonaws.com"},
 	"AWS::SQS::Queue":              {"QueueName", 80, "aws.sqs GetQueueUrl QueueName={n}", "QueueAlreadyExists", "", "QueueName FifoQueue", "aws.sqs CreateQueue QueueName={n} Attributes", "QueueUrl", "", "aws.sqs DeleteQueue QueueUrl={id}", "Arn=arn:aws:sqs:{r}:{a}:{id/} QueueName={id/} QueueUrl={id}"},
 	"AWS::SNS::Topic":              {"TopicName", 256, "aws.sns GetTopicAttributes TopicArn=arn:aws:sns:{r}:{a}:{n}", "AlreadyExistsException", "arn:aws:sns:{r}:{a}:{n}", "TopicName FifoTopic", "aws.sns CreateTopic Name={n}", "TopicArn", "", "aws.sns DeleteTopic TopicArn={id}", "TopicArn={id} TopicName={id:}"},
-	"AWS::DynamoDB::Table":         {"TableName", 255, "aws.dynamodb DescribeTable TableName={n}", "ResourceInUseException", "{n}", "TableName ImportSourceSpecification KeySchema LocalSecondaryIndexes", "aws.dynamodb CreateTable * TableName={n}", "TableName", "aws.dynamodb UpdateTable TableName={id} BillingMode ProvisionedThroughput StreamSpecification TableClass DeletionProtectionEnabled", "aws.dynamodb DeleteTable TableName={id}", "Arn=arn:aws:dynamodb:{r}:{a}:table/{id}"},
+	"AWS::DynamoDB::Table":         {"TableName", 255, "aws.dynamodb DescribeTable TableName={n}", "ResourceInUseException", "{n}", "TableName ImportSourceSpecification KeySchema LocalSecondaryIndexes", "aws.dynamodb CreateTable * TableName={n}", "TableName", "aws.dynamodb UpdateTable TableName={id} BillingMode ProvisionedThroughput StreamSpecification TableClass", "aws.dynamodb DeleteTable TableName={id}", "Arn=arn:aws:dynamodb:{r}:{a}:table/{id}"},
 	"AWS::IAM::Role":               {"RoleName", 64, "aws.iam GetRole RoleName={n}", "EntityAlreadyExists", "{n}", "RoleName Path", "aws.iam CreateRole RoleName={n} AssumeRolePolicyDocument=%AssumeRolePolicyDocument", "Role.RoleName", "aws.iam UpdateAssumeRolePolicy RoleName={id/} PolicyDocument=%AssumeRolePolicyDocument", "aws.iam DeleteRole RoleName={id/}", "Arn=arn:aws:iam::{a}:role/{id}"},
 	"AWS::SSM::Parameter":          {"Name", 2048, "aws.ssm GetParameter Name={n}", "ParameterAlreadyExists", "{n}", "Name", "aws.ssm PutParameter Name={n} Value= Value=$Value Type=String Type=$Type", "Name", "aws.ssm PutParameter Name={id} Value= Value=$Value Type=String Type=$Type Overwrite=true", "aws.ssm DeleteParameter Name={id}", "Arn=arn:aws:ssm:{r}:{a}:parameter/{param}"},
-	"AWS::SecretsManager::Secret":  {"Name", 512, "aws.secretsmanager DescribeSecret SecretId={n}", "ResourceExistsException", "arn:aws:secretsmanager:{r}:{a}:secret:{n}", "Name", "aws.secretsmanager CreateSecret Name={n} SecretString=$SecretString Description=$Description", "ARN", "aws.secretsmanager UpdateSecret SecretId={id} SecretString=$SecretString Description= Description=$Description", "aws.secretsmanager DeleteSecret SecretId={id} ForceDeleteWithoutRecovery=true", "Id={id}"},
-	"AWS::KMS::Key":                {"", 0, "", "", "", "KeySpec KeyUsage MultiRegion", "aws.kms CreateKey Description= Description=$Description", "KeyMetadata.KeyId", "aws.kms UpdateKeyDescription KeyId={id} Description= Description=$Description", "aws.kms ScheduleKeyDeletion KeyId={id} PendingWindowInDays=7", "Arn=arn:aws:kms:{r}:{a}:key/{id} KeyId={id}"},
+	"AWS::SecretsManager::Secret":  {"Name", 512, "aws.secretsmanager DescribeSecret SecretId={n}", "ResourceExistsException", "arn:aws:secretsmanager:{r}:{a}:secret:{n}", "Name", "aws.secretsmanager CreateSecret Name={n} SecretString=$SecretString Description=$Description", "ARN", "aws.secretsmanager UpdateSecret SecretId={id} SecretString=$SecretString Description=$Description", "aws.secretsmanager DeleteSecret SecretId={id} ForceDeleteWithoutRecovery=true", "Id={id}"},
+	"AWS::KMS::Key":                {"", 0, "", "", "", "KeySpec KeyUsage MultiRegion", "aws.kms CreateKey Description= Description=$Description", "KeyMetadata.KeyId", "aws.kms UpdateKeyDescription KeyId={id} Description=$Description need:Description", "aws.kms ScheduleKeyDeletion KeyId={id} PendingWindowInDays=7", "Arn=arn:aws:kms:{r}:{a}:key/{id} KeyId={id}"},
 	"AWS::Logs::LogGroup":          {"LogGroupName", 512, "aws.logs DescribeLogGroups logGroupNamePrefix={n}", "ResourceAlreadyExistsException", "{n}", "LogGroupName", "aws.logs CreateLogGroup logGroupName={n}", "logGroupName", "", "aws.logs DeleteLogGroup logGroupName={id}", "Arn=arn:aws:logs:{r}:{a}:log-group:{id}:*"},
 	"AWS::Events::Rule":            {"Name", 64, "aws.events DescribeRule Name={n} EventBusName=$EventBusName", "ResourceAlreadyExistsException", "{n}", "Name EventBusName", "aws.events PutRule Name={n} ScheduleExpression=$ScheduleExpression State=$State Description=$Description EventBusName=$EventBusName EventPattern=%EventPattern", "RuleArn", "aws.events PutRule Name={n} ScheduleExpression=$ScheduleExpression State=$State Description=$Description EventBusName=$EventBusName EventPattern=%EventPattern", "aws.events DeleteRule Name={rule} EventBusName={bus}", "Arn=arn:aws:events:{r}:{a}:rule/{bus/}{rule} RuleName={rule}"},
 	"AWS::Lambda::Function":        {"FunctionName", 64, "aws.lambda GetFunction FunctionName={n}", "ResourceConflictException", "{n}", "FunctionName PackageType DurableConfig TenancyConfig", "aws.lambda CreateFunction * FunctionName={n}", "FunctionName", "aws.lambda UpdateFunctionConfiguration * FunctionName={id:}", "aws.lambda DeleteFunction FunctionName={id:}", "Arn=arn:aws:lambda:{r}:{a}:function:{id}"},
-	"AWS::Kinesis::Stream":         {"Name", 128, "aws.kinesis DescribeStreamSummary StreamName={n}", "ResourceInUseException", "{n}", "Name", "aws.kinesis CreateStream StreamName={n} ShardCount", "StreamName", "aws.kinesis UpdateShardCount StreamName={id} TargetShardCount=1 TargetShardCount=@ShardCount ScalingType=UNIFORM_SCALING", "aws.kinesis DeleteStream StreamName={id}", "Arn=arn:aws:kinesis:{r}:{a}:stream/{id}"},
+	"AWS::Kinesis::Stream":         {"Name", 128, "aws.kinesis DescribeStreamSummary StreamName={n}", "ResourceInUseException", "{n}", "Name", "aws.kinesis CreateStream StreamName={n} ShardCount", "StreamName", "aws.kinesis UpdateShardCount StreamName={id} TargetShardCount=@ShardCount ScalingType=UNIFORM_SCALING need:TargetShardCount", "aws.kinesis DeleteStream StreamName={id}", "Arn=arn:aws:kinesis:{r}:{a}:stream/{id}"},
 	"AWS::Kinesis::ResourcePolicy": {"", 0, "", "", "", "ResourceArn", "aws.kinesis PutResourcePolicy ResourceARN=$ResourceARN ResourceARN=$ResourceArn Policy=%Policy Policy=%ResourcePolicy", "ResourceARN", "aws.kinesis PutResourcePolicy ResourceARN=$ResourceARN ResourceARN=$ResourceArn Policy=%Policy Policy=%ResourcePolicy", "aws.kinesis DeleteResourcePolicy ResourceARN={id}", ""},
 	"AWS::ApiGateway::RestApi":     {"Name", 1024, "", "", "", "", "aws.apigateway CreateRestApi name={n}", "id", "aws.apigateway UpdateRestApi restApiId={id} name={n}", "aws.apigateway DeleteRestApi restApiId={id}", "RestApiId={id}"},
 }
 
 // prior is what the template a resource is updated from gave it: its properties, none for a resource the
-// template declared without any, or unknown. Only ContinueUpdateRollback passes unknown (what a failed
-// update gave is not recorded), and only then is every property the template lacks read as given before:
-// a resource with no Properties is known, to have been given nothing.
+// template declared without any, or unknown. A continued rollback knows them by name alone (res.Gave), and
+// passes unknown only for a record written before the names were kept; only then is every property the
+// template lacks read as given before. A resource with no Properties is known, to have been given nothing.
 type prior struct {
 	props   map[string]any
 	unknown bool
@@ -940,16 +953,25 @@ type prior struct {
 // gave is whether the template the resource is updated from gave it property.
 func (w prior) gave(property string) bool { return w.unknown || w.props[property] != nil }
 
-// clears are what a type's update call sends for a property the template gives no longer, so that an
-// update, and a rollback's restore, leave exactly the template's properties: each service's update keeps
-// what a call does not name, so the value is the one its API reference gives a resource made without the
-// property (Lambda's Timeout "The default is 3 seconds", MemorySize "The default value is 128 MB"; DynamoDB's
-// StreamEnabled false, BillingMode PROVISIONED, TableClass STANDARD; its DeletionProtectionEnabled the
-// table service here keeps false, so there is none to clear). A bucket's are bucketOps; a secret's
-// description, a key's and a parameter's value are sent whenever their type is updated (kinds).
+// clears are what a type's update call sends for a property the template it is updated from gave and the
+// template gives no longer, so that an update, and a rollback's restore, leave exactly the template's
+// properties and nothing that was set outside it is touched: each service's update keeps what a call does
+// not name, so the value is the one its API reference gives a resource made without the property (Lambda's
+// Timeout "The default is 3 seconds", MemorySize "The default value is 128 MB"; DynamoDB's StreamEnabled
+// false, BillingMode PROVISIONED, TableClass STANDARD; an empty description; a stream's one shard). An
+// entry is the member to send, named as its property, or property>member where the names differ. A
+// bucket's are bucketOps, and a rule's targets provision's. Three updates send what the template gives
+// whatever was there, because the template must give it and the call is a whole replacement: a parameter's
+// value and type (PutParameter), a role's trust policy, and a rule (PutRule: "If you omit arguments in
+// PutRule, the old values for those arguments are not kept"), so a rule's description or state set outside
+// the template does not outlive an update of the rule, in the service as here. A table's
+// DeletionProtectionEnabled is not sent at all: the table service here keeps it false.
 var clears = map[string]string{
-	"AWS::DynamoDB::Table":  `StreamSpecification=^{"StreamEnabled":false} BillingMode=PROVISIONED TableClass=STANDARD`,
-	"AWS::Lambda::Function": `Description= Timeout=3 MemorySize=128 Environment=^{"Variables":{}} Layers=^[] KMSKeyArn= DeadLetterConfig=^{"TargetArn":""} TracingConfig=^{"Mode":"PassThrough"} EphemeralStorage=^{"Size":512}`,
+	"AWS::DynamoDB::Table":        `StreamSpecification=^{"StreamEnabled":false} BillingMode=PROVISIONED TableClass=STANDARD`,
+	"AWS::Lambda::Function":       `Description= Timeout=3 MemorySize=128 Environment=^{"Variables":{}} Layers=^[] KMSKeyArn= DeadLetterConfig=^{"TargetArn":""} TracingConfig=^{"Mode":"PassThrough"} EphemeralStorage=^{"Size":512}`,
+	"AWS::SecretsManager::Secret": `Description=`,
+	"AWS::KMS::Key":               `Description=`,
+	"AWS::Kinesis::Stream":        `ShardCount>TargetShardCount=1`,
 }
 
 // do makes a call a kind spells "service Operation member=value ...", and answers the answer over the
@@ -957,7 +979,7 @@ var clears = map[string]string{
 // {rule} and {bus} a rule's name and event bus, {r} and {a} the region and account; $Prop is the template's
 // property Prop as text, %Prop as JSON text, @Prop as given, each set only when given; ^ and JSON, that JSON; else the value
 // itself, which call types by the member's model. A member alone is @member, and * is every property. An
-// empty spec calls nothing.
+// empty spec calls nothing, and neither does one with need:member whose member nothing set.
 func (p *Pack) do(ctx context.Context, req *spi.Request, spec, n, id string, props map[string]any) (map[string]any, error) {
 	f, in := strings.Fields(spec), map[string]any{}
 	if len(f) < 2 {
@@ -965,12 +987,15 @@ func (p *Pack) do(ctx context.Context, req *spi.Request, spec, n, id string, pro
 	}
 	sub := strings.NewReplacer("{n}", n, "{id}", id, "{id/}", spi.LastSlash(id), "{id:}", lastColon(id), "{rule}", spi.LastSlash(id[strings.Index(id, "|")+1:]),
 		"{bus}", ruleBus(id), "{r}", req.Identity.Region, "{a}", req.Identity.Account)
+	var needs []string
 	for _, arg := range f[2:] {
 		k, v, set := strings.Cut(arg, "=")
 		if !set {
 			v = "@" + k
 		}
-		if pv, given := props[v[min(1, len(v)):]]; arg == "*" {
+		if pv, given := props[v[min(1, len(v)):]]; strings.HasPrefix(arg, "need:") {
+			needs = append(needs, arg[len("need:"):])
+		} else if arg == "*" {
 			maps.Copy(in, props)
 		} else if strings.HasPrefix(v, "^") {
 			in[k] = spi.Decode[any]([]byte(v[1:]))
@@ -981,6 +1006,9 @@ func (p *Pack) do(ctx context.Context, req *spi.Request, spec, n, id string, pro
 		} else {
 			in[k] = sub.Replace(v)
 		}
+	}
+	if slices.ContainsFunc(needs, func(member string) bool { _, set := in[member]; return !set }) {
+		return in, nil
 	}
 	out, err := p.call(ctx, req, f[0], f[1], in)
 	maps.Copy(in, out)
@@ -1111,8 +1139,12 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	} else if existing != "" {
 		spec = k.update
 		for _, c := range strings.Fields(clears[typ]) {
-			if member, _, _ := strings.Cut(c, "="); props[member] == nil && was.gave(member) {
-				spec += " " + c
+			property, send, renamed := strings.Cut(c, ">")
+			if !renamed {
+				property, send = c[:strings.Index(c, "=")], c
+			}
+			if props[property] == nil && was.gave(property) {
+				spec += " " + send
 			}
 		}
 	}
@@ -1135,7 +1167,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	if phys = cmp.Or(existing, phys); err == nil && typ == "AWS::Events::Rule" {
 		targets, set := props["Targets"]
 		keep, _ := targets.([]any)
-		if err = p.dropTargets(ctx, req, phys, keep); set && err == nil { // the rule's targets are the template's, no others
+		if err = p.dropTargets(ctx, req, phys, keep, was); set && err == nil { // what the template gave before and gives no longer goes
 			// "each entry in FailedEntries provides the ID of the failed target and the error code":
 			// a target not added fails the rule, as its error does.
 			put, putErr := p.do(ctx, req, "aws.events PutTargets Rule={n} Targets EventBusName=$EventBusName", n, "", props)
@@ -1165,14 +1197,19 @@ func (p *Pack) rollback(ctx context.Context, req *spi.Request, seen, old stack, 
 	for _, r := range made {
 		if old.Refs[r.Logical] != r.Physical {
 			doomed = append(doomed, r)
-		} else if props, was := maps.Collect(maps.All(p.Props(tpl, r.Logical, old.Refs, old.Name))), applied[r.Logical]; was != nil {
-			if _, err := p.provision(ctx, req, r.Type, r.Logical, r.Name, props, prior{props: was}, r.Physical, old.ID); err != nil { // UPDATE_FAILED, for ContinueUpdateRollback
-				i := slices.IndexFunc(old.Resources, func(o res) bool { return o.Logical == r.Logical })
-				old.Resources[i].Status, old.Resources[i].Reason = "UPDATE_FAILED", err.Error() // the stack's reason in the service's words
-				first = cmp.Or(first, error(invalid("The following resource(s) failed to update: ["+r.Logical+"].")))
-			}
-			delete(applied, r.Logical) // put back, or marked here: no longer a takeover's to mark
 		}
+	}
+	for i, r := range old.Resources { // each the update changed in place, a change it did not finish included
+		was := applied[r.Logical]
+		if was == nil {
+			continue
+		}
+		props := maps.Collect(maps.All(p.Props(tpl, r.Logical, old.Refs, old.Name)))
+		if _, err := p.provision(ctx, req, r.Type, r.Logical, r.Name, props, prior{props: was}, r.Physical, old.ID); err != nil { // UPDATE_FAILED, for ContinueUpdateRollback
+			old.Resources[i].Status, old.Resources[i].Reason, old.Resources[i].Gave = "UPDATE_FAILED", err.Error(), names(was) // the stack's reason in the service's words
+			first = cmp.Or(first, error(invalid("The following resource(s) failed to update: ["+r.Logical+"].")))
+		}
+		delete(applied, r.Logical) // put back, or marked here: no longer a takeover's to mark
 	}
 	return p.unwind(ctx, req, seen, old, old.Resources, doomed, first, "UPDATE_ROLLBACK_COMPLETE", "UPDATE_ROLLBACK_FAILED", skip)
 }
@@ -1217,12 +1254,16 @@ func (p *Pack) resume(ctx context.Context, req *spi.Request, name string) (*spi.
 			doomed = append(doomed, r)
 			continue
 		} else if r.Status == "UPDATE_FAILED" && !slices.Contains(skip, any(r.Logical)) {
-			_, err = p.provision(ctx, req, r.Type, r.Logical, r.Name, props, prior{unknown: true}, r.Physical, st.ID) // what the failed update gave it is not recorded
+			was := prior{unknown: r.Gave == nil, props: map[string]any{}} // unknown for a record from before the names were kept
+			for _, property := range *cmp.Or(r.Gave, &[]string{}) {
+				was.props[property] = true
+			}
+			_, err = p.provision(ctx, req, r.Type, r.Logical, r.Name, props, was, r.Physical, st.ID)
 		}
 		if r.Status == "UPDATE_FAILED" && err != nil {
 			r.Reason, first, err = err.Error(), cmp.Or(first, err), nil
 		} else if r.Status == "UPDATE_FAILED" {
-			r.Status, r.Reason = "UPDATE_COMPLETE", ""
+			r.Status, r.Reason, r.Gave = "UPDATE_COMPLETE", "", nil
 		}
 		kept = append(kept, r)
 	}
@@ -1251,7 +1292,7 @@ func ruleBus(id string) string {
 // owner's not-found error) counts as deleted, as a stack delete proceeds past it.
 func (p *Pack) deprovision(ctx context.Context, req *spi.Request, r res) (err error) {
 	if r.Type == "AWS::Events::Rule" {
-		err = p.dropTargets(ctx, req, r.Physical, nil)
+		err = p.dropTargets(ctx, req, r.Physical, nil, prior{unknown: true})
 	}
 	if err == nil {
 		_, err = p.do(ctx, req, kinds[r.Type].del, "", r.Physical, nil)
@@ -1268,14 +1309,23 @@ func gone(err error) bool {
 	return errors.As(err, &f) && (strings.Contains(f.Code, "NotFound") || strings.Contains(f.Code, "NoSuch") || strings.Contains(f.Code, "NonExistent"))
 }
 
-// dropTargets removes the rule's targets but those keep names: all of them before the rule is deleted
+// dropTargets removes the rule's targets that the template it is updated from gave (was) but those keep
+// names, so one put on the rule outside its template stays; with what it gave unknown, or known by name
+// alone (a continued rollback), every target but those keep names: all of them before the rule is deleted
 // ("Before you can delete the rule, you must remove all targets, using RemoveTargets", EventBridge).
-func (p *Pack) dropTargets(ctx context.Context, req *spi.Request, rule string, keep []any) error {
+func (p *Pack) dropTargets(ctx context.Context, req *spi.Request, rule string, keep []any, was prior) error {
+	if !was.gave("Targets") {
+		return nil
+	}
 	listed, err := p.do(ctx, req, "aws.events ListTargetsByRule Rule={rule} EventBusName={bus}", "", rule, nil)
 	targets, _ := listed["Targets"].([]any)
+	gave, listed2 := was.props["Targets"].([]any) // the targets themselves, when the previous properties are known in full
+	named := func(in []any, t any) bool {
+		return slices.ContainsFunc(in, func(k any) bool { return str(asMap(k)["Id"]) == str(asMap(t)["Id"]) })
+	}
 	var ids []any
 	for _, t := range targets {
-		if !slices.ContainsFunc(keep, func(k any) bool { return str(asMap(k)["Id"]) == str(asMap(t)["Id"]) }) {
+		if !named(keep, t) && (!listed2 || named(gave, t)) {
 			ids = append(ids, asMap(t)["Id"])
 		}
 	}

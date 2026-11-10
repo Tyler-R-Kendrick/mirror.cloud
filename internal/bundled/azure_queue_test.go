@@ -471,6 +471,26 @@ func TestAzureQueueUpdateOfAVisibleMessage(t *testing.T) {
 	}
 	sr = fmt.Sprint(inv("UpdateMessage", map[string]any{"messageid": sid, "popreceipt": sr, "visibilitytimeout": "9"})["pop_receipt"])
 	inv("DeleteMessage", map[string]any{"messageid": sid, "popreceipt": sr})
+	// Nor put already hidden past it. The default TTL is seven days, which
+	// is also the longest timeout; a TTL of -1 never expires.
+	for _, in := range []map[string]any{
+		{"message": "x", "messagettl": "10", "visibilitytimeout": "11"},
+		{"message": "x", "messagettl": "1", "visibilitytimeout": "604800"},
+	} {
+		in["queue"] = "q"
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutMessage", Input: in})
+		if f, ok := err.(*spi.Fault); !ok || f.Code != "OutOfRangeQueryParameterValue" || f.HTTPStatus != 400 {
+			t.Fatalf("put %v: %#v", in, err)
+		}
+	}
+	for _, in := range []map[string]any{
+		{"message": "x", "messagettl": "10", "visibilitytimeout": "10"},
+		{"message": "x", "visibilitytimeout": "604800"},
+		{"message": "x", "messagettl": "-1", "visibilitytimeout": "604800"},
+	} {
+		put := inv("PutMessage", in)
+		inv("DeleteMessage", map[string]any{"messageid": fmt.Sprint(put["id"]), "popreceipt": fmt.Sprint(put["pop_receipt"])})
+	}
 	// A message that never expires can be hidden for the full seven days.
 	forever := inv("PutMessage", map[string]any{"message": "forever", "messagettl": "-1"})
 	fr := fmt.Sprint(inv("UpdateMessage", map[string]any{"messageid": fmt.Sprint(forever["id"]), "popreceipt": fmt.Sprint(forever["pop_receipt"]), "visibilitytimeout": "604800"})["pop_receipt"])

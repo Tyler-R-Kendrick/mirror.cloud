@@ -56,7 +56,7 @@ func TestCloudFormationAStreamHasTheModeItsTemplateGives(t *testing.T) {
 		// A failed update that changes both modes, and its rollback: each has the mode it had.
 		rveFailed(t, h, "sm", stream(map[string]any{"StreamModeDetails": rv34Mode("ON_DEMAND")}), continued)
 		if continued {
-			if state() != "ON_DEMAND 3, ON_DEMAND 2" {
+			if state() != "ON_DEMAND 4, ON_DEMAND 2" { // made on-demand in place: the four a created one has
 				t.Fatalf("the failed update whose restore failed left %s", state())
 			}
 			rveContinue(t, h, "sm")
@@ -206,5 +206,54 @@ func TestCloudFormationAStreamMadeOnDemandOutsideItsTemplateIsUpdated(t *testing
 		if _, err := h.invoke("ContinueUpdateRollback", map[string]any{"StackName": "a1"}); err == nil {
 			t.Errorf("continued=%v: a stack rolled back clean took a ContinueUpdateRollback", continued)
 		}
+	}
+}
+
+// A stream updated in place to on-demand has the count a stream created on-demand has: the template's
+// ShardCount, or the four a new on-demand stream starts with. The count is set while the stream is still
+// provisioned, before its mode, since no call sets an on-demand stream's. It read whatever the stream
+// had: one shard after an update that gave it seven, and after a rollback from provisioned the failed
+// update's count. That the service's own handler does so is a reading.
+func TestCloudFormationAStreamUpdatedToOnDemandHasACreatedOnesCount(t *testing.T) {
+	t.Parallel()
+	h := newStacks(t)
+	stream := func(properties map[string]any) map[string]any {
+		return map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": properties}
+	}
+	onDemand, seven := map[string]any{"StreamModeDetails": rv34Mode("ON_DEMAND")}, map[string]any{"StreamModeDetails": rv34Mode("ON_DEMAND"), "ShardCount": 7}
+	if err := rveCreate(h, "od", map[string]any{"R": stream(onDemand), "S": stream(map[string]any{}), "N": stream(seven)}); err != nil {
+		t.Fatal(err)
+	}
+	ids := rv31IDs(h, "od")
+	state := func() string {
+		return rv34Stream(h, ids["R"]) + ", " + rv34Stream(h, ids["S"]) + ", " + rv34Stream(h, ids["N"])
+	}
+	if state() != "ON_DEMAND 4, PROVISIONED 1, ON_DEMAND 7" {
+		t.Fatalf("made: %s", state())
+	}
+	// S, made provisioned with one shard, is given on-demand and seven: as N was created.
+	if err := rv28Update(h, "od", map[string]any{"R": stream(onDemand), "S": stream(seven), "N": stream(seven)}); err != nil || state() != "ON_DEMAND 4, ON_DEMAND 7, ON_DEMAND 7" {
+		t.Fatalf("the update to on-demand with seven shards answered %v and left %s", err, state())
+	}
+	// R goes to provisioned with five, the update fails after it, and the rollback makes it what it was.
+	for _, continued := range []bool{false, true} {
+		rveFailed(t, h, "od", stream(map[string]any{"StreamModeDetails": rv34Mode("PROVISIONED"), "ShardCount": 5}), continued)
+		if continued {
+			if got := rv34Stream(h, ids["R"]); got != "PROVISIONED 5" {
+				t.Fatalf("the failed update whose restore fails left R %s", got)
+			}
+			rveContinue(t, h, "od")
+		}
+		if got := rv34Stream(h, ids["R"]); got != "ON_DEMAND 4" {
+			t.Errorf("continued=%v: rolled back from provisioned with five, R is %s; want the on-demand stream of four it was", continued, got)
+		}
+	}
+	// An on-demand stream's count is not the template's to change once it is on-demand: Kinesis refuses it,
+	// the update fails, and the rollback is clean.
+	if err := rv28Update(h, "od", map[string]any{"R": stream(onDemand), "S": stream(seven), "N": stream(map[string]any{"StreamModeDetails": rv34Mode("ON_DEMAND"), "ShardCount": 9})}); err == nil || state() != "ON_DEMAND 4, ON_DEMAND 7, ON_DEMAND 7" {
+		t.Errorf("an update of an on-demand stream's count answered %v and left %s", err, state())
+	}
+	if st, _, _ := h.status("od"); st != "UPDATE_ROLLBACK_COMPLETE" {
+		t.Errorf("the stack is %s", st)
 	}
 }

@@ -62,6 +62,8 @@
 | A 51st on-demand stream (`OnDemandStreamCountLimit` 50) | Accepted | `LimitExceededException` |
 | `UpdateShardCount` on an on-demand stream | The count set | `ValidationException` |
 | `CreateStream` or `UpdateStreamMode` with a `StreamMode` that is not `PROVISIONED` or `ON_DEMAND` | Recorded as given | `ValidationException`, "1 validation error detected: Value 'X' at 'streamModeDetails.streamMode' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]" |
+| `SplitShard` or `MergeShards` on an on-demand stream | The count moved | `ValidationException` |
+| `SplitShard` or `MergeShards` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException`, "Stream <name> under account <id> not found." |
 | `UpdateStreamMode` with no `StreamModeDetails`, or a null one | `ValidationException`, "StreamModeDetails is required" | The same (it was `InternalFailure`, 500, between the two changes of this note) |
 | `CreateStream` or `UpdateStreamMode` with a `StreamModeDetails` that is `{}`, holds a null `StreamMode`, or is no structure | Taken as provisioned, or `InternalFailure` | `ValidationException` |
 | `UpdateStreamMode` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException` |
@@ -97,8 +99,9 @@
   provisioned capacity mode" (API reference). Which of its errors answers an
   on-demand stream is not stated: `ValidationException` ("The request failed
   data validation for this data stream") and the message are a reading.
-  `SplitShard` and `MergeShards`, "Only applicable for provisioned" (Quotas
-  and limits), still move an on-demand stream's count.
+  `SplitShard` and `MergeShards` say the same of themselves ("This API is
+  only supported for the data streams with the provisioned capacity mode"),
+  and are answered the same way, by the same reading.
 - `SplitShard`, `MergeShards` and the retention operations still make a
   record for a stream that does not exist, as the recorded trace has them.
 - A CloudFormation `AWS::Kinesis::Stream` has the mode its template gives:

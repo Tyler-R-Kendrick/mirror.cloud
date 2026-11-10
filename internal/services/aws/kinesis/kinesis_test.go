@@ -99,6 +99,9 @@ func TestBootedServerKinesisPutGet(t *testing.T) {
 	call("UpdateShardCount", `{"StreamName":"s","TargetShardCount":2,"ScalingType":"UNIFORM_SCALING"}`)
 	call("StartStreamEncryption", `{"StreamName":"s","EncryptionType":"KMS","KeyId":"alias/aws/kinesis"}`)
 	call("DescribeLimits", `{}`)
+	// A split and a merge are a provisioned stream's: before the stream is made on-demand.
+	call("SplitShard", `{"StreamName":"s","ShardToSplit":"shardId-000000000000","NewStartingHashKey":"1"}`)
+	call("MergeShards", `{"StreamName":"s","ShardToMerge":"shardId-000000000000","AdjacentShardToMerge":"shardId-000000000001"}`)
 	call("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
 	call("TagResource", `{"ResourceARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s","Tags":{"a":"b"}}`)
 	call("ListTagsForResource", `{"ResourceARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s"}`)
@@ -106,8 +109,6 @@ func TestBootedServerKinesisPutGet(t *testing.T) {
 	call("DecreaseStreamRetentionPeriod", `{"StreamName":"s","RetentionPeriodHours":24}`)
 	call("DeleteResourcePolicy", `{"ResourceARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s"}`)
 	call("DisableEnhancedMonitoring", `{"StreamName":"s","ShardLevelMetrics":["IncomingBytes"]}`)
-	call("SplitShard", `{"StreamName":"s","ShardToSplit":"shardId-000000000000","NewStartingHashKey":"1"}`)
-	call("MergeShards", `{"StreamName":"s","ShardToMerge":"shardId-000000000000","AdjacentShardToMerge":"shardId-000000000001"}`)
 	call("StopStreamEncryption", `{"StreamName":"s","EncryptionType":"KMS","KeyId":"alias/aws/kinesis"}`)
 	call("DescribeAccountSettings", `{}`)
 	call("UpdateAccountSettings", `{"MinimumThroughputBillingCommitment":{"Status":"DISABLED"}}`)
@@ -574,5 +575,44 @@ func TestKinesisAnOlderRecordsModeIsProvisioned(t *testing.T) {
 	request("UpdateStreamMode", map[string]any{"StreamARN": "arn:aws:kinesis:us-east-1:123456789012:stream/text", "StreamModeDetails": map[string]any{"StreamMode": "ON_DEMAND"}})
 	if limits := request("DescribeLimits", map[string]any{}); fmt.Sprint(limits["OpenShardCount"], limits["OnDemandStreamCount"]) != "22 2" {
 		t.Errorf("after one older record is made on-demand the limits read %v", limits)
+	}
+}
+
+// SplitShard and MergeShards are a provisioned stream's, and an existing one's. Each "is only supported
+// for the data streams with the provisioned capacity mode" (API reference), and "If the specified stream
+// does not exist, MergeShards returns a ResourceNotFoundException"; SplitShard lists the same error. Both
+// moved the count of any stream, an on-demand one included, and made a record for a stream that did not
+// exist. Which of their errors answers an on-demand stream is not stated: ValidationException and the
+// message are a reading, as for UpdateShardCount.
+func TestKinesisSplitAndMergeAreAnExistingProvisionedStreams(t *testing.T) {
+	answer := kinesisAnswers(t)
+	split := func(stream string) string {
+		return answer("SplitShard", `{"StreamName":"`+stream+`","ShardToSplit":"shardId-000000000000","NewStartingHashKey":"10"}`)
+	}
+	merge := func(stream string) string {
+		return answer("MergeShards", `{"StreamName":"`+stream+`","ShardToMerge":"shardId-000000000000","AdjacentShardToMerge":"shardId-000000000001"}`)
+	}
+	const missing = "400 ResourceNotFoundException: Stream ghost under account 000000000000 not found."
+	if got := split("ghost") + " | " + merge("ghost"); got != missing+" | "+missing {
+		t.Errorf("a split and a merge of a stream that does not exist answered %s", got)
+	}
+	if got := answer("DescribeStreamSummary", `{"StreamName":"ghost"}`); !strings.HasPrefix(got, "400 ResourceNotFoundException") {
+		t.Errorf("the stream that does not exist is described: %s", got)
+	}
+	answer("CreateStream", `{"StreamName":"od","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
+	answer("CreateStream", `{"StreamName":"p","ShardCount":2}`)
+	if got := split("od") + " | " + merge("od"); got != "400 ValidationException: SplitShard is only supported for data streams with the provisioned capacity mode. | 400 ValidationException: MergeShards is only supported for data streams with the provisioned capacity mode." {
+		t.Errorf("a split and a merge of an on-demand stream answered %s", got)
+	}
+	if got := split("p") + " " + split("p") + " " + merge("p"); got != "200 200 200" {
+		t.Errorf("two splits and a merge of a provisioned stream answered %s", got)
+	}
+	if got := answer("UpdateShardCount", `{"StreamName":"od","TargetShardCount":4,"ScalingType":"UNIFORM_SCALING"}`); !strings.HasPrefix(got, "400 ValidationException") {
+		t.Errorf("the on-demand stream's count: %s", got)
+	}
+	// What the provisioned stream has after two splits and a merge, and the on-demand one untouched: the
+	// account's provisioned shards are the first's three.
+	if got := answer("UpdateShardCount", `{"StreamName":"p","TargetShardCount":3,"ScalingType":"UNIFORM_SCALING"}`); got != "200" {
+		t.Errorf("UpdateShardCount: %s", got)
 	}
 }

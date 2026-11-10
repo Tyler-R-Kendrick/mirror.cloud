@@ -83,6 +83,10 @@
   and leaves on-demand shards out, is a reading. The messages of both
   `LimitExceededException`s are this emulator's, and so is the limit of 500
   (the guide's defaults are 1,000, 6,000 or 20,000 by Region).
+- The `ResourceNotFoundException` of `UpdateShardCount` and `UpdateStreamMode`
+  carries "Stream <name> under account <id> not found.", the service's
+  message as its clients report it (not printed in the reference; a reading).
+  The other operations' is still empty.
 - `StreamMode` has "Valid Values: `PROVISIONED | ON_DEMAND`" (API reference,
   StreamModeDetails). The message for any other is the form the service's
   request validation gives an enum; that it is these words, and the order of

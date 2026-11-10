@@ -15664,7 +15664,7 @@ var mutants = []mutant{
 	{
 		name: "kinesis-update-shard-count-makes-a-stream",
 		file: filepath.Join("behavior", "aws", "kinesis", "service.yaml"),
-		old:  "      - { cond: s_found, error: NotFound }\n      - cond: \"!('StreamModeDetails' in s",
+		old:  "      - cond: s_found\n        error: NotFound\n        message_expr: \"'Stream ' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'\"\n      - cond: \"!('StreamModeDetails' in s",
 		new:  `      - cond: "!('StreamModeDetails' in s`,
 		pkg:  "./internal/services/aws/kinesis",
 		run:  "TestKinesisAShardCountIsAnExistingStreamsWithinTheLimit",
@@ -15752,7 +15752,7 @@ var mutants = []mutant{
 	{
 		name: "kinesis-update-stream-mode-makes-a-stream",
 		file: filepath.Join("behavior", "aws", "kinesis", "service.yaml"),
-		old:  "      - { cond: s_found, error: NotFound }\n      - cond: \"mode != 'ON_DEMAND' || size(others",
+		old:  "      - cond: s_found\n        error: NotFound\n        message_expr: \"'Stream ' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'\"\n      - cond: \"mode != 'ON_DEMAND' || size(others",
 		new:  "      - cond: \"mode != 'ON_DEMAND' || size(others",
 		pkg:  "./internal/services/aws/kinesis",
 		run:  "TestKinesisAStreamThatChangesModeIsHeldToItsLimit",
@@ -15812,6 +15812,22 @@ var mutants = []mutant{
 		new:  "      mode: \"string(input.StreamModeDetails.StreamMode)\"\n    require:\n      - cond: \"true\"",
 		pkg:  "./internal/services/aws/kinesis",
 		run:  "TestKinesisAStreamModeIsOneOfTheTwo",
+	},
+	{
+		name: "kinesis-update-shard-count-does-not-name-the-stream-not-found",
+		file: filepath.Join("behavior", "aws", "kinesis", "service.yaml"),
+		old:  "+ ' under account ' + identity.account + ' not found.'\"\n      - cond: \"!('StreamModeDetails' in s",
+		new:  "+ ' under account ' + ' not found.'\"\n      - cond: \"!('StreamModeDetails' in s",
+		pkg:  "./internal/services/aws/kinesis",
+		run:  "TestKinesisAStreamNotFoundIsNamed",
+	},
+	{
+		name: "kinesis-update-stream-mode-does-not-name-the-stream-not-found",
+		file: filepath.Join("behavior", "aws", "kinesis", "service.yaml"),
+		old:  "+ ' under account ' + identity.account + ' not found.'\"\n      - cond: \"mode != 'ON_DEMAND' || size(others",
+		new:  "+ ' under account ' + ' not found.'\"\n      - cond: \"mode != 'ON_DEMAND' || size(others",
+		pkg:  "./internal/services/aws/kinesis",
+		run:  "TestKinesisAStreamNotFoundIsNamed",
 	},
 	{
 		name: "kinesis-reverse-at-timestamp-selection",

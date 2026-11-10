@@ -453,3 +453,20 @@ func TestKinesisAStreamModeIsOneOfTheTwo(t *testing.T) {
 		}
 	}
 }
+
+// A stream that is not found is named: "Stream <name> under account <id> not found." is the service's
+// message, as its clients see it; UpdateShardCount and UpdateStreamMode answered ResourceNotFoundException
+// with none.
+func TestKinesisAStreamNotFoundIsNamed(t *testing.T) {
+	answer := kinesisAnswers(t)
+	const want = "400 ResourceNotFoundException: Stream ghost under account 000000000000 not found."
+	if got := answer("UpdateShardCount", `{"StreamName":"ghost","TargetShardCount":2,"ScalingType":"UNIFORM_SCALING"}`); got != want {
+		t.Errorf("UpdateShardCount answered %s", got)
+	}
+	if got := answer("UpdateShardCount", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/ghost","TargetShardCount":2,"ScalingType":"UNIFORM_SCALING"}`); got != want {
+		t.Errorf("UpdateShardCount by ARN answered %s", got)
+	}
+	if got := answer("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/ghost","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`); got != want {
+		t.Errorf("UpdateStreamMode answered %s", got)
+	}
+}

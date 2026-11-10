@@ -348,7 +348,9 @@ operations:
       cur: "s_found && 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1"
       target: "int(input.TargetShardCount) > 0 ? int(input.TargetShardCount) : cur"
     require:
-      - { cond: s_found, error: NotFound }
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
       - cond: "!('StreamModeDetails' in s && 'StreamMode' in s.StreamModeDetails && string(s.StreamModeDetails.StreamMode) == 'ON_DEMAND')"
         error: Validation
         message: UpdateShardCount is only supported for data streams with the provisioned capacity mode.
@@ -441,7 +443,9 @@ operations:
       - cond: "mode in ['PROVISIONED', 'ON_DEMAND']"
         error: Validation
         message_expr: "'1 validation error detected: Value \\'' + mode + '\\' at \\'streamModeDetails.streamMode\\' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]'"
-      - { cond: s_found, error: NotFound }
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
       - cond: "mode != 'ON_DEMAND' || size(others.filter(o, 'StreamModeDetails' in o && 'StreamMode' in o.StreamModeDetails && string(o.StreamModeDetails.StreamMode) == 'ON_DEMAND')) < 50"
         error: LimitExceeded
         message: This request would exceed the limit of on-demand streams for the account.

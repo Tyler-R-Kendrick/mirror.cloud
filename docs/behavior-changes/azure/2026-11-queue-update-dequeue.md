@@ -27,3 +27,11 @@ Update Message).
   `OutOfRangeQueryParameterValue`. Before, `0` was accepted and the message was
   dequeued (count and receipt moved) while staying visible. Put Message and
   Update Message still take `0`, as each documents.
+- **Update Message with no body keeps the text.** The REST reference describes
+  the operation as one that "updates the visibility timeout of a message. You
+  can also use this operation to update the contents", and the SDKs make the
+  text optional: the JavaScript client documents "if this parameter is
+  undefined, then the content of the message won't be updated", and .NET's
+  `messageText` is "Optional". A worker renewing its hold on a message sends a
+  new timeout and no body. Before, such an update emptied the message. An
+  update that sends a `MessageText`, empty or not, still replaces the text.

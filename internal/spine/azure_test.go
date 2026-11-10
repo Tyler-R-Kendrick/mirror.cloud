@@ -888,6 +888,15 @@ func TestBootedServerAzureQueue(t *testing.T) {
 	if code != 204 || h.Get("x-ms-popreceipt") == "" || h.Get("x-ms-time-next-visible") == "" {
 		t.Fatalf("update %d %#v %s", code, h, raw)
 	}
+	// An update with no body renews the hold and keeps the text.
+	code, raw, h = do(http.MethodPut, "/q1/messages/"+msgID+"?popreceipt="+url.QueryEscape(h.Get("x-ms-popreceipt"))+"&visibilitytimeout=0", "", nil)
+	if code != 204 || h.Get("x-ms-popreceipt") == "" {
+		t.Fatalf("update with no body %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<MessageText>changed</MessageText>") {
+		t.Fatalf("peek after an update with no body %d %s", code, raw)
+	}
 	code, raw, h = do(http.MethodPost, "/q1/messages?visibilitytimeout=691200", envelope("x"), nil)
 	if code != 400 || h.Get("x-ms-error-code") != "OutOfRangeQueryParameterValue" {
 		t.Fatalf("invalid visibilitytimeout %d %#v %s", code, h, raw)

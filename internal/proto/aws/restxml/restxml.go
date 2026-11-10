@@ -957,7 +957,9 @@ func decodeAzureQueue(svc *model.Service, op *model.Operation, r *http.Request) 
 			text, ok := azureMessageText(body)
 			if !ok {
 				in["body_invalid"] = true
-			} else {
+			} else if op.Name == "PutMessage" || len(bytes.TrimSpace(body)) > 0 {
+				// An Update Message with no body carries no text: the bundle
+				// keeps the message's own.
 				in["message"] = text
 			}
 		}

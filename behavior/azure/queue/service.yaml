@@ -56,7 +56,7 @@ resources:
             UPDATE:
               - target: invisible
                 actions:
-                  - set: { pop_receipt: "event.popReceipt", message: "event.text", visible_at: "int(event.nextVisible)", visible_ms: "int(event.nextVisibleMs)" }
+                  - set: { pop_receipt: "event.popReceipt", message: "event.hasText ? event.text : rec.message", visible_at: "int(event.nextVisible)", visible_ms: "int(event.nextVisibleMs)" }
                   - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
             DELETE: [{ target: deleted }]
             CLEAR: [{ target: deleted }]
@@ -67,7 +67,7 @@ resources:
             UPDATE:
               - target: invisible
                 actions:
-                  - set: { pop_receipt: "event.popReceipt", message: "event.text", visible_at: "int(event.nextVisible)", visible_ms: "int(event.nextVisibleMs)" }
+                  - set: { pop_receipt: "event.popReceipt", message: "event.hasText ? event.text : rec.message", visible_at: "int(event.nextVisible)", visible_ms: "int(event.nextVisibleMs)" }
                   - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
             DELETE: [{ target: deleted }]
             CLEAR: [{ target: deleted }]
@@ -307,6 +307,9 @@ operations:
           event: UPDATE
           context:
             popReceipt: fx.pr
+            # An update that sends no text keeps the text it finds: a worker
+            # renewing its hold on a message sends a new timeout and no body.
+            hasText: "'message' in input && input.message != null"
             text: "('message' in input && input.message != null) ? string(input.message) : ''"
             visibilityTimeout: "int(input.visibilitytimeout)"
             nextVisible: "string(int(now) + int(input.visibilitytimeout))"

@@ -433,6 +433,32 @@ func TestAzureQueueUpdateOfAVisibleMessage(t *testing.T) {
 	}
 	mismatch("DeleteMessage", map[string]any{"messageid": mid, "popreceipt": r2})
 
+	// An update that sends no text keeps the text: it is how a worker renews
+	// its hold on a message. Visible, then hidden, then visible again.
+	renew := func(receipt, vt string) string {
+		t.Helper()
+		out := inv("UpdateMessage", map[string]any{"messageid": mid, "popreceipt": receipt, "visibilitytimeout": vt})
+		next := fmt.Sprint(out["pop_receipt"])
+		if next == "" || next == receipt {
+			t.Fatalf("renewal answered receipt %q for %q", next, receipt)
+		}
+		return next
+	}
+	r3 = renew(r3, "0")
+	if got := peeked(); got != "late" {
+		t.Fatalf("after renewing a visible message: peek %q, want its text kept", got)
+	}
+	r3 = renew(r3, "5")
+	r3 = renew(r3, "0")
+	if got := peeked(); got != "late" {
+		t.Fatalf("after renewing a hidden message: peek %q, want its text kept", got)
+	}
+	// Text that is sent and empty is still a text.
+	r3 = update(mid, r3, "0", "")
+	if got := peeked(); got != "" || len(inv("PeekMessages", map[string]any{})["_list"].([]any)) != 1 {
+		t.Fatalf("after an update to an empty text: peek %q", got)
+	}
+
 	// A dequeue spends it.
 	dq := inv("GetMessages", map[string]any{"visibilitytimeout": "1"})["_list"].([]any)
 	if len(dq) != 1 || fmt.Sprint(dq[0].(map[string]any)["dequeue_count"]) != "1" {

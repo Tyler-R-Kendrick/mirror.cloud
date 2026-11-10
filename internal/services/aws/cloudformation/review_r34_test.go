@@ -123,9 +123,9 @@ func rv34Typing(svc *model.Service, shape string, depth int) string {
 // unchanged, or changed, against what is sent. Every kind's create is walked against each call its update
 // makes, the ones provision spells itself included.
 func TestCloudFormationCreateAndUpdateTypeAPropertyAlike(t *testing.T) {
-	updates := map[string][]string{ // the calls an update makes beside the kind's own
-		"AWS::Kinesis::Stream": {"aws.kinesis UpdateShardCount StreamName={id} ScalingType=UNIFORM_SCALING TargetShardCount=@ShardCount"},
-		"AWS::Events::Rule":    {"aws.events PutTargets Rule={n} Targets"},
+	updates := map[string][]string{ // the calls an update makes beside the kind's own, as provision spells them
+		"AWS::Kinesis::Stream": {shardCountCall},
+		"AWS::Events::Rule":    {putTargetsCall},
 	}
 	compared := 0
 	for _, typ := range slices.Sorted(maps.Keys(kinds)) {

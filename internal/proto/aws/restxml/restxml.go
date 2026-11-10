@@ -954,10 +954,13 @@ func decodeAzureQueue(svc *model.Service, op *model.Operation, r *http.Request) 
 		in["body"] = string(body)
 		req.Body = io.NopCloser(bytes.NewReader(body))
 		if op.Name == "PutMessage" || op.Name == "UpdateMessage" {
-			text, ok := azureMessageText(body)
+			text, has, ok := azureMessageText(body)
 			if !ok {
 				in["body_invalid"] = true
-			} else {
+			} else if has || op.Name == "PutMessage" {
+				// An Update Message that sends no MessageText, in no body or
+				// in an envelope without one, carries no text: the bundle
+				// keeps the message's own.
 				in["message"] = text
 			}
 		}
@@ -970,18 +973,22 @@ func decodeAzureQueue(svc *model.Service, op *model.Operation, r *http.Request) 
 
 // azureMessageText pulls the MessageText element out of a QueueMessage
 // envelope; the stored text is whatever the client encoded (Azurite keeps it
-// verbatim, base64 or not).
-func azureMessageText(body []byte) (string, bool) {
+// verbatim, base64 or not). has says the element was there: an empty one is a
+// text, an absent one is not.
+func azureMessageText(body []byte) (text string, has, ok bool) {
 	if len(bytes.TrimSpace(body)) == 0 {
-		return "", true
+		return "", false, true
 	}
 	var doc struct {
-		Text string `xml:"MessageText"`
+		Text *string `xml:"MessageText"`
 	}
 	if err := xml.Unmarshal(body, &doc); err != nil {
-		return "", false
+		return "", false, false
 	}
-	return doc.Text, true
+	if doc.Text == nil {
+		return "", false, true
+	}
+	return *doc.Text, true, true
 }
 
 func (c Codec) Decode(svc *model.Service, op *model.Operation, r *http.Request) (*spi.Request, error) {
@@ -1662,7 +1669,16 @@ func writeAzureQueueMessage(b *strings.Builder, m map[string]any, withReceipt bo
 		}
 	}
 	b.WriteString("<DequeueCount>")
-	b.WriteString(strAny(m["dequeue_count"]))
+	// A string until the first dequeue, a number once the bundle has counted
+	// one: strAny answered "" for the number, so every dequeued message
+	// reported an empty count.
+	switch n := m["dequeue_count"].(type) {
+	case nil:
+	case float64:
+		b.WriteString(strconv.FormatInt(int64(n), 10))
+	default:
+		fmt.Fprint(b, n)
+	}
 	b.WriteString("</DequeueCount><MessageText>")
 	b.WriteString(xmlenc.Escape(strAny(m["message"])))
 	b.WriteString("</MessageText></QueueMessage>")

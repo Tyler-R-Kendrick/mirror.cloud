@@ -49,6 +49,15 @@ resources:
                 actions:
                   - set: { dequeue_count: "int(rec.dequeue_count) + 1", pop_receipt: "event.popReceipt + '-' + string(rec.seq)", visible_at: "int(event.nextVisible)", visible_ms: "int(event.nextVisibleMs)" }
                   - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
+            # A pop receipt outlives the visibility timeout: it is good until
+            # the message is dequeued again, updated or deleted, and Put
+            # Message hands one out too. So a visible message is updated like
+            # an invisible one, and hidden again for the timeout it is given.
+            UPDATE:
+              - target: invisible
+                actions:
+                  - set: { pop_receipt: "event.popReceipt", message: "event.hasText ? event.text : rec.message", visible_at: "int(event.nextVisible)", visible_ms: "int(event.nextVisibleMs)" }
+                  - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
             DELETE: [{ target: deleted }]
             CLEAR: [{ target: deleted }]
         invisible:
@@ -58,7 +67,7 @@ resources:
             UPDATE:
               - target: invisible
                 actions:
-                  - set: { pop_receipt: "event.popReceipt", message: "event.text", visible_at: "int(event.nextVisible)", visible_ms: "int(event.nextVisibleMs)" }
+                  - set: { pop_receipt: "event.popReceipt", message: "event.hasText ? event.text : rec.message", visible_at: "int(event.nextVisible)", visible_ms: "int(event.nextVisibleMs)" }
                   - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
             DELETE: [{ target: deleted }]
             CLEAR: [{ target: deleted }]
@@ -209,6 +218,10 @@ operations:
       - { cond: "!('body_invalid' in input && input.body_invalid == true)", error: InvalidXmlDocument, message: "XML specified is not syntactically valid." }
       - { cond: "!('visibilitytimeout' in input && input.visibilitytimeout != null) || (int(input.visibilitytimeout) >= 0 && int(input.visibilitytimeout) <= 604800)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
       - { cond: "!('messagettl' in input && input.messagettl != null) || int(input.messagettl) == -1 || (int(input.messagettl) > 0 && int(input.messagettl) <= 604800)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
+      # As for Update Message: a message is not put already hidden past its own
+      # expiry, and the reference names no error for it. Both run from the put,
+      # so the seconds are compared; a TTL of -1 never expires.
+      - { cond: "!('visibilitytimeout' in input && input.visibilitytimeout != null) || ('messagettl' in input && input.messagettl != null && int(input.messagettl) == -1) || int(input.visibilitytimeout) <= (('messagettl' in input && input.messagettl != null) ? int(input.messagettl) : 604800)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
       # The 64KB limit is computed after content encoding; the encoded form
       # is what lands here.
       - { cond: "blen(('message' in input && input.message != null) ? string(input.message) : (('body' in input && input.body != null) ? string(input.body) : '')) <= 65536", error: RequestBodyTooLarge, message: "The request body is too large and exceeds the maximum permissible limit." }
@@ -231,7 +244,9 @@ operations:
     require:
       - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
       - { cond: "!('numofmessages' in input && input.numofmessages != null) || (int(input.numofmessages) >= 1 && int(input.numofmessages) <= 32)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
-      - { cond: "!('visibilitytimeout' in input && input.visibilitytimeout != null) || (int(input.visibilitytimeout) >= 0 && int(input.visibilitytimeout) <= 604800)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
+      # A dequeue's timeout is at least a second; only Put Message and Update
+      # Message take 0.
+      - { cond: "!('visibilitytimeout' in input && input.visibilitytimeout != null) || (int(input.visibilitytimeout) >= 1 && int(input.visibilitytimeout) <= 604800)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
     select:
       binding: msgs
       resource: message
@@ -288,6 +303,10 @@ operations:
       - { cond: "(('expires_ms' in rec) ? int(rec.expires_ms) : int(rec.expires_at) * 1000) > now_ms", error: MessageNotFound, message: "The specified message does not exist." }
       - { cond: "'popreceipt' in input && input.popreceipt != null && string(rec.pop_receipt) == string(input.popreceipt)", error: PopReceiptMismatch, message: "The specified pop receipt is invalid." }
       - { cond: "('visibilitytimeout' in input && input.visibilitytimeout != null) && int(input.visibilitytimeout) >= 0 && int(input.visibilitytimeout) <= 604800", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
+      # "The visibility timeout of a message can't be set to a value later than
+      # the expiry time." The reference names no error for it; this is the one
+      # it gives a visibility timeout it will not take.
+      - { cond: "now_ms + 1000 * int(input.visibilitytimeout) <= (('expires_ms' in rec) ? int(rec.expires_ms) : int(rec.expires_at) * 1000)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
       - { cond: "blen(('message' in input && input.message != null) ? string(input.message) : '') <= 65536", error: RequestBodyTooLarge, message: "The request body is too large and exceeds the maximum permissible limit." }
     effects:
       - generate: { bind: pr, kind: hex, bytes: 16 }
@@ -296,6 +315,9 @@ operations:
           event: UPDATE
           context:
             popReceipt: fx.pr
+            # An update that sends no text keeps the text it finds: a worker
+            # renewing its hold on a message sends a new timeout and no body.
+            hasText: "'message' in input && input.message != null"
             text: "('message' in input && input.message != null) ? string(input.message) : ''"
             visibilityTimeout: "int(input.visibilitytimeout)"
             nextVisible: "string(int(now) + int(input.visibilitytimeout))"

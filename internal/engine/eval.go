@@ -72,6 +72,8 @@ func (ev *eval) activation() map[string]any {
 			}
 		}
 	}
+	// One reading for both, so an expression that uses the two sees one instant.
+	now := ev.e.deps.Clock.Now()
 	act := map[string]any{
 		"input": ev.req.Input,
 		"identity": map[string]any{
@@ -82,8 +84,8 @@ func (ev *eval) activation() map[string]any {
 			// The caller's access key: STS answers it as GetCallerIdentity's UserId.
 			"access_key": ev.req.Identity.AccessKeyID,
 		},
-		"now":      ev.e.deps.Clock.Now(),
-		"now_ms":   ev.e.deps.Clock.Now().UnixMilli(),
+		"now":      now,
+		"now_ms":   now.UnixMilli(),
 		"id":       ev.id,
 		"fx":       ev.fx,
 		"hit":      map[string]any{},

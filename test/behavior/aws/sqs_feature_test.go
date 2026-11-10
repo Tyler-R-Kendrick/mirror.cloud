@@ -383,23 +383,6 @@ func TestSQSQueueListing(t *testing.T) {
 			t.Fatalf("delayed receive %d %s", status, body)
 		}
 	})
-	t.Run("Given a delayed message When polling with an explicit wait Then it is returned after becoming visible", func(t *testing.T) {
-		if status, body := call("CreateQueue", `{"QueueName":"bdd-delay-wait"}`); status != http.StatusOK {
-			t.Fatalf("create %d %s", status, body)
-		}
-		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delay-wait","MessageBody":"foobar","DelaySeconds":1}`); status != http.StatusOK {
-			t.Fatalf("send %d %s", status, body)
-		}
-		status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delay-wait"}`)
-		if status != http.StatusOK || bytes.Contains(body, []byte(`"Messages"`)) {
-			t.Fatalf("early receive %d %s", status, body)
-		}
-		time.Sleep(1500 * time.Millisecond)
-		status, body = call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delay-wait","WaitTimeSeconds":2}`)
-		if status != http.StatusOK || !bytes.Contains(body, []byte(`"Body":"foobar"`)) {
-			t.Fatalf("delayed receive %d %s", status, body)
-		}
-	})
 	t.Run("Given a queue receive wait attribute When polling without a request wait Then the queue wait is used", func(t *testing.T) {
 		if status, body := call("CreateQueue", `{"QueueName":"bdd-queue-wait","Attributes":{"ReceiveMessageWaitTimeSeconds":"1"}}`); status != http.StatusOK {
 			t.Fatalf("create %d %s", status, body)
@@ -1625,6 +1608,74 @@ func TestSQSQueueListing(t *testing.T) {
 			if status != http.StatusOK || !bytes.Contains(body, []byte(`"Body":"`+name+`"`)) {
 				t.Fatalf("returned %s %d %s", name, status, body)
 			}
+		}
+	})
+}
+
+// On the booted clock, so that no stall between the send and the early receive
+// can let the delay run out: nothing moves the clock but the test.
+func TestSQSDelayedMessageExplicitWaitBDD(t *testing.T) {
+	t.Setenv("MIRROR_CLOCK", "controllable")
+	cfg := config.Default()
+	cfg.Services = []string{"aws.sqs"}
+	rt, err := runtime.Boot(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(rt.Handler())
+	defer server.Close()
+	// No wall time passes here, so a request that takes seconds is a hang.
+	client := &http.Client{Timeout: 10 * time.Second}
+	call := func(action, payload string) (int, []byte) {
+		request, _ := http.NewRequest(http.MethodPost, server.URL, strings.NewReader(payload))
+		request.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential=test/20200101/us-east-1/sqs/aws4_request, SignedHeaders=host, Signature=00")
+		request.Header.Set("Content-Type", "application/x-amz-json-1.0")
+		request.Header.Set("X-Amz-Target", "AmazonSQS."+action)
+		response, err := client.Do(request)
+		if err != nil {
+			t.Error(err)
+			return 0, nil
+		}
+		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		return response.StatusCode, body
+	}
+	t.Run("Given a delayed message When polling with an explicit wait Then it is returned after becoming visible", func(t *testing.T) {
+		if status, body := call("CreateQueue", `{"QueueName":"bdd-delay-wait"}`); status != http.StatusOK {
+			t.Fatalf("create %d %s", status, body)
+		}
+		if status, body := call("SendMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delay-wait","MessageBody":"foobar","DelaySeconds":1}`); status != http.StatusOK {
+			t.Fatalf("send %d %s", status, body)
+		}
+		for _, elapsed := range []time.Duration{0, 999 * time.Millisecond} {
+			if err := rt.Deps.Clock.Advance(elapsed); err != nil {
+				t.Fatal(err)
+			}
+			status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delay-wait"}`)
+			if status != http.StatusOK || bytes.Contains(body, []byte(`"Messages"`)) {
+				t.Fatalf("early receive %s after the send: %d %s", elapsed, status, body)
+			}
+		}
+		type answer struct {
+			status int
+			body   []byte
+		}
+		polled := make(chan answer, 1)
+		go func() {
+			status, body := call("ReceiveMessage", `{"QueueUrl":"http://queue/000000000000/bdd-delay-wait","WaitTimeSeconds":2}`)
+			polled <- answer{status, body}
+		}()
+		// The last millisecond of the delay; the poll is waiting or about to ask.
+		if err := rt.Deps.Clock.Advance(time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case got := <-polled:
+			if got.status != http.StatusOK || !bytes.Contains(got.body, []byte(`"Body":"foobar"`)) {
+				t.Fatalf("delayed receive %d %s", got.status, got.body)
+			}
+		case <-time.After(15 * time.Second):
+			t.Fatal("the long poll did not return once the delay had run out")
 		}
 	})
 }

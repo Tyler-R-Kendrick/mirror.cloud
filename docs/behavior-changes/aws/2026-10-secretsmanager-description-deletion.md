@@ -44,10 +44,48 @@ The oracle is AWS's documentation as it ships in the vendored model
   this note's reading: the model does not say what happens, and the real
   service would start the rotation function, which would fail. Before, the
   empty string was seated as the secret's first version. The same holds for
-  a secret whose versions hold no `AWSCURRENT` stage (removed with
-  `UpdateSecretVersionStage`), and the refusal says so: "The secret has no
+  a secret whose versions hold no `AWSCURRENT` stage (a stored record from
+  before `UpdateSecretVersionStage` refused to remove it; see the next
+  entry), and the refusal says so: "The secret has no
   value to rotate: it has no AWSCURRENT version." checks for that stage, not
   for any version.
+- **AWSCURRENT is moved, never removed.** `UpdateSecretVersionStage` that
+  would take `AWSCURRENT` off the version holding it without seating it on
+  another is `InvalidParameterException`, "You can only move staging label
+  AWSCURRENT to a different secret version. It can't be completely removed."
+  Before, the label came off, and the operations then disagreed about the
+  secret: `RotateSecret` refused it as having no `AWSCURRENT` version while
+  `GetSecretValue` and `BatchGetSecretValue` answered its last value with
+  `VersionStages: [AWSCURRENT]`. Of the two repairs, refusing the removal or
+  making the reads agree with `RotateSecret`, this is the one the
+  documentation supports best, and it removes the cause. What the model says:
+  "You can move the AWSCURRENT staging label to this version by including it
+  in this call", "Whenever you move AWSCURRENT, Secrets Manager automatically
+  moves the label AWSPREVIOUS to the version that AWSCURRENT was removed
+  from", its example of deleting a label deletes a custom one and its example
+  with `AWSCURRENT` names both `RemoveFromVersionId` and `MoveToVersionId`,
+  and `InvalidParameterException` is among the operation's errors. It speaks
+  of `AWSCURRENT` only as moved and nowhere says a removal is refused: the
+  refusal and its text are the service's wire answer, not a sentence of the
+  model. A `MoveToVersionId` that names no version of the secret would take
+  the label off and seat it nowhere, so it is refused with the same error;
+  that case is this note's reading. Removing any other label, and a removal
+  that names a version not holding `AWSCURRENT`, are unchanged.
+
+  So that the operations agree whatever the store holds, the reads were also
+  given `RotateSecret`'s rule: a secret none of whose versions holds
+  `AWSCURRENT` has no current value. `GetSecretValue` with no `VersionId` or
+  `VersionStage` (or with `VersionStage: AWSCURRENT`) is
+  `ResourceNotFoundException`, "Secrets Manager can't find the specified
+  secret value for staging label: AWSCURRENT", and `BatchGetSecretValue`
+  answers that as an `Errors` row in both of its forms. A version is still
+  answered by its `VersionId`. No call leaves a secret in that state any
+  more; a store written before this change and restored from a snapshot can
+  hold one, which is how the tests reach it
+  (`TestSecretsManagerRotateNeedsAnAWSCURRENTVersion` now writes the record
+  to the store instead of calling `UpdateSecretVersionStage`). Moving
+  `AWSCURRENT` still does not move `AWSPREVIOUS` to the version it left; that
+  sentence of the documentation is not implemented here.
 - **Description.** `CreateSecret` and `UpdateSecret` keep `Description`, and
   `DescribeSecret` answers it. Before, it was accepted and dropped. A write
   that names no description keeps the one already stored.

@@ -4290,6 +4290,51 @@ var mutants = []mutant{
 		run: "TestSecretsManagerRotateNeedsAnAWSCURRENTVersion",
 	},
 	{
+		// "You can only move staging label AWSCURRENT to a different secret version. It can't be completely removed."
+		name: "secretsmanager-awscurrent-removed-with-nowhere-to-go",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `stage != 'AWSCURRENT' || uvers.exists(v, 'VersionId' in v && string(v.VersionId) == moveTo)`,
+		new:  `true`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerAWSCURRENTIsMovedNotRemoved",
+	},
+	{
+		// A MoveToVersionId that names no version seats the label nowhere.
+		name: "secretsmanager-awscurrent-moved-to-no-version",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `stage != 'AWSCURRENT' || uvers.exists(v, 'VersionId' in v && string(v.VersionId) == moveTo)`,
+		new:  `stage != 'AWSCURRENT' || moveTo != ''`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerAWSCURRENTIsMovedNotRemoved",
+	},
+	{
+		// GetSecretValue of a secret with no AWSCURRENT version has no current value to answer, as RotateSecret reads it.
+		name: "secretsmanager-get-answers-a-current-value-with-no-awscurrent",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `cond: "size(vers) > 0 && (vid != '' || effstage != 'AWSCURRENT' || vers.exists(`,
+		new:  `cond: "size(vers) > 0 && (true || vers.exists(`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerNoAWSCURRENTVersionIsNoCurrentValue",
+	},
+	{
+		// BatchGetSecretValue's SecretIdList form reads it the same.
+		name: "secretsmanager-batch-list-answers-a-value-with-no-awscurrent",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `string(x.Name) == string(b) && !('Versions' in x && x.Versions.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')))))"`,
+		new:  `string(x.Name) == string(b) && !('Versions' in x && size(x.Versions) > 0)))"`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerNoAWSCURRENTVersionIsNoCurrentValue",
+	},
+	{
+		// And its Filters form.
+		name: "secretsmanager-batch-filters-answer-a-value-with-no-awscurrent",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `? items.filter(m, 'Versions' in m && m.Versions.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')))`,
+		new:  `? items.filter(m, 'Versions' in m && size(m.Versions) > 0)`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerNoAWSCURRENTVersionIsNoCurrentValue",
+	},
+	{
 		// A secret created without a value has none to rotate.
 		name: "secretsmanager-rotate-a-secret-with-no-value",
 		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),

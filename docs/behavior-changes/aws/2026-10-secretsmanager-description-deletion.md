@@ -728,7 +728,8 @@ The oracle is AWS's documentation as it ships in the vendored model
     rollback; a resource declared with no `Properties` was given nothing.
     The rule is one for every type: a secret's and a key's description are
     cleared only when the previous template gave one, a stream goes back to
-    one shard only when the previous template gave a `ShardCount`, and a
+    one shard only when the previous template gave a `ShardCount`, and to
+    the provisioned mode only when it gave a `StreamModeDetails`, and a
     rule's targets are removed only when the previous template gave them.
     Two property values are compared as the service is sent them. A number
     or a Boolean that is a property's whole value is its text ("the

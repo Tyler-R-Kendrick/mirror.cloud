@@ -43,8 +43,25 @@ func TestCloudFormationReview6NestedNumberVsParamIsNoUpdate(t *testing.T) {
 	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "np", "TemplateBody": tpl(5)}); err != nil {
 		t.Fatal(err)
 	}
+	table := rv31IDs(h, "np")["T"]
+	var wrote []string // a store write for the table, which an update of it makes
+	off := faultStore(h, func(op, collection, key string) bool {
+		if strings.HasSuffix(op, "put") && !strings.HasPrefix(collection, "cfn") && strings.Contains(key, table) {
+			wrote = append(wrote, collection+"/"+key)
+		}
+		return false
+	})
 	_, err := h.invoke("UpdateStack", map[string]any{"StackName": "np", "TemplateBody": tpl(map[string]any{"Ref": "N"})})
-	t.Logf("literal 5 -> Ref Number 5: err=%v events=%v", err, h.events("np", "T"))
+	off()
+	if st, _, _ := h.status("np"); err != nil || st != "UPDATE_COMPLETE" || len(wrote) != 0 || rv31IDs(h, "np")["T"] != table {
+		t.Errorf("literal 5 to a Ref of a Number parameter 5: answered %v, the stack %s, the table written to at %v, its id %s; want no update of it", err, st, wrote, rv31IDs(h, "np")["T"])
+	}
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "np", "TemplateBody": tpl(6)}); err != nil {
+		t.Fatal(err)
+	}
+	if units := asMap(asMap(rv31Get(h, "aws.dynamodb", "DescribeTable", map[string]any{"TableName": table})["Table"])["ProvisionedThroughput"])["ReadCapacityUnits"]; fmt.Sprint(units) != "6" {
+		t.Errorf("six units, a real change, left the table %v", units)
+	}
 }
 
 func TestCloudFormationReview6ReplaceByBooleanSpelling(t *testing.T) {
@@ -116,13 +133,15 @@ func TestCloudFormationReview6TargetsIntrinsics(t *testing.T) {
 	_, err = h.invoke("UpdateStack", map[string]any{"StackName": "ti", "TemplateBody": tpl(map[string]any{"Ref": "L"}), "Parameters": []any{map[string]any{"ParameterKey": "On", "ParameterValue": "no"}}})
 	st, reason, _ = h.status("ti")
 	t.Logf("Ref to a list parameter: %v %s %s %s", err, st, reason, ids())
-	if err != nil && strings.Contains(fmt.Sprint(err, reason), "must be a list") {
-		t.Errorf("a list parameter was refused as not a list: %v", err)
+	if err == nil || strings.Contains(fmt.Sprint(err, reason), "must be a list") || !strings.Contains(fmt.Sprint(err), "Id or Arn is invalid") || st != "UPDATE_ROLLBACK_COMPLETE" || ids() != "[outside a]" && ids() != "[a outside]" {
+		t.Errorf("a list parameter as the targets: %v, %s, %s; want it read as a list, refused by EventBridge for its members, and the rule's targets as they were", err, st, ids())
 	}
 	// empty list
 	_, err = h.invoke("UpdateStack", map[string]any{"StackName": "ti", "TemplateBody": tpl([]any{}), "Parameters": []any{map[string]any{"ParameterKey": "On", "ParameterValue": "no"}}})
 	st, reason, _ = h.status("ti")
-	t.Logf("empty list: %v %s %s %s", err, st, reason, ids())
+	if err == nil || !strings.Contains(fmt.Sprint(err), "between 1 and 10 entries") || st != "UPDATE_ROLLBACK_COMPLETE" || ids() != "[outside a]" && ids() != "[a outside]" {
+		t.Errorf("an empty list of targets: %v, %s (%s), %s; want EventBridge's refusal and the rule's targets as they were", err, st, reason, ids())
+	}
 }
 
 // A record with Gave but no Took (written before this PR) continues as before: no crash, settles.

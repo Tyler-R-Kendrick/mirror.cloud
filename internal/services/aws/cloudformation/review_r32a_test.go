@@ -249,7 +249,14 @@ func TestCloudFormationReview5AEveryKindLegacyAndCurrent(t *testing.T) {
 							if err := rv28Update(h, "lg", map[string]any{"R": two}); err != nil {
 								t.Errorf("the update after: %v", err)
 							}
-							t.Logf("after a good update: %s", k.state(h, id))
+							// It applied: the resource is no longer as the first template made it, and where the failed
+							// update's own change was seen (its restore failed), it is that change again.
+							// A kind with no update call (a queue, a topic, a log group) reads the same under both templates,
+							// and so does an API, whose description, the one thing its two differ in, is sent by no call.
+							reads := k.name != "restapi" && (kinds[str(two["Type"])].update != "" || k.name == "bucket")
+							if after := k.state(h, id); rv31IDs(h, "lg")["R"] != id || reads && after == want || cur && fired.Load() && mid != want && after != mid {
+								t.Errorf("the update after left %s (the id %s); want the second template's properties applied to the same resource: before it %s, as the failed update left it %s", after, rv31IDs(h, "lg")["R"], want, mid)
+							}
 						}
 					})
 				}

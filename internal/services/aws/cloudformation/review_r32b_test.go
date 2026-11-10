@@ -175,7 +175,9 @@ func TestCloudFormationReview5BSecretForward(t *testing.T) {
 	g1 := rveValue(h, ids["G"])
 	// back to the first: same password as created (deterministic), logged
 	up(map[string]any{"SecretString": "A"}, map[string]any{"GenerateSecretString": map[string]any{"PasswordLength": 20}})
-	t.Logf("G created %q, at 25 %q, back at 20 %q (same as created: %v)", g0, g1, rveValue(h, ids["G"]), rveValue(h, ids["G"]) == g0)
+	if back := rveValue(h, ids["G"]); back != g0 || g1 == g0 || rveValue(h, ids["R"]) != "A" {
+		t.Errorf("G was created %q, was %q at 25, and is %q back at 20; want the password it was created with (it is made from the stack and logical id), and R the template's A", g0, g1, back)
+	}
 	// a value given by a Ref to a parameter: the parameter's change is a change of the value
 	h2 := newStacks(t)
 	tpl := func() string {
@@ -203,9 +205,14 @@ func TestCloudFormationReview5BSecretSkipped(t *testing.T) {
 	id := rv31IDs(h, "sk")["R"]
 	rveFailed(t, h, "sk", rveSecret(map[string]any{"SecretString": "B"}), true)
 	rveContinue(t, h, "sk", "R")
-	t.Logf("skipped: value %q (the template says A)", rveValue(h, id))
-	err := rv28Update(h, "sk", map[string]any{"R": rveSecret(map[string]any{"SecretString": "A", "Description": "d"})})
-	t.Logf("update of the description only: %v, value %q", err, rveValue(h, id))
+	// Skipped, it is left as the failed update made it, and an update of its description alone, whose
+	// template still gives A, sends no value: what the secret holds stays.
+	if st, _, _ := h.status("sk"); st != "UPDATE_ROLLBACK_COMPLETE" || rveValue(h, id) != "B" {
+		t.Errorf("skipped: the stack is %s and the value %q; want the failed update's B left", st, rveValue(h, id))
+	}
+	if err := rv28Update(h, "sk", map[string]any{"R": rveSecret(map[string]any{"SecretString": "A", "Description": "d"})}); err != nil || rveValue(h, id) != "B" {
+		t.Errorf("the update of the description only answered %v and left the value %q; want B", err, rveValue(h, id))
+	}
 }
 
 // 3b: what the failed update REMOVED is put back by the rollback and by a continued one.
@@ -267,6 +274,7 @@ func TestCloudFormationReview5BRemovedIsPutBack(t *testing.T) {
 			func(h *stacks, id string) string {
 				return "desc=" + str(asMap(rv31Get(h, "aws.kms", "DescribeKey", map[string]any{"KeyId": id})["KeyMetadata"])["Description"])
 			}},
+		{"stream-mode", rveProps("AWS::Kinesis::Stream", map[string]any{"StreamModeDetails": rv34Mode("ON_DEMAND"), "RetentionPeriodHours": 24}), rveProps("AWS::Kinesis::Stream", map[string]any{"RetentionPeriodHours": 48}), rv34Stream},
 		{"stream", rveProps("AWS::Kinesis::Stream", map[string]any{"ShardCount": 3, "RetentionPeriodHours": 24}), rveProps("AWS::Kinesis::Stream", map[string]any{"RetentionPeriodHours": 48}),
 			func(h *stacks, id string) string {
 				raw, _, _ := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("kinesis").Get(h.ctx, id)

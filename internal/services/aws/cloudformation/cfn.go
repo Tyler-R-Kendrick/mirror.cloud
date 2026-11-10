@@ -930,7 +930,7 @@ var kinds = map[string]kind{
 	"AWS::Logs::LogGroup":          {"LogGroupName", 512, "aws.logs DescribeLogGroups logGroupNamePrefix={n}", "ResourceAlreadyExistsException", "{n}", "LogGroupName", "aws.logs CreateLogGroup logGroupName={n}", "logGroupName", "", "aws.logs DeleteLogGroup logGroupName={id}", "Arn=arn:aws:logs:{r}:{a}:log-group:{id}:*"},
 	"AWS::Events::Rule":            {"Name", 64, "aws.events DescribeRule Name={n} EventBusName=$EventBusName", "ResourceAlreadyExistsException", "{n}", "Name EventBusName", "aws.events PutRule Name={n} ScheduleExpression=$ScheduleExpression State=$State Description=$Description EventBusName=$EventBusName EventPattern=%EventPattern", "RuleArn", "aws.events PutRule Name={n} ScheduleExpression=$ScheduleExpression State=$State Description=$Description EventBusName=$EventBusName EventPattern=%EventPattern", "aws.events DeleteRule Name={rule} EventBusName={bus}", "Arn=arn:aws:events:{r}:{a}:rule/{bus/}{rule} RuleName={rule}"},
 	"AWS::Lambda::Function":        {"FunctionName", 64, "aws.lambda GetFunction FunctionName={n}", "ResourceConflictException", "{n}", "FunctionName PackageType DurableConfig TenancyConfig", "aws.lambda CreateFunction * FunctionName={n}", "FunctionName", "aws.lambda UpdateFunctionConfiguration * FunctionName={id:}", "aws.lambda DeleteFunction FunctionName={id:}", "Arn=arn:aws:lambda:{r}:{a}:function:{id}"},
-	"AWS::Kinesis::Stream":         {"Name", 128, "aws.kinesis DescribeStreamSummary StreamName={n}", "ResourceInUseException", "{n}", "Name", "aws.kinesis CreateStream StreamName={n} ShardCount", "StreamName", "aws.kinesis UpdateShardCount StreamName={id} TargetShardCount=@ShardCount ScalingType=UNIFORM_SCALING need:TargetShardCount", "aws.kinesis DeleteStream StreamName={id}", "Arn=arn:aws:kinesis:{r}:{a}:stream/{id}"},
+	"AWS::Kinesis::Stream":         {"Name", 128, "aws.kinesis DescribeStreamSummary StreamName={n}", "ResourceInUseException", "{n}", "Name", "aws.kinesis CreateStream StreamName={n} ShardCount StreamModeDetails", "StreamName", "aws.kinesis UpdateStreamMode StreamARN=arn:aws:kinesis:{r}:{a}:stream/{id} StreamModeDetails need:StreamModeDetails", "aws.kinesis DeleteStream StreamName={id}", "Arn=arn:aws:kinesis:{r}:{a}:stream/{id}"},
 	"AWS::Kinesis::ResourcePolicy": {"", 0, "", "", "", "ResourceArn", "aws.kinesis PutResourcePolicy ResourceARN=$ResourceARN ResourceARN=$ResourceArn Policy=%Policy Policy=%ResourcePolicy", "ResourceARN", "aws.kinesis PutResourcePolicy ResourceARN=$ResourceARN ResourceARN=$ResourceArn Policy=%Policy Policy=%ResourcePolicy", "aws.kinesis DeleteResourcePolicy ResourceARN={id}", ""},
 	"AWS::ApiGateway::RestApi":     {"Name", 1024, "", "", "", "", "aws.apigateway CreateRestApi name={n}", "id", "aws.apigateway UpdateRestApi restApiId={id} name={n}", "aws.apigateway DeleteRestApi restApiId={id}", "RestApiId={id}"},
 }
@@ -1015,9 +1015,9 @@ func under(st stack, r res, props map[string]any) string {
 // properties and nothing that was set outside it is touched: each service's update keeps what a call does
 // not name, so the value is the one its API reference gives a resource made without the property (Lambda's
 // Timeout "The default is 3 seconds", MemorySize "The default value is 128 MB"; DynamoDB's StreamEnabled
-// false, BillingMode PROVISIONED, TableClass STANDARD; an empty description; a stream's one shard). An
-// entry is the member to send, named as its property, or property>member where the names differ. A
-// bucket's are bucketOps, a rule's targets provision's, and a secret's value is sent only when the
+// false, BillingMode PROVISIONED, TableClass STANDARD; an empty description; a stream's provisioned mode).
+// An entry is the member to send, named as its property. A stream's one shard is sent by its own call, after its
+// mode. A bucket's are bucketOps, a rule's targets provision's, and a secret's value is sent only when the
 // template's differs (provision). Four updates send what the template gives whatever was there, because
 // the template must give it and the call is a whole replacement: a parameter's value and type
 // (PutParameter), a role's trust policy, a stream's resource policy, and a rule (PutRule: "If you omit arguments in
@@ -1029,7 +1029,7 @@ var clears = map[string]string{
 	"AWS::Lambda::Function":       `Description= Timeout=3 MemorySize=128 Environment=^{"Variables":{}} Layers=^[] KMSKeyArn= DeadLetterConfig=^{"TargetArn":""} TracingConfig=^{"Mode":"PassThrough"} EphemeralStorage=^{"Size":512}`,
 	"AWS::SecretsManager::Secret": `Description=`,
 	"AWS::KMS::Key":               `Description=`,
-	"AWS::Kinesis::Stream":        `ShardCount>TargetShardCount=1`,
+	"AWS::Kinesis::Stream":        `StreamModeDetails=^{"StreamMode":"PROVISIONED"}`,
 }
 
 // do makes a call a kind spells "service Operation member=value ...", and answers the answer over the
@@ -1111,7 +1111,7 @@ func (p *Pack) change(req *spi.Request, old stack, logical, typ string, props ma
 	if i < 0 {
 		return res{}, "create"
 	}
-	create := strings.Fields(kinds[typ].create) // compared as the service is sent them: what its model types, typed
+	create := strings.Fields(kinds[typ].create) // compared as the service is sent them, typed by the create's model: the update's types what both take alike (a test walks every kind)
 	before, how := input(create[0], create[1], p.Props(stored(old.Template), logical, old.Refs, old.Name)), ""
 	props = input(create[0], create[1], props)
 	for _, k := range slices.Concat(slices.Collect(maps.Keys(before)), slices.Collect(maps.Keys(props))) {
@@ -1152,8 +1152,8 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 	k, n := kinds[typ], str(props[kinds[typ].member])
 	if arn := planID(req, typ, "", props); typ == "AWS::Kinesis::ResourcePolicy" && p.holder(ctx, req, st.Name, res{Type: typ, Physical: arn}) != "" { // another stack's
 		return "", fault("AlreadyExistsException", "Resource of type '"+typ+"' with identifier '"+arn+"' already exists.") // the wording is a reading
-	} else if v, set := props["FifoQueue"]; typ == "AWS::SQS::Queue" && set && !isBoolean(v) { // FifoQueue is a Boolean (Template Reference)
-		return "", invalid("Properties validation failed for resource " + logical + ": FifoQueue must be a Boolean, not " + spi.JSONText(v))
+	} else if _, boolean := coerce(props["FifoQueue"], "Boolean"); typ == "AWS::SQS::Queue" && props["FifoQueue"] != nil && !boolean { // FifoQueue is a Boolean (Template Reference)
+		return "", invalid("Properties validation failed for resource " + logical + ": FifoQueue must be a Boolean, not " + spi.JSONText(props["FifoQueue"]))
 	}
 	if cfntemplate.Unknown(props[k.member]) { // one built on an id known only once made is checked as it is made:
 		return "", nil // its id is not planned (planID), and a Ref to it is unknown
@@ -1174,19 +1174,18 @@ func (p *Pack) claim(ctx context.Context, req *spi.Request, st, old stack, logic
 	return "", fault(k.taken, "Resource of type '"+typ+"' with identifier '"+n+"' already exists.")
 }
 
-func fifo(p map[string]any) bool { return isTrue(p["FifoQueue"]) }
-
 // physicalName is the name of a resource the template leaves unnamed (cfntemplate.PhysicalName), within the
 // longest name its service takes: none for a type no template names.
 func physicalName(stack, logical, stackID, typ string, props map[string]any) string {
-	k := kinds[typ]
-	if k.member == "" {
+	if kinds[typ].member == "" {
 		return ""
 	}
-	return cfntemplate.PhysicalName(stack, logical, stackID, typ, k.max, props)
+	return cfntemplate.PhysicalName(stack, logical, stackID, typ, kinds[typ].max, props)
 }
 
-func isBoolean(v any) bool { _, ok := coerce(v, "Boolean"); return ok }
+// countRefused is, whole, the error of UpdateShardCount on an on-demand stream: the one a restore passes.
+const countRefused = "ValidationException: UpdateShardCount is only supported for data streams with the provisioned capacity mode."
+const shardCountCall, putTargetsCall = "aws.kinesis UpdateShardCount StreamName={id} ScalingType=UNIFORM_SCALING TargetShardCount=@ShardCount", "aws.events PutTargets Rule={n} Targets EventBusName=$EventBusName" // a stream's count and a rule's targets: calls of their own, beside the kind's update
 
 // provision creates a resource through the service that owns it, and answers the resource's physical id.
 // Going through the owner's API keeps its store layout, validation and cascades that service's business.
@@ -1201,12 +1200,8 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	} else if existing != "" {
 		spec = k.update
 		for _, c := range strings.Fields(clears[typ]) {
-			property, send, renamed := strings.Cut(c, ">")
-			if !renamed {
-				property, send = c[:strings.Index(c, "=")], c
-			}
-			if props[property] == nil && was.gave(property) {
-				spec += " " + send
+			if property := c[:strings.Index(c, "=")]; props[property] == nil && was.gave(property) {
+				spec += " " + c
 			}
 		}
 	}
@@ -1221,7 +1216,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 			return "", err
 		}
 		props["SecretString"] = value
-	} else if fifo(props) && typ == "AWS::SQS::Queue" {
+	} else if isTrue(props["FifoQueue"]) && typ == "AWS::SQS::Queue" {
 		props["Attributes"] = map[string]any{"FifoQueue": "true"}
 	}
 	out, err := p.do(ctx, req, spec, n, existing, props)
@@ -1237,12 +1232,14 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 		if err = p.dropTargets(ctx, req, phys, keep, was); set && err == nil { // what the template gave before and gives no longer goes
 			// "each entry in FailedEntries provides the ID of the failed target and the error code":
 			// a target not added fails the rule, as its error does.
-			put, putErr := p.do(ctx, req, "aws.events PutTargets Rule={n} Targets EventBusName=$EventBusName", n, "", props)
+			put, putErr := p.do(ctx, req, putTargetsCall, n, "", props)
 			if failed, _ := put["FailedEntries"].([]any); putErr == nil && len(failed) > 0 {
 				putErr = fault(cmp.Or(str(asMap(failed[0])["ErrorCode"]), "ValidationError"), "PutTargets failed to add targets: "+spi.JSONText(failed))
 			}
 			err = putErr
 		}
+	} else if err == nil && typ == "AWS::Kinesis::Stream" && existing != "" && str(asMap(props["StreamModeDetails"])["StreamMode"]) != "ON_DEMAND" && (was.differs("ShardCount", props["ShardCount"]) || props["ShardCount"] != nil && (str(asMap(was.props["StreamModeDetails"])["StreamMode"]) == "ON_DEMAND" || slices.Contains(was.changed, "StreamModeDetails"))) {
+		_, err = p.do(ctx, req, shardCountCall, n, existing, map[string]any{"ShardCount": cmp.Or(props["ShardCount"], any(1))}) // after its mode: a count is a provisioned stream's, and is sent when the template's changed, or the stream was on-demand by its template, which was sent none (a continued rollback knows only that the mode changed, and takes that for it)
 	} else if err == nil && typ == "AWS::S3::Bucket" && existing != "" { // one it makes, upsert configures once it is recorded
 		err = p.configureBucket(ctx, req, n, props, was)
 	} else if err != nil && existing == "" { // none once a create failed
@@ -1267,7 +1264,7 @@ func (p *Pack) rollback(ctx context.Context, req *spi.Request, seen, old stack, 
 			continue
 		}
 		props := maps.Collect(maps.All(p.Props(tpl, r.Logical, old.Refs, old.Name)))
-		if _, err := p.provision(ctx, req, r.Type, r.Logical, under(old, r, props), props, prior{props: was}, r.Physical, old.ID); err != nil { // UPDATE_FAILED, for ContinueUpdateRollback
+		if _, err := p.provision(ctx, req, r.Type, r.Logical, under(old, r, props), props, prior{props: was}, r.Physical, old.ID); err != nil && !(r.Type == "AWS::Kinesis::Stream" && err.Error() == countRefused) { // UPDATE_FAILED, for ContinueUpdateRollback; but the count call's refusal of an on-demand stream, and that alone, was the update's too: nothing is left to put back
 			old.Resources[i].Status, old.Resources[i].Reason = "UPDATE_FAILED", err.Error() // the stack's reason in the service's words
 			old.Resources[i].Gave, old.Resources[i].Targets, old.Resources[i].Took = gave(was, props)
 			first = cmp.Or(first, error(invalid("The following resource(s) failed to update: ["+r.Logical+"].")))
@@ -1318,6 +1315,7 @@ func (p *Pack) resume(ctx context.Context, req *spi.Request, name string) (*spi.
 			continue
 		} else if r.Status == "UPDATE_FAILED" && !slices.Contains(skip, any(r.Logical)) {
 			_, err = p.provision(ctx, req, r.Type, r.Logical, under(st, r, props), props, recorded(r), r.Physical, st.ID)
+			err = map[bool]error{false: err}[r.Type == "AWS::Kinesis::Stream" && err != nil && err.Error() == countRefused] // as a rollback: a count refused an on-demand stream is nothing left to put back
 		}
 		if r.Status == "UPDATE_FAILED" && err != nil {
 			r.Reason, first, err = err.Error(), cmp.Or(first, err), nil

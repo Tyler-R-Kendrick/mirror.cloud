@@ -25,9 +25,20 @@
   `LimitExceededException`: "The requested resource exceeds the maximum number
   allowed, or the number of concurrent stream requests exceeds the maximum
   number allowed."
-- The quoted wording is from the API reference as remembered: the vendored
-  model file is not in a checkout, so each quotation is a reading until it is
-  compared with the page.
+- The quotations of `DescribeLimits`, `UpdateShardCount`, `UpdateStreamMode`,
+  `StreamModeDetails` and of the Developer Guide's
+  [Quotas and limits](https://docs.aws.amazon.com/streams/latest/dev/service-sizes-and-limits.html)
+  were read from the pages in 2026-11. The others are from the API reference
+  as remembered: the vendored model file is not in a checkout, so each of
+  those is a reading until it is compared with the page.
+- The shard quota is the provisioned streams'. The quotas table gives, for
+  "Number of shards", under on-demand mode "There's no upper limit. Number of
+  shards depends on the amount of data ingested and the level of throughput
+  you require. Kinesis Data Streams automatically scales the number of
+  shards", and only under provisioned mode "The default shard quota is ...
+  shards per AWS account". An on-demand stream has the other quota: "By
+  default, you can create up to 50 data streams with the on-demand capacity
+  mode."
 - Before, `CreateStream` accepted `ShardCount` and dropped it. A
   CloudFormation stream whose template gave three shards was made with one,
   and a rollback that put the template's count back could only do it with
@@ -46,25 +57,106 @@
 | `DescribeStreamSummary` | No `StreamModeDetails` | The stream's mode: the one it was created with or `UpdateStreamMode` set, `PROVISIONED` when none was given |
 | `DescribeLimits` with on-demand streams | `OnDemandStreamCount` 0 | The number of the caller's streams whose mode is `ON_DEMAND` |
 | `UpdateShardCount` on a stream that does not exist | 200, and a stream record of that count | `ResourceNotFoundException` |
-| `CreateStream` or `UpdateShardCount` that would take the caller's open shards past `ShardLimit` (500) | Accepted | `LimitExceededException` |
+| `CreateStream` or `UpdateShardCount` of a provisioned stream that would take the caller's provisioned shards past `ShardLimit` (500) | Accepted | `LimitExceededException` |
+| `DescribeLimits.OpenShardCount` with on-demand streams | 1 | The provisioned streams' shards; an on-demand stream's are not counted |
 | A 51st on-demand stream (`OnDemandStreamCountLimit` 50) | Accepted | `LimitExceededException` |
+| `UpdateShardCount` on an on-demand stream | The count set | `ValidationException` |
+| `CreateStream` or `UpdateStreamMode` with a `StreamMode` that is not `PROVISIONED` or `ON_DEMAND` | Recorded as given | `ValidationException`, "1 validation error detected: Value 'X' at 'streamModeDetails.streamMode' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]" |
+| `UpdateStreamMode` with no `StreamModeDetails`, or a null one | `ValidationException`, "StreamModeDetails is required" | The same (it was `InternalFailure`, 500, between the two changes of this note) |
+| `CreateStream` or `UpdateStreamMode` with a `StreamModeDetails` that is `{}`, holds a null `StreamMode`, or is no structure | Taken as provisioned, or `InternalFailure` | `ValidationException` |
+| `UpdateStreamMode` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException` |
+| `UpdateStreamMode` to `ON_DEMAND` with 50 other on-demand streams, or to `PROVISIONED` when the stream's shards would take the provisioned shards past `ShardLimit` | Accepted | `LimitExceededException` |
 
 ## Readings
 
 - A provisioned stream created with no `ShardCount`, or one that is not
   positive, has one shard; the service requires a count there. An on-demand
-  stream has four: the Developer Guide gives a new on-demand stream "4 MB/s
-  write and 8 MB/s read throughput" by default, a shard carrying one megabyte
-  of writes a second (as remembered; a reading). A `ShardCount` given with
-  `ON_DEMAND` is kept as the count.
-- The shard limit is held over every stream's shards, on-demand ones
-  included, less those of the name a create replaces. Whether the service
-  counts on-demand shards against `ShardLimit` is not established. The
-  messages of both `LimitExceededException`s are this emulator's.
+  stream has four: "By default, new data streams created with the on-demand
+  capacity mode have 4 MB/s of write and 8 MB/s of read throughput", and
+  "Each shard can support up to 1 MB/sec ... write throughput" (Quotas and
+  limits); that this is four shards is the arithmetic, not a sentence of the
+  guide. A `ShardCount` given with `ON_DEMAND` is kept as the count.
+- The shard limit holds a provisioned stream over the shards of the other
+  provisioned streams, less those of the name a create replaces. An
+  on-demand stream's shards are neither held to it nor counted in it.
+  `DescribeLimits.OpenShardCount` is "The number of open shards", of an
+  operation that "Describes the shard limits and usage for the account":
+  that it is the count held against `ShardLimit`, the provisioned streams',
+  and leaves on-demand shards out, is a reading. The messages of both
+  `LimitExceededException`s are this emulator's, and so is the limit of 500
+  (the guide's defaults are 1,000, 6,000 or 20,000 by Region).
+- The `ResourceNotFoundException` of `UpdateShardCount` and `UpdateStreamMode`
+  carries "Stream <name> under account <id> not found.", the service's
+  message as its clients report it (not printed in the reference; a reading).
+  The other operations' is still empty.
+- `StreamMode` has "Valid Values: `PROVISIONED | ON_DEMAND`" (API reference,
+  StreamModeDetails). The message for any other is the form the service's
+  request validation gives an enum; that it is these words, and the order of
+  the values in them, is a reading.
+- `UpdateShardCount` "is only supported for the data streams with the
+  provisioned capacity mode" (API reference). Which of its errors answers an
+  on-demand stream is not stated: `ValidationException` ("The request failed
+  data validation for this data stream") and the message are a reading.
+  `SplitShard` and `MergeShards`, "Only applicable for provisioned" (Quotas
+  and limits), still move an on-demand stream's count.
 - `SplitShard`, `MergeShards` and the retention operations still make a
   record for a stream that does not exist, as the recorded trace has them.
-- A CloudFormation `AWS::Kinesis::Stream` does not pass its
-  `StreamModeDetails` on: its streams are provisioned.
+- A CloudFormation `AWS::Kinesis::Stream` has the mode its template gives:
+  `StreamModeDetails` goes to `CreateStream`, and its "Update requires: No
+  interruption" (Template Reference) is an `UpdateStreamMode` in place. A
+  rollback, and a continued one, put the previous mode back, and a template
+  that stops giving a mode leaves a provisioned stream, cleared only when
+  the previous template gave one.
+- A CloudFormation stream's shard count is sent, after the mode, when its
+  template's `ShardCount` differs from what the previous template gave, or
+  when the update takes the stream from on-demand by its template to not
+  on-demand and the template gives a count; never to a stream whose
+  template makes it on-demand. The second case is there because a count
+  given or changed while the template made the stream on-demand was never
+  sent: `{}`, then `ON_DEMAND` with 7, then `PROVISIONED` with 7 ended
+  with one shard, and `ON_DEMAND` with 7, then with 9, then `PROVISIONED`
+  with 9 ended with seven. A restore does the same, so a rollback from
+  on-demand to a provisioned template puts that template's count back. A
+  continued rollback knows only that the mode changed, not what it was,
+  and takes a changed mode for a stream that was on-demand (a reading: it
+  can send a count the stream already has). A template that gives no count
+  is sent none on leaving on-demand, and keeps the shards it has. A change of mode
+  in place leaves the stream's shards as they are, as Kinesis itself does.
+  Two consequences are readings of what the service's handler would do,
+  pinned as they are: a stream made on-demand in place keeps the count it
+  had (a provisioned stream of one shard given `ON_DEMAND` and a
+  `ShardCount` of 7 is on-demand with one), where a stream created from the
+  same template has the template's count or four; and a rollback to
+  on-demand, after an update that had made the stream provisioned with five
+  shards, leaves five. An on-demand stream's count is the service's, not
+  the template's: a `ShardCount` added to, changed in or taken out of such
+  a template is not sent.
+- A stream whose mode was set to on-demand outside a template that gives a
+  count and no mode is updated as any other; before, every update of it
+  failed and the stack was left `UPDATE_ROLLBACK_FAILED`. An update that
+  changes that template's count fails with Kinesis's refusal and rolls back
+  to `UPDATE_ROLLBACK_COMPLETE`: the restore's count is refused as the
+  update's was, and since the update's never applied there is nothing to
+  put back, so that one refusal, of the count call alone, does not stop a
+  rollback or `ContinueUpdateRollback`. It is recognised whole, by its code
+  and its full sentence, and only on a stream: an error that merely
+  contains those words, as `ResourceNotFoundException` does for a stream so
+  named, or the enum refusal for a stored mode so spelled, is a failed
+  restore like any other. Any other restore that fails is a failed
+  rollback. The same reading holds on a continued rollback of a count that
+  did apply: `ShardCount` 2 updated to 5, the restore failing for another
+  reason, the stream then made on-demand outside the stack, ends
+  `UPDATE_ROLLBACK_COMPLETE` with the stream on-demand and five shards.
+- A request's `StreamModeDetails` that is absent or null is not given:
+  `CreateStream` makes a provisioned stream and `UpdateStreamMode` answers
+  "StreamModeDetails is required", as for any required member, before
+  anything else. One that is given must be a structure with a `StreamMode`
+  ("Required: Yes") of the two values. The messages for a `StreamMode` that
+  is missing or null ("Member must not be null") and for a value that is no
+  structure are this emulator's, in the service's form.
+- A stream record stored with a `StreamModeDetails` that is not such a
+  structure (an earlier `UpdateStreamMode` stored what it was given) is a
+  provisioned stream to every operation.
 - `DescribeStream` and `ListShards` still list exactly one shard,
   `shardId-000000000000`, with the full hash-key range, whatever the count.
   Shards are not records here: listing a stream's real shards needs one
@@ -72,9 +164,9 @@
   expressions cannot compute), parent and adjacent shards for splits and
   merges, and a record plane that routes a partition key to a shard and
   hands out one iterator per shard. `PutRecord` writes to that one shard.
-- `UpdateShardCount` applies at once: the stream is never `UPDATING`, and
-  none of the service's limits on how far or how often a count may move is
-  applied.
+- `UpdateShardCount` and `UpdateStreamMode` apply at once: the stream is
+  never `UPDATING`, and none of the service's limits on how far or how
+  often a count or a mode may move is applied.
 
 ## Recorded trace
 

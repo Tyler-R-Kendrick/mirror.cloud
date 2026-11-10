@@ -278,16 +278,16 @@ func TestKinesisAnOnDemandStreamIsRecordedAsOne(t *testing.T) {
 			t.Errorf("stream %s is summarized %s; want %s", stream, got, want)
 		}
 	}
-	if got := limits(); got != "open=15 on-demand=2" {
-		t.Errorf("the account's limits read %s; want 15 open shards and 2 on-demand streams", got)
+	if got := limits(); got != "open=5 on-demand=2" {
+		t.Errorf("the account's limits read %s; want the 5 open shards of its provisioned streams and 2 on-demand streams", got)
 	}
 	call("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/plain","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
 	call("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/od","StreamModeDetails":{"StreamMode":"PROVISIONED"}}`)
-	if got := summary("plain") + ", " + summary("od") + ", " + limits(); got != "ON_DEMAND 3, PROVISIONED 4, open=15 on-demand=2" {
+	if got := summary("plain") + ", " + summary("od") + ", " + limits(); got != "ON_DEMAND 3, PROVISIONED 4, open=6 on-demand=2" {
 		t.Errorf("after each of two streams changed mode: %s", got)
 	}
 	call("DeleteStream", `{"StreamName":"od6"}`)
-	if got := limits(); got != "open=9 on-demand=1" {
+	if got := limits(); got != "open=6 on-demand=1" {
 		t.Errorf("after an on-demand stream is deleted the limits read %s", got)
 	}
 }
@@ -296,8 +296,12 @@ func TestKinesisAnOnDemandStreamIsRecordedAsOne(t *testing.T) {
 // does not exist answered 200 and made a record of one; and nothing held the ShardLimit DescribeLimits
 // reports. UpdateShardCount lists ResourceNotFoundException and LimitExceededException among its errors,
 // CreateStream LimitExceededException: "The requested resource exceeds the maximum number allowed"
-// (Kinesis API reference, as remembered). The message here is this emulator's. Shards of on-demand
-// streams are counted against the limit with the others, which is a reading.
+// (Kinesis API reference). The message here is this emulator's. The limit is the provisioned streams':
+// the Developer Guide's quotas give "the default shard quota" under provisioned mode alone, and under
+// on-demand "There's no upper limit ... Kinesis Data Streams automatically scales the number of shards",
+// so an on-demand stream's shards are neither held to it nor counted in it. That DescribeLimits'
+// OpenShardCount, "The number of open shards", is the count held against ShardLimit, the provisioned
+// streams', is a reading: the operation "Describes the shard limits and usage for the account".
 func TestKinesisAShardCountIsAnExistingStreamsWithinTheLimit(t *testing.T) {
 	try := kinesisTries(t)
 	code := func(op, body string) string { // of try as it is when called: a second service is booted below
@@ -316,10 +320,10 @@ func TestKinesisAShardCountIsAnExistingStreamsWithinTheLimit(t *testing.T) {
 		{"CreateStream", `{"StreamName":"b","ShardCount":201}`, "400 LimitExceededException"},
 		{"CreateStream", `{"StreamName":"b","ShardCount":200}`, "200 <nil>"},
 		{"CreateStream", `{"StreamName":"c"}`, "400 LimitExceededException"},
-		{"CreateStream", `{"StreamName":"c","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "400 LimitExceededException"},
+		{"CreateStream", `{"StreamName":"od","ShardCount":400,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "200 <nil>"}, // on-demand: not the limit's
 		{"UpdateShardCount", `{"StreamName":"a","TargetShardCount":301,"ScalingType":"UNIFORM_SCALING"}`, "400 LimitExceededException"},
 		{"UpdateShardCount", `{"StreamName":"a","TargetShardCount":296,"ScalingType":"UNIFORM_SCALING"}`, "200 <nil>"},
-		{"CreateStream", `{"StreamName":"c","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "200 <nil>"},
+		{"CreateStream", `{"StreamName":"c","ShardCount":4}`, "200 <nil>"},
 		{"CreateStream", `{"StreamName":"a","ShardCount":296}`, "200 <nil>"}, // over its own name: its 296 shards are not counted twice
 		{"CreateStream", `{"StreamName":"a","ShardCount":297}`, "400 LimitExceededException"},
 	} {
@@ -328,7 +332,7 @@ func TestKinesisAShardCountIsAnExistingStreamsWithinTheLimit(t *testing.T) {
 		}
 	}
 	if _, limits := try("DescribeLimits", `{}`); fmt.Sprint(limits["OpenShardCount"], limits["ShardLimit"]) != "500 500" {
-		t.Errorf("the limits read %v; want every one of the 500 shards open", limits)
+		t.Errorf("the limits read %v; want every one of the 500 shards open, the on-demand stream's 400 apart", limits)
 	}
 
 	// The on-demand streams have their own limit, the OnDemandStreamCountLimit DescribeLimits reports.
@@ -343,5 +347,232 @@ func TestKinesisAShardCountIsAnExistingStreamsWithinTheLimit(t *testing.T) {
 	}
 	if got := code("CreateStream", `{"StreamName":"od7","ShardCount":2,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`) + ", " + code("CreateStream", `{"StreamName":"p","ShardCount":1}`); got != "200 <nil>, 200 <nil>" {
 		t.Errorf("an on-demand stream created over its own name, and a provisioned one beside fifty on-demand, answered %s", got)
+	}
+}
+
+// kinesisAnswers boots the service alone and answers a call as "status code: message".
+func kinesisAnswers(t *testing.T) func(op, body string) string {
+	try := kinesisTries(t)
+	return func(op, body string) string {
+		t.Helper()
+		status, out := try(op, body)
+		if status < 300 {
+			return fmt.Sprint(status)
+		}
+		return fmt.Sprint(status, " ", out["__type"], ": ", out["message"])
+	}
+}
+
+// An on-demand stream's shard count is not the caller's to set: UpdateShardCount "is only supported for
+// the data streams with the provisioned capacity mode" (API reference). It was applied to any stream.
+// The reference does not say which of the operation's errors answers; ValidationException, "The request
+// failed data validation for this data stream", and the message are a reading.
+func TestKinesisAnOnDemandStreamsShardCountIsNotUpdated(t *testing.T) {
+	answer := kinesisAnswers(t)
+	answer("CreateStream", `{"StreamName":"od","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
+	answer("CreateStream", `{"StreamName":"p","ShardCount":2}`)
+	const refused = "400 ValidationException: UpdateShardCount is only supported for data streams with the provisioned capacity mode."
+	if got := answer("UpdateShardCount", `{"StreamName":"od","TargetShardCount":8,"ScalingType":"UNIFORM_SCALING"}`); got != refused {
+		t.Errorf("UpdateShardCount on an on-demand stream answered %s", got)
+	}
+	if got := answer("UpdateShardCount", `{"StreamName":"p","TargetShardCount":3,"ScalingType":"UNIFORM_SCALING"}`); got != "200" {
+		t.Errorf("UpdateShardCount on a provisioned stream answered %s", got)
+	}
+	answer("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/p","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
+	answer("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/od","StreamModeDetails":{"StreamMode":"PROVISIONED"}}`)
+	if got := answer("UpdateShardCount", `{"StreamName":"p","TargetShardCount":4,"ScalingType":"UNIFORM_SCALING"}`) + ", " + answer("UpdateShardCount", `{"StreamName":"od","TargetShardCount":5,"ScalingType":"UNIFORM_SCALING"}`); got != refused+", 200" {
+		t.Errorf("after each stream changed mode, the two updates answered %s", got)
+	}
+}
+
+// A stream that changes mode is held to the limit of the mode it takes, as a stream created in it is:
+// UpdateStreamMode lists LimitExceededException, "The requested resource exceeds the maximum number
+// allowed", and ResourceNotFoundException (API reference). It set the mode of any stream, made a record
+// for one that did not exist, and let a 51st on-demand stream and a 501st provisioned shard through. A
+// stream that already has the mode asked for is not counted against itself. The messages are this emulator's.
+func TestKinesisAStreamThatChangesModeIsHeldToItsLimit(t *testing.T) {
+	answer := kinesisAnswers(t)
+	mode := func(stream, to string) string {
+		return answer("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/`+stream+`","StreamModeDetails":{"StreamMode":"`+to+`"}}`)
+	}
+	if got := mode("ghost", "ON_DEMAND"); !strings.HasPrefix(got, "400 ResourceNotFoundException") {
+		t.Errorf("UpdateStreamMode on a stream that does not exist answered %s", got)
+	}
+	if got := answer("DescribeStreamSummary", `{"StreamName":"ghost"}`); !strings.HasPrefix(got, "400 ResourceNotFoundException") {
+		t.Errorf("the stream that does not exist is described: %s", got)
+	}
+	// The shard limit: 400 provisioned shards, and an on-demand stream of 101 that may not become provisioned.
+	answer("CreateStream", `{"StreamName":"p","ShardCount":400}`)
+	answer("CreateStream", `{"StreamName":"big","ShardCount":101,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
+	answer("CreateStream", `{"StreamName":"fits","ShardCount":100,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
+	const shards = "400 LimitExceededException: This request would exceed the shard limit for the account."
+	if got := mode("big", "PROVISIONED") + ", " + mode("fits", "PROVISIONED") + ", " + mode("fits", "PROVISIONED") + ", " + mode("p", "PROVISIONED"); got != shards+", 200, 200, 200" {
+		t.Errorf("an on-demand stream of 101 shards, one of 100 (twice), and the provisioned one itself, made provisioned beside 400 shards, answered %s", got)
+	}
+	// The on-demand limit: fifty on-demand streams, and a provisioned one that may not join them.
+	answer = kinesisAnswers(t)
+	for i := range 50 {
+		answer("CreateStream", fmt.Sprintf(`{"StreamName":"od%d","ShardCount":1,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, i))
+	}
+	answer("CreateStream", `{"StreamName":"p","ShardCount":1}`)
+	const streams = "400 LimitExceededException: This request would exceed the limit of on-demand streams for the account."
+	if got := mode("p", "ON_DEMAND") + ", " + mode("od3", "ON_DEMAND"); got != streams+", 200" {
+		t.Errorf("a 51st on-demand stream by a change of mode, and one of the fifty asked to be what it is, answered %s", got)
+	}
+	answer("DeleteStream", `{"StreamName":"od7"}`)
+	if got := mode("p", "ON_DEMAND"); got != "200" {
+		t.Errorf("with one of the fifty deleted the change of mode answered %s", got)
+	}
+}
+
+// A stream's mode is PROVISIONED or ON_DEMAND ("Valid Values: PROVISIONED | ON_DEMAND", API reference,
+// StreamModeDetails). Any other was recorded as given. It is ValidationException, in the words the
+// service's request validation uses for an enum; that those are the words here, and the order of the
+// values in them, is a reading.
+func TestKinesisAStreamModeIsOneOfTheTwo(t *testing.T) {
+	answer := kinesisAnswers(t)
+	refused := func(value string) string {
+		return "400 ValidationException: 1 validation error detected: Value '" + value + "' at 'streamModeDetails.streamMode' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]"
+	}
+	for _, value := range []string{"BOGUS", "on_demand", ""} {
+		if got := answer("CreateStream", `{"StreamName":"n","StreamModeDetails":{"StreamMode":"`+value+`"}}`); got != refused(value) {
+			t.Errorf("CreateStream with the mode %q answered %s", value, got)
+		}
+	}
+	if got := answer("DescribeStreamSummary", `{"StreamName":"n"}`); !strings.HasPrefix(got, "400 ResourceNotFoundException") {
+		t.Errorf("a stream refused for its mode is described: %s", got)
+	}
+	answer("CreateStream", `{"StreamName":"s","ShardCount":2}`)
+	arn := `"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s"`
+	if got := answer("UpdateStreamMode", `{`+arn+`,"StreamModeDetails":{"StreamMode":"BOGUS"}}`); got != refused("BOGUS") {
+		t.Errorf("UpdateStreamMode with the mode BOGUS answered %s", got)
+	}
+	for _, value := range []string{"ON_DEMAND", "PROVISIONED"} {
+		if got := answer("UpdateStreamMode", `{`+arn+`,"StreamModeDetails":{"StreamMode":"`+value+`"}}`) + " " + answer("CreateStream", `{"StreamName":"c`+value+`","StreamModeDetails":{"StreamMode":"`+value+`"}}`); got != "200 200" {
+			t.Errorf("the mode %s answered %s to a change and a create", value, got)
+		}
+	}
+}
+
+// A stream that is not found is named: "Stream <name> under account <id> not found." is the service's
+// message, as its clients see it; UpdateShardCount and UpdateStreamMode answered ResourceNotFoundException
+// with none.
+func TestKinesisAStreamNotFoundIsNamed(t *testing.T) {
+	answer := kinesisAnswers(t)
+	const want = "400 ResourceNotFoundException: Stream ghost under account 000000000000 not found."
+	if got := answer("UpdateShardCount", `{"StreamName":"ghost","TargetShardCount":2,"ScalingType":"UNIFORM_SCALING"}`); got != want {
+		t.Errorf("UpdateShardCount answered %s", got)
+	}
+	if got := answer("UpdateShardCount", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/ghost","TargetShardCount":2,"ScalingType":"UNIFORM_SCALING"}`); got != want {
+		t.Errorf("UpdateShardCount by ARN answered %s", got)
+	}
+	if got := answer("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/ghost","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`); got != want {
+		t.Errorf("UpdateStreamMode answered %s", got)
+	}
+}
+
+// A request's StreamModeDetails is read whole, whatever it holds. The checks of the mode ran before the
+// operation's required members were looked at and read the mode as a member of a structure, so an
+// UpdateStreamMode with no StreamModeDetails, with {}, with a string or with null was InternalFailure
+// (500) where main answered that the member is required, and a CreateStream whose StreamMode was null was
+// InternalFailure too, while {} and a string were taken as provisioned.
+//
+// A StreamModeDetails that is absent or null is not given: CreateStream makes a provisioned stream, and
+// UpdateStreamMode answers what it answers for a required member that is missing. One that is given must
+// hold a StreamMode ("Required: Yes", API reference, StreamModeDetails) of the two values; anything else
+// is ValidationException. The messages for a missing StreamMode and for a value that is no structure are
+// this emulator's, in the service's form for a null member. A required member that is missing is still
+// answered first: a StreamName where UpdateStreamMode takes a StreamARN is "StreamARN is required",
+// whether or not the stream exists.
+func TestKinesisAStreamModeIsReadWhole(t *testing.T) {
+	try := kinesisTries(t)
+	answer := func(op, body string) string {
+		status, out := try(op, body)
+		return strings.TrimSuffix(fmt.Sprint(status, " ", out["__type"], ": ", out["message"]), " <nil>: <nil>")
+	}
+	answer("CreateStream", `{"StreamName":"s","ShardCount":2}`)
+	const arn = `"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s"`
+	const null = "400 ValidationException: 1 validation error detected: Value null at 'streamModeDetails.streamMode' failed to satisfy constraint: Member must not be null"
+	const shape = "400 ValidationException: 1 validation error detected: Value at 'streamModeDetails' failed to satisfy constraint: Member must be a structure with a StreamMode"
+	enum := func(value string) string {
+		return "400 ValidationException: 1 validation error detected: Value '" + value + "' at 'streamModeDetails.streamMode' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]"
+	}
+	for _, row := range []struct{ op, body, want string }{
+		{"UpdateStreamMode", `{` + arn + `}`, "400 ValidationException: StreamModeDetails is required"},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":null}`, "400 ValidationException: StreamModeDetails is required"},
+		{"UpdateStreamMode", `{}`, "400 ValidationException: StreamARN is required"},
+		{"UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/ghost"}`, "400 ValidationException: StreamModeDetails is required"},
+		{"UpdateStreamMode", `{"StreamName":"ghost","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "400 ValidationException: StreamARN is required"},
+		{"UpdateStreamMode", `{"StreamName":"s","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "400 ValidationException: StreamARN is required"},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":{}}`, null},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":{"StreamMode":null}}`, null},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":"ON_DEMAND"}`, shape},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":["ON_DEMAND"]}`, shape},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":{"StreamMode":7}}`, enum("7")},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":{"StreamMode":{"a":1}}}`, enum(`{"a":1}`)},
+		{"UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/ghost","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "400 ResourceNotFoundException: Stream ghost under account 000000000000 not found."},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "200"},
+		{"CreateStream", `{"StreamName":"a","StreamModeDetails":{"StreamMode":null}}`, null},
+		{"CreateStream", `{"StreamName":"a","StreamModeDetails":{}}`, null},
+		{"CreateStream", `{"StreamName":"a","StreamModeDetails":"ON_DEMAND"}`, shape},
+		{"CreateStream", `{"StreamName":"a","StreamModeDetails":{"StreamMode":7}}`, enum("7")},
+		{"CreateStream", `{"StreamName":"a","StreamModeDetails":{"StreamMode":["ON_DEMAND"]}}`, enum(`["ON_DEMAND"]`)},
+		{"DescribeStreamSummary", `{"StreamName":"a"}`, "400 ResourceNotFoundException: "},
+		{"CreateStream", `{"StreamName":"a","StreamModeDetails":null}`, "200"},
+	} {
+		if got := answer(row.op, row.body); got != row.want {
+			t.Errorf("%s %s answered %s; want %s", row.op, row.body, got, row.want)
+		}
+	}
+	// What the last two made: the stream whose mode was given, and the one whose mode was null.
+	for stream, want := range map[string]string{"s": "ON_DEMAND", "a": "PROVISIONED"} {
+		if got := answer("DescribeStreamSummary", `{"StreamName":"`+stream+`"}`); got != "200" {
+			t.Fatalf("stream %s: %s", stream, got)
+		}
+		_, out := try("DescribeStreamSummary", `{"StreamName":"`+stream+`"}`)
+		if mode := out["StreamDescriptionSummary"].(map[string]any)["StreamModeDetails"].(map[string]any)["StreamMode"]; mode != want {
+			t.Errorf("stream %s has the mode %v; want %s", stream, mode, want)
+		}
+	}
+}
+
+// A stream record an earlier build stored with a StreamModeDetails that is null or a string, which its
+// UpdateStreamMode wrote as it was given, is a provisioned stream to every operation. Reading the mode
+// as a member of a structure failed on such a record: CreateStream of any provisioned stream and
+// UpdateShardCount were InternalFailure once one was in the account, as DescribeLimits and
+// DescribeStreamSummary were before.
+func TestKinesisAnOlderRecordsModeIsProvisioned(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := bundled.Handler("aws.kinesis", deps)
+	request := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	streams := deps.Store.Scope(id.Account, id.Region).Collection("kinesis")
+	for name, mode := range map[string]string{"null": `null`, "text": `"ON_DEMAND"`, "number": `7`, "empty": `{}`, "list": `["ON_DEMAND"]`, "inner": `{"StreamMode":null}`} {
+		if err := streams.Put(context.Background(), name, []byte(`{"StreamName":"`+name+`","Seq":0,"OpenShardCount":3,"StreamModeDetails":`+mode+`}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request("CreateStream", map[string]any{"StreamName": "new", "ShardCount": 2})
+	request("CreateStream", map[string]any{"StreamName": "od", "StreamModeDetails": map[string]any{"StreamMode": "ON_DEMAND"}})
+	if limits := request("DescribeLimits", map[string]any{}); fmt.Sprint(limits["OpenShardCount"], limits["OnDemandStreamCount"]) != "20 1" {
+		t.Errorf("the limits read %v; want the six older records' eighteen shards and the new stream's two, and one on-demand stream", limits)
+	}
+	for _, name := range []string{"null", "text", "number", "empty", "list", "inner"} {
+		summary := request("DescribeStreamSummary", map[string]any{"StreamName": name})["StreamDescriptionSummary"].(map[string]any)
+		moved := request("UpdateShardCount", map[string]any{"StreamName": name, "TargetShardCount": 4, "ScalingType": "UNIFORM_SCALING"})
+		if mode := summary["StreamModeDetails"].(map[string]any)["StreamMode"]; mode != "PROVISIONED" || fmt.Sprint(moved["CurrentShardCount"], moved["TargetShardCount"]) != "3 4" {
+			t.Errorf("the record whose mode is stored as %s is summarized %v and its count moved %v; want a provisioned stream, from 3 to 4", name, mode, moved)
+		}
+	}
+	request("UpdateStreamMode", map[string]any{"StreamARN": "arn:aws:kinesis:us-east-1:123456789012:stream/text", "StreamModeDetails": map[string]any{"StreamMode": "ON_DEMAND"}})
+	if limits := request("DescribeLimits", map[string]any{}); fmt.Sprint(limits["OpenShardCount"], limits["OnDemandStreamCount"]) != "22 2" {
+		t.Errorf("after one older record is made on-demand the limits read %v", limits)
 	}
 }

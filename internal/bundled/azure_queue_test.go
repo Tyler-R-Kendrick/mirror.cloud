@@ -343,3 +343,99 @@ func TestAzureQueueLifetimesAreNotTruncated(t *testing.T) {
 		t.Fatalf("after delete: approx count %s, want 0", got)
 	}
 }
+
+// A pop receipt stays good until the message is dequeued again, updated or
+// deleted: an update on it is stored whether or not the message is visible at
+// the time. Put Message's receipt is one too.
+func TestAzureQueueUpdateOfAVisibleMessage(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, err := bundled.New("azure.queue", deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	inv := func(op string, in map[string]any) map[string]any {
+		t.Helper()
+		in["queue"] = "q"
+		res, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return res.Output
+	}
+	mismatch := func(op string, in map[string]any) {
+		t.Helper()
+		in["queue"] = "q"
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if f, ok := err.(*spi.Fault); !ok || f.Code != "PopReceiptMismatch" {
+			t.Fatalf("%s on a spent receipt: %#v", op, err)
+		}
+	}
+	peeked := func() string {
+		t.Helper()
+		var texts []string
+		for _, m := range inv("PeekMessages", map[string]any{"numofmessages": "32"})["_list"].([]any) {
+			texts = append(texts, fmt.Sprint(m.(map[string]any)["message"]))
+		}
+		return strings.Join(texts, ",")
+	}
+	update := func(mid, receipt, vt, text string) string {
+		t.Helper()
+		out := inv("UpdateMessage", map[string]any{"messageid": mid, "popreceipt": receipt, "visibilitytimeout": vt, "message": text})
+		next := fmt.Sprint(out["pop_receipt"])
+		if next == "" || next == receipt {
+			t.Fatalf("update answered receipt %q for %q", next, receipt)
+		}
+		return next
+	}
+	advance := func(d time.Duration) {
+		t.Helper()
+		if err := deps.Clock.Advance(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inv("CreateQueue", map[string]any{})
+
+	// Never dequeued: the receipt is the put's.
+	put := inv("PutMessage", map[string]any{"message": "first"})
+	mid, r0 := fmt.Sprint(put["id"]), fmt.Sprint(put["pop_receipt"])
+	r1 := update(mid, r0, "0", "edited")
+	if got := peeked(); got != "edited" {
+		t.Fatalf("after updating a never-dequeued message: peek %q", got)
+	}
+	mismatch("UpdateMessage", map[string]any{"messageid": mid, "popreceipt": r0, "visibilitytimeout": "0", "message": "x"})
+
+	// Visible after an update with no timeout: the next update hides it.
+	r2 := update(mid, r1, "5", "hidden")
+	if got := peeked(); got != "" {
+		t.Fatalf("after an update with a timeout: peek %q, want nothing visible", got)
+	}
+	advance(4999 * time.Millisecond)
+	if got := peeked(); got != "" {
+		t.Fatalf("4.999s into a 5s timeout: peek %q", got)
+	}
+	advance(time.Millisecond)
+	if got := peeked(); got != "hidden" {
+		t.Fatalf("after the timeout: peek %q", got)
+	}
+
+	// Visible again because the timeout ran out: the receipt is still good.
+	r3 := update(mid, r2, "0", "late")
+	if got := peeked(); got != "late" {
+		t.Fatalf("after updating a reappeared message: peek %q", got)
+	}
+	mismatch("DeleteMessage", map[string]any{"messageid": mid, "popreceipt": r2})
+
+	// A dequeue spends it.
+	dq := inv("GetMessages", map[string]any{"visibilitytimeout": "1"})["_list"].([]any)
+	if len(dq) != 1 || fmt.Sprint(dq[0].(map[string]any)["dequeue_count"]) != "1" {
+		t.Fatalf("dequeue %#v", dq)
+	}
+	mismatch("UpdateMessage", map[string]any{"messageid": mid, "popreceipt": r3, "visibilitytimeout": "0", "message": "x"})
+	advance(time.Second)
+	inv("DeleteMessage", map[string]any{"messageid": mid, "popreceipt": fmt.Sprint(dq[0].(map[string]any)["pop_receipt"])})
+	if got := peeked(); got != "" {
+		t.Fatalf("after delete: peek %q", got)
+	}
+}

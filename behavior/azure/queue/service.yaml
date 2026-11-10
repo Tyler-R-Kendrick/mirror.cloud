@@ -49,6 +49,15 @@ resources:
                 actions:
                   - set: { dequeue_count: "int(rec.dequeue_count) + 1", pop_receipt: "event.popReceipt + '-' + string(rec.seq)", visible_at: "int(event.nextVisible)", visible_ms: "int(event.nextVisibleMs)" }
                   - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
+            # A pop receipt outlives the visibility timeout: it is good until
+            # the message is dequeued again, updated or deleted, and Put
+            # Message hands one out too. So a visible message is updated like
+            # an invisible one, and hidden again for the timeout it is given.
+            UPDATE:
+              - target: invisible
+                actions:
+                  - set: { pop_receipt: "event.popReceipt", message: "event.text", visible_at: "int(event.nextVisible)", visible_ms: "int(event.nextVisibleMs)" }
+                  - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
             DELETE: [{ target: deleted }]
             CLEAR: [{ target: deleted }]
         invisible:

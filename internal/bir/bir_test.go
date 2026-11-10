@@ -597,3 +597,21 @@ func TestOpenObjectOutputIsAcceptedOnAShapeWithNoMembers(t *testing.T) {
 		}
 	}
 }
+
+// malformed_input_error names a row of the error table, as missing_input_error
+// does: the engine answers with it, so a name the table lacks is refused at
+// load rather than found by the first malformed request.
+func TestMalformedInputErrorNamesARowOfTheErrorTable(t *testing.T) {
+	named := func(ref string) string {
+		return strings.Replace(demoBundle, "service: aws.demo\n", "service: aws.demo\nmalformed_input_error: "+ref+"\n", 1)
+	}
+	if _, err := loadDemo(t, named("Nope")); err == nil || !strings.Contains(err.Error(), `malformed_input_error: unknown error "Nope"`) {
+		t.Errorf("a malformed_input_error the table lacks loaded: %v", err)
+	}
+	if svc, err := loadDemo(t, named("NotFound")); err != nil || svc.MalformedInput != "NotFound" {
+		t.Errorf("a malformed_input_error of the table: %v, %+v", err, svc)
+	}
+	if svc, err := loadDemo(t, demoBundle); err != nil || svc.MalformedInput != "" {
+		t.Errorf("a bundle that names none has %q: %v", svc.MalformedInput, err)
+	}
+}

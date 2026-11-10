@@ -110,6 +110,16 @@ type Service struct {
 	// bundle that knows better says so here.
 	MissingInput string `yaml:"missing_input_error,omitempty"`
 
+	// MalformedInput names the error table entry the engine answers with when
+	// a member the model declares a string or an integer is given a value that
+	// could be neither -- null, an object, an array, or for an integer anything
+	// that is not a whole number. Left unset nothing is checked and the value
+	// reaches the bundle's expressions as it came: services that have their own
+	// answer for such a value (Secrets Manager's MaxResults) give it there, and
+	// one that converts with string() and int() and has none fails. A bundle
+	// names it to be answered for instead.
+	MalformedInput string `yaml:"malformed_input_error,omitempty"`
+
 	// MissingInputMessages maps a required member name to the wording the
 	// service uses for its absence. Left unset, the member name is the
 	// message — SQS's MessageGroupId, Label, SourceArn. MessageBody is the

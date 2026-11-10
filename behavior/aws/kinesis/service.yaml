@@ -15,6 +15,11 @@ provenance: authored
 # record collection below, numeric-key ordering and Limit pagination.
 native: [PutRecord, PutRecords, GetShardIterator, GetRecords]
 
+# A member that should be a string or an integer and could be neither is the
+# caller's mistake, answered before any rule: the expressions below convert
+# with string() and int(), which have no answer for null, an object or a list.
+malformed_input_error: Validation
+
 resources:
   # Streams are keyed by StreamName alone for the operations the pack's main
   # switch serves (CreateStream, DeleteStream, DescribeStream,
@@ -97,6 +102,9 @@ operations:
       - cond: "!given || mode in ['PROVISIONED', 'ON_DEMAND']"
         error: Validation
         message_expr: "'1 validation error detected: Value \\'' + mode + '\\' at \\'streamModeDetails.streamMode\\' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]'"
+      - cond: "!('ShardCount' in input) || int(input.ShardCount) >= 1"
+        error: Validation
+        message_expr: "'1 validation error detected: Value \\'' + string(int(input.ShardCount)) + '\\' at \\'shardCount\\' failed to satisfy constraint: Member must have value greater than or equal to 1'"
       - cond: "mode == 'ON_DEMAND' || sum(streams.filter(s, !('StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND')).map(s, 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1)) + shards <= 500"
         error: LimitExceeded
         message: This request would exceed the shard limit for the account.
@@ -396,6 +404,9 @@ operations:
       cur: "s_found && 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1"
       target: "int(input.TargetShardCount) > 0 ? int(input.TargetShardCount) : cur"
     require:
+      - cond: "!('TargetShardCount' in input) || int(input.TargetShardCount) >= 1"
+        error: Validation
+        message_expr: "'1 validation error detected: Value \\'' + string(int(input.TargetShardCount)) + '\\' at \\'targetShardCount\\' failed to satisfy constraint: Member must have value greater than or equal to 1'"
       - cond: s_found
         error: NotFound
         message_expr: "'Stream ' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
@@ -614,7 +625,8 @@ quirks:
       it, and the consumer named is not checked to exist.
   - operation: UpdateShardCount
     note: >
-      A stream that does not exist faults ResourceNotFoundException with the
+      A target below 1 faults ValidationException before the stream is looked
+      for, as CreateStream's ShardCount does. A stream that does not exist faults ResourceNotFoundException with the
       service's message, an on-demand stream ValidationException (the
       operation is a provisioned stream's alone), and a target that would
       take the account's provisioned shards past its ShardLimit

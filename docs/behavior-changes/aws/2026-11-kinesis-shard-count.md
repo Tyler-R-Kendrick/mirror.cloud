@@ -67,6 +67,8 @@
 | `IncreaseStreamRetentionPeriod` or `DecreaseStreamRetentionPeriod` on a stream that does not exist | 200, and a stream record that `DescribeStream` then answered | `ResourceNotFoundException`, with the message; no record |
 | `DescribeStream`, `DescribeStreamSummary`, `PutRecord` or `DescribeStreamConsumer` of what does not exist | `ResourceNotFoundException` with no message | The same, with the message |
 | A third change of a stream's mode within 24 hours | Accepted | `LimitExceededException` |
+| `CreateStream` with a `ShardCount`, or `UpdateShardCount` with a `TargetShardCount`, of 0 or less | The default made (one shard, or four on-demand); 200 and nothing changed | `ValidationException`, "1 validation error detected: Value '0' at 'shardCount' failed to satisfy constraint: Member must have value greater than or equal to 1" (`targetShardCount` for the other) |
+| Any operation with a member that should be a string given null, an object or a list, or one that should be an integer given anything but a whole number | `InternalFailure` (500) wherever the member was read | `ValidationException`, "<Member> must be a string" or "<Member> must be an integer", before any other rule |
 | `UpdateStreamMode` with no `StreamModeDetails`, or a null one | `ValidationException`, "StreamModeDetails is required" | The same (it was `InternalFailure`, 500, between the two changes of this note) |
 | `CreateStream` or `UpdateStreamMode` with a `StreamModeDetails` that is `{}`, holds a null `StreamMode`, or is no structure | Taken as provisioned, or `InternalFailure` | `ValidationException` |
 | `UpdateStreamMode` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException` |
@@ -165,6 +167,23 @@
   refuses fails as any refused call does: a rollback is left
   `UPDATE_ROLLBACK_FAILED` with Kinesis's reason, and
   `ContinueUpdateRollback` succeeds once the window has passed.
+- "Valid Range: Minimum value of 1" is the reference's for `CreateStream`'s
+  `ShardCount` and `UpdateShardCount`'s `TargetShardCount`; that the answer
+  is `ValidationException`, and its message, are readings in the form the
+  service uses for a constraint. The count is judged before the stream is
+  looked for. A CloudFormation stream whose template gives 0 or -1 fails
+  its create, or its update, which rolls back to the count it had.
+- A member that cannot be what the model declares is refused by the engine
+  for this bundle (`malformed_input_error`, a bundle option; no other
+  service is changed): null, an object or a list for a string, and for an
+  integer also a Boolean, a fraction, text that is not a whole number, or a
+  number no 64-bit integer holds. The service itself refuses such a request
+  when it reads it; `ValidationException` and the two messages are this
+  emulator's, a reading, and so are two leniencies: a string member given a
+  number or a Boolean is read as its text, and an integer written as text
+  ("3") is read as the number. Every operation of the model is swept with
+  each such value in each member, with a provisioned and an on-demand
+  stream present: none answers a 5xx.
 - `UpdateShardCount` and `UpdateStreamMode` apply at once: the stream is
   never `UPDATING`, and none of the service's limits on how far or how
   often a count may move is applied.

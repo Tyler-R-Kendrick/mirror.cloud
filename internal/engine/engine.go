@@ -26,8 +26,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -190,6 +192,9 @@ func (e *Engine) invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	// exist with NonExistentQueue whether or not MessageBody came with it. So
 	// the fault is held until the requires have had their say, and nothing
 	// between here and there writes.
+	if fault := e.checkKinds(modelOp, req); fault != nil {
+		return nil, fault
+	}
 	inputFault := e.validateInput(modelOp, req)
 	if inputFault != nil && len(op.Require) == 0 {
 		return nil, inputFault
@@ -436,6 +441,50 @@ func (e *Engine) validateInput(op model.Operation, req *spi.Request) *spi.Fault 
 		}
 		if fault := checkConstraints(e.model, name, m, v); fault != nil {
 			return fault
+		}
+	}
+	return nil
+}
+
+// checkKinds refuses, for a bundle that names malformed_input_error, a member
+// the model declares a string or an integer whose value could be neither:
+// null, an object, an array, and for an integer also a boolean, a fraction,
+// text that is not a number, or a number no int64 holds. A bundle converts
+// such members with string() and int(), which have no answer for those
+// values, so without this the caller's mistake is reported as the service's.
+// Unlike a missing member this outranks the operation's own rules: a request
+// that cannot be read names nothing for them to judge. A number written as
+// text passes, because the query and REST protocols carry every scalar that
+// way.
+func (e *Engine) checkKinds(op model.Operation, req *spi.Request) *spi.Fault {
+	if e.ir.MalformedInput == "" {
+		return nil
+	}
+	names := make([]string, 0, len(req.Input))
+	for name := range req.Input {
+		names = append(names, name)
+	}
+	sort.Strings(names) // deterministic, as validateInput is
+	for _, name := range names {
+		want := ""
+		switch v := req.Input[name]; e.model.Shapes[e.model.Shapes[op.Input].Members[name].Shape].Kind {
+		case model.KindString, model.KindEnum:
+			switch v.(type) {
+			case nil, map[string]any, []any:
+				want = "a string"
+			}
+		case model.KindInteger, model.KindLong:
+			n, isNum := toFloat(v)
+			if s, isStr := v.(string); isStr {
+				_, err := strconv.ParseInt(s, 10, 64)
+				isNum, n = err == nil, 0
+			}
+			if !isNum || n != math.Trunc(n) || math.Abs(n) >= 1<<63 {
+				want = "an integer"
+			}
+		}
+		if want != "" {
+			return e.fault(e.ir.MalformedInput, name+" must be "+want)
 		}
 	}
 	return nil

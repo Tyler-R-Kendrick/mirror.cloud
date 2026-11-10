@@ -43,8 +43,11 @@ resources:
         ('body' in input && input.body != null && size(input.body) > 2)
           ? string(input.body[2]) : ''
       # 0 means no TTL. Redis SET clears expiry; SETEX/EXPIRE write a unix
-      # deadline here and reads treat a past deadline as a miss.
-      expires_at: "0"
+      # deadline here, in milliseconds, and reads treat a past deadline as a
+      # miss. Milliseconds because a TTL of N seconds runs N seconds from the
+      # command: a deadline kept in whole seconds lost the part of the second
+      # already spent, and SETEX k 1 late in a second was gone when it turned.
+      expires_ms: "0"
 
 errors:
   BadRequest:
@@ -77,13 +80,16 @@ operations:
       cmd: "('body' in input && input.body != null) ? input.body : []"
       verb: "size(cmd) > 0 ? upper(string(cmd[0])) : ''"
       # A key past its deadline is a miss for every read path, matching Redis
-      # lazy expiry. expires_at 0 / absent means no TTL. entry is {} on a miss,
-      # so every field access sits behind entry_found / alive.
-      alive: >
-        entry_found && (
-          !('expires_at' in entry) || entry.expires_at == null || int(entry.expires_at) == 0
-            || int(entry.expires_at) > int(now)
-        )
+      # lazy expiry. A deadline of 0 / absent means no TTL. entry is {} on a
+      # miss, so every field access sits behind entry_found / alive.
+      #
+      # An entry written before expires_ms existed (a restored snapshot)
+      # carries expires_at in whole seconds, and is read on that.
+      deadline_ms: >
+        !entry_found ? 0
+          : (('expires_ms' in entry && entry.expires_ms != null) ? int(entry.expires_ms)
+          : (('expires_at' in entry && entry.expires_at != null) ? int(entry.expires_at) * 1000 : 0))
+      alive: "entry_found && (deadline_ms == 0 || deadline_ms > now_ms)"
       # Numeric payload for INCR family. Missing key starts at 0; a live
       # non-integer is refused below as BadRequest. matches-guards keep int()
       # from running in let before require can answer 400.
@@ -147,26 +153,26 @@ operations:
           when: "verb == 'SETEX'"
           record:
             value: setex_value
-            expires_at: "int(now) + setex_ttl"
+            expires_ms: "now_ms + 1000 * setex_ttl"
       - put:
           resource: entry
           when: "verb == 'INCR' || verb == 'DECR' || verb == 'INCRBY' || verb == 'DECRBY'"
           record:
             value: "string(next_num)"
             # INCR on a missing/expired key mints a fresh string with no TTL.
-            expires_at: "alive ? int(entry.expires_at) : 0"
+            expires_ms: "alive ? deadline_ms : 0"
       - put:
           resource: entry
           when: "verb == 'APPEND'"
           record:
             value: "alive ? string(entry.value) + string(cmd[2]) : string(cmd[2])"
-            expires_at: "alive ? int(entry.expires_at) : 0"
+            expires_ms: "alive ? deadline_ms : 0"
       - put:
           resource: entry
           when: "verb == 'EXPIRE' && alive"
           record:
             value: "string(entry.value)"
-            expires_at: "int(now) + expire_ttl"
+            expires_ms: "now_ms + 1000 * expire_ttl"
       - delete:
           resource: entry
           when: "verb == 'DEL'"
@@ -190,8 +196,8 @@ operations:
           : (verb == 'EXPIRE' ? dyn(alive ? 1 : 0)
           : (verb == 'TTL' ? (
                 !alive ? dyn(-2)
-                  : (int(entry.expires_at) == 0 ? dyn(-1)
-                  : dyn(int(entry.expires_at) - int(now))))
+                  : (deadline_ms == 0 ? dyn(-1)
+                  : dyn((deadline_ms - now_ms + 500) / 1000)))
           : dyn(null))))))))))
 
 quirks:
@@ -206,5 +212,7 @@ quirks:
       ignored, matching the old pack's silence on EX/PX rather than inventing
       option parsing without a probe.
 
-      EXPIRE/SETEX use whole seconds against the injected clock; sub-second
-      PEXPIRE is not in the served set.
+      EXPIRE/SETEX take whole seconds and run them in full from the command,
+      against the injected clock; TTL answers the time left rounded to the
+      nearest second, as Redis does. Sub-second PEXPIRE is not in the served
+      set.

@@ -316,6 +316,9 @@ operations:
       - { cond: "!('body_invalid' in input && input.body_invalid == true)", error: InvalidXmlDocument, message: "XML specified is not syntactically valid." }
       - { cond: rec_found, error: MessageNotFound, message: "The specified message does not exist." }
       - { cond: "(('expires_ms' in rec) ? int(rec.expires_ms) : int(rec.expires_at) * 1000) > now_ms", error: MessageNotFound, message: "The specified message does not exist." }
+      # The pop receipt is Required, as the timeout below is. Not sent, the
+      # request is short a parameter; sent and wrong, it is a mismatch.
+      - { cond: "'popreceipt' in input && input.popreceipt != null", error: MissingRequiredQueryParameter, message: "A required query parameter was not specified for this request." }
       - { cond: "'popreceipt' in input && input.popreceipt != null && string(rec.pop_receipt) == string(input.popreceipt)", error: PopReceiptMismatch, message: "The specified pop receipt is invalid." }
       # Update Message's timeout is Required. Without it the request is not
       # out of range, it is short a parameter.
@@ -354,6 +357,8 @@ operations:
       - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
       - { cond: rec_found, error: MessageNotFound, message: "The specified message does not exist." }
       - { cond: "(('expires_ms' in rec) ? int(rec.expires_ms) : int(rec.expires_at) * 1000) > now_ms", error: MessageNotFound, message: "The specified message does not exist." }
+      # Required here too, as for Update Message.
+      - { cond: "'popreceipt' in input && input.popreceipt != null", error: MissingRequiredQueryParameter, message: "A required query parameter was not specified for this request." }
       - { cond: "string(rec.pop_receipt) == (('popreceipt' in input && input.popreceipt != null) ? string(input.popreceipt) : '')", error: PopReceiptMismatch, message: "The specified pop receipt is invalid." }
     effects:
       - send_event: { resource: message, event: DELETE }

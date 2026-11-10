@@ -570,8 +570,15 @@ func TestAzureQueueMalformedQueryParameters(t *testing.T) {
 	fault(outOfRange, "GetMessages", map[string]any{"numofmessages": "-0"})
 	fault(outOfRange, "GetMessages", map[string]any{"visibilitytimeout": "+0"})
 
-	// Update Message's timeout is required.
-	fault("MissingRequiredQueryParameter", "UpdateMessage", map[string]any{"messageid": mid, "popreceipt": receipt, "message": "x"})
+	// Update Message's timeout and pop receipt are required, and Delete
+	// Message's pop receipt. A receipt that is there and wrong is a mismatch.
+	const missing = "MissingRequiredQueryParameter"
+	fault(missing, "UpdateMessage", map[string]any{"messageid": mid, "popreceipt": receipt, "message": "x"})
+	fault(missing, "UpdateMessage", map[string]any{"messageid": mid, "visibilitytimeout": "0", "message": "x"})
+	fault(missing, "UpdateMessage", map[string]any{"messageid": mid, "message": "x"})
+	fault(missing, "DeleteMessage", map[string]any{"messageid": mid})
+	fault("PopReceiptMismatch", "UpdateMessage", map[string]any{"messageid": mid, "popreceipt": "wrong", "visibilitytimeout": "0", "message": "x"})
+	fault("PopReceiptMismatch", "DeleteMessage", map[string]any{"messageid": mid, "popreceipt": "wrong"})
 	// Nothing above touched the message.
 	peek := inv("PeekMessages", map[string]any{})["_list"].([]any)
 	if len(peek) != 1 || peek[0].(map[string]any)["message"] != "m" || fmt.Sprint(peek[0].(map[string]any)["dequeue_count"]) != "0" {

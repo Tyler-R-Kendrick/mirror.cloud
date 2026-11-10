@@ -920,6 +920,18 @@ func TestBootedServerAzureQueue(t *testing.T) {
 	if code != 400 || eh.Get("x-ms-error-code") != "MissingRequiredQueryParameter" {
 		t.Fatalf("update with no visibilitytimeout: %d %#v %s", code, eh, raw)
 	}
+	// So is the pop receipt, of an update and of a delete.
+	for _, c := range []struct{ method, path string }{
+		{http.MethodPut, "/q1/messages/" + msgID + "?visibilitytimeout=0"},
+		{http.MethodPut, "/q1/messages/" + msgID},
+		{http.MethodDelete, "/q1/messages/" + msgID},
+		{http.MethodDelete, "/q1/messages/" + msgID + "?popreceipt="},
+	} {
+		code, raw, eh = do(c.method, c.path, "", nil)
+		if code != 400 || eh.Get("x-ms-error-code") != "MissingRequiredQueryParameter" {
+			t.Fatalf("%s %s: %d %#v %s", c.method, c.path, code, eh, raw)
+		}
+	}
 	// A parameter with an empty value is read as not sent: the update is
 	// short its timeout, and a put takes its defaults.
 	code, raw, eh = do(http.MethodPut, "/q1/messages/"+msgID+"?popreceipt="+url.QueryEscape(h.Get("x-ms-popreceipt"))+"&visibilitytimeout=", envelope("x"), nil)

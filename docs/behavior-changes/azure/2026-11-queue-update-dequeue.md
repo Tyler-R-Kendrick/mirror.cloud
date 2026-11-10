@@ -69,3 +69,10 @@ Update Message).
   Required, and the common REST error codes give that code for "a required
   query parameter was not specified for this request". Before, it answered
   `OutOfRangeQueryParameterValue`.
+- **Update Message and Delete Message without `popreceipt` are 400
+  `MissingRequiredQueryParameter`.** Both mark the parameter Required. The
+  reference does not state which code Azure returns for it; this is the code
+  the common REST error codes give for "a required query parameter was not
+  specified", as for the timeout above. Before, both answered
+  `PopReceiptMismatch`, which is still the answer for a receipt that is sent
+  and wrong.

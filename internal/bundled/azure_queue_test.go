@@ -145,6 +145,12 @@ func TestAzureQueueMessages(t *testing.T) {
 	_ = inv("PutMessage", map[string]any{"queue": "q", "message": "x", "messagettl": "-1"})
 	fault("PutMessage", map[string]any{"queue": "q", "message": strings.Repeat("a", 65537)}, 400, "RequestBodyTooLarge")
 	fault("GetMessages", map[string]any{"queue": "q", "numofmessages": "33"}, 400, "OutOfRangeQueryParameterValue")
+	// A dequeue hides the message for at least a second, seven days at most.
+	fault("GetMessages", map[string]any{"queue": "q", "visibilitytimeout": "0"}, 400, "OutOfRangeQueryParameterValue")
+	fault("GetMessages", map[string]any{"queue": "q", "visibilitytimeout": "604801"}, 400, "OutOfRangeQueryParameterValue")
+	if n := len(inv("GetMessages", map[string]any{"queue": "q", "visibilitytimeout": "604800"}).Output["_list"].([]any)); n != 1 {
+		t.Fatalf("dequeue with the longest timeout: %d messages", n)
+	}
 	fault("PutMessage", map[string]any{"queue": "q", "body_invalid": true}, 400, "InvalidXmlDocument")
 }
 
@@ -208,7 +214,6 @@ func TestAzureQueueLifetimesAreNotTruncated(t *testing.T) {
 		t.Fatalf("0.2s after put: dequeue %#v", dq)
 	}
 	shortID, receipt := fmt.Sprint(dq[0].(map[string]any)["id"]), fmt.Sprint(dq[0].(map[string]any)["pop_receipt"])
-	upd := inv("UpdateMessage", map[string]any{"queue": "q", "messageid": shortID, "popreceipt": receipt, "visibilitytimeout": "1", "message": "short"})
 
 	// 0.999 s after the put: still a millisecond of TTL and of delay left.
 	advance(799 * time.Millisecond)
@@ -227,7 +232,7 @@ func TestAzureQueueLifetimesAreNotTruncated(t *testing.T) {
 	if got := count(); got != "1" {
 		t.Fatalf("1s after put: approx count %s, want 1", got)
 	}
-	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"queue": "q", "messageid": shortID, "popreceipt": fmt.Sprint(upd.Output["pop_receipt"])}})
+	_, err = p.Invoke(ctx, &spi.Request{Identity: id, Operation: "DeleteMessage", Input: map[string]any{"queue": "q", "messageid": shortID, "popreceipt": receipt}})
 	if f, ok := err.(*spi.Fault); !ok || f.Code != "MessageNotFound" {
 		t.Fatalf("delete of an expired message: %#v", err)
 	}
@@ -314,7 +319,7 @@ func TestAzureQueueLifetimesAreNotTruncated(t *testing.T) {
 	if rec := stored(oldID); rec["visible_ms"] == nil || rec["expires_ms"] != nil {
 		t.Fatalf("dequeued old record %v", rec)
 	}
-	upd = inv("UpdateMessage", map[string]any{"queue": "q", "messageid": oldID, "popreceipt": oldReceipt, "visibilitytimeout": "1", "message": "old"})
+	upd := inv("UpdateMessage", map[string]any{"queue": "q", "messageid": oldID, "popreceipt": oldReceipt, "visibilitytimeout": "1", "message": "old"})
 	advance(999 * time.Millisecond)
 	if got := peeked(); got != "old-delayed" {
 		t.Fatalf("old record 0.999s after its update: peek %q", got)
@@ -341,5 +346,165 @@ func TestAzureQueueLifetimesAreNotTruncated(t *testing.T) {
 	inv("DeleteMessage", map[string]any{"queue": "q", "messageid": fmt.Sprint(dq[0].(map[string]any)["id"]), "popreceipt": fmt.Sprint(dq[0].(map[string]any)["pop_receipt"])})
 	if got := count(); got != "0" {
 		t.Fatalf("after delete: approx count %s, want 0", got)
+	}
+}
+
+// A pop receipt stays good until the message is dequeued again, updated or
+// deleted: an update on it is stored whether or not the message is visible at
+// the time. Put Message's receipt is one too.
+func TestAzureQueueUpdateOfAVisibleMessage(t *testing.T) {
+	deps := spitest.Deps(t)
+	p, err := bundled.New("azure.queue", deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	inv := func(op string, in map[string]any) map[string]any {
+		t.Helper()
+		in["queue"] = "q"
+		res, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return res.Output
+	}
+	mismatch := func(op string, in map[string]any) {
+		t.Helper()
+		in["queue"] = "q"
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if f, ok := err.(*spi.Fault); !ok || f.Code != "PopReceiptMismatch" {
+			t.Fatalf("%s on a spent receipt: %#v", op, err)
+		}
+	}
+	peeked := func() string {
+		t.Helper()
+		var texts []string
+		for _, m := range inv("PeekMessages", map[string]any{"numofmessages": "32"})["_list"].([]any) {
+			texts = append(texts, fmt.Sprint(m.(map[string]any)["message"]))
+		}
+		return strings.Join(texts, ",")
+	}
+	update := func(mid, receipt, vt, text string) string {
+		t.Helper()
+		out := inv("UpdateMessage", map[string]any{"messageid": mid, "popreceipt": receipt, "visibilitytimeout": vt, "message": text})
+		next := fmt.Sprint(out["pop_receipt"])
+		if next == "" || next == receipt {
+			t.Fatalf("update answered receipt %q for %q", next, receipt)
+		}
+		return next
+	}
+	advance := func(d time.Duration) {
+		t.Helper()
+		if err := deps.Clock.Advance(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inv("CreateQueue", map[string]any{})
+
+	// Never dequeued: the receipt is the put's.
+	put := inv("PutMessage", map[string]any{"message": "first"})
+	mid, r0 := fmt.Sprint(put["id"]), fmt.Sprint(put["pop_receipt"])
+	r1 := update(mid, r0, "0", "edited")
+	if got := peeked(); got != "edited" {
+		t.Fatalf("after updating a never-dequeued message: peek %q", got)
+	}
+	mismatch("UpdateMessage", map[string]any{"messageid": mid, "popreceipt": r0, "visibilitytimeout": "0", "message": "x"})
+
+	// Visible after an update with no timeout: the next update hides it.
+	r2 := update(mid, r1, "5", "hidden")
+	if got := peeked(); got != "" {
+		t.Fatalf("after an update with a timeout: peek %q, want nothing visible", got)
+	}
+	advance(4999 * time.Millisecond)
+	if got := peeked(); got != "" {
+		t.Fatalf("4.999s into a 5s timeout: peek %q", got)
+	}
+	advance(time.Millisecond)
+	if got := peeked(); got != "hidden" {
+		t.Fatalf("after the timeout: peek %q", got)
+	}
+
+	// Visible again because the timeout ran out: the receipt is still good.
+	r3 := update(mid, r2, "0", "late")
+	if got := peeked(); got != "late" {
+		t.Fatalf("after updating a reappeared message: peek %q", got)
+	}
+	mismatch("DeleteMessage", map[string]any{"messageid": mid, "popreceipt": r2})
+
+	// An update that sends no text keeps the text: it is how a worker renews
+	// its hold on a message. Visible, then hidden, then visible again.
+	renew := func(receipt, vt string) string {
+		t.Helper()
+		out := inv("UpdateMessage", map[string]any{"messageid": mid, "popreceipt": receipt, "visibilitytimeout": vt})
+		next := fmt.Sprint(out["pop_receipt"])
+		if next == "" || next == receipt {
+			t.Fatalf("renewal answered receipt %q for %q", next, receipt)
+		}
+		return next
+	}
+	r3 = renew(r3, "0")
+	if got := peeked(); got != "late" {
+		t.Fatalf("after renewing a visible message: peek %q, want its text kept", got)
+	}
+	r3 = renew(r3, "5")
+	r3 = renew(r3, "0")
+	if got := peeked(); got != "late" {
+		t.Fatalf("after renewing a hidden message: peek %q, want its text kept", got)
+	}
+	// Text that is sent and empty is still a text.
+	r3 = update(mid, r3, "0", "")
+	if got := peeked(); got != "" || len(inv("PeekMessages", map[string]any{})["_list"].([]any)) != 1 {
+		t.Fatalf("after an update to an empty text: peek %q", got)
+	}
+
+	// A message cannot be hidden past its own expiry.
+	short := inv("PutMessage", map[string]any{"message": "short", "messagettl": "10"})
+	sid, sr := fmt.Sprint(short["id"]), fmt.Sprint(short["pop_receipt"])
+	advance(500 * time.Millisecond)
+	for _, vt := range []string{"10", "11", "604800"} {
+		in := map[string]any{"queue": "q", "messageid": sid, "popreceipt": sr, "visibilitytimeout": vt}
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "UpdateMessage", Input: in})
+		if f, ok := err.(*spi.Fault); !ok || f.Code != "OutOfRangeQueryParameterValue" || f.HTTPStatus != 400 {
+			t.Fatalf("update hiding a 10s message for %ss, 0.5s in: %#v", vt, err)
+		}
+	}
+	sr = fmt.Sprint(inv("UpdateMessage", map[string]any{"messageid": sid, "popreceipt": sr, "visibilitytimeout": "9"})["pop_receipt"])
+	inv("DeleteMessage", map[string]any{"messageid": sid, "popreceipt": sr})
+	// Nor put already hidden past it. The default TTL is seven days, which
+	// is also the longest timeout; a TTL of -1 never expires.
+	for _, in := range []map[string]any{
+		{"message": "x", "messagettl": "10", "visibilitytimeout": "11"},
+		{"message": "x", "messagettl": "1", "visibilitytimeout": "604800"},
+	} {
+		in["queue"] = "q"
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: "PutMessage", Input: in})
+		if f, ok := err.(*spi.Fault); !ok || f.Code != "OutOfRangeQueryParameterValue" || f.HTTPStatus != 400 {
+			t.Fatalf("put %v: %#v", in, err)
+		}
+	}
+	for _, in := range []map[string]any{
+		{"message": "x", "messagettl": "10", "visibilitytimeout": "10"},
+		{"message": "x", "visibilitytimeout": "604800"},
+		{"message": "x", "messagettl": "-1", "visibilitytimeout": "604800"},
+	} {
+		put := inv("PutMessage", in)
+		inv("DeleteMessage", map[string]any{"messageid": fmt.Sprint(put["id"]), "popreceipt": fmt.Sprint(put["pop_receipt"])})
+	}
+	// A message that never expires can be hidden for the full seven days.
+	forever := inv("PutMessage", map[string]any{"message": "forever", "messagettl": "-1"})
+	fr := fmt.Sprint(inv("UpdateMessage", map[string]any{"messageid": fmt.Sprint(forever["id"]), "popreceipt": fmt.Sprint(forever["pop_receipt"]), "visibilitytimeout": "604800"})["pop_receipt"])
+	inv("DeleteMessage", map[string]any{"messageid": fmt.Sprint(forever["id"]), "popreceipt": fr})
+
+	// A dequeue spends it.
+	dq := inv("GetMessages", map[string]any{"visibilitytimeout": "1"})["_list"].([]any)
+	if len(dq) != 1 || fmt.Sprint(dq[0].(map[string]any)["dequeue_count"]) != "1" {
+		t.Fatalf("dequeue %#v", dq)
+	}
+	mismatch("UpdateMessage", map[string]any{"messageid": mid, "popreceipt": r3, "visibilitytimeout": "0", "message": "x"})
+	advance(time.Second)
+	inv("DeleteMessage", map[string]any{"messageid": mid, "popreceipt": fmt.Sprint(dq[0].(map[string]any)["pop_receipt"])})
+	if got := peeked(); got != "" {
+		t.Fatalf("after delete: peek %q", got)
 	}
 }

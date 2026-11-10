@@ -865,6 +865,10 @@ func TestBootedServerAzureQueue(t *testing.T) {
 	if popReceipt == "" {
 		t.Fatalf("no pop receipt in %s", raw)
 	}
+	// The first dequeue reports a count of 1.
+	if !strings.Contains(string(raw), "<DequeueCount>1</DequeueCount>") {
+		t.Fatalf("first dequeue count in %s", raw)
+	}
 	msgID := ""
 	if i := strings.Index(string(raw), "<MessageId>"); i >= 0 {
 		rest := string(raw)[i+len("<MessageId>"):]
@@ -883,6 +887,33 @@ func TestBootedServerAzureQueue(t *testing.T) {
 	code, raw, h = do(http.MethodPut, "/q1/messages/"+msgID+"?popreceipt="+url.QueryEscape(popReceipt)+"&visibilitytimeout=5", envelope("changed"), nil)
 	if code != 204 || h.Get("x-ms-popreceipt") == "" || h.Get("x-ms-time-next-visible") == "" {
 		t.Fatalf("update %d %#v %s", code, h, raw)
+	}
+	// An update with no body renews the hold and keeps the text.
+	code, raw, h = do(http.MethodPut, "/q1/messages/"+msgID+"?popreceipt="+url.QueryEscape(h.Get("x-ms-popreceipt"))+"&visibilitytimeout=0", "", nil)
+	if code != 204 || h.Get("x-ms-popreceipt") == "" {
+		t.Fatalf("update with no body %d %#v %s", code, h, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true", "", nil)
+	if code != 200 || !strings.Contains(string(raw), "<MessageText>changed</MessageText>") {
+		t.Fatalf("peek after an update with no body %d %s", code, raw)
+	}
+	// So does an envelope with no MessageText; an empty MessageText is a text,
+	// and replaces it.
+	for _, c := range []struct{ body, want string }{
+		{"<QueueMessage></QueueMessage>", "<MessageText>changed</MessageText>"},
+		{"<QueueMessage/>", "<MessageText>changed</MessageText>"},
+		{"<QueueMessage><MessageText></MessageText></QueueMessage>", "<MessageText></MessageText>"},
+		{"<QueueMessage></QueueMessage>", "<MessageText></MessageText>"},
+		{"<QueueMessage><MessageText>changed</MessageText></QueueMessage>", "<MessageText>changed</MessageText>"},
+	} {
+		code, raw, h = do(http.MethodPut, "/q1/messages/"+msgID+"?popreceipt="+url.QueryEscape(h.Get("x-ms-popreceipt"))+"&visibilitytimeout=0", c.body, nil)
+		if code != 204 || h.Get("x-ms-popreceipt") == "" {
+			t.Fatalf("update with body %s: %d %#v %s", c.body, code, h, raw)
+		}
+		code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true", "", nil)
+		if code != 200 || !strings.Contains(string(raw), c.want) {
+			t.Fatalf("peek after an update with body %s, want %s: %d %s", c.body, c.want, code, raw)
+		}
 	}
 	code, raw, h = do(http.MethodPost, "/q1/messages?visibilitytimeout=691200", envelope("x"), nil)
 	if code != 400 || h.Get("x-ms-error-code") != "OutOfRangeQueryParameterValue" {
@@ -935,6 +966,18 @@ func TestBootedServerAzureQueue(t *testing.T) {
 	code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true&numofmessages=5", "", nil)
 	if code != 200 || strings.Contains(string(raw), "short") || !strings.Contains(string(raw), "<MessageText>linger</MessageText>") {
 		t.Fatalf("peek after ttl %d %s", code, raw)
+	}
+	// The count goes up by one a dequeue, and a peek reports it too.
+	for _, want := range []string{"<DequeueCount>1</DequeueCount>", "<DequeueCount>2</DequeueCount>"} {
+		code, raw, _ = do(http.MethodGet, "/q1/messages?visibilitytimeout=1", "", nil)
+		if code != 200 || !strings.Contains(string(raw), "<MessageText>linger</MessageText>") || !strings.Contains(string(raw), want) {
+			t.Fatalf("dequeue linger, want %s: %d %s", want, code, raw)
+		}
+		advance(time.Second)
+		code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true", "", nil)
+		if code != 200 || !strings.Contains(string(raw), want) {
+			t.Fatalf("peek linger, want %s: %d %s", want, code, raw)
+		}
 	}
 	code, raw, _ = do(http.MethodDelete, "/q1/messages", "", nil)
 	if code != 204 {

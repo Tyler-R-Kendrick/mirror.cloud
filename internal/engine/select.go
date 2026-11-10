@@ -309,27 +309,33 @@ func (ev *eval) sortSelected(items []selected, orderBy string) error {
 	return nil
 }
 
-// nextDeadline answers the earliest armed deadline among the selection's
-// records that has not fired yet, so a waiter can park on the instant a
-// record becomes selectable rather than on its own timeout.
-func (ev *eval) nextDeadline(ctx context.Context, op bir.Operation) (time.Time, bool) {
+// nextDeadline reads the armed deadlines among the selection's records for a
+// waiter that last selected at observed. due says one has come due since: the
+// selection ran before it and the clock has reached it, so the record may be
+// selectable now and nothing will say so. Otherwise next is the earliest one
+// still ahead, to park on in place of the waiter's own timeout.
+//
+// A deadline at or before observed is neither: the selection has already had
+// its chance at it.
+func (ev *eval) nextDeadline(ctx context.Context, op bir.Operation, observed time.Time) (due bool, next time.Time) {
 	if op.Select == nil {
-		return time.Time{}, false
+		return false, time.Time{}
 	}
 	res, ok := ev.e.ir.Resources[op.Select.Resource]
 	if !ok || res.Statechart == nil {
-		return time.Time{}, false
+		return false, time.Time{}
 	}
 	col, err := ev.collection(res)
 	if err != nil {
-		return time.Time{}, false
+		return false, time.Time{}
 	}
 	entries, _, err := col.List(ctx, "", "", 0)
 	if err != nil {
-		return time.Time{}, false
+		return false, time.Time{}
 	}
+	// Read after the list, so a deadline armed by a write this list saw is
+	// compared with a time no earlier than that write.
 	now := ev.e.deps.Clock.Now()
-	var next time.Time
 	for _, kv := range entries {
 		rec := map[string]any{}
 		if err := unmarshal(kv.Value, &rec); err != nil {
@@ -337,12 +343,17 @@ func (ev *eval) nextDeadline(ctx context.Context, op bir.Operation) (time.Time, 
 		}
 		for _, at := range deadlinesOf(rec) {
 			when := time.Unix(0, at)
-			if when.After(now) && (next.IsZero() || when.Before(next)) {
-				next = when
+			switch {
+			case when.After(now):
+				if next.IsZero() || when.Before(next) {
+					next = when
+				}
+			case when.After(observed):
+				due = true
 			}
 		}
 	}
-	return next, !next.IsZero()
+	return due, next
 }
 
 // runWait is long polling as an engine capability rather than per-service code.
@@ -407,6 +418,10 @@ func (ev *eval) runWait(ctx context.Context, op bir.Operation) error {
 		defer cancel()
 	}
 
+	// When the selection last ran. The one before this call ran at a time
+	// nobody kept, so the first pass treats every deadline behind the clock as
+	// come due since and selects once more before it parks.
+	var observed time.Time
 	for {
 		now := ev.e.deps.Clock.Now()
 		if !now.Before(deadline) {
@@ -418,16 +433,25 @@ func (ev *eval) runWait(ctx context.Context, op bir.Operation) error {
 		// deadline is why a record may become selectable with nobody writing:
 		// a delayed message reappears on its own instant, and a waiter that
 		// slept past it would answer empty with the message already visible.
-		park := deadline
-		if at, ok := ev.nextDeadline(ctx, op); ok && at.After(now) && at.Before(park) {
-			park = at
+		//
+		// That instant can pass between the selection and here. Such a
+		// deadline is not ahead of the clock, so there is nothing to park on
+		// for it, and the selection ran before it: it is selected again at
+		// once. Parking on the timeout instead answered late on a real clock
+		// and never on a controllable one.
+		if due, at := ev.nextDeadline(ctx, op, observed); !due {
+			park := deadline
+			if !at.IsZero() && at.Before(park) {
+				park = at
+			}
+			select {
+			case <-ev.e.deps.Clock.AfterTime(park):
+			case <-wake:
+			case <-ctx.Done():
+				return nil
+			}
 		}
-		select {
-		case <-ev.e.deps.Clock.AfterTime(park):
-		case <-wake:
-		case <-ctx.Done():
-			return nil
-		}
+		observed = ev.e.deps.Clock.Now()
 		if err := ev.runSelect(ctx, op); err != nil {
 			return err
 		}

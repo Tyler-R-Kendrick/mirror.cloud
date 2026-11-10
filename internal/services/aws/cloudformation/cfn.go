@@ -232,7 +232,8 @@ func (p *Pack) createChangeSet(ctx context.Context, req *spi.Request, name strin
 			Resources: []res{}, Outputs: []any{}, NotificationARNs: []any{}, Tags: []any{}}))); err != nil {
 			return err
 		}
-		if _, _, _, _, err := p.template(ctx, req, named(name), str(rec["StackId"])); err != nil { // every check its execution makes, the store untouched
+		_, tpl, _, _, err := p.template(ctx, req, named(name), str(rec["StackId"])) // every check its execution makes, the store untouched
+		if err = cmp.Or(err, retyped(st, asMap(tpl["Resources"]))); err != nil {
 			rec["Status"], rec["StatusReason"], rec["ExecutionStatus"] = "FAILED", err.Error(), "UNAVAILABLE"
 		}
 		return stx.Collection("cfn-cs").Put(named(name)+":"+csn, []byte(spi.JSONText(rec)))
@@ -328,7 +329,7 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 		return nil, nil, invalid("1 validation error detected: Value at 'notificationARNs' failed to satisfy constraint: Member must have length less than or equal to 5")
 	}
 	given, name := name, named(name)
-	id = cmp.Or(id, "arn:aws:cloudformation:"+req.Identity.Region+":"+req.Identity.Account+":stack/"+name+"/"+p.deps.Rand.Hex(8))
+	id = cmp.Or(id, stackARN(req, name)+p.deps.Rand.Hex(8))
 	input, loaded := spi.Decode[map[string]any]([]byte(spi.JSONText(req.Input))), stack{}
 	rereads, _ := ctx.Value(staleKey{}).(int)
 	if cur, err := p.load(ctx, req, given); err == nil && update { // the id an update's AWS::StackId answers
@@ -348,6 +349,7 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 	var old, held stack
 	var leave *stack // what a failing operation leaves, until it has settled it: the next operation's to settle (orphan)
 	op, release := p.hold()
+	defer func() { release(leave) }() // registered at once: a refused reservation releases too
 	reserved := stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags, Op: op}
 	if err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
 		tx := stx.Collection("cfn")
@@ -365,8 +367,8 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 			return invalid("Stack [" + given + "] does not exist")
 		} else if found && !updatable(old) {
 			return invalid("Stack:" + old.ID + " is in " + old.Status + " state and can not be updated.")
-		} else if changed := retyped(old, resources); update && len(changed) > 0 { // the wording is a reading
-			return invalid("Update of resource type is not permitted. The new template modifies resource type of the following resources: [" + strings.Join(changed, ", ") + "]")
+		} else if err := retyped(old, resources); update && err != nil {
+			return err
 		} else if id, held = cmp.Or(old.ID, id), old; update { // "is in UPDATE_IN_PROGRESS state" to another change
 			held.Status, held.Op = "UPDATE_IN_PROGRESS", op
 			return tx.Put(name, []byte(spi.JSONText(held)))
@@ -387,9 +389,14 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 	}
 	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: refs,
 		Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags} // never null: every read of a stack lists them
-	applied := map[string]map[string]any{} // the properties the update gave what it changed in place, which a rollback changes back
+	applied := map[string]map[string]any{} // the properties the update gave what it changed in place, until a rollback has changed each back
 	defer func() {
-		if leave == &old { // an update: what it made, which its rollback did not settle, is listed for ContinueUpdateRollback
+		if leave == &old { // an update whose rollback did not settle: what it had not restored and what it made are ContinueUpdateRollback's
+			for i, o := range old.Resources {
+				if applied[o.Logical] != nil { // changed in place, and not put back
+					old.Resources[i].Status, old.Resources[i].Reason = "UPDATE_FAILED", old.Reason
+				}
+			}
 			for _, r := range st.Resources {
 				if has(old.Resources, r) {
 				} else if retains(tpl, "DeletionPolicy", "Retain")(r) { // kept, as its rollback keeps it: it leaves the stack
@@ -402,7 +409,6 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 			}
 		}
 		st.Status, old.Status = "ROLLBACK_FAILED", "UPDATE_ROLLBACK_FAILED" // where a rollback that did not settle leaves it
-		release(leave)
 	}()
 	fail := func(cause error) (*spi.Response, func(), error) {
 		st.Reason, old.Reason = cause.Error(), cause.Error()
@@ -446,9 +452,9 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 		phys := map[string]string{"": prev.Physical}[how]                    // one an update keeps as it is
 		if err = cmp.Or(err, encode(props)); how == "update" && err == nil { // recorded before it is called: a half-made change is put back too
 			applied[logical] = maps.Clone(props)
-			phys, err = p.provision(ctx, req, typ, logical, n, props, p.Props(stored(old.Template), logical, old.Refs, old.Name), prev.Physical, id)
+			phys, err = p.provision(ctx, req, typ, logical, n, props, prior{props: p.Props(stored(old.Template), logical, old.Refs, old.Name)}, prev.Physical, id)
 		} else if how != "" && err == nil {
-			phys, err = p.provision(ctx, req, typ, logical, n, props, nil, "", id)
+			phys, err = p.provision(ctx, req, typ, logical, n, props, prior{}, "", id)
 		}
 		if phys != "" { // recorded once it exists, before anything is set on it, so a rollback finds a half-made one too
 			st.Refs[logical] = phys
@@ -456,7 +462,7 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 			st.Resources = append(st.Resources, res{Logical: logical, Physical: phys, Type: typ, Name: n})
 		}
 		if how != "" && how != "update" && err == nil && typ == "AWS::S3::Bucket" {
-			err = p.configureBucket(ctx, req, phys, props, nil, false)
+			err = p.configureBucket(ctx, req, phys, props, prior{})
 		}
 		if err != nil {
 			return fail(err)
@@ -506,18 +512,19 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 // rolls the update back: one it cannot delete is abandoned, and a panic of the engine's own abandons what
 // is not yet deleted the same way, each a DELETE_FAILED event of a stack that stays UPDATE_COMPLETE.
 func (p *Pack) cleanup(ctx context.Context, req *spi.Request, st, old stack, tpl map[string]any) {
-	seen, oldTpl := st, stored(old.Template)
-	stale := slices.DeleteFunc(slices.Clone(old.Resources), func(r res) bool { return has(st.Resources, r) })
-	defer func() {
+	seen, stale := st, []res(nil)
+	defer func() { // installed before anything is read
 		if recover() == nil {
 			return
 		}
 		for _, r := range stale { // those finish had not come to, or was at
-			r.Status, r.Reason = "DELETE_FAILED", internalFailure().Message
-			st.Events, st.Reason = append(st.Events, r), internalFailure().Error()
+			r.Status, r.Reason = "DELETE_FAILED", "The cleanup ended before it deleted the resource." // the wordings are readings
+			st.Events, st.Reason = append(st.Events, r), "The cleanup ended before it deleted every old resource."
 		}
 		_ = recovered(func() error { _, _, err := p.settle(ctx, req, seen, st); return err })
 	}()
+	stale = slices.DeleteFunc(slices.Clone(old.Resources), func(r res) bool { return has(st.Resources, r) })
+	oldTpl := stored(old.Template)
 	_ = p.finish(ctx, req, seen, &st, slices.Clone(st.Resources), &stale, nil, st.Status, st.Status, func(r res) bool {
 		if slices.ContainsFunc(st.Resources, func(n res) bool { return n.Logical == r.Logical }) { // still the stack's
 			return retains(tpl, "UpdateReplacePolicy", "Retain")(r)
@@ -737,6 +744,12 @@ type kept struct {
 	store spi.Store
 }
 
+// stackARN is the stack id of the caller's stack named name, up to the part that tells one such stack from
+// the next: its account, its Region and its name.
+func stackARN(req *spi.Request, name string) string {
+	return "arn:aws:cloudformation:" + req.Identity.Region + ":" + req.Identity.Account + ":stack/" + name + "/"
+}
+
 // sameStore is whether a and b are one store: false for a kind of store that cannot be compared.
 func sameStore(a, b spi.Store) (same bool) {
 	defer func() { _ = recover() }()
@@ -769,7 +782,7 @@ func (p *Pack) orphan(ctx context.Context, req *spi.Request, name string) {
 	})
 	id := strings.TrimPrefix(cur.Op, "/")
 	ops.Range(func(k, v any) bool { // a record kept for this stack by an operation it is no longer held by is no one's now
-		if left, isKept := v.(kept); isKept && left.Name == named(name) && k != id && sameStore(left.store, p.deps.Store) {
+		if left, isKept := v.(kept); isKept && strings.HasPrefix(left.ID, stackARN(req, named(name))) && k != id && sameStore(left.store, p.deps.Store) {
 			ops.Delete(k)
 			opKept.Add(-1)
 		}
@@ -839,18 +852,20 @@ func has(rs []res, r res) bool {
 	return slices.ContainsFunc(rs, func(o res) bool { return o.Type == r.Type && o.Physical == r.Physical })
 }
 
-// retyped are the logical ids, sorted, that resources, a template's, give another type than the stack old
-// holds them under. CloudFormation refuses such an update; one held only for a delete (DELETE_FAILED) is
-// no longer the stack's to keep a type for.
-func retyped(old stack, resources map[string]any) []string {
+// retyped is CloudFormation's refusal of an update whose template, of resources, gives a logical id another
+// type than the stack old holds it under (the wording is a reading); one held only for a delete
+// (DELETE_FAILED) is no longer the stack's to keep a type for.
+func retyped(old stack, resources map[string]any) error {
 	var changed []string
 	for _, r := range old.Resources {
 		if t := str(asMap(resources[r.Logical])["Type"]); t != "" && t != r.Type && r.Status != "DELETE_FAILED" {
 			changed = append(changed, r.Logical)
 		}
 	}
-	slices.Sort(changed)
-	return changed
+	if slices.Sort(changed); len(changed) > 0 {
+		return invalid("Update of resource type is not permitted. The new template modifies resource type of the following resources: [" + strings.Join(changed, ", ") + "]")
+	}
+	return nil
 }
 
 // retains answers whether tpl's policy attr keeps a resource rather than deleting it: it is one of keep.
@@ -913,14 +928,27 @@ var kinds = map[string]kind{
 	"AWS::ApiGateway::RestApi":     {"Name", 1024, "", "", "", "", "aws.apigateway CreateRestApi name={n}", "id", "aws.apigateway UpdateRestApi restApiId={id} name={n}", "aws.apigateway DeleteRestApi restApiId={id}", "RestApiId={id}"},
 }
 
+// prior is what the template a resource is updated from gave it: its properties, none for a resource the
+// template declared without any, or unknown. Only ContinueUpdateRollback passes unknown (what a failed
+// update gave is not recorded), and only then is every property the template lacks read as given before:
+// a resource with no Properties is known, to have been given nothing.
+type prior struct {
+	props   map[string]any
+	unknown bool
+}
+
+// gave is whether the template the resource is updated from gave it property.
+func (w prior) gave(property string) bool { return w.unknown || w.props[property] != nil }
+
 // clears are what a type's update call sends for a property the template gives no longer, so that an
 // update, and a rollback's restore, leave exactly the template's properties: each service's update keeps
 // what a call does not name, so the value is the one its API reference gives a resource made without the
 // property (Lambda's Timeout "The default is 3 seconds", MemorySize "The default value is 128 MB"; DynamoDB's
-// StreamEnabled false, BillingMode PROVISIONED, TableClass STANDARD). A bucket's are bucketOps; a secret's
+// StreamEnabled false, BillingMode PROVISIONED, TableClass STANDARD; its DeletionProtectionEnabled the
+// table service here keeps false, so there is none to clear). A bucket's are bucketOps; a secret's
 // description, a key's and a parameter's value are sent whenever their type is updated (kinds).
 var clears = map[string]string{
-	"AWS::DynamoDB::Table":  `StreamSpecification=^{"StreamEnabled":false} BillingMode=PROVISIONED TableClass=STANDARD DeletionProtectionEnabled=false`,
+	"AWS::DynamoDB::Table":  `StreamSpecification=^{"StreamEnabled":false} BillingMode=PROVISIONED TableClass=STANDARD`,
 	"AWS::Lambda::Function": `Description= Timeout=3 MemorySize=128 Environment=^{"Variables":{}} Layers=^[] KMSKeyArn= DeadLetterConfig=^{"TargetArn":""} TracingConfig=^{"Mode":"PassThrough"} EphemeralStorage=^{"Size":512}`,
 }
 
@@ -1072,10 +1100,10 @@ func isBoolean(v any) bool { _, ok := coerce(v, "Boolean"); return ok }
 
 // provision creates a resource through the service that owns it, and answers the resource's physical id.
 // Going through the owner's API keeps its store layout, validation and cascades that service's business.
-// existing is what an update finds: a resource its kind updates in place is updated under it, and was the
-// properties it had, of which each the template no longer gives is cleared (clears); with none known, a
-// rollback continued from a record, every one it does not give is.
-func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n string, props, was map[string]any, existing, stackID string) (string, error) {
+// existing is what an update finds: a resource its kind updates in place is updated under it, and was what
+// the template it is updated from gave it, of which each property the template no longer gives is cleared
+// (clears).
+func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n string, props map[string]any, was prior, existing, stackID string) (string, error) {
 	k, known := kinds[typ]
 	spec, phys := k.create, ""
 	if !known {
@@ -1083,7 +1111,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	} else if existing != "" {
 		spec = k.update
 		for _, c := range strings.Fields(clears[typ]) {
-			if member, _, _ := strings.Cut(c, "="); props[member] == nil && (was == nil || was[member] != nil) {
+			if member, _, _ := strings.Cut(c, "="); props[member] == nil && was.gave(member) {
 				spec += " " + c
 			}
 		}
@@ -1117,7 +1145,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 			err = putErr
 		}
 	} else if err == nil && typ == "AWS::S3::Bucket" && existing != "" { // one it makes, upsert configures once it is recorded
-		err = p.configureBucket(ctx, req, n, props, was, true)
+		err = p.configureBucket(ctx, req, n, props, was)
 	} else if err != nil && existing == "" { // none once a create failed
 		phys = ""
 	}
@@ -1137,12 +1165,13 @@ func (p *Pack) rollback(ctx context.Context, req *spi.Request, seen, old stack, 
 	for _, r := range made {
 		if old.Refs[r.Logical] != r.Physical {
 			doomed = append(doomed, r)
-		} else if props := maps.Collect(maps.All(p.Props(tpl, r.Logical, old.Refs, old.Name))); applied[r.Logical] != nil {
-			if _, err := p.provision(ctx, req, r.Type, r.Logical, r.Name, props, applied[r.Logical], r.Physical, old.ID); err != nil { // UPDATE_FAILED, for ContinueUpdateRollback
+		} else if props, was := maps.Collect(maps.All(p.Props(tpl, r.Logical, old.Refs, old.Name))), applied[r.Logical]; was != nil {
+			if _, err := p.provision(ctx, req, r.Type, r.Logical, r.Name, props, prior{props: was}, r.Physical, old.ID); err != nil { // UPDATE_FAILED, for ContinueUpdateRollback
 				i := slices.IndexFunc(old.Resources, func(o res) bool { return o.Logical == r.Logical })
 				old.Resources[i].Status, old.Resources[i].Reason = "UPDATE_FAILED", err.Error() // the stack's reason in the service's words
 				first = cmp.Or(first, error(invalid("The following resource(s) failed to update: ["+r.Logical+"].")))
 			}
+			delete(applied, r.Logical) // put back, or marked here: no longer a takeover's to mark
 		}
 	}
 	return p.unwind(ctx, req, seen, old, old.Resources, doomed, first, "UPDATE_ROLLBACK_COMPLETE", "UPDATE_ROLLBACK_FAILED", skip)
@@ -1188,7 +1217,7 @@ func (p *Pack) resume(ctx context.Context, req *spi.Request, name string) (*spi.
 			doomed = append(doomed, r)
 			continue
 		} else if r.Status == "UPDATE_FAILED" && !slices.Contains(skip, any(r.Logical)) {
-			_, err = p.provision(ctx, req, r.Type, r.Logical, r.Name, props, nil, r.Physical, st.ID)
+			_, err = p.provision(ctx, req, r.Type, r.Logical, r.Name, props, prior{unknown: true}, r.Physical, st.ID) // what the failed update gave it is not recorded
 		}
 		if r.Status == "UPDATE_FAILED" && err != nil {
 			r.Reason, first, err = err.Error(), cmp.Or(first, err), nil
@@ -1327,12 +1356,12 @@ var bucketOps = map[string][2]string{"VersioningConfiguration": {"PutBucketVersi
 	"PublicAccessBlockConfiguration": {"PutPublicAccessBlock", "DeletePublicAccessBlock"}, "OwnershipControls": {"PutBucketOwnershipControls", "DeleteBucketOwnershipControls"}}
 
 // configureBucket applies the bucket properties that map one to one onto an S3 operation, and stores the
-// rest as they are given. An update clears each the template gives no longer: of those the bucket had
-// (was), or, with none known, of them all.
-func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket string, props, was map[string]any, update bool) error {
+// rest as they are given, and clears each that the template it is updated from gave (was) and the template
+// gives no longer.
+func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket string, props map[string]any, was prior) error {
 	dropped := func(property string) bool {
 		_, given := props[property]
-		return update && !given && (was == nil || was[property] != nil)
+		return !given && was.gave(property)
 	}
 	for property, ops := range bucketOps {
 		v, ok := props[property]

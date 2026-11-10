@@ -84,6 +84,9 @@ func TestCloudFormationACleanupThatPanicsRollsNothingBack(t *testing.T) {
 			if abandoned := slices.Contains(h.events("cp", "K"), "DELETE_FAILED"); (gone == nil) != c.abandoned || abandoned != c.abandoned {
 				t.Errorf("the old topic exists: %t, and is recorded DELETE_FAILED: %t; want both %t", gone == nil, abandoned, c.abandoned)
 			}
+			if _, reason, _ := h.status("cp"); strings.Contains(reason, "InternalFailure") || c.abandoned != strings.Contains(reason, "cleanup ended before it deleted") {
+				t.Errorf("the stack's reason is %q; want the cleanup's own wording where it abandoned the topic, and nothing of the panic", reason)
+			}
 			if err := rv28Update(h, "cp", map[string]any{"N": rv28Topic, "S": secret("two"), "X": rv28Topic}); err != nil {
 				t.Errorf("the next update answered %v", err)
 			}
@@ -462,8 +465,12 @@ func TestCloudFormationAContinueUpdateRollbackLeftIsTakenOver(t *testing.T) {
 			rv28Failed(t, h, "to", "rv28left")()
 			leave(t, h)
 			_, err := h.invoke("UpdateStack", map[string]any{"StackName": "to", "TemplateBody": rv19Body(map[string]any{"Resources": map[string]any{"K": rv28Topic}})})
-			if status, _, _ := h.status("to"); err == nil || !strings.Contains(err.Error(), "is in UPDATE_ROLLBACK_FAILED state") || status != "UPDATE_ROLLBACK_FAILED" || h.record("to")["Op"] != nil {
+			status, reason, _ := h.status("to")
+			if err == nil || !strings.Contains(err.Error(), "is in UPDATE_ROLLBACK_FAILED state") || status != "UPDATE_ROLLBACK_FAILED" || h.record("to")["Op"] != nil {
 				t.Fatalf("the next operation answered %v and the stack is %s; want it taken over, UPDATE_ROLLBACK_FAILED, and refused", err, status)
+			}
+			if kept := strings.Contains(reason, "BucketNotEmpty"); kept != (name == "one that panicked") { // this process's is settled as it found the stack
+				t.Errorf("the stack taken over has the reason %q; want the stack's own only where its operation ended in this process", reason)
 			}
 			if _, err := h.invoke("ContinueUpdateRollback", map[string]any{"StackName": "to"}); err != nil {
 				t.Fatalf("ContinueUpdateRollback of the stack taken over answered %v", err)

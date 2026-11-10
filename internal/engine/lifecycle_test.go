@@ -338,13 +338,21 @@ type steppingClock struct {
 	mu     sync.Mutex
 	left   int
 	step   time.Duration
+	since  int // readings since the step was taken, or since arm
 	parked chan struct{}
 }
 
 func (c *steppingClock) arm(n int, step time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.left, c.step = n, step
+	c.left, c.step, c.since = n, step, 0
+}
+
+// readSince reports how often the clock has been read since it stepped.
+func (c *steppingClock) readSince() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.since
 }
 
 // spent reports whether the step has been taken.
@@ -357,6 +365,10 @@ func (c *steppingClock) spent() bool {
 func (c *steppingClock) Now() time.Time {
 	c.mu.Lock()
 	fire := c.left == 1
+	c.since++
+	if fire {
+		c.since = 0
+	}
 	if c.left > 0 {
 		c.left--
 	}
@@ -387,6 +399,24 @@ func (c *steppingClock) AfterTime(at time.Time) <-chan time.Time {
 // deadline inside the nth reading of it, for every n the poll makes before it
 // parks. Left to the scheduler the window is hit a few times in a thousand.
 func TestLongPollDoesNotLoseADeadlineThatPassesWhileItLooks(t *testing.T) {
+	stepOverADeadlineInEveryReading(t, time.Millisecond)
+}
+
+// TestLongPollLooksOnceMoreWhenItsTimeoutPassesWithADeadline: the same window,
+// with a step that carries the clock over the poll's own timeout as well as
+// the record's deadline. The poll is out of time, and the message is
+// selectable: it selects once more and answers it, where it used to see only
+// that its time was up and answer empty. Once, not until something turns up:
+// the readings of the clock after the step are counted.
+func TestLongPollLooksOnceMoreWhenItsTimeoutPassesWithADeadline(t *testing.T) {
+	stepOverADeadlineInEveryReading(t, 3*time.Second)
+}
+
+// stepOverADeadlineInEveryReading receives a message for a second, waits 999 ms
+// and long-polls for two seconds, stepping the clock by step inside the nth
+// reading the poll makes of it, for every n until the poll parks without one.
+func stepOverADeadlineInEveryReading(t *testing.T, step time.Duration) {
+	t.Helper()
 	var clk *steppingClock
 	f := newSQS(t, func(c *clock.Controllable) spi.Clock {
 		clk = &steppingClock{Controllable: c, parked: make(chan struct{}, 1)}
@@ -407,7 +437,7 @@ func TestLongPollDoesNotLoseADeadlineThatPassesWhileItLooks(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		clk.arm(n, time.Millisecond)
+		clk.arm(n, step)
 		done := make(chan int, 1)
 		go func() {
 			out, err := f.call("ReceiveMessage", map[string]any{"QueueUrl": url, "WaitTimeSeconds": 2})
@@ -424,7 +454,12 @@ func TestLongPollDoesNotLoseADeadlineThatPassesWhileItLooks(t *testing.T) {
 			select {
 			case messages := <-done:
 				if messages != 1 {
-					t.Fatalf("clock stepped in reading %d: long poll returned %d messages, want 1", n, messages)
+					t.Fatalf("clock stepped %s in reading %d: long poll returned %d messages, want 1", step, n, messages)
+				}
+				// A poll that has what it came for, or is out of time, stops
+				// looking: a few readings to select and answer, not a loop.
+				if after := clk.readSince(); after > 200 {
+					t.Fatalf("clock stepped %s in reading %d: the poll read the clock %d more times before it answered", step, n, after)
 				}
 				got = true
 			case <-clk.parked:
@@ -434,7 +469,7 @@ func TestLongPollDoesNotLoseADeadlineThatPassesWhileItLooks(t *testing.T) {
 				if !clk.spent() {
 					last = true
 					clk.arm(0, 0)
-					if err := f.clock.Advance(time.Millisecond); err != nil {
+					if err := f.clock.Advance(step); err != nil {
 						t.Fatal(err)
 					}
 				}

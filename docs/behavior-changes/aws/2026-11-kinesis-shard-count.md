@@ -61,6 +61,8 @@
 | `DescribeLimits.OpenShardCount` with on-demand streams | 1 | The provisioned streams' shards; an on-demand stream's are not counted |
 | A 51st on-demand stream (`OnDemandStreamCountLimit` 50) | Accepted | `LimitExceededException` |
 | `UpdateShardCount` on an on-demand stream | The count set | `ValidationException` |
+| `UpdateStreamMode` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException` |
+| `UpdateStreamMode` to `ON_DEMAND` with 50 other on-demand streams, or to `PROVISIONED` when the stream's shards would take the provisioned shards past `ShardLimit` | Accepted | `LimitExceededException` |
 
 ## Readings
 

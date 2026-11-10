@@ -422,7 +422,26 @@ operations:
             MaxRecordSizeInKiB: "input.MaxRecordSizeInKiB"
     output: {}
 
+  # A stream that changes mode is held to the limit of the mode it takes, over
+  # the other streams: the on-demand streams' limit, or the shard limit for
+  # the shards it has.
   UpdateStreamMode:
+    reads:
+      s: { resource: stream, key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))" }
+    select:
+      binding: others
+      resource: stream
+      filter: "string(item.StreamName) != ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))"
+    let:
+      mode: "string(input.StreamModeDetails.StreamMode)"
+    require:
+      - { cond: s_found, error: NotFound }
+      - cond: "mode != 'ON_DEMAND' || size(others.filter(o, 'StreamModeDetails' in o && 'StreamMode' in o.StreamModeDetails && string(o.StreamModeDetails.StreamMode) == 'ON_DEMAND')) < 50"
+        error: LimitExceeded
+        message: This request would exceed the limit of on-demand streams for the account.
+      - cond: "mode != 'PROVISIONED' || sum(others.filter(o, !('StreamModeDetails' in o && 'StreamMode' in o.StreamModeDetails && string(o.StreamModeDetails.StreamMode) == 'ON_DEMAND')).map(o, 'OpenShardCount' in o && int(o.OpenShardCount) > 0 ? int(o.OpenShardCount) : 1)) + ('OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1) <= 500"
+        error: LimitExceeded
+        message: This request would exceed the shard limit for the account.
     effects:
       - patch:
           resource: stream

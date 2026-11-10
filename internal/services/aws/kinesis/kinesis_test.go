@@ -384,3 +384,43 @@ func TestKinesisAnOnDemandStreamsShardCountIsNotUpdated(t *testing.T) {
 		t.Errorf("after each stream changed mode, the two updates answered %s", got)
 	}
 }
+
+// A stream that changes mode is held to the limit of the mode it takes, as a stream created in it is:
+// UpdateStreamMode lists LimitExceededException, "The requested resource exceeds the maximum number
+// allowed", and ResourceNotFoundException (API reference). It set the mode of any stream, made a record
+// for one that did not exist, and let a 51st on-demand stream and a 501st provisioned shard through. A
+// stream that already has the mode asked for is not counted against itself. The messages are this emulator's.
+func TestKinesisAStreamThatChangesModeIsHeldToItsLimit(t *testing.T) {
+	answer := kinesisAnswers(t)
+	mode := func(stream, to string) string {
+		return answer("UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/`+stream+`","StreamModeDetails":{"StreamMode":"`+to+`"}}`)
+	}
+	if got := mode("ghost", "ON_DEMAND"); !strings.HasPrefix(got, "400 ResourceNotFoundException") {
+		t.Errorf("UpdateStreamMode on a stream that does not exist answered %s", got)
+	}
+	if got := answer("DescribeStreamSummary", `{"StreamName":"ghost"}`); !strings.HasPrefix(got, "400 ResourceNotFoundException") {
+		t.Errorf("the stream that does not exist is described: %s", got)
+	}
+	// The shard limit: 400 provisioned shards, and an on-demand stream of 101 that may not become provisioned.
+	answer("CreateStream", `{"StreamName":"p","ShardCount":400}`)
+	answer("CreateStream", `{"StreamName":"big","ShardCount":101,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
+	answer("CreateStream", `{"StreamName":"fits","ShardCount":100,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`)
+	const shards = "400 LimitExceededException: This request would exceed the shard limit for the account."
+	if got := mode("big", "PROVISIONED") + ", " + mode("fits", "PROVISIONED") + ", " + mode("fits", "PROVISIONED") + ", " + mode("p", "PROVISIONED"); got != shards+", 200, 200, 200" {
+		t.Errorf("an on-demand stream of 101 shards, one of 100 (twice), and the provisioned one itself, made provisioned beside 400 shards, answered %s", got)
+	}
+	// The on-demand limit: fifty on-demand streams, and a provisioned one that may not join them.
+	answer = kinesisAnswers(t)
+	for i := range 50 {
+		answer("CreateStream", fmt.Sprintf(`{"StreamName":"od%d","ShardCount":1,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, i))
+	}
+	answer("CreateStream", `{"StreamName":"p","ShardCount":1}`)
+	const streams = "400 LimitExceededException: This request would exceed the limit of on-demand streams for the account."
+	if got := mode("p", "ON_DEMAND") + ", " + mode("od3", "ON_DEMAND"); got != streams+", 200" {
+		t.Errorf("a 51st on-demand stream by a change of mode, and one of the fifty asked to be what it is, answered %s", got)
+	}
+	answer("DeleteStream", `{"StreamName":"od7"}`)
+	if got := mode("p", "ON_DEMAND"); got != "200" {
+		t.Errorf("with one of the fifty deleted the change of mode answered %s", got)
+	}
+}

@@ -331,20 +331,15 @@
       "operation": "IncreaseStreamRetentionPeriod",
       "input": {"StreamName": "ghost", "RetentionPeriodHours": 48},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {}
+      "recut": "The pack made a stream record for a name that had none. IncreaseStreamRetentionPeriod lists ResourceNotFoundException, 'The requested resource could not be found. The stream might not be specified correctly.' (Kinesis API reference, IncreaseStreamRetentionPeriod, read 2026-11): a retention period is an existing stream's, and no stream is named ghost.",
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
     },
     {
       "operation": "DescribeStream",
       "input": {"StreamName": "ghost"},
       "identity": {"Account": "000000000000", "Region": "us-east-1", "AccessKeyID": "", "ARN": "", "Project": ""},
-      "output": {"StreamDescription": {
-        "StreamName": "ghost",
-        "StreamARN": "arn:aws:kinesis:us-east-1:000000000000:stream/ghost",
-        "StreamStatus": "ACTIVE",
-        "Shards": [{"ShardId": "shardId-000000000000",
-                    "HashKeyRange": {"StartingHashKey": "0", "EndingHashKey": "340282366920938463463374607431768211455"},
-                    "SequenceNumberRange": {"StartingSequenceNumber": "0"}}]
-      }}
+      "recut": "The pack described the record the step before had made. With no such record there is no stream: DescribeStream lists ResourceNotFoundException, 'The requested resource could not be found. The stream might not be specified correctly.' (Kinesis API reference).",
+      "fault": {"code": "ResourceNotFoundException", "http_status": 400, "fault": "client"}
     },
     {
       "operation": "DeleteStream",

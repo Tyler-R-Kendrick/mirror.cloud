@@ -616,3 +616,27 @@ func TestKinesisSplitAndMergeAreAnExistingProvisionedStreams(t *testing.T) {
 		t.Errorf("UpdateShardCount: %s", got)
 	}
 }
+
+// A retention period is an existing stream's. IncreaseStreamRetentionPeriod and
+// DecreaseStreamRetentionPeriod list ResourceNotFoundException, "The requested resource could not be
+// found. The stream might not be specified correctly." (API reference); each made a record for a stream
+// that did not exist, which DescribeStream then answered as a stream.
+func TestKinesisARetentionPeriodIsAnExistingStreams(t *testing.T) {
+	answer := kinesisAnswers(t)
+	const missing = "400 ResourceNotFoundException: Stream ghost under account 000000000000 not found."
+	for _, op := range []string{"IncreaseStreamRetentionPeriod", "DecreaseStreamRetentionPeriod"} {
+		if got := answer(op, `{"StreamName":"ghost","RetentionPeriodHours":48}`); got != missing {
+			t.Errorf("%s of a stream that does not exist answered %s", op, got)
+		}
+		if got := answer(op, `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/ghost","RetentionPeriodHours":48}`); got != missing {
+			t.Errorf("%s by the ARN of a stream that does not exist answered %s", op, got)
+		}
+	}
+	if got := answer("DescribeStream", `{"StreamName":"ghost"}`) + " " + answer("ListStreams", `{}`); !strings.HasPrefix(got, "400 ResourceNotFoundException") || !strings.HasSuffix(got, " 200") {
+		t.Errorf("the stream that does not exist is described: %s", got)
+	}
+	answer("CreateStream", `{"StreamName":"s"}`)
+	if got := answer("IncreaseStreamRetentionPeriod", `{"StreamName":"s","RetentionPeriodHours":48}`) + " " + answer("DecreaseStreamRetentionPeriod", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s","RetentionPeriodHours":24}`); got != "200 200" {
+		t.Errorf("the retention period of a stream that exists answered %s", got)
+	}
+}

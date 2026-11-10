@@ -64,6 +64,7 @@
 | `CreateStream` or `UpdateStreamMode` with a `StreamMode` that is not `PROVISIONED` or `ON_DEMAND` | Recorded as given | `ValidationException`, "1 validation error detected: Value 'X' at 'streamModeDetails.streamMode' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]" |
 | `SplitShard` or `MergeShards` on an on-demand stream | The count moved | `ValidationException` |
 | `SplitShard` or `MergeShards` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException`, "Stream <name> under account <id> not found." |
+| `IncreaseStreamRetentionPeriod` or `DecreaseStreamRetentionPeriod` on a stream that does not exist | 200, and a stream record that `DescribeStream` then answered | `ResourceNotFoundException`, with the message; no record |
 | `UpdateStreamMode` with no `StreamModeDetails`, or a null one | `ValidationException`, "StreamModeDetails is required" | The same (it was `InternalFailure`, 500, between the two changes of this note) |
 | `CreateStream` or `UpdateStreamMode` with a `StreamModeDetails` that is `{}`, holds a null `StreamMode`, or is no structure | Taken as provisioned, or `InternalFailure` | `ValidationException` |
 | `UpdateStreamMode` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException` |
@@ -102,8 +103,6 @@
   `SplitShard` and `MergeShards` say the same of themselves ("This API is
   only supported for the data streams with the provisioned capacity mode"),
   and are answered the same way, by the same reading.
-- `SplitShard`, `MergeShards` and the retention operations still make a
-  record for a stream that does not exist, as the recorded trace has them.
 - A CloudFormation `AWS::Kinesis::Stream` has the mode its template gives:
   `StreamModeDetails` goes to `CreateStream`, and its "Update requires: No
   interruption" (Template Reference) is an `UpdateStreamMode` in place. A
@@ -150,7 +149,9 @@
 ## Recorded trace
 
 `internal/equivalence/traces/aws.kinesis.json` was recorded from the pack the
-bundle replaced. Three steps are re-cut, each with its reason on the step:
+bundle replaced. Five steps are re-cut, each with its reason on the step:
 `DescribeStreamSummary` (step 7, `StreamModeDetails` added),
-`UpdateShardCount` (step 35, `CurrentShardCount` 2 to 1) and `DescribeLimits`
-(step 40, `OpenShardCount` 1 to 4). All are still compared in full.
+`UpdateShardCount` (step 35, `CurrentShardCount` 2 to 1), `DescribeLimits`
+(step 40, `OpenShardCount` 1 to 4), and `IncreaseStreamRetentionPeriod` and
+`DescribeStream` on a stream that does not exist (steps 47 and 48, success
+to `ResourceNotFoundException`). All are still compared in full.

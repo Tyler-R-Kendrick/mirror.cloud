@@ -223,6 +223,12 @@ operations:
   # stream record even when the stream does not exist -- a retention call on a
   # name that was never created conjures an ACTIVE stream.
   IncreaseStreamRetentionPeriod:
+    reads:
+      s: { resource: stream, key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))" }
+    require:
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - patch:
           resource: stream
@@ -232,6 +238,12 @@ operations:
     output: {}
 
   DecreaseStreamRetentionPeriod:
+    reads:
+      s: { resource: stream, key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))" }
+    require:
+      - cond: s_found
+        error: NotFound
+        message_expr: "'Stream ' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ('ResourceARN' in input && string(input.ResourceARN) != '' ? lastSegment(string(input.ResourceARN), '/') : ('ResourceArn' in input && string(input.ResourceArn) != '' ? lastSegment(string(input.ResourceArn), '/') : ''))))) + ' under account ' + identity.account + ' not found.'"
     effects:
       - patch:
           resource: stream

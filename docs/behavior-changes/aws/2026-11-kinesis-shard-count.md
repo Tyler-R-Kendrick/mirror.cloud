@@ -62,6 +62,8 @@
 | A 51st on-demand stream (`OnDemandStreamCountLimit` 50) | Accepted | `LimitExceededException` |
 | `UpdateShardCount` on an on-demand stream | The count set | `ValidationException` |
 | `CreateStream` or `UpdateStreamMode` with a `StreamMode` that is not `PROVISIONED` or `ON_DEMAND` | Recorded as given | `ValidationException`, "1 validation error detected: Value 'X' at 'streamModeDetails.streamMode' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]" |
+| `UpdateStreamMode` with no `StreamModeDetails`, or a null one | `ValidationException`, "StreamModeDetails is required" | The same (it was `InternalFailure`, 500, between the two changes of this note) |
+| `CreateStream` or `UpdateStreamMode` with a `StreamModeDetails` that is `{}`, holds a null `StreamMode`, or is no structure | Taken as provisioned, or `InternalFailure` | `ValidationException` |
 | `UpdateStreamMode` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException` |
 | `UpdateStreamMode` to `ON_DEMAND` with 50 other on-demand streams, or to `PROVISIONED` when the stream's shards would take the provisioned shards past `ShardLimit` | Accepted | `LimitExceededException` |
 
@@ -101,12 +103,46 @@
   record for a stream that does not exist, as the recorded trace has them.
 - A CloudFormation `AWS::Kinesis::Stream` has the mode its template gives:
   `StreamModeDetails` goes to `CreateStream`, and its "Update requires: No
-  interruption" (Template Reference) is an `UpdateStreamMode` in place,
-  before the shard count; a stream whose template makes it on-demand is sent
-  no count. A rollback, and a continued one, put the previous mode back, and
-  a template that stops giving a mode leaves a provisioned stream, cleared
-  only when the previous template gave one. That the service's handler
-  orders the two calls so is a reading.
+  interruption" (Template Reference) is an `UpdateStreamMode` in place. A
+  rollback, and a continued one, put the previous mode back, and a template
+  that stops giving a mode leaves a provisioned stream, cleared only when
+  the previous template gave one.
+- A CloudFormation stream's shard count is sent only when its template's
+  `ShardCount` differs from what the previous template gave, after the mode.
+  A stream made on-demand in place has the count a stream created so has,
+  the template's or four, set before the mode while it is still
+  provisioned; so a rollback to on-demand puts its count back. That the
+  service's handler orders the calls so, and gives a stream switched in
+  place a created one's count, is a reading: Kinesis itself leaves a
+  stream's shards as they are when its mode changes.
+- A stream whose mode was set to on-demand outside a template that gives a
+  count and no mode is updated as any other; before, every update of it
+  failed and the stack was left `UPDATE_ROLLBACK_FAILED`. An update that
+  changes the count of a stream that is on-demand, by its template or
+  outside it, fails with Kinesis's refusal and rolls back to
+  `UPDATE_ROLLBACK_COMPLETE`: a restore's count refused the same way was
+  refused the update too, so nothing is left to put back, and neither a
+  rollback nor `ContinueUpdateRollback` is stopped by it.
+- A request's `StreamModeDetails` that is absent or null is not given:
+  `CreateStream` makes a provisioned stream and `UpdateStreamMode` answers
+  "StreamModeDetails is required", as for any required member, before
+  anything else. One that is given must be a structure with a `StreamMode`
+  ("Required: Yes") of the two values. The messages for a `StreamMode` that
+  is missing or null ("Member must not be null") and for a value that is no
+  structure are this emulator's, in the service's form.
+- A stream record stored with a `StreamModeDetails` that is not such a
+  structure (an earlier `UpdateStreamMode` stored what it was given) is a
+  provisioned stream to every operation.
+- `DescribeStream` and `ListShards` still list exactly one shard,
+  `shardId-000000000000`, with the full hash-key range, whatever the count.
+  Shards are not records here: listing a stream's real shards needs one
+  record per shard with its hash-key range (a 128-bit split the bundle's
+  expressions cannot compute), parent and adjacent shards for splits and
+  merges, and a record plane that routes a partition key to a shard and
+  hands out one iterator per shard. `PutRecord` writes to that one shard.
+- `UpdateShardCount` and `UpdateStreamMode` apply at once: the stream is
+  never `UPDATING`, and none of the service's limits on how far or how
+  often a count or a mode may move is applied.
 
 ## Recorded trace
 

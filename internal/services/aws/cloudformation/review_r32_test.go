@@ -98,8 +98,8 @@ func TestCloudFormationATakeoverMarksWhatTheFailedUpdateChanged(t *testing.T) {
 		rec[str(asMap(r)["Logical"])] = spi.JSONText(r)
 	}
 	if st, _, _ := h.status("tk"); st != "UPDATE_ROLLBACK_FAILED" || !strings.Contains(rec["S"], `"Gave":["Description"]`) || strings.Contains(rec["S"], "SecretString") ||
-		!strings.Contains(rec["R"], `"Gave":["Targets"]`) || !strings.Contains(rec["R"], `"Targets":["b"]`) {
-		t.Fatalf("the stack taken over is %s, recording %s and %s; want the secret's description and the rule's targets as what changed, and the value not", st, rec["S"], rec["R"])
+		!strings.Contains(rec["R"], `"Gave":["Targets"]`) || !strings.Contains(rec["R"], `"Targets":["b"]`) || strings.Contains(rec["S"]+rec["R"], "Took") {
+		t.Fatalf("the stack taken over is %s, recording %s and %s; want the secret's description and the rule's targets as what changed, the value not, and no list of what was taken away, which nothing was", st, rec["S"], rec["R"])
 	}
 	if _, err := h.service("aws.secretsmanager", "PutSecretValue", map[string]any{"SecretId": ids["S"], "SecretString": "ROT"}); err != nil {
 		t.Fatal(err)

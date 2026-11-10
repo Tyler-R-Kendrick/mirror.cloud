@@ -438,7 +438,7 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 	planned := maps.Clone(st.Refs)
 	for _, logical := range order { // a name taken fails the stack before anything is made: a Ref answers the id planned
 		rm := asMap(resources[logical])
-		typ, props := str(rm["Type"]), asMap(p.Resolve(rm["Properties"], planned, name))
+		typ, props := str(rm["Type"]), p.Given(rm["Properties"], planned, name)
 		prev, how, n, err := p.next(ctx, req, st, old, logical, typ, props)
 		if err != nil {
 			return fail(err)
@@ -449,7 +449,7 @@ func (p *Pack) apply(ctx context.Context, req *spi.Request, name string, update 
 	}
 	for _, logical := range order {
 		rm := asMap(resources[logical]) // props is never nil: provision adds to it
-		typ, props := str(rm["Type"]), maps.Collect(maps.All(asMap(p.Resolve(rm["Properties"], st.Refs, name))))
+		typ, props := str(rm["Type"]), p.Given(rm["Properties"], st.Refs, name)
 		prev, how, n, err := p.next(ctx, req, st, old, logical, typ, props)  // again: a name may come from a resource made before it
 		phys := map[string]string{"": prev.Physical}[how]                    // one an update keeps as it is
 		if err = cmp.Or(err, encode(props)); how == "update" && err == nil { // recorded before it is called: a half-made change is put back too

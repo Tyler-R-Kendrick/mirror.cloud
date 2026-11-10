@@ -5578,6 +5578,22 @@ var mutants = []mutant{
 		run:  "TestCloudFormationAStoredTemplateIsRestoredAsItWasRead",
 	},
 	{
+		name: "cloudformation-a-property-given-as-null-is-read-as-given",
+		file: filepath.Join("internal", "cfntemplate", "resolve.go"),
+		old:  "\t\tif v != nil {\n\t\t\tgiven[property] = v",
+		new:  "\t\tif true {\n\t\t\tgiven[property] = v",
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationAPropertyGivenAsNullIsNotGiven",
+	},
+	{
+		name: "cloudformation-an-operation-sends-a-property-given-as-null",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `typ, props := str(rm["Type"]), p.Given(rm["Properties"], st.Refs, name)`,
+		new:  `typ, props := str(rm["Type"]), maps.Collect(maps.All(asMap(p.Resolve(rm["Properties"], st.Refs, name))))`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationAPropertyGivenAsNullIsNotGiven",
+	},
+	{
 		name: "cloudformation-what-is-kept-has-no-bound",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
 		old:  `opKept.Load() < 1024 {`,

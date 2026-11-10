@@ -129,3 +129,48 @@ func TestCloudFormationAStoredTemplateIsRestoredAsItWasRead(t *testing.T) {
 		}
 	}
 }
+
+// A property given as null is a property not given, as one that is a Ref to AWS::NoValue is ("Removes the
+// corresponding resource property"). Three readers disagreed: what a failed update gave counted a null as
+// taken away, while the call that sends a resource's properties and the bucket's configuration took the
+// key as given, so a secret whose SecretString was null was sent an empty value ("must be at least 1
+// characters") and a rule whose Targets was null an empty PutTargets. All three now read it as absent, in
+// a template given and in a stored one. (The service itself refuses a template that holds a null, "'null'
+// values are not allowed in templates", as users report it; that refusal is not made here.)
+func TestCloudFormationAPropertyGivenAsNullIsNotGiven(t *testing.T) {
+	t.Parallel()
+	h := newStacks(t)
+	one := map[string]any{"Id": "a", "Arn": "arn:aws:sqs:us-east-1:000000000000:q"}
+	resources := func(value, targets, tags, block any) map[string]any {
+		return map[string]any{
+			"S": map[string]any{"Type": "AWS::SecretsManager::Secret", "Properties": map[string]any{"SecretString": value, "Description": "d"}},
+			"E": map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"ScheduleExpression": "rate(5 minutes)", "Targets": targets}},
+			"B": map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"Tags": tags, "PublicAccessBlockConfiguration": block}}}
+	}
+	given := []any{"v", []any{one}, []any{map[string]any{"Key": "k", "Value": "v"}}, map[string]any{"BlockPublicAcls": true}}
+	if err := rvMake(t, h, "nu", map[string]any{"Resources": resources(nil, nil, nil, nil)}); err != nil {
+		t.Fatalf("a stack whose properties are null answered %v", err)
+	}
+	ids := rv31IDs(h, "nu")
+	state := func() string {
+		value := rv31Get(h, "aws.secretsmanager", "GetSecretValue", map[string]any{"SecretId": ids["S"]})["SecretString"]
+		targets := len(spi.Slice(rv31Get(h, "aws.events", "ListTargetsByRule", map[string]any{"Rule": spi.LastSlash(ids["E"])})["Targets"]))
+		return fmt.Sprint("value=", value, " targets=", targets, " ", rv29Bucket(h, ids["B"]))
+	}
+	made := state()
+	if !strings.HasPrefix(made, "value=<nil> targets=0 ") || !strings.HasSuffix(made, "tags=none") {
+		t.Fatalf("made with null properties: %s", made)
+	}
+	if err := rv28Update(h, "nu", resources(given[0], given[1], given[2], given[3])); err != nil || !strings.HasPrefix(state(), "value=v targets=1 ") || !strings.HasSuffix(state(), "tags=set") {
+		t.Fatalf("the update that gives each property answered %v and left %s", err, state())
+	}
+	// Null again: each is cleared as a property taken out of the template is, and the secret keeps its value,
+	// which nothing takes away.
+	if err := rv28Update(h, "nu", resources(nil, nil, nil, nil)); err != nil || !strings.HasPrefix(state(), "value=v targets=0 ") || !strings.Contains(state(), "block=none") || !strings.HasSuffix(state(), "tags=none") {
+		t.Errorf("the update that gives each property as null answered %v and left %s", err, state())
+	}
+	names, _, took := gave(h.pack.Given(map[string]any{"A": nil, "B": "b"}, nil, "nu"), h.pack.Given(map[string]any{"A": "a", "B": nil}, nil, "nu"))
+	if fmt.Sprint(*names, *took) != "[B] [A]" {
+		t.Errorf("what a failed update gave is %v, and took away %v; want [B] and [A]", *names, *took)
+	}
+}

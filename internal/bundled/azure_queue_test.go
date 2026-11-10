@@ -508,3 +508,85 @@ func TestAzureQueueUpdateOfAVisibleMessage(t *testing.T) {
 		t.Fatalf("after delete: peek %q", got)
 	}
 }
+
+// A query parameter that is not a number is refused as one, and a required one
+// that is missing as missing: 400s, never an evaluation error.
+func TestAzureQueueMalformedQueryParameters(t *testing.T) {
+	p, err := bundled.New("azure.queue", spitest.Deps(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	inv := func(op string, in map[string]any) map[string]any {
+		t.Helper()
+		in["queue"] = "q"
+		res, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			t.Fatalf("%s: %v", op, err)
+		}
+		return res.Output
+	}
+	fault := func(code, op string, in map[string]any) {
+		t.Helper()
+		in["queue"] = "q"
+		_, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if f, ok := err.(*spi.Fault); !ok || f.Code != code || f.HTTPStatus != 400 {
+			t.Fatalf("%s %v: got %#v, want 400 %s", op, in, err, code)
+		}
+	}
+	inv("CreateQueue", map[string]any{})
+	put := inv("PutMessage", map[string]any{"message": "m"})
+	mid, receipt := fmt.Sprint(put["id"]), fmt.Sprint(put["pop_receipt"])
+
+	const invalid, outOfRange = "InvalidQueryParameterValue", "OutOfRangeQueryParameterValue"
+	for _, v := range []string{"abc", "1.5", "1e3", " 5", "5s", "0x10", "--1", "+-1", "+", "-", "99999999999999999999"} {
+		fault(invalid, "PutMessage", map[string]any{"message": "x", "visibilitytimeout": v})
+		fault(invalid, "PutMessage", map[string]any{"message": "x", "messagettl": v})
+		fault(invalid, "GetMessages", map[string]any{"visibilitytimeout": v})
+		fault(invalid, "GetMessages", map[string]any{"numofmessages": v})
+		fault(invalid, "PeekMessages", map[string]any{"numofmessages": v})
+		fault(invalid, "UpdateMessage", map[string]any{"messageid": mid, "popreceipt": receipt, "visibilitytimeout": v, "message": "x"})
+	}
+	// A number that is out of range is still that.
+	fault(outOfRange, "PutMessage", map[string]any{"message": "x", "visibilitytimeout": "999999999999"})
+	fault(outOfRange, "GetMessages", map[string]any{"numofmessages": "-1"})
+	fault(outOfRange, "UpdateMessage", map[string]any{"messageid": mid, "popreceipt": receipt, "visibilitytimeout": "-1", "message": "x"})
+
+	// A decimal integer is one with a sign or leading zeros too, as it always
+	// was here: only what is not a decimal integer is refused.
+	for _, in := range []map[string]any{
+		{"message": "x", "messagettl": "+5"}, {"message": "x", "messagettl": "007"},
+		{"message": "x", "visibilitytimeout": "+1"}, {"message": "x", "visibilitytimeout": "-0"}, {"message": "x", "visibilitytimeout": "000"},
+	} {
+		extra := inv("PutMessage", in)
+		inv("DeleteMessage", map[string]any{"messageid": fmt.Sprint(extra["id"]), "popreceipt": fmt.Sprint(extra["pop_receipt"])})
+	}
+	// However many zeros: nineteen characters of them are still the number 1.
+	padded := inv("PutMessage", map[string]any{"message": "x", "visibilitytimeout": "0000000000000000001", "messagettl": "+0000000000000000000000005"})
+	inv("DeleteMessage", map[string]any{"messageid": fmt.Sprint(padded["id"]), "popreceipt": fmt.Sprint(padded["pop_receipt"])})
+	fault(invalid, "PutMessage", map[string]any{"message": "x", "visibilitytimeout": "01000000000000000000"})
+	for _, n := range []string{"+1", "01", "001", "0000000000000000001"} {
+		if got := inv("PeekMessages", map[string]any{"numofmessages": n})["_list"].([]any); len(got) != 1 {
+			t.Fatalf("peek numofmessages=%s: %d messages", n, len(got))
+		}
+	}
+	fault(outOfRange, "GetMessages", map[string]any{"numofmessages": "-0"})
+	fault(outOfRange, "GetMessages", map[string]any{"visibilitytimeout": "+0"})
+
+	// Update Message's timeout and pop receipt are required, and Delete
+	// Message's pop receipt. A receipt that is there and wrong is a mismatch.
+	const missing = "MissingRequiredQueryParameter"
+	fault(missing, "UpdateMessage", map[string]any{"messageid": mid, "popreceipt": receipt, "message": "x"})
+	fault(missing, "UpdateMessage", map[string]any{"messageid": mid, "visibilitytimeout": "0", "message": "x"})
+	fault(missing, "UpdateMessage", map[string]any{"messageid": mid, "message": "x"})
+	fault(missing, "DeleteMessage", map[string]any{"messageid": mid})
+	fault("PopReceiptMismatch", "UpdateMessage", map[string]any{"messageid": mid, "popreceipt": "wrong", "visibilitytimeout": "0", "message": "x"})
+	fault("PopReceiptMismatch", "DeleteMessage", map[string]any{"messageid": mid, "popreceipt": "wrong"})
+	// Nothing above touched the message.
+	peek := inv("PeekMessages", map[string]any{})["_list"].([]any)
+	if len(peek) != 1 || peek[0].(map[string]any)["message"] != "m" || fmt.Sprint(peek[0].(map[string]any)["dequeue_count"]) != "0" {
+		t.Fatalf("peek after the refusals %#v", peek)
+	}
+	inv("UpdateMessage", map[string]any{"messageid": mid, "popreceipt": receipt, "visibilitytimeout": "0", "message": "x"})
+}

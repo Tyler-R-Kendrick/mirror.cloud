@@ -30,7 +30,58 @@ const sqsID = "aws.sqs"
 type sqsFixture struct {
 	pack  spi.BehaviorPack
 	clock *clock.Controllable
+	looks *lookCounter
 	t     *testing.T
+}
+
+// lookCounter counts the times a queue's messages are listed: once by every
+// selection, and once each time a wait reads their deadlines.
+type lookCounter struct {
+	spi.Store
+	mu sync.Mutex
+	n  int
+}
+
+func (c *lookCounter) Scope(account, region string) spi.Scope {
+	return lookScope{Scope: c.Store.Scope(account, region), c: c}
+}
+
+// mark starts the count again.
+func (c *lookCounter) mark() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.n = 0
+}
+
+func (c *lookCounter) since() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.n
+}
+
+type lookScope struct {
+	spi.Scope
+	c *lookCounter
+}
+
+func (s lookScope) Collection(name string) spi.Collection {
+	col := s.Scope.Collection(name)
+	if !strings.HasPrefix(name, "msgs:") {
+		return col
+	}
+	return lookCollection{Collection: col, c: s.c}
+}
+
+type lookCollection struct {
+	spi.Collection
+	c *lookCounter
+}
+
+func (l lookCollection) List(ctx context.Context, prefix, after string, limit int) ([]spi.KV, bool, error) {
+	l.c.mu.Lock()
+	l.c.n++
+	l.c.mu.Unlock()
+	return l.Collection.List(ctx, prefix, after, limit)
 }
 
 func newSQS(t *testing.T, around ...func(*clock.Controllable) spi.Clock) *sqsFixture {
@@ -51,11 +102,13 @@ func newSQS(t *testing.T, around ...func(*clock.Controllable) spi.Clock) *sqsFix
 	for _, wrap := range around {
 		deps.Clock = wrap(clk)
 	}
+	looks := &lookCounter{Store: deps.Store}
+	deps.Store = looks
 	pack, err := engine.New(deps, ir, svc)
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	return &sqsFixture{pack: pack, clock: clk, t: t}
+	return &sqsFixture{pack: pack, clock: clk, looks: looks, t: t}
 }
 
 func (f *sqsFixture) call(op string, in map[string]any) (map[string]any, error) {
@@ -338,6 +391,7 @@ type steppingClock struct {
 	mu     sync.Mutex
 	left   int
 	step   time.Duration
+	onStep func() // called as the step is taken
 	parked chan struct{}
 }
 
@@ -362,6 +416,7 @@ func (c *steppingClock) Now() time.Time {
 	}
 	c.mu.Unlock()
 	if fire {
+		c.onStep()
 		_ = c.Controllable.Advance(c.step)
 	}
 	return c.Controllable.Now()
@@ -387,27 +442,66 @@ func (c *steppingClock) AfterTime(at time.Time) <-chan time.Time {
 // deadline inside the nth reading of it, for every n the poll makes before it
 // parks. Left to the scheduler the window is hit a few times in a thousand.
 func TestLongPollDoesNotLoseADeadlineThatPassesWhileItLooks(t *testing.T) {
+	stepOverADeadlineInEveryReading(t, time.Millisecond, nil, 1, 999*time.Millisecond, 1)
+}
+
+// TestLongPollLooksOnceMoreWhenItsTimeoutPassesWithADeadline: the same window,
+// with a step that carries the clock over the poll's own timeout as well as
+// the record's deadline. The poll is out of time, and the message is
+// selectable: it selects once more and answers it, where it used to see only
+// that its time was up and answer empty. Once, not until something turns up:
+// the times it looks at the messages after the step are counted, and are one
+// reading of their deadlines and exactly one selection.
+func TestLongPollLooksOnceMoreWhenItsTimeoutPassesWithADeadline(t *testing.T) {
+	stepOverADeadlineInEveryReading(t, 3*time.Second, nil, 1, 999*time.Millisecond, 1)
+}
+
+// TestLongPollOutOfTimeLooksOnceAndNoMore: the deadline that comes due with
+// the timeout makes nothing selectable -- the message reappears a second after
+// the queue stopped retaining it. The one more selection finds nothing, and
+// the poll answers empty there and then: it does not go round again.
+func TestLongPollOutOfTimeLooksOnceAndNoMore(t *testing.T) {
+	stepOverADeadlineInEveryReading(t, 3*time.Second, map[string]any{"MessageRetentionPeriod": "60"}, 61, 60*time.Second+999*time.Millisecond, 0)
+}
+
+// stepOverADeadlineInEveryReading receives a message for hidden seconds, waits
+// lead -- a millisecond short of that -- and long-polls for two seconds,
+// stepping the clock by step inside the nth reading the poll makes of it, for
+// every n until the poll parks without one. Every poll answers want messages.
+func stepOverADeadlineInEveryReading(t *testing.T, step time.Duration, attrs map[string]any, hidden int, lead time.Duration, want int) {
+	t.Helper()
 	var clk *steppingClock
 	f := newSQS(t, func(c *clock.Controllable) spi.Clock {
 		clk = &steppingClock{Controllable: c, parked: make(chan struct{}, 1)}
 		return clk
 	})
+	clk.onStep = f.looks.mark
+	// Rounds in which the step fell between a selection and the wait's next
+	// reading of the deadlines: the window itself.
+	reselected := 0
 	for n := 1; ; n++ {
 		// A queue a round, on one engine: building one costs more than the round.
-		url := f.queue(fmt.Sprintf("q%d", n), nil)
+		var queueAttrs map[string]any
+		if attrs != nil {
+			queueAttrs = map[string]any{}
+			for k, v := range attrs {
+				queueAttrs[k] = v
+			}
+		}
+		url := f.queue(fmt.Sprintf("q%d", n), queueAttrs)
 		select {
 		case <-clk.parked:
 		default:
 		}
 		f.must("SendMessage", map[string]any{"QueueUrl": url, "MessageBody": "hello"})
-		if got := f.must("ReceiveMessage", map[string]any{"QueueUrl": url, "VisibilityTimeout": 1})["Messages"].([]any); len(got) != 1 {
+		if got := f.must("ReceiveMessage", map[string]any{"QueueUrl": url, "VisibilityTimeout": hidden})["Messages"].([]any); len(got) != 1 {
 			t.Fatalf("receive got %d messages, want 1", len(got))
 		}
-		if err := f.clock.Advance(999 * time.Millisecond); err != nil {
+		if err := f.clock.Advance(lead); err != nil {
 			t.Fatal(err)
 		}
 
-		clk.arm(n, time.Millisecond)
+		clk.arm(n, step)
 		done := make(chan int, 1)
 		go func() {
 			out, err := f.call("ReceiveMessage", map[string]any{"QueueUrl": url, "WaitTimeSeconds": 2})
@@ -419,12 +513,25 @@ func TestLongPollDoesNotLoseADeadlineThatPassesWhileItLooks(t *testing.T) {
 			done <- len(items)
 		}()
 		hung := time.After(10 * time.Second)
-		last := false
+		last, waited := false, false
 		for got := false; !got; {
 			select {
 			case messages := <-done:
-				if messages != 1 {
-					t.Fatalf("clock stepped in reading %d: long poll returned %d messages, want 1", n, messages)
+				if messages != want {
+					t.Fatalf("clock stepped %s in reading %d: long poll returned %d messages, want %d", step, n, messages, want)
+				}
+				// A poll the step left with nothing to wait for looks at the
+				// messages at most twice more: once for their deadlines, once
+				// to select. A step inside one of the two leaves one look.
+				after := f.looks.since()
+				if waited {
+					after = 0
+				}
+				if after > 2 {
+					t.Fatalf("clock stepped %s in reading %d: the poll looked at the messages %d times after the step, want at most a deadline read and one selection", step, n, after)
+				}
+				if after == 2 {
+					reselected++
 				}
 				got = true
 			case <-clk.parked:
@@ -434,7 +541,16 @@ func TestLongPollDoesNotLoseADeadlineThatPassesWhileItLooks(t *testing.T) {
 				if !clk.spent() {
 					last = true
 					clk.arm(0, 0)
-					if err := f.clock.Advance(time.Millisecond); err != nil {
+					f.looks.mark()
+					if err := f.clock.Advance(step); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					// Parked after the step: it fell before the poll set its
+					// timeout, and there is nothing selectable to wake it.
+					// Let the two seconds run out, as a clock would.
+					waited = true
+					if err := f.clock.Advance(2 * time.Second); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -445,6 +561,9 @@ func TestLongPollDoesNotLoseADeadlineThatPassesWhileItLooks(t *testing.T) {
 		if last {
 			if n < 3 {
 				t.Fatalf("the poll parked after %d readings of the clock; the step was never inside it", n-1)
+			}
+			if reselected == 0 {
+				t.Fatal("no step fell between a selection and the deadlines' reading: the window was never entered")
 			}
 			return
 		}

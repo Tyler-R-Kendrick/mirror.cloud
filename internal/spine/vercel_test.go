@@ -107,6 +107,23 @@ func TestBootedServerVercelAPI(t *testing.T) {
 	if code != 200 || kv["result"] != nil {
 		t.Fatalf("kv get after del %d %#v", code, kv)
 	}
+	// Arguments sent as JSON numbers, as an SDK sends them, are their digits.
+	for _, c := range []struct {
+		body string
+		want any
+	}{
+		{`["SET","n",1000000]`, "OK"},
+		{`["GET","n"]`, "1000000"},
+		{`["INCRBY","n",2500000]`, float64(3500000)},
+		{`["EXPIRE","n",2592000]`, float64(1)},
+		{`["TTL","n"]`, float64(2592000)},
+		{`["DEL","n"]`, float64(1)},
+	} {
+		code, kv, _ = do(http.MethodPost, "/", c.body, "id.kv.vercel-storage.com")
+		if code != 200 || kv["result"] != c.want {
+			t.Fatalf("kv %s: %d %#v, want %v", c.body, code, kv, c.want)
+		}
+	}
 	// An unimplemented verb is 501 with the header that says so, not a 400: a
 	// client can tell "mirror has not got to this yet" from "you sent
 	// nonsense" without reading the message. The error is a plain string,

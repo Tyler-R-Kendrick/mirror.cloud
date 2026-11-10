@@ -46,3 +46,35 @@ Update Message).
   message stayed hidden until it expired. A timeout equal to the TTL is taken,
   and a message that never expires (`messagettl=-1`) takes any timeout up to
   seven days.
+- **A query parameter that is not a number is 400
+  `InvalidQueryParameterValue`.** The common REST error codes give it for "an
+  invalid value was specified for one of the query parameters in the request
+  URI". `visibilitytimeout`, `messagettl` and `numofmessages` that are not a
+  decimal integer (`abc`, `1.5`, `5s`) answered 500 before, on Put Message,
+  Get Messages, Peek Messages and Update Message. A number outside the
+  documented range is still `OutOfRangeQueryParameterValue`.
+  - A decimal integer is one with a sign or leading zeros too (`+5`, `007`,
+    `-0`, `0000000000000000001`): they were accepted before and still are,
+    however many the zeros, for all three parameters. The reference does not
+    say how Azure reads them.
+  - A parameter with an empty value (`?messagettl=`) is read as not sent, as
+    before: it never reached these rules and was never a 500. The reference
+    does not say whether Azure refuses an empty value.
+  - A number of nineteen digits or more, not counting leading zeros, is
+    refused as not a number, where one of up to eighteen digits is refused as
+    out of range.
+  - These rules run where the range rules already ran, after the queue and
+    the message are looked up: a bad parameter on a missing queue is still
+    `QueueNotFound`.
+- **Update Message without `visibilitytimeout` is 400
+  `MissingRequiredQueryParameter`.** Update Message marks the parameter
+  Required, and the common REST error codes give that code for "a required
+  query parameter was not specified for this request". Before, it answered
+  `OutOfRangeQueryParameterValue`.
+- **Update Message and Delete Message without `popreceipt` are 400
+  `MissingRequiredQueryParameter`.** Both mark the parameter Required. The
+  reference does not state which code Azure returns for it; this is the code
+  the common REST error codes give for "a required query parameter was not
+  specified", as for the timeout above. Before, both answered
+  `PopReceiptMismatch`, which is still the answer for a receipt that is sent
+  and wrong.

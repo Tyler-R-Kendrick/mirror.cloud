@@ -423,10 +423,9 @@ func (ev *eval) runWait(ctx context.Context, op bir.Operation) error {
 	// come due since and selects once more before it parks.
 	var observed time.Time
 	for {
-		now := ev.e.deps.Clock.Now()
-		if !now.Before(deadline) {
-			return nil
-		}
+		// Out of time, read before the deadlines are: time that passes while
+		// they are read is the next pass's.
+		expired := !ev.e.deps.Clock.Now().Before(deadline)
 		// Park until the deadline, the next armed deadline among the records
 		// being waited on, or a bus wakeup from a write to this selection's
 		// collection -- the long-poll contract, not a poll loop. An armed
@@ -439,7 +438,15 @@ func (ev *eval) runWait(ctx context.Context, op bir.Operation) error {
 		// for it, and the selection ran before it: it is selected again at
 		// once. Parking on the timeout instead answered late on a real clock
 		// and never on a controllable one.
-		if due, at := ev.nextDeadline(ctx, op, observed); !due {
+		//
+		// The wait's own timeout can pass in that window too. A deadline that
+		// came due with it is still selected, once, before the wait answers:
+		// out of time is no reason to answer empty with the record selectable.
+		due, at := ev.nextDeadline(ctx, op, observed)
+		if expired && !due {
+			return nil
+		}
+		if !due {
 			park := deadline
 			if !at.IsZero() && at.Before(park) {
 				park = at
@@ -459,7 +466,7 @@ func (ev *eval) runWait(ctx context.Context, op bir.Operation) error {
 		if err != nil {
 			return err
 		}
-		if done {
+		if done || expired {
 			return nil
 		}
 	}

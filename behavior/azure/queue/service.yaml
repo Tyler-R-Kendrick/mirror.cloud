@@ -111,6 +111,10 @@ errors:
     code: InvalidQueryParameterValue
     http: 400
     fault: client
+  MissingRequiredQueryParameter:
+    code: MissingRequiredQueryParameter
+    http: 400
+    fault: client
   InvalidXmlDocument:
     code: InvalidXmlDocument
     http: 400
@@ -216,7 +220,16 @@ operations:
     require:
       - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
       - { cond: "!('body_invalid' in input && input.body_invalid == true)", error: InvalidXmlDocument, message: "XML specified is not syntactically valid." }
+      # A query parameter is text until it is read as a number. One that is
+      # not a number is refused as such before any rule does arithmetic on
+      # it: int() of it is an evaluation error, which was a 500. The same
+      # rule stands before every range rule below. A decimal integer is one
+      # with a sign or leading zeros too ("+5", "007"), as int() always read
+      # them here; eighteen digits after any zeros are the most int() is asked
+      # to read.
+      - { cond: "!('visibilitytimeout' in input && input.visibilitytimeout != null) || string(input.visibilitytimeout).matches('^[+-]?0*[0-9]{1,18}$')", error: InvalidQueryParameterValue, message: "An invalid value was specified for one of the query parameters in the request URI." }
       - { cond: "!('visibilitytimeout' in input && input.visibilitytimeout != null) || (int(input.visibilitytimeout) >= 0 && int(input.visibilitytimeout) <= 604800)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
+      - { cond: "!('messagettl' in input && input.messagettl != null) || string(input.messagettl).matches('^[+-]?0*[0-9]{1,18}$')", error: InvalidQueryParameterValue, message: "An invalid value was specified for one of the query parameters in the request URI." }
       - { cond: "!('messagettl' in input && input.messagettl != null) || int(input.messagettl) == -1 || (int(input.messagettl) > 0 && int(input.messagettl) <= 604800)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
       # As for Update Message: a message is not put already hidden past its own
       # expiry, and the reference names no error for it. Both run from the put,
@@ -243,9 +256,11 @@ operations:
       q: { resource: queue }
     require:
       - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
+      - { cond: "!('numofmessages' in input && input.numofmessages != null) || string(input.numofmessages).matches('^[+-]?0*[0-9]{1,18}$')", error: InvalidQueryParameterValue, message: "An invalid value was specified for one of the query parameters in the request URI." }
       - { cond: "!('numofmessages' in input && input.numofmessages != null) || (int(input.numofmessages) >= 1 && int(input.numofmessages) <= 32)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
       # A dequeue's timeout is at least a second; only Put Message and Update
       # Message take 0.
+      - { cond: "!('visibilitytimeout' in input && input.visibilitytimeout != null) || string(input.visibilitytimeout).matches('^[+-]?0*[0-9]{1,18}$')", error: InvalidQueryParameterValue, message: "An invalid value was specified for one of the query parameters in the request URI." }
       - { cond: "!('visibilitytimeout' in input && input.visibilitytimeout != null) || (int(input.visibilitytimeout) >= 1 && int(input.visibilitytimeout) <= 604800)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
     select:
       binding: msgs
@@ -272,6 +287,7 @@ operations:
       q: { resource: queue }
     require:
       - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
+      - { cond: "!('numofmessages' in input && input.numofmessages != null) || string(input.numofmessages).matches('^[+-]?0*[0-9]{1,18}$')", error: InvalidQueryParameterValue, message: "An invalid value was specified for one of the query parameters in the request URI." }
       - { cond: "!('numofmessages' in input && input.numofmessages != null) || (int(input.numofmessages) >= 1 && int(input.numofmessages) <= 32)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
     select:
       binding: msgs
@@ -301,7 +317,14 @@ operations:
       - { cond: "!('body_invalid' in input && input.body_invalid == true)", error: InvalidXmlDocument, message: "XML specified is not syntactically valid." }
       - { cond: rec_found, error: MessageNotFound, message: "The specified message does not exist." }
       - { cond: "(('expires_ms' in rec) ? int(rec.expires_ms) : int(rec.expires_at) * 1000) > now_ms", error: MessageNotFound, message: "The specified message does not exist." }
+      # The pop receipt is Required, as the timeout below is. Not sent, the
+      # request is short a parameter; sent and wrong, it is a mismatch.
+      - { cond: "'popreceipt' in input && input.popreceipt != null", error: MissingRequiredQueryParameter, message: "A required query parameter was not specified for this request." }
       - { cond: "'popreceipt' in input && input.popreceipt != null && string(rec.pop_receipt) == string(input.popreceipt)", error: PopReceiptMismatch, message: "The specified pop receipt is invalid." }
+      # Update Message's timeout is Required. Without it the request is not
+      # out of range, it is short a parameter.
+      - { cond: "'visibilitytimeout' in input && input.visibilitytimeout != null", error: MissingRequiredQueryParameter, message: "A required query parameter was not specified for this request." }
+      - { cond: "!('visibilitytimeout' in input && input.visibilitytimeout != null) || string(input.visibilitytimeout).matches('^[+-]?0*[0-9]{1,18}$')", error: InvalidQueryParameterValue, message: "An invalid value was specified for one of the query parameters in the request URI." }
       - { cond: "('visibilitytimeout' in input && input.visibilitytimeout != null) && int(input.visibilitytimeout) >= 0 && int(input.visibilitytimeout) <= 604800", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
       # "The visibility timeout of a message can't be set to a value later than
       # the expiry time." The reference names no error for it; this is the one
@@ -335,6 +358,8 @@ operations:
       - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
       - { cond: rec_found, error: MessageNotFound, message: "The specified message does not exist." }
       - { cond: "(('expires_ms' in rec) ? int(rec.expires_ms) : int(rec.expires_at) * 1000) > now_ms", error: MessageNotFound, message: "The specified message does not exist." }
+      # Required here too, as for Update Message.
+      - { cond: "'popreceipt' in input && input.popreceipt != null", error: MissingRequiredQueryParameter, message: "A required query parameter was not specified for this request." }
       - { cond: "string(rec.pop_receipt) == (('popreceipt' in input && input.popreceipt != null) ? string(input.popreceipt) : '')", error: PopReceiptMismatch, message: "The specified pop receipt is invalid." }
     effects:
       - send_event: { resource: message, event: DELETE }

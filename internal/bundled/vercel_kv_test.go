@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -175,33 +176,58 @@ func TestVercelKVExpireNowDeletesTheKey(t *testing.T) {
 	want("v", "GET", "k")
 }
 
-// A TTL too large to add to the clock is refused as Redis refuses it, not
-// answered with whatever the arithmetic does.
-func TestVercelKVRefusesAnExpiryThatOverflows(t *testing.T) {
+// SETEX and EXPIRE read their seconds as Redis does: a signed 64-bit integer in
+// its one canonical spelling. What is not one is "not an integer"; what is one
+// and cannot be added to the clock is an invalid expire time.
+func TestVercelKVReadsSecondsAsRedisDoes(t *testing.T) {
 	cmd := kvPack(t)
-	if _, err := cmd("SET", "k", "v"); err != nil {
-		t.Fatal(err)
-	}
-	for _, seconds := range []string{"9223372036854775807", "9223372036854776", "99999999999999999999", "-99999999999999999999"} {
-		for verb, argv := range map[string][]any{"setex": {"SETEX", "k", seconds, "v"}, "expire": {"EXPIRE", "k", seconds}} {
-			_, err := cmd(argv...)
-			if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR invalid expire time in "+verb {
-				t.Fatalf("%v: %#v", argv, err)
-			}
+	refused := func(message string, argv ...any) {
+		t.Helper()
+		_, err := cmd(argv...)
+		if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != message {
+			t.Fatalf("%v: got %#v, want 400 %q", argv, err, message)
 		}
 	}
-	if got, err := cmd("TTL", "k"); err != nil || got != "-1" {
-		t.Fatalf("after the refusals: TTL %q, %v", got, err)
-	}
-	// The largest TTL taken: about thirty million years.
-	for _, argv := range [][]any{{"SETEX", "big", "999999999999999", "v"}, {"EXPIRE", "k", "999999999999999"}} {
-		if _, err := cmd(argv...); err != nil {
-			t.Fatalf("%v: %v", argv, err)
+	want := func(want string, argv ...any) {
+		t.Helper()
+		if got, err := cmd(argv...); err != nil || got != want {
+			t.Fatalf("%v: got %q, %v; want %q", argv, got, err, want)
 		}
 	}
-	if got, err := cmd("TTL", "k"); err != nil || got != "999999999999999" {
-		t.Fatalf("TTL of the largest expiry: %q, %v", got, err)
+	const notInt = "ERR value is not an int or out of range"
+	want("OK", "SET", "k", "v")
+
+	// Not an integer as Redis parses one: a sign it does not take, a leading
+	// zero, a minus zero, a fraction, a space, nothing, or past 64 bits.
+	for _, seconds := range []string{"soon", "+5", "007", "00", "-0", "-05", "5.5", " 5", "5 ", "", "-", "9223372036854775808", "-9223372036854775809", "99999999999999999999", "-99999999999999999999"} {
+		refused(notInt, "SETEX", "k", seconds, "v")
+		refused(notInt, "EXPIRE", "k", seconds)
 	}
+	// An integer that cannot be turned into milliseconds on the clock. The
+	// test clock stands at zero, so the last second that fits is 2^63/1000.
+	for _, seconds := range []string{"9223372036854775807", "9223372036854776", "1000000000000000000"} {
+		refused("ERR invalid expire time in setex", "SETEX", "k", seconds, "v")
+		refused("ERR invalid expire time in expire", "EXPIRE", "k", seconds)
+	}
+	refused("ERR invalid expire time in expire", "EXPIRE", "k", "-9223372036854775808")
+	refused("ERR invalid expire time in expire", "EXPIRE", "k", "-9223372036854776")
+	for _, seconds := range []string{"0", "-1", "-9223372036854775808"} {
+		refused("ERR invalid expire time in setex", "SETEX", "k", seconds, "v")
+	}
+	want("v", "GET", "k")
+	want("-1", "TTL", "k")
+
+	// Sixteen digits are an integer like any other: the largest that fits.
+	want("OK", "SETEX", "big", "9223372036854775", "v")
+	want("9223372036854775", "TTL", "big")
+	want("1", "EXPIRE", "k", "1000000000000000")
+	want("1000000000000000", "TTL", "k")
+	// A JSON number for the seconds is read as the integer it is.
+	want("1", "EXPIRE", "k", 5.0)
+	want("5", "TTL", "k")
+	// The most negative seconds that fit delete the key, as any negative does.
+	want("1", "EXPIRE", "k", "-9223372036854775")
+	want("<nil>", "GET", "k")
 }
 
 // What the bundle's quirk note says of SET options: they are ignored, not
@@ -220,4 +246,155 @@ func TestVercelKVSetIgnoresItsOptions(t *testing.T) {
 	if got, err := cmd("TTL", "k"); err != nil || got != "-1" {
 		t.Fatalf("TTL after SET with EX: %q, %v", got, err)
 	}
+}
+
+// Whatever a client puts in the command array, the answer is the service's:
+// a JSON null, list or object where a word belongs, or a number that cannot
+// be counted with, is a 400 and never an evaluation error.
+func TestVercelKVAnswersMalformedArguments(t *testing.T) {
+	cmd := kvPack(t)
+	refused := func(message string, argv ...any) {
+		t.Helper()
+		_, err := cmd(argv...)
+		if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != message {
+			t.Fatalf("%v: got %#v, want 400 %q", argv, err, message)
+		}
+	}
+	want := func(want string, argv ...any) {
+		t.Helper()
+		if got, err := cmd(argv...); err != nil || got != want {
+			t.Fatalf("%v: got %q, %v; want %q", argv, got, err, want)
+		}
+	}
+	const notInt = "ERR value is not an int or out of range"
+	const notScalar = "redis command arguments must be strings or numbers"
+	want("OK", "SET", "k", "v")
+	want("OK", "SET", "n", "5")
+
+	// Seconds that are no word at all are not an integer.
+	for _, seconds := range []any{nil, []any{1.0}, map[string]any{"s": 1.0}, true} {
+		refused(notInt, "EXPIRE", "k", seconds)
+		refused(notInt, "SETEX", "k", seconds, "v")
+	}
+	// Nor is such an increment.
+	for _, by := range []any{nil, []any{}, map[string]any{}, "007", "+1", "-0", "1.5", "", "9223372036854775808"} {
+		refused(notInt, "INCRBY", "n", by)
+		refused(notInt, "DECRBY", "n", by)
+	}
+	// Anywhere else it is a malformed command.
+	for _, argv := range [][]any{
+		{nil}, {[]any{"GET"}, "k"}, {"GET", nil}, {"SET", nil, "v"}, {"SET", "k", nil}, {"SET", "k", []any{}},
+		{"SET", "k", map[string]any{}}, {"APPEND", "k", nil}, {"SETEX", "k", "5", nil}, {"DEL", []any{"k"}},
+		{"SET", "k", "v", nil}, {"EXISTS", map[string]any{}}, {"INCR", nil}, {"HSET", "h", nil, "v"},
+	} {
+		refused(notScalar, argv...)
+	}
+	want("v", "GET", "k")
+	want("-1", "TTL", "k")
+	want("5", "GET", "n")
+
+	// Counting past 64 bits is refused, as Redis refuses it, and counts nothing.
+	want("OK", "SET", "top", "9223372036854775807")
+	refused("ERR increment or decrement would overflow", "INCR", "top")
+	refused("ERR increment or decrement would overflow", "INCRBY", "top", "1")
+	refused("ERR increment or decrement would overflow", "DECRBY", "top", "-1")
+	want("9223372036854775806", "DECR", "top")
+	want("OK", "SET", "bottom", "-9223372036854775808")
+	refused("ERR increment or decrement would overflow", "DECR", "bottom")
+	refused("ERR increment or decrement would overflow", "INCRBY", "bottom", "-1")
+	refused("ERR decrement would overflow", "DECRBY", "n", "-9223372036854775808")
+	want("-1", "INCRBY", "bottom", "9223372036854775807")
+	// A stored value Redis would not count with is not an integer.
+	for _, stored := range []string{"007", "9223372036854775808", "-0", "+1"} {
+		want("OK", "SET", "odd", stored)
+		refused(notInt, "INCR", "odd")
+		want(stored, "GET", "odd")
+	}
+}
+
+// A client may send an argument as a JSON number: @upstash/redis does, for
+// incrby("n", 1000000) and expire("k", 2592000). Redis receives its decimal
+// text, so a whole number is spelled in digits however large -- not in the
+// exponent form a float prints as from a million up.
+func TestVercelKVSpellsJSONNumbersInDecimal(t *testing.T) {
+	cmd := kvPack(t)
+	want := func(want string, argv ...any) {
+		t.Helper()
+		if got, err := cmd(argv...); err != nil || got != want {
+			t.Fatalf("%v: got %q, %v; want %q", argv, got, err, want)
+		}
+	}
+	// A value.
+	want("OK", "SET", "n", 1000000.0)
+	want("1000000", "GET", "n")
+	want("7", "STRLEN", "n")
+	// An increment and a decrement.
+	want("3000000", "INCRBY", "n", 2000000.0)
+	want("1500000", "DECRBY", "n", 1500000.0)
+	want("1499999", "DECRBY", "n", 1.0)
+	want("-8500001", "INCRBY", "n", -10000000.0)
+	// Seconds.
+	want("1", "EXPIRE", "n", 2592000.0)
+	want("2592000", "TTL", "n")
+	want("OK", "SETEX", "s", 31536000.0, 123456789.0)
+	want("31536000", "TTL", "s")
+	want("123456789", "GET", "s")
+	// Appended text.
+	want("OK", "SET", "a", "x")
+	want("8", "APPEND", "a", 1000000.0)
+	want("x1000000", "GET", "a")
+	// A key: the number and its digits are one key.
+	want("OK", "SET", 5000000.0, "by number")
+	want("by number", "GET", "5000000")
+	want("by number", "GET", 5000000.0)
+	want("1", "DEL", 5000000.0)
+	want("<nil>", "GET", "5000000")
+	// The largest whole number that only one JSON text decodes to, and its
+	// negative: the safe integers end a step short of 2^53.
+	want("OK", "SET", "big", 9007199254740991.0)
+	want("9007199254740991", "GET", "big")
+	want("OK", "SET", "big", -9007199254740991.0)
+	want("-9007199254740991", "GET", "big")
+	want("OK", "SET", "c", "0")
+	want("9007199254740991", "INCRBY", "c", 9007199254740991.0)
+	// 2^53 itself is where that stops: 9007199254740992 and 9007199254740993
+	// are one float, so the digits sent cannot be told, and neither is read
+	// as an integer or spelled as one.
+	for _, twoTo53 := range []float64{9007199254740992, 9007199254740993, -9007199254740992} {
+		for _, argv := range [][]any{{"INCRBY", "c", twoTo53}, {"DECRBY", "c", twoTo53}, {"EXPIRE", "c", twoTo53}, {"SETEX", "c", twoTo53, "v"}} {
+			_, err := cmd(argv...)
+			if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR value is not an int or out of range" {
+				t.Fatalf("%v: %#v", argv, err)
+			}
+		}
+		want("OK", "SET", twoTo53, "v")
+		for _, digits := range []string{"9007199254740992", "-9007199254740992", "9007199254740993"} {
+			want("<nil>", "GET", digits)
+		}
+		want("1", "DEL", twoTo53)
+	}
+	want("9007199254740991", "GET", "c")
+	want("-1", "TTL", "c")
+	// A fraction is its own spelling, and no integer.
+	want("OK", "SET", "f", 1.5)
+	want("1.5", "GET", "f")
+	// A large one is in the float's exponent form, as it always was.
+	want("OK", "SET", "f", 1234567.5)
+	want("1.2345675e+06", "GET", "f")
+	// Minus zero is the whole number zero.
+	want("OK", "SET", "z", math.Copysign(0, -1))
+	want("0", "GET", "z")
+	_, err := cmd("INCRBY", "n", 1.5)
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR value is not an int or out of range" {
+		t.Fatalf("INCRBY by a fraction: %#v", err)
+	}
+	// Past 2^53 a JSON number no longer reaches the bundle digit for digit --
+	// it is decoded to a float before the bundle sees it -- so it is left in
+	// the float's own spelling and is not read as an integer. A client that
+	// needs such a number sends it as a string, which is exact.
+	_, err = cmd("INCRBY", "n", 1e19)
+	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR value is not an int or out of range" {
+		t.Fatalf("INCRBY by 1e19: %#v", err)
+	}
+	want("-8500000", "INCRBY", "n", "1")
 }

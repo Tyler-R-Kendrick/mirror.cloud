@@ -688,6 +688,102 @@ The oracle is AWS's documentation as it ships in the vendored model
     made one of its name, deleted the other stack's. Stack statuses here have no `_IN_PROGRESS` grain, so
     `UPDATE_COMPLETE_CLEANUP_IN_PROGRESS` is never seen. Before, an update
     never deleted what it replaced or dropped.
+  - The cleanup runs after the update is written and can undo nothing of
+    it: "In this state, the stack has been updated and is usable, but
+    CloudFormation is still deleting the old resources" (User Guide, stack
+    status codes, `UPDATE_COMPLETE_CLEANUP_IN_PROGRESS`). A failure of the
+    engine's own in the cleanup abandons what it had not yet deleted, as a
+    delete that fails does: the stack stays `UPDATE_COMPLETE` with the new
+    template, and each such resource is a `DELETE_FAILED` event. Before, such
+    a failure ran the update's rollback over the finished stack: it deleted
+    what the update had made and restored the old properties under an
+    `UPDATE_COMPLETE` record, and after a replacement neither generation was
+    left.
+  - An update, and a rollback's restore, leave a resource with exactly its
+    template's properties. Each service's update keeps what a call does not
+    name, so a property the template no longer gives is cleared through that
+    service's own API: a table's stream is disabled and its billing mode and
+    table class are the defaults; a function's `Description`, `Environment`,
+    `Timeout` ("The default is 3 seconds"), `MemorySize` ("128 MB"),
+    `Layers`, `KMSKeyArn`, `DeadLetterConfig`, `TracingConfig` and
+    `EphemeralStorage` are the values a function made without them has; a
+    bucket's tags, public access block, ownership controls and stored
+    configurations are deleted. A bucket's versioning is suspended, since
+    "Once you version-enable a bucket, it can never return to an unversioned
+    state. You can, however, suspend versioning on that bucket". A rollback
+    clears what the failed update gave; `ContinueUpdateRollback`, which does
+    not know what that was, clears every such property the template lacks.
+    One property cannot be cleared, in the service as here: a secret's
+    value. Secrets Manager has no call that takes a value away (a new value
+    is a new version, and `AWSCURRENT` is moved, never removed), so a secret
+    whose template gave no `SecretString` keeps the value a failed update
+    gave it. Before, an update sent only the properties the template gave,
+    and a failed update's additions outlived its rollback.
+  - A logical id keeps its type. An update that gives one another type is
+    `ValidationError`, "Update of resource type is not permitted. The new
+    template modifies resource type of the following resources: [X]" (the
+    service's wording as users report it; the guides do not print it, so a
+    reading), and changes nothing. Before, the update made the new type and
+    its cleanup deleted the old resource as a replaced one, a
+    `DeletionPolicy: Retain` one included.
+  - A resource is told by its type and its physical id together, wherever
+    the engine asks whether a stack holds it: a bucket and a parameter may
+    share a name. Before, the cleanup matched the id alone, and a dropped
+    bucket whose name a kept parameter had was left behind, listed by no
+    stack.
+  - `ListStacks` reads `StackStatusFilter`: it "Returns the summary
+    information for stacks whose status matches the specified
+    StackStatusFilter", and "If no StackStatusFilter is specified, summary
+    information for all stacks is returned (including existing stacks and
+    stacks that have been deleted)". A deleted stack is listed for as long
+    as its record is kept ("Deleted stacks are retained and viewable for 90
+    days"; here, until its name is used again, which replaces the record:
+    the deleted stack then answers by its id no more). Before, the filter
+    was not read.
+  - `ContinueUpdateRollback` reserves its stack as every operation does:
+    the stack is `UPDATE_ROLLBACK_IN_PROGRESS` while it runs, a
+    `DeleteStack`, an `UpdateStack` or a second `ContinueUpdateRollback`
+    during it is refused, and one that ends without settling the stack is
+    taken over by the next operation, which settles it
+    `UPDATE_ROLLBACK_FAILED`. Before, it took no reservation.
+  - `DeletionPolicy: Retain` holds on every rollback of the update that made
+    the resource, one taken over by a later operation included: the resource
+    leaves the stack, `DELETE_SKIPPED` ("The DELETE_SKIPPED status applies
+    to resources with a deletion policy attribute of retain"), and
+    `RetainExceptOnCreate`'s is deleted. Before, a rollback that was taken
+    over listed both for `ContinueUpdateRollback`, which deleted both.
+  - A rollback that cannot delete what the failed update made leaves the
+    stack `UPDATE_ROLLBACK_FAILED` with the resource listed, so that
+    `ContinueUpdateRollback` and `DeleteStack` retry it and no other stack
+    takes its name. The User Guide puts that delete after the rollback
+    (`UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS`: "the stack has been
+    rolled back to its previous working state and is usable, but
+    CloudFormation is still deleting any new resources it created during
+    the stack update") and does not say what a delete that fails there
+    leaves; this engine keeps the resource the stack's rather than abandon
+    it. This is unchanged.
+  - A deleted stack changes no more: `DeleteStack` by the stack id of a
+    deleted stack answers as a delete does and writes nothing. A stack that
+    is deleted cleanly has no `StackStatusReason`, whatever an earlier
+    operation failed with; `ROLLBACK_COMPLETE` and
+    `UPDATE_ROLLBACK_COMPLETE` keep the reason the operation rolled back
+    for, a reading of "Success/failure message associated with the stack
+    status". Before, the delete by id reserved and settled the record
+    again, and a deleted stack kept an earlier failure's reason.
+  - A table's `KeySchema` and `LocalSecondaryIndexes` are set when the table
+    is made: `UpdateTable` takes neither, so a change to one replaces the
+    table. The Template Reference prints "Update requires: Some
+    interruptions" and "No interruption" for them, which no DynamoDB call
+    can carry out, so this is a reading. A bucket's `ObjectLockEnabled` is a
+    replacement too. Before, the update called `UpdateTable` without them
+    and reported the table updated.
+  - The previous template is read with what its own stack read:
+    `AWS::NotificationARNs` in it answers the ARNs the stack had, so an
+    update that changes the ARNs changes a resource built on them, and a
+    rollback puts back the old ones. Before, the previous properties were
+    read with the request's ARNs.
+  - EventBridge's `DeleteRule` deletes the rule's targets record, empty by
+    then, with the rule.
   - The rollback family accepts only the states the API reference gives
     each operation: `RollbackStack` rolls back "from CREATE_FAILED or
     UPDATE_FAILED stack statuses", `ContinueUpdateRollback` "from

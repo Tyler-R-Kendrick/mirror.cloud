@@ -29,6 +29,14 @@ resources:
       # messagettl -1 means never expire; default is seven days.
       expires_at: "('messagettl' in input && int(input.messagettl) == -1) ? 253402300799 : (int(now) + (('messagettl' in input && int(input.messagettl) > 0) ? int(input.messagettl) : 604800))"
       visible_at: "int(now) + (('visibilitytimeout' in input && int(input.visibilitytimeout) > 0) ? int(input.visibilitytimeout) : 0)"
+      # The times above are what the service reports, in whole seconds. A TTL
+      # or visibility timeout of N seconds runs N seconds from the instant it
+      # was set, so the deadlines the bundle compares are kept in milliseconds:
+      # int(now) drops up to a second, and a 1-second TTL set late in a clock
+      # second was over when the second turned. A record without them (a
+      # snapshot from before they existed) falls back to the reported seconds.
+      expires_ms: "('messagettl' in input && int(input.messagettl) == -1) ? 253402300799000 : (now_ms + 1000 * (('messagettl' in input && int(input.messagettl) > 0) ? int(input.messagettl) : 604800))"
+      visible_ms: "now_ms + 1000 * (('visibilitytimeout' in input && int(input.visibilitytimeout) > 0) ? int(input.visibilitytimeout) : 0)"
     statechart:
       initial: visible
       states:
@@ -39,7 +47,7 @@ resources:
             DEQUEUE:
               - target: invisible
                 actions:
-                  - set: { dequeue_count: "int(rec.dequeue_count) + 1", pop_receipt: "event.popReceipt + '-' + string(rec.seq)", visible_at: "int(event.nextVisible)" }
+                  - set: { dequeue_count: "int(rec.dequeue_count) + 1", pop_receipt: "event.popReceipt + '-' + string(rec.seq)", visible_at: "int(event.nextVisible)", visible_ms: "int(event.nextVisibleMs)" }
                   - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
             DELETE: [{ target: deleted }]
             CLEAR: [{ target: deleted }]
@@ -50,7 +58,7 @@ resources:
             UPDATE:
               - target: invisible
                 actions:
-                  - set: { pop_receipt: "event.popReceipt", message: "event.text", visible_at: "int(event.nextVisible)" }
+                  - set: { pop_receipt: "event.popReceipt", message: "event.text", visible_at: "int(event.nextVisible)", visible_ms: "int(event.nextVisibleMs)" }
                   - deadline: { name: reappear, after: "seconds(event.visibilityTimeout)" }
             DELETE: [{ target: deleted }]
             CLEAR: [{ target: deleted }]
@@ -149,7 +157,7 @@ operations:
     output:
       name: rec.name
       metadata: "('metadata' in rec && rec.metadata != null) ? rec.metadata : {}"
-      approx_count: "string(size(msgs.filter(m, int(m.expires_at) > int(now))))"
+      approx_count: "string(size(msgs.filter(m, (('expires_ms' in m) ? int(m.expires_ms) : int(m.expires_at) * 1000) > now_ms)))"
 
   SetQueueAcl:
     reads:
@@ -228,7 +236,7 @@ operations:
       binding: msgs
       resource: message
       state: visible
-      filter: "int(item.visible_at) <= int(now) && int(item.expires_at) > int(now)"
+      filter: "(('visible_ms' in item) ? int(item.visible_ms) : int(item.visible_at) * 1000) <= now_ms && (('expires_ms' in item) ? int(item.expires_ms) : int(item.expires_at) * 1000) > now_ms"
       order_by: item.seq
       limit: "('numofmessages' in input && input.numofmessages != null) ? int(input.numofmessages) : 1"
     effects:
@@ -240,6 +248,7 @@ operations:
             popReceipt: fx.pr
             visibilityTimeout: "('visibilitytimeout' in input && input.visibilitytimeout != null) ? int(input.visibilitytimeout) : 30"
             nextVisible: "string(int(now) + (('visibilitytimeout' in input && input.visibilitytimeout != null) ? int(input.visibilitytimeout) : 30))"
+            nextVisibleMs: "string(now_ms + 1000 * (('visibilitytimeout' in input && input.visibilitytimeout != null) ? int(input.visibilitytimeout) : 30))"
     output:
       _list: "msgs.map(m, {'id': m.id, 'message': m.message, 'pop_receipt': m.pop_receipt, 'dequeue_count': m.dequeue_count, 'inserted_at': m.inserted_at, 'expires_at': m.expires_at, 'visible_at': m.visible_at})"
 
@@ -253,7 +262,7 @@ operations:
       binding: msgs
       resource: message
       state: visible
-      filter: "int(item.visible_at) <= int(now) && int(item.expires_at) > int(now)"
+      filter: "(('visible_ms' in item) ? int(item.visible_ms) : int(item.visible_at) * 1000) <= now_ms && (('expires_ms' in item) ? int(item.expires_ms) : int(item.expires_at) * 1000) > now_ms"
       order_by: item.seq
       limit: "('numofmessages' in input && input.numofmessages != null) ? int(input.numofmessages) : 1"
     output:
@@ -276,7 +285,7 @@ operations:
       - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
       - { cond: "!('body_invalid' in input && input.body_invalid == true)", error: InvalidXmlDocument, message: "XML specified is not syntactically valid." }
       - { cond: rec_found, error: MessageNotFound, message: "The specified message does not exist." }
-      - { cond: "int(rec.expires_at) > int(now)", error: MessageNotFound, message: "The specified message does not exist." }
+      - { cond: "(('expires_ms' in rec) ? int(rec.expires_ms) : int(rec.expires_at) * 1000) > now_ms", error: MessageNotFound, message: "The specified message does not exist." }
       - { cond: "'popreceipt' in input && input.popreceipt != null && string(rec.pop_receipt) == string(input.popreceipt)", error: PopReceiptMismatch, message: "The specified pop receipt is invalid." }
       - { cond: "('visibilitytimeout' in input && input.visibilitytimeout != null) && int(input.visibilitytimeout) >= 0 && int(input.visibilitytimeout) <= 604800", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
       - { cond: "blen(('message' in input && input.message != null) ? string(input.message) : '') <= 65536", error: RequestBodyTooLarge, message: "The request body is too large and exceeds the maximum permissible limit." }
@@ -290,6 +299,7 @@ operations:
             text: "('message' in input && input.message != null) ? string(input.message) : ''"
             visibilityTimeout: "int(input.visibilitytimeout)"
             nextVisible: "string(int(now) + int(input.visibilitytimeout))"
+            nextVisibleMs: "string(now_ms + 1000 * int(input.visibilitytimeout))"
     output:
       id: "string(input.messageid)"
       pop_receipt: fx.pr
@@ -302,7 +312,7 @@ operations:
     require:
       - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
       - { cond: rec_found, error: MessageNotFound, message: "The specified message does not exist." }
-      - { cond: "int(rec.expires_at) > int(now)", error: MessageNotFound, message: "The specified message does not exist." }
+      - { cond: "(('expires_ms' in rec) ? int(rec.expires_ms) : int(rec.expires_at) * 1000) > now_ms", error: MessageNotFound, message: "The specified message does not exist." }
       - { cond: "string(rec.pop_receipt) == (('popreceipt' in input && input.popreceipt != null) ? string(input.popreceipt) : '')", error: PopReceiptMismatch, message: "The specified pop receipt is invalid." }
     effects:
       - send_event: { resource: message, event: DELETE }

@@ -905,11 +905,15 @@ func TestBootedServerAzureQueue(t *testing.T) {
 	if code != 200 || !strings.Contains(string(raw), "<MessageText>short</MessageText>") {
 		t.Fatalf("dequeue short %d %s", code, raw)
 	}
+	// The TTL and the visibility timeout were both stamped before here, so a
+	// second from here the message is visible again and expired: only its
+	// expiry keeps it out of the peek below.
+	shortGone := rt.Deps.Clock.After(time.Second)
 	code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true", "", nil)
 	if code != 200 || !strings.Contains(string(raw), "<MessageText>linger</MessageText>") || strings.Contains(string(raw), "short") {
 		t.Fatalf("peek hides invisible %d %s", code, raw)
 	}
-	time.Sleep(1200 * time.Millisecond)
+	<-shortGone
 	code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true&numofmessages=5", "", nil)
 	if code != 200 || strings.Contains(string(raw), "short") || !strings.Contains(string(raw), "<MessageText>linger</MessageText>") {
 		t.Fatalf("peek after ttl %d %s", code, raw)

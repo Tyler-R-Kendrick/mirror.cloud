@@ -1061,6 +1061,36 @@ func TestSecretsManagerListSecretVersionIdsIncludesDeprecatedOnlyWhenAsked(t *te
 	}
 }
 
+// IncludeDeprecated is a BooleanType, so it is true or false: the string
+// "true" is not the Boolean, and neither is "yes" or 1. A value the awsJson1_1
+// codec cannot read as a Boolean is SerializationException, as a MaxResults
+// that is no integer is. Before, "true" listed the deprecated versions and
+// "yes" and 1 answered the listing without them.
+func TestSecretsManagerIncludeDeprecatedIsABoolean(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "s", "SecretString": "v1"})
+	ok(t, "PutSecretValue", map[string]any{"SecretId": "s", "SecretString": "v2"})
+	ok(t, "PutSecretValue", map[string]any{"SecretId": "s", "SecretString": "v3"})
+	for _, c := range []struct {
+		in   map[string]any
+		want int
+	}{
+		{map[string]any{"SecretId": "s"}, 2},
+		{map[string]any{"SecretId": "s", "IncludeDeprecated": false}, 2},
+		{map[string]any{"SecretId": "s", "IncludeDeprecated": true}, 3},
+	} {
+		if versions, _ := ok(t, "ListSecretVersionIds", c.in)["Versions"].([]any); len(versions) != c.want {
+			t.Errorf("%v listed %d versions, want %d", c.in, len(versions), c.want)
+		}
+	}
+	for _, v := range []any{"true", "yes", 1, 1.0} {
+		out, err := call("ListSecretVersionIds", map[string]any{"SecretId": "s", "IncludeDeprecated": v})
+		if f, isFault := err.(*spi.Fault); !isFault || f.Code != "SerializationException" {
+			t.Errorf("IncludeDeprecated %#v answered %v, %v, want SerializationException", v, out, err)
+		}
+	}
+}
+
 // APIErrorType is "The error Secrets Manager encountered while retrieving an
 // individual secret as part of BatchGetSecretValue": SecretId, ErrorCode and
 // Message, "A message describing the error". Every row carries the code and

@@ -59,7 +59,10 @@ The oracle is AWS's documentation as it ships in the vendored model
   `DescribeSecret` leave such a version out; they answered it with `[]`.
   `ListSecretVersionIds` lists it only with `IncludeDeprecated` ("By
   default, versions without staging labels aren't included"); it listed
-  every version.
+  every version. `IncludeDeprecated` is a `BooleanType`: a value that is not
+  a Boolean (the string `"true"`, `"yes"`, `1`) is `SerializationException`,
+  the awsJson1_1 codec's answer to a member that is not of its shape's type,
+  as a `MaxResults` that is no integer is.
 - **ListSecrets answers both.** Each entry carries `Description` ("The
   user-provided description of the secret") and, for a secret scheduled for
   deletion listed with `IncludePlannedDeletion`, `DeletedDate` ("Not present on

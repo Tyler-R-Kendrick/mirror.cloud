@@ -588,8 +588,13 @@ operations:
       - *maxIsInteger
       - *maxIn100
       - *tokenNotEmpty
+      # IncludeDeprecated is a BooleanType: the string "true" is not one, nor
+      # is "yes" or 1. Refused as a MaxResults that is no integer is.
+      - cond: "!('IncludeDeprecated' in input && input.IncludeDeprecated != null) || type(input.IncludeDeprecated) == bool"
+        error: Serialization
+        message: "IncludeDeprecated must be a Boolean."
     let:
-      deprecated: "'IncludeDeprecated' in input && (input.IncludeDeprecated == true || input.IncludeDeprecated == 'true')"
+      deprecated: "'IncludeDeprecated' in input && input.IncludeDeprecated == true"
     output:
       Versions: >-
         s_found && 'Versions' in s

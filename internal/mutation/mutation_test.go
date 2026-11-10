@@ -4262,10 +4262,19 @@ var mutants = []mutant{
 		// "By default, versions without staging labels aren't included" (ListSecretVersionIds, IncludeDeprecated).
 		name: "secretsmanager-list-version-ids-always-deprecated",
 		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
-		old:  `deprecated: "'IncludeDeprecated' in input && (input.IncludeDeprecated == true || input.IncludeDeprecated == 'true')"`,
+		old:  `deprecated: "'IncludeDeprecated' in input && input.IncludeDeprecated == true"`,
 		new:  `deprecated: "true"`,
 		pkg:  "./internal/bundled",
 		run:  "TestSecretsManagerListSecretVersionIdsIncludesDeprecatedOnlyWhenAsked",
+	},
+	{
+		// IncludeDeprecated is a BooleanType: "true", "yes" and 1 are not Booleans.
+		name: "secretsmanager-include-deprecated-of-any-type",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `|| type(input.IncludeDeprecated) == bool"`,
+		new:  `|| true"`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerIncludeDeprecatedIsABoolean",
 	},
 	{
 		// RotateSecret "starts a rotation with the values already stored in the secret": its AWSCURRENT version's, not any version's.

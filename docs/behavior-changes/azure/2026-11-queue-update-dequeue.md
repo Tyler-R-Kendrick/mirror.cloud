@@ -34,7 +34,8 @@ Update Message).
   undefined, then the content of the message won't be updated", and .NET's
   `messageText` is "Optional". A worker renewing its hold on a message sends a
   new timeout and no body. Before, such an update emptied the message. An
-  update that sends a `MessageText`, empty or not, still replaces the text.
+  envelope with no `MessageText` element is read the same way. An update that
+  sends a `MessageText`, empty or not, still replaces the text.
 - **Update Message and Put Message refuse a timeout past the message's
   expiry.** Both document that "the visibility timeout of a message can't be
   set to a value later than the expiry time" (Put Message: "later than the

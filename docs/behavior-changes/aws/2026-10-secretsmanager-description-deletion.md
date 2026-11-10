@@ -725,19 +725,30 @@ The oracle is AWS's documentation as it ships in the vendored model
     one shard only when the previous template gave a `ShardCount`, and a
     rule's targets are removed only when the previous template gave them.
     A resource that is `UPDATE_FAILED` records the names of the properties
-    the failed update gave it (names, never values), so
-    `ContinueUpdateRollback` clears by the same rule; knowing a rule's
-    targets by name alone, it removes every target the template does not
-    give where the failed update gave any. A record written before the
-    names were kept has none: for it alone `ContinueUpdateRollback` clears
-    every such property the template lacks, and suspends a bucket's
-    versioning only where it is on. Three updates replace what is there
-    with the template's, because the template must give it and the call is
-    a whole replacement: a parameter's value and type, a role's trust
-    policy, and a rule ("If you omit arguments in PutRule, the old values
-    for those arguments are not kept"), so a rule's description or state
-    set outside the template does not outlive an update of the rule, in the
-    service as here. A table's `DeletionProtectionEnabled` is not sent at
+    the failed update gave another value than its template's (names, never
+    values; none is recorded as an empty list), and the ids of the targets
+    it gave a rule, so `ContinueUpdateRollback` clears, and removes
+    targets, by the same rule. A record written before the names were kept
+    has none: for it alone `ContinueUpdateRollback` clears every such
+    property the template lacks, removes every target the template does not
+    give, and suspends a bucket's versioning only where it is on. A resource
+    recorded before resources recorded the name they were made under is
+    put back under the name its template gives it, or the generated one.
+    A secret's value follows the rule too: `UpdateSecret` makes a new
+    version only "If you include SecretString or SecretBinary", so the
+    engine sends the value only when the template's `SecretString` or
+    `GenerateSecretString` differs from what the previous template gave. An
+    update of a secret's tags or description, an update that changes
+    nothing and a rollback of an update that did not change the value all
+    leave a value rotated outside the template as it is; before, each sent
+    the template's value again, and made a generated password anew. Four
+    updates replace what is there with the template's, because the template
+    must give it and the call is a whole replacement: a parameter's value
+    and type, a role's trust policy, a stream's resource policy, and a rule
+    ("If you omit arguments in PutRule, the old values for those arguments
+    are not kept"), so a rule's description or state set outside the
+    template does not outlive an update of the rule, in the service as
+    here. A table's `DeletionProtectionEnabled` is not sent at
     all: the table service here keeps it false.
     One property cannot be cleared, in the service as here: a secret's
     value. Secrets Manager has no call that takes a value away (a new value
@@ -766,6 +777,13 @@ The oracle is AWS's documentation as it ships in the vendored model
     days"; here, until its name is used again, which replaces the record:
     the deleted stack then answers by its id no more). Before, the filter
     was not read.
+  - What an operation that could not settle its stack leaves for the next
+    one is kept in the process's memory, at most 1024 of them. After the
+    process restarts, or past that bound, the next operation on a stack an
+    update left in progress settles it `UPDATE_ROLLBACK_FAILED` with
+    nothing marked: it does not know what the update had changed or made,
+    and `ContinueUpdateRollback` then answers `UPDATE_ROLLBACK_COMPLETE`
+    over the resources as they are.
   - `ContinueUpdateRollback` reserves its stack as every operation does:
     the stack is `UPDATE_ROLLBACK_IN_PROGRESS` while it runs, a
     `DeleteStack`, an `UpdateStack` or a second `ContinueUpdateRollback`

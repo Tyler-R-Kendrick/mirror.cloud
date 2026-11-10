@@ -1122,6 +1122,19 @@ func TestSecretsManagerBatchGetErrorsMatchGetSecretValue(t *testing.T) {
 			t.Errorf("the filter form's row for %s is %#v, want Message %q", id, filtered, f.Message)
 		}
 	}
+	// The documented exception: a full ARN in SecretIdList. The batch reads
+	// an id as the secret's name and does not strip an ARN's prefix, so the
+	// ARN of a secret GetSecretValue answers is a not-found row.
+	arn := ok(t, "CreateSecret", map[string]any{"Name": "kept", "SecretString": "v"})["ARN"]
+	if got := ok(t, "GetSecretValue", map[string]any{"SecretId": arn}); got["SecretString"] != "v" {
+		t.Errorf("GetSecretValue by ARN answered %#v, want the value", got)
+	}
+	byARN := ok(t, "BatchGetSecretValue", map[string]any{"SecretIdList": []any{arn}})
+	arnRows, _ := byARN["Errors"].([]any)
+	if values, _ := byARN["SecretValues"].([]any); len(values) != 0 || len(arnRows) != 1 || arnRows[0].(map[string]any)["ErrorCode"] != "ResourceNotFoundException" ||
+		arnRows[0].(map[string]any)["Message"] != "Secrets Manager can't find the specified secret." {
+		t.Errorf("BatchGetSecretValue by ARN answered %#v, want one not-found row and no value", byARN)
+	}
 	// The wire text, which the service answers for a secret it cannot find:
 	// the model's documentation of the exception ("can't find the resource
 	// that you asked for") is not what a client reads.

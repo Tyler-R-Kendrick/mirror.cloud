@@ -654,7 +654,14 @@ The oracle is AWS's documentation as it ships in the vendored model
   is not answered; it is an `Errors` row, an `APIErrorType` of `SecretId`,
   `ErrorCode` `InvalidRequestException` and `Message`. Before, its value was
   answered in `SecretValues`. Every `Errors` row carries the code and message
-  `GetSecretValue` answers for that secret alone: a secret that does not
+  `GetSecretValue` answers for that secret alone, with one documented
+  exception: a full ARN in `SecretIdList`. `BatchGetSecretValue` reads each id
+  as the secret's name and does not strip an ARN's prefix, as every other
+  operation does, so the row for an ARN is `ResourceNotFoundException`,
+  "Secrets Manager can't find the specified secret.", whatever
+  `GetSecretValue` answers for that ARN (the value, or another error). That
+  is the hand-written pack's behaviour, kept and recorded among the bundle's
+  quirks. For a name: a secret that does not
   exist is `ResourceNotFoundException`, "Secrets Manager can't find the
   specified secret." (the service's wire text, which every
   `ResourceNotFoundException` of this service now carries; the model's

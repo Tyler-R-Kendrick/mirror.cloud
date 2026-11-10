@@ -269,3 +269,51 @@ func TestCloudFormationABucketClearedHasWhatANewBucketHas(t *testing.T) {
 		}
 	}
 }
+
+// The same question for the kinds the reviewer's walk (review_r32b_test.go) does not hold: a failed update
+// that takes a value away from a resource updated in place, rolled back and, where the restore fails,
+// continued. Only a secret's value is ever withheld from a restore (provision, differs); every other kind
+// is sent its template's values whatever the failed update gave, so both paths put them back. A role's
+// trust policy cannot be taken away, so the failed update changes it. An API has one property updated in
+// place, its name, and it keeps the name it was made under when the template stops giving one.
+func TestCloudFormationEveryOtherKindPutsBackAValueTakenAway(t *testing.T) {
+	t.Parallel()
+	policy := func(action string) map[string]any {
+		return map[string]any{"Version": "2012-10-17", "Statement": []any{map[string]any{"Effect": "Allow", "Principal": map[string]any{"Service": "lambda.amazonaws.com"}, "Action": action}}}
+	}
+	for _, k := range []rveKind{
+		{"parameter", rveProps("AWS::SSM::Parameter", map[string]any{"Type": "StringList", "Value": "a,b"}), rveProps("AWS::SSM::Parameter", map[string]any{"Value": "c"}),
+			func(h *stacks, id string) string {
+				p := asMap(rv31Get(h, "aws.ssm", "GetParameter", map[string]any{"Name": id})["Parameter"])
+				return fmt.Sprint("type=", p["Type"], " value=", p["Value"])
+			}},
+		{"parameter-value", rveProps("AWS::SSM::Parameter", map[string]any{"Type": "String", "Value": "a"}), rveProps("AWS::SSM::Parameter", map[string]any{"Type": "String"}),
+			func(h *stacks, id string) string {
+				return fmt.Sprint("value=", asMap(rv31Get(h, "aws.ssm", "GetParameter", map[string]any{"Name": id})["Parameter"])["Value"])
+			}},
+		{"role", rveProps("AWS::IAM::Role", map[string]any{"AssumeRolePolicyDocument": policy("sts:AssumeRole")}), rveProps("AWS::IAM::Role", map[string]any{"AssumeRolePolicyDocument": policy("sts:TagSession")}),
+			func(h *stacks, id string) string {
+				return spi.JSONText(asMap(rv31Get(h, "aws.iam", "GetRole", map[string]any{"RoleName": spi.LastSlash(id)})["Role"])["AssumeRolePolicyDocument"])
+			}},
+	} {
+		for _, continued := range []bool{false, true} {
+			t.Run(fmt.Sprint(k.name, "/continued=", continued), func(t *testing.T) {
+				h := newStacks(t)
+				if err := rveCreate(h, "ev", map[string]any{"R": k.one}); err != nil {
+					t.Fatal(err)
+				}
+				id := rv31IDs(h, "ev")["R"]
+				want := k.state(h, id)
+				rveFailed(t, h, "ev", k.two, continued)
+				if mid := k.state(h, id); continued && mid == want {
+					t.Fatalf("the failed update left %s, as it was: the case proves nothing", mid)
+				} else if continued {
+					rveContinue(t, h, "ev")
+				}
+				if got := k.state(h, id); got != want || rv31IDs(h, "ev")["R"] != id {
+					t.Errorf("rolled back, the resource reads %s; want %s, as before the update", got, want)
+				}
+			})
+		}
+	}
+}

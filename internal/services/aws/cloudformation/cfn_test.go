@@ -330,20 +330,6 @@ func TestBootedServerCloudFormationExtraOps(t *testing.T) {
 	}
 }
 
-func TestParseYAMLRefGetAtt(t *testing.T) {
-	m, err := parseYAML("Resources:\n  Q:\n    Type: AWS::SQS::Queue\n    Properties:\n      QueueName: !Ref Name\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	res := m["Resources"].(map[string]any)
-	q := res["Q"].(map[string]any)
-	props := q["Properties"].(map[string]any)
-	ref := props["QueueName"].(map[string]any)
-	if str(ref["Ref"]) != "Name" {
-		t.Fatalf("%v", m)
-	}
-}
-
 func TestCloudFormationProvisionedResourceLifecycle(t *testing.T) {
 	deps := spitest.Deps(t)
 	p := bundled.Handler("aws.cloudformation", deps)
@@ -458,7 +444,11 @@ func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
 	p := New(spitest.Deps(t))
 	req := &spi.Request{Identity: spi.Identity{Account: "000000000000", Region: "us-east-1"}}
 	refs := map[string]string{"Bucket": "bucket", "Queue": "http://localhost/000000000000/queue"}
-	ref := func(name string) string { v, _ := p.ref(name, refs, req, "stack"); return v }
+	p.Account, p.Region = req.Identity.Account, req.Identity.Region
+	ref := func(name string) any { return p.Resolve(map[string]any{"Ref": name}, refs, "stack") }
+	getAtt := func(g any, refs map[string]string) any {
+		return p.Resolve(map[string]any{"Fn::GetAtt": g}, refs, "stack")
+	}
 	if ref("AWS::AccountId") != "000000000000" || ref("AWS::Partition") != "aws" || ref("AWS::URLSuffix") != "amazonaws.com" || ref("missing") != "missing" {
 		t.Fatal("pseudo-parameter references")
 	}
@@ -467,21 +457,21 @@ func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
 	if getAtt("Bucket.Arn", refs) != "arn:aws:s3:::bucket" || getAtt([]any{"Queue", "Arn"}, refs) != "arn:aws:sqs:us-east-1:000000000000:queue" || getAtt([]any{"Queue", "QueueName"}, refs) != "queue" {
 		t.Fatal("GetAtt resolution")
 	}
-	if got := p.fnJoin([]any{"-", []any{"a", map[string]any{"Ref": "AWS::Region"}}}, refs, req, "stack"); got != "a-us-east-1" {
+	if got := p.Resolve(map[string]any{"Fn::Join": []any{"-", []any{"a", map[string]any{"Ref": "AWS::Region"}}}}, refs, "stack"); got != "a-us-east-1" {
 		t.Fatalf("join %q", got)
 	}
-	if got := p.fnSub([]any{"${AWS::StackName}-${Bucket}"}, refs, req, "stack"); got != "stack-bucket" {
+	if got := p.Resolve(map[string]any{"Fn::Sub": []any{"${AWS::StackName}-${Bucket}"}}, refs, "stack"); got != "stack-bucket" {
 		t.Fatalf("sub %q", got)
 	}
-	if got := p.resolve([]any{map[string]any{"Ref": "Bucket"}}, refs, req, "stack").([]any); len(got) != 1 || got[0] != "bucket" {
+	if got := p.Resolve([]any{map[string]any{"Ref": "Bucket"}}, refs, "stack").([]any); len(got) != 1 || got[0] != "bucket" {
 		t.Fatalf("nested resolution %#v", got)
 	}
-	if got := p.fnJoin([]any{"only"}, refs, req, "stack"); got != "" {
+	if got := p.Resolve(map[string]any{"Fn::Join": []any{"only"}}, refs, "stack"); got != "" {
 		t.Fatalf("short join %q", got)
 	}
-	parsed, err := parseYAML("# comment\nValues:\n  - one\n  - Key: two\n    Enabled: True\n  -\n    nested: 3.5\nEmpty:\n  -\nNull: ~\nQuoted: 'value'\n")
-	if err != nil {
-		t.Fatal(err)
+	parsed := stored("# comment\nValues:\n  - one\n  - Key: two\n    Enabled: True\n  -\n    nested: 3.5\nEmpty:\n  -\nNull: ~\nQuoted: 'value'\n")
+	if parsed == nil {
+		t.Fatal("the YAML did not read")
 	}
 	values := parsed["Values"].([]any)
 	if len(values) != 3 || values[0] != "one" || values[1].(map[string]any)["Enabled"] != true {
@@ -822,40 +812,5 @@ func TestCloudFormationAFailedUpdateRollsBack(t *testing.T) {
 	}
 	if status := stacks["Stacks"].([]any)[0].(map[string]any)["StackStatus"]; status != "UPDATE_ROLLBACK_COMPLETE" {
 		t.Errorf("the stack's status is %v, want UPDATE_ROLLBACK_COMPLETE", status)
-	}
-}
-
-// A YAML template is YAML: flow collections, block scalars and the short-form
-// intrinsics (!Ref, !GetAtt, !Sub, and !Name for any other Fn::Name) all read
-// as their JSON-template equivalents. The hand-written subset this replaced
-// read a flow sequence as a string and refused a block scalar.
-func TestParseYAMLReadsYAML(t *testing.T) {
-	m, err := parseYAML(`Resources:
-  Q:
-    Type: AWS::SQS::Queue
-    Properties:
-      Tags: [{Key: env, Value: dev}, {Key: team, Value: "a: b"}]
-      Policy: |
-        line one
-        line two
-      Arn: !GetAtt [Other, Arn]
-      Joined: !Join ["-", [a, !Ref B]]
-      Port: 8080
-      Ratio: 0.5
-      On: true
-`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	props := m["Resources"].(map[string]any)["Q"].(map[string]any)["Properties"].(map[string]any)
-	want := map[string]any{
-		"Tags":   []any{map[string]any{"Key": "env", "Value": "dev"}, map[string]any{"Key": "team", "Value": "a: b"}},
-		"Policy": "line one\nline two\n",
-		"Arn":    map[string]any{"Fn::GetAtt": []any{"Other", "Arn"}},
-		"Joined": map[string]any{"Fn::Join": []any{"-", []any{"a", map[string]any{"Ref": "B"}}}},
-		"Port":   8080, "Ratio": 0.5, "On": true,
-	}
-	if !reflect.DeepEqual(props, want) {
-		t.Fatalf("parsed %#v\nwant   %#v", props, want)
 	}
 }

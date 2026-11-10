@@ -147,11 +147,8 @@ func TestCloudFormationNotificationARNsAreTheStacks(t *testing.T) {
 	if got := h.arnsOf("na"); !reflect.DeepEqual(got, []any{}) {
 		t.Errorf("after an UpdateStack with an empty list, NotificationARNs = %#v, want []", got)
 	}
-	none := &spi.Request{Identity: h.id, Input: map[string]any{}}
-	if got := pseudo(none, "s", "id")["AWS::NotificationARNs"]; got != "[]" {
-		t.Errorf("AWS::NotificationARNs with none given = %q, want []", got)
-	}
-	if got := h.pack.resolve(map[string]any{"Ref": "AWS::NotificationARNs"}, map[string]string{}, none, "s"); !reflect.DeepEqual(got, []any{}) {
+	h.pack.NotificationARNs = nil // none given
+	if got := h.pack.Resolve(map[string]any{"Ref": "AWS::NotificationARNs"}, map[string]string{}, "s"); !reflect.DeepEqual(got, []any{}) {
 		t.Errorf("a Ref to AWS::NotificationARNs with none given resolves to %#v, want []", got)
 	}
 }

@@ -186,10 +186,11 @@
   `UPDATE_ROLLBACK_FAILED` with Kinesis's reason, and
   `ContinueUpdateRollback` succeeds once the window has passed.
 - "Valid Range: Minimum value of 1" is the reference's for `CreateStream`'s
-  `ShardCount` and `UpdateShardCount`'s `TargetShardCount`; that the answer
-  is `ValidationException`, and its message, are readings in the form the
-  service uses for a constraint. The count is judged before the stream is
-  looked for. A CloudFormation stream whose template gives 0 or -1 fails
+  `ShardCount` and `UpdateShardCount`'s `TargetShardCount`, and
+  `ValidationException` is the one for "a parameter value that is outside
+  its valid range" (`CreateStream`, Errors). The message is a reading, in
+  the form the service uses for a constraint, and so is that the count is
+  judged before the stream is looked for. A CloudFormation stream whose template gives 0 or -1 fails
   its create, or its update, which rolls back to the count it had.
 - A member that cannot be what the model declares is refused by the engine
   for this bundle (`malformed_input_error`, a bundle option; no other

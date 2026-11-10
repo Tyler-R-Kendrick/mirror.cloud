@@ -1662,7 +1662,16 @@ func writeAzureQueueMessage(b *strings.Builder, m map[string]any, withReceipt bo
 		}
 	}
 	b.WriteString("<DequeueCount>")
-	b.WriteString(strAny(m["dequeue_count"]))
+	// A string until the first dequeue, a number once the bundle has counted
+	// one: strAny answered "" for the number, so every dequeued message
+	// reported an empty count.
+	switch n := m["dequeue_count"].(type) {
+	case nil:
+	case float64:
+		b.WriteString(strconv.FormatInt(int64(n), 10))
+	default:
+		fmt.Fprint(b, n)
+	}
 	b.WriteString("</DequeueCount><MessageText>")
 	b.WriteString(xmlenc.Escape(strAny(m["message"])))
 	b.WriteString("</MessageText></QueueMessage>")

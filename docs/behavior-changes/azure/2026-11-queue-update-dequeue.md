@@ -15,3 +15,9 @@ Update Message).
   given. Before, such an update answered 204 and a new `x-ms-popreceipt` and
   stored neither: the text was unchanged and the receipt it returned was
   refused.
+- **`DequeueCount` is reported once a message has been dequeued.** Get
+  Messages documents that "the `DequeueCount` element has a value of 1 the
+  first time the message is dequeued. This value is incremented each time the
+  message is subsequently dequeued." Before, Get Messages and Peek Messages
+  rendered `<DequeueCount></DequeueCount>`, empty, for any message that had
+  been dequeued; only a never-dequeued message carried a number (`0`).

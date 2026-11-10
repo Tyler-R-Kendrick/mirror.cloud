@@ -865,6 +865,10 @@ func TestBootedServerAzureQueue(t *testing.T) {
 	if popReceipt == "" {
 		t.Fatalf("no pop receipt in %s", raw)
 	}
+	// The first dequeue reports a count of 1.
+	if !strings.Contains(string(raw), "<DequeueCount>1</DequeueCount>") {
+		t.Fatalf("first dequeue count in %s", raw)
+	}
 	msgID := ""
 	if i := strings.Index(string(raw), "<MessageId>"); i >= 0 {
 		rest := string(raw)[i+len("<MessageId>"):]
@@ -935,6 +939,18 @@ func TestBootedServerAzureQueue(t *testing.T) {
 	code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true&numofmessages=5", "", nil)
 	if code != 200 || strings.Contains(string(raw), "short") || !strings.Contains(string(raw), "<MessageText>linger</MessageText>") {
 		t.Fatalf("peek after ttl %d %s", code, raw)
+	}
+	// The count goes up by one a dequeue, and a peek reports it too.
+	for _, want := range []string{"<DequeueCount>1</DequeueCount>", "<DequeueCount>2</DequeueCount>"} {
+		code, raw, _ = do(http.MethodGet, "/q1/messages?visibilitytimeout=1", "", nil)
+		if code != 200 || !strings.Contains(string(raw), "<MessageText>linger</MessageText>") || !strings.Contains(string(raw), want) {
+			t.Fatalf("dequeue linger, want %s: %d %s", want, code, raw)
+		}
+		advance(time.Second)
+		code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true", "", nil)
+		if code != 200 || !strings.Contains(string(raw), want) {
+			t.Fatalf("peek linger, want %s: %d %s", want, code, raw)
+		}
 	}
 	code, raw, _ = do(http.MethodDelete, "/q1/messages", "", nil)
 	if code != 204 {

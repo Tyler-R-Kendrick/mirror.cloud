@@ -124,8 +124,8 @@ func TestCloudFormationNotificationARNsAreTheStacks(t *testing.T) {
 		"Outputs": map[string]any{"N": map[string]any{"Value": map[string]any{"Fn::Join": []any{",", map[string]any{"Ref": "AWS::NotificationARNs"}}}}}})
 	a, b := "arn:aws:sns:us-east-1:000000000000:a", "arn:aws:sns:us-east-1:000000000000:b"
 	six := []any{a, a, a, a, a, a}
-	for _, op := range []string{"CreateStack", "UpdateStack"} {
-		if _, err := h.invoke(op, map[string]any{"StackName": "six", "TemplateBody": string(body), "NotificationARNs": six}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Member must have length less than or equal to 5") {
+	for _, op := range []string{"CreateStack", "UpdateStack", "CreateChangeSet"} {
+		if _, err := h.invoke(op, map[string]any{"StackName": "six", "ChangeSetName": "c", "ChangeSetType": "CREATE", "TemplateBody": string(body), "NotificationARNs": six}); code(err) != "ValidationError" || !strings.Contains(err.Error(), "Member must have length less than or equal to 5") {
 			t.Errorf("%s with six NotificationARNs answered %v, want ValidationError", op, err)
 		}
 	}
@@ -147,11 +147,8 @@ func TestCloudFormationNotificationARNsAreTheStacks(t *testing.T) {
 	if got := h.arnsOf("na"); !reflect.DeepEqual(got, []any{}) {
 		t.Errorf("after an UpdateStack with an empty list, NotificationARNs = %#v, want []", got)
 	}
-	none := &spi.Request{Identity: h.id, Input: map[string]any{}}
-	if got := pseudo(none, "s", "id")["AWS::NotificationARNs"]; got != "[]" {
-		t.Errorf("AWS::NotificationARNs with none given = %q, want []", got)
-	}
-	if got := h.pack.resolve(map[string]any{"Ref": "AWS::NotificationARNs"}, map[string]string{}, none, "s"); !reflect.DeepEqual(got, []any{}) {
+	h.pack.NotificationARNs = nil // none given
+	if got := h.pack.Resolve(map[string]any{"Ref": "AWS::NotificationARNs"}, map[string]string{}, "s"); !reflect.DeepEqual(got, []any{}) {
 		t.Errorf("a Ref to AWS::NotificationARNs with none given resolves to %#v, want []", got)
 	}
 }
@@ -303,11 +300,8 @@ func TestCloudFormationIAMResourcesNeedTheirCapabilities(t *testing.T) {
 			t.Errorf("the refused stack %s was made", c.name)
 		}
 	}
-	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "cs", "ChangeSetName": "role", "ChangeSetType": "CREATE", "TemplateBody": role(map[string]any{})}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "cs", "ChangeSetName": "role"}); code(err) != "InsufficientCapabilitiesException" {
-		t.Errorf("ExecuteChangeSet of a change set without CAPABILITY_IAM answered %v, want InsufficientCapabilitiesException", err)
+	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "cs", "ChangeSetName": "role", "ChangeSetType": "CREATE", "TemplateBody": role(map[string]any{})}); code(err) != "InsufficientCapabilitiesException" {
+		t.Errorf("CreateChangeSet without CAPABILITY_IAM answered %v, want InsufficientCapabilitiesException, an error CreateChangeSet lists", err)
 	}
 }
 

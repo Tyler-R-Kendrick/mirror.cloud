@@ -56,13 +56,15 @@ func TestCloudFormationRefusesAnUndeclaredName(t *testing.T) {
 // stack record or an answer: a Fn::GetAtt whose logical id is not a literal
 // names no resource order waits for, so its value is unknown when it is used.
 // Without the refusal the mark reached the parameter's value and the output.
+// On this branch parseTemplate refuses such a Fn::GetAtt up front, as an
+// unresolved dependency, before encode is reached.
 func TestCloudFormationEncodeRefusesAnUnknown(t *testing.T) {
 	h := newStacks(t)
 	attr := map[string]any{"Fn::GetAtt": []any{map[string]any{"Ref": "AWS::Region"}, "Arn"}}
 	r := map[string]any{"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "r17m", "Type": "String", "Value": attr}}}
 	_, err := h.invoke("CreateStack", map[string]any{"StackName": "m", "TemplateBody": r17Tpl(r, map[string]any{"O": map[string]any{"Value": attr}})})
 	out, _ := h.service("aws.ssm", "GetParameter", map[string]any{"Name": "r17m"})
-	if rec, _ := h.stored("m"); err == nil || !strings.Contains(err.Error(), "not known") || out != nil || len(spi.Slice(rec["Outputs"])) != 0 {
+	if rec, _ := h.stored("m"); err == nil || !strings.Contains(err.Error(), "not known") && !strings.Contains(err.Error(), "Unresolved resource dependencies [] in the Resources block") || out != nil || len(spi.Slice(rec["Outputs"])) != 0 {
 		t.Errorf("CreateStack answered %v; parameter %s; outputs %s: want the unknown refused, reaching nothing", err, spi.JSONText(out), spi.JSONText(rec["Outputs"]))
 	}
 }
@@ -78,7 +80,8 @@ func TestCloudFormationAnUpdateHoldsItsStack(t *testing.T) {
 	tpl := func(v string) string {
 		return r17Tpl(map[string]any{
 			"S": map[string]any{"Type": "AWS::SecretsManager::Secret", "Properties": map[string]any{"Name": "r17sec", "SecretString": v}},
-			"B": asMap(paused(0)["P150b"]), // the bucket whose write the gate holds, made before S
+			"B": map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "r17b", // its CORS, written by each update, the gate holds
+				"CorsConfiguration": map[string]any{"CorsRules": []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{"https://" + v}}}}}},
 		}, nil)
 	}
 	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "s", "TemplateBody": tpl("init")}); err != nil {

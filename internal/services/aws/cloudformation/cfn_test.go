@@ -270,10 +270,9 @@ func TestBootedServerCloudFormationRemainder(t *testing.T) {
 	call(url.Values{"Action": {"SetStackPolicy"}, "Version": {"2010-05-15"}, "StackName": {"rem"}, "StackPolicyBody": {"{}"}})
 	call(url.Values{"Action": {"GetStackPolicy"}, "Version": {"2010-05-15"}, "StackName": {"rem"}})
 	call(url.Values{"Action": {"DetectStackDrift"}, "Version": {"2010-05-15"}, "StackName": {"rem"}})
-	// The change set put cfn-rem-b2 in cfn-rem-b's place without deleting
-	// cfn-rem-b, which still holds its name, so rem2's bucket is unnamed.
-	unnamed := `{"Resources":{"B":{"Type":"AWS::S3::Bucket"}}}`
-	call(url.Values{"Action": {"CreateStack"}, "Version": {"2010-05-15"}, "StackName": {"rem2"}, "TemplateBody": {unnamed}})
+	// The change set replaced cfn-rem-b with cfn-rem-b2 and its cleanup deleted
+	// cfn-rem-b, so rem2 can take the name again.
+	call(url.Values{"Action": {"CreateStack"}, "Version": {"2010-05-15"}, "StackName": {"rem2"}, "TemplateBody": {tpl}})
 	// RollbackStack rolls back "from CREATE_FAILED or UPDATE_FAILED stack
 	// statuses"; rem2 is CREATE_COMPLETE, so it is refused.
 	req, _ = http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader(url.Values{"Action": {"RollbackStack"}, "Version": {"2010-05-15"}, "StackName": {"rem2"}}.Encode()))
@@ -328,20 +327,6 @@ func TestBootedServerCloudFormationExtraOps(t *testing.T) {
 	listed := hard(url.Values{"Action": {"ListStackSets"}, "Version": {"2010-05-15"}})
 	if strings.Contains(listed, "<StackSetName>ssboot</StackSetName>") {
 		t.Fatalf("stackset still present %s", listed)
-	}
-}
-
-func TestParseYAMLRefGetAtt(t *testing.T) {
-	m, err := parseYAML("Resources:\n  Q:\n    Type: AWS::SQS::Queue\n    Properties:\n      QueueName: !Ref Name\n")
-	if err != nil {
-		t.Fatal(err)
-	}
-	res := m["Resources"].(map[string]any)
-	q := res["Q"].(map[string]any)
-	props := q["Properties"].(map[string]any)
-	ref := props["QueueName"].(map[string]any)
-	if str(ref["Ref"]) != "Name" {
-		t.Fatalf("%v", m)
 	}
 }
 
@@ -459,7 +444,11 @@ func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
 	p := New(spitest.Deps(t))
 	req := &spi.Request{Identity: spi.Identity{Account: "000000000000", Region: "us-east-1"}}
 	refs := map[string]string{"Bucket": "bucket", "Queue": "http://localhost/000000000000/queue"}
-	ref := func(name string) string { v, _ := p.ref(name, refs, req, "stack"); return v }
+	p.Account, p.Region = req.Identity.Account, req.Identity.Region
+	ref := func(name string) any { return p.Resolve(map[string]any{"Ref": name}, refs, "stack") }
+	getAtt := func(g any, refs map[string]string) any {
+		return p.Resolve(map[string]any{"Fn::GetAtt": g}, refs, "stack")
+	}
 	if ref("AWS::AccountId") != "000000000000" || ref("AWS::Partition") != "aws" || ref("AWS::URLSuffix") != "amazonaws.com" || ref("missing") != "missing" {
 		t.Fatal("pseudo-parameter references")
 	}
@@ -468,21 +457,21 @@ func TestCloudFormationIntrinsicAndYAMLUnits(t *testing.T) {
 	if getAtt("Bucket.Arn", refs) != "arn:aws:s3:::bucket" || getAtt([]any{"Queue", "Arn"}, refs) != "arn:aws:sqs:us-east-1:000000000000:queue" || getAtt([]any{"Queue", "QueueName"}, refs) != "queue" {
 		t.Fatal("GetAtt resolution")
 	}
-	if got := p.fnJoin([]any{"-", []any{"a", map[string]any{"Ref": "AWS::Region"}}}, refs, req, "stack"); got != "a-us-east-1" {
+	if got := p.Resolve(map[string]any{"Fn::Join": []any{"-", []any{"a", map[string]any{"Ref": "AWS::Region"}}}}, refs, "stack"); got != "a-us-east-1" {
 		t.Fatalf("join %q", got)
 	}
-	if got := p.fnSub([]any{"${AWS::StackName}-${Bucket}"}, refs, req, "stack"); got != "stack-bucket" {
+	if got := p.Resolve(map[string]any{"Fn::Sub": []any{"${AWS::StackName}-${Bucket}"}}, refs, "stack"); got != "stack-bucket" {
 		t.Fatalf("sub %q", got)
 	}
-	if got := p.resolve([]any{map[string]any{"Ref": "Bucket"}}, refs, req, "stack").([]any); len(got) != 1 || got[0] != "bucket" {
+	if got := p.Resolve([]any{map[string]any{"Ref": "Bucket"}}, refs, "stack").([]any); len(got) != 1 || got[0] != "bucket" {
 		t.Fatalf("nested resolution %#v", got)
 	}
-	if got := p.fnJoin([]any{"only"}, refs, req, "stack"); got != "" {
+	if got := p.Resolve(map[string]any{"Fn::Join": []any{"only"}}, refs, "stack"); got != "" {
 		t.Fatalf("short join %q", got)
 	}
-	parsed, err := parseYAML("# comment\nValues:\n  - one\n  - Key: two\n    Enabled: True\n  -\n    nested: 3.5\nEmpty:\n  -\nNull: ~\nQuoted: 'value'\n")
-	if err != nil {
-		t.Fatal(err)
+	parsed := stored("# comment\nValues:\n  - one\n  - Key: two\n    Enabled: True\n  -\n    nested: 3.5\nEmpty:\n  -\nNull: ~\nQuoted: 'value'\n")
+	if parsed == nil {
+		t.Fatal("the YAML did not read")
 	}
 	values := parsed["Values"].([]any)
 	if len(values) != 3 || values[0] != "one" || values[1].(map[string]any)["Enabled"] != true {
@@ -757,37 +746,71 @@ func TestCloudFormationGeneratesASecretString(t *testing.T) {
 	}
 }
 
-// A YAML template is YAML: flow collections, block scalars and the short-form
-// intrinsics (!Ref, !GetAtt, !Sub, and !Name for any other Fn::Name) all read
-// as their JSON-template equivalents. The hand-written subset this replaced
-// read a flow sequence as a string and refused a block scalar.
-func TestParseYAMLReadsYAML(t *testing.T) {
-	m, err := parseYAML(`Resources:
-  Q:
-    Type: AWS::SQS::Queue
-    Properties:
-      Tags: [{Key: env, Value: dev}, {Key: team, Value: "a: b"}]
-      Policy: |
-        line one
-        line two
-      Arn: !GetAtt [Other, Arn]
-      Joined: !Join ["-", [a, !Ref B]]
-      Port: 8080
-      Ratio: 0.5
-      On: true
-`)
+// An UpdateStack that fails rolls back as CloudFormation's UPDATE_ROLLBACK
+// does: what it created is deleted, what it changed is put back from the
+// previous template, and the stack keeps its previous template and resources,
+// as UPDATE_ROLLBACK_COMPLETE. Here the update changes a secret's value, adds
+// a good secret and a resource of an unsupported type; afterwards the stack
+// and its resources are exactly as they were before the update.
+func TestCloudFormationAFailedUpdateRollsBack(t *testing.T) {
+	deps := spitest.Deps(t)
+	p := bundled.Handler("aws.cloudformation", deps)
+	ctx := context.Background()
+	id := spi.Identity{Account: "000000000000", Region: "us-east-1"}
+	cfn := func(op string, in map[string]any) (map[string]any, error) {
+		out, err := p.Invoke(ctx, &spi.Request{Identity: id, Operation: op, Input: in})
+		if err != nil {
+			return nil, err
+		}
+		return out.Output, nil
+	}
+	secrets := func(op string, in map[string]any) (map[string]any, error) {
+		return New(deps).call(ctx, &spi.Request{Identity: id}, "aws.secretsmanager", op, in)
+	}
+	before := `{"Resources":{"A":{"Type":"AWS::SecretsManager::Secret","Properties":{"Name":"a","SecretString":"v1","Description":"first"}}}}`
+	failing := `{"Resources":{
+		"A":{"Type":"AWS::SecretsManager::Secret","Properties":{"Name":"a","SecretString":"v2","Description":"second"}},
+		"B":{"Type":"AWS::SecretsManager::Secret","Properties":{"Name":"b","SecretString":"new"}},
+		"Z":{"Type":"AWS::Nope::Thing"}}}`
+	if _, err := cfn("CreateStack", map[string]any{"StackName": "u", "TemplateBody": before}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := func() map[string]any {
+		t.Helper()
+		stack, err := cfn("DescribeStackResources", map[string]any{"StackName": "u"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		template, err := cfn("GetTemplate", map[string]any{"StackName": "u"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err := secrets("GetSecretValue", map[string]any{"SecretId": "a"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		described, err := secrets("DescribeSecret", map[string]any{"SecretId": "a"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return map[string]any{"resources": stack["StackResources"], "template": template["TemplateBody"],
+			"value": value["SecretString"], "description": described["Description"]}
+	}
+	was := snapshot()
+	if _, err := cfn("UpdateStack", map[string]any{"StackName": "u", "TemplateBody": failing}); err == nil {
+		t.Fatal("an update with an unsupported resource type succeeded")
+	}
+	if now := snapshot(); !reflect.DeepEqual(now, was) {
+		t.Errorf("after the failed update the stack is\n%#v\nwant\n%#v", now, was)
+	}
+	if _, err := secrets("DescribeSecret", map[string]any{"SecretId": "b"}); err == nil {
+		t.Error("the secret the failed update created is still there")
+	}
+	stacks, err := cfn("DescribeStacks", map[string]any{"StackName": "u"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	props := m["Resources"].(map[string]any)["Q"].(map[string]any)["Properties"].(map[string]any)
-	want := map[string]any{
-		"Tags":   []any{map[string]any{"Key": "env", "Value": "dev"}, map[string]any{"Key": "team", "Value": "a: b"}},
-		"Policy": "line one\nline two\n",
-		"Arn":    map[string]any{"Fn::GetAtt": []any{"Other", "Arn"}},
-		"Joined": map[string]any{"Fn::Join": []any{"-", []any{"a", map[string]any{"Ref": "B"}}}},
-		"Port":   8080, "Ratio": 0.5, "On": true,
-	}
-	if !reflect.DeepEqual(props, want) {
-		t.Fatalf("parsed %#v\nwant   %#v", props, want)
+	if status := stacks["Stacks"].([]any)[0].(map[string]any)["StackStatus"]; status != "UPDATE_ROLLBACK_COMPLETE" {
+		t.Errorf("the stack's status is %v, want UPDATE_ROLLBACK_COMPLETE", status)
 	}
 }

@@ -23,7 +23,7 @@ missing_input_error: Validation
 # deprovisions them in reverse, keeping any it cannot delete; ValidateTemplate and GetTemplateSummary parse
 # without provisioning; ListExports flattens every stack's outputs. The stack
 # record below is the one the engine writes.
-native: [CreateStack, UpdateStack, DeleteStack, CreateChangeSet, ExecuteChangeSet, DeleteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports, UpdateTerminationProtection]
+native: [CreateStack, UpdateStack, DeleteStack, CreateChangeSet, ExecuteChangeSet, DeleteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports, ContinueUpdateRollback, UpdateTerminationProtection]
 
 resources:
   # The stack record, written only by the native template engine, in one
@@ -31,8 +31,17 @@ resources:
   # that its write cannot fall between another's read and write.
   stack:
     collection: cfn
+    # StackName is "The name or unique stack ID". A stack id,
+    # arn:...:stack/<name>/<id>, finds the record by its name, and a read takes
+    # it only while the record's id is the one given (stackExists); no record
+    # is keyed by an id. A deleted stack's record stays, DELETE_COMPLETE, and
+    # answers only its id ("Deleted stacks don't show up in the DescribeStacks
+    # operation if the deletion has been completed successfully").
     id:
-      input_members: [StackName]
+      derive: >-
+        'StackName' in input && string(input.StackName).contains(':stack/')
+          ? string(split(string(split(string(input.StackName), ':stack/')[1]), '/')[0])
+          : ('StackName' in input ? string(input.StackName) : '')
 
   # Change sets are keyed stack:changeset over one collection; ListChangeSets
   # narrows by the recorded StackName. The composite key is derive-only:
@@ -40,7 +49,10 @@ resources:
   changeset:
     collection: cfn-cs
     id:
-      derive: "('StackName' in input ? string(input.StackName) : '') + ':' + string(input.ChangeSetName)"
+      derive: >-
+        ('StackName' in input && string(input.StackName).contains(':stack/')
+          ? string(split(string(split(string(input.StackName), ':stack/')[1]), '/')[0])
+          : ('StackName' in input ? string(input.StackName) : '')) + ':' + string(input.ChangeSetName)
 
   stackset:
     collection: cfnss
@@ -135,14 +147,35 @@ operations:
     reads:
       s: { resource: stack }
     require:
-      - cond: >-
-          !('StackName' in input) || string(input.StackName) == '' || s_found
+      # StackName is "The name or unique stack ID": a name, or a stack id by
+      # the model's StackNameOrId pattern,
+      # ^([a-zA-Z][-a-zA-Z0-9]*)|(arn:\b(aws|aws-us-gov|aws-cn)\b:[-a-zA-Z0-9:/._+]*)$,
+      # each alternative matched whole, as the native operations check it
+      # (checkStackName). StackNameOrId also has a minimum length of 1, which
+      # the operations that take it check (stackNameOrId); DescribeStacks'
+      # StackName, which has none, reads '' as no name.
+      - &stackPattern
+        cond: >-
+          !('StackName' in input) || string(input.StackName) == ''
+          || string(input.StackName).matches('^(([a-zA-Z][-a-zA-Z0-9]*)|(arn:\\b(aws|aws-us-gov|aws-cn)\\b:[-a-zA-Z0-9:/._+]*))$')
         error: Validation
+        message_expr: >-
+          "1 validation error detected: Value '" + string(input.StackName)
+          + "' at 'stackName' failed to satisfy constraint: Member must satisfy regular expression pattern: ^([a-zA-Z][-a-zA-Z0-9]*)|(arn:\\b(aws|aws-us-gov|aws-cn)\\b:[-a-zA-Z0-9:/._+]*)$"
+      - cond: >-
+          !('StackName' in input) || string(input.StackName) == ''
+          || s_found && (string(input.StackName).startsWith('arn:') ? s.ID == string(input.StackName) : s.Status != 'DELETE_COMPLETE')
+        error: Validation
+        message_expr: "'Stack [' + string(input.StackName) + '] does not exist'"
     list:
       resource: stack
       member: Stacks
       paginate: model
-      key: "'StackName' in input ? string(input.StackName) : ''"
+      filter: "'StackName' in input && string(input.StackName).startsWith('arn:') ? item.ID == string(input.StackName) : item.Status != 'DELETE_COMPLETE'"
+      key: >-
+        'StackName' in input && string(input.StackName).contains(':stack/')
+          ? string(split(string(split(string(input.StackName), ':stack/')[1]), '/')[0])
+          : ('StackName' in input ? string(input.StackName) : '')
     # StackStatusReason ("Success/failure message associated with the stack
     # status") is the error a failed rollback or delete kept.
     output:
@@ -153,11 +186,20 @@ operations:
           'Tags': 'Tags' in s && s.Tags != null ? s.Tags : []},
           'Reason' in s ? {'StackStatusReason': s.Reason} : {}))
 
+  # "Returns the summary information for stacks whose status matches the
+  # specified StackStatusFilter. Summary information for stacks that have been
+  # deleted is kept for 90 days after the stack is deleted. If no
+  # StackStatusFilter is specified, summary information for all stacks is
+  # returned (including existing stacks and stacks that have been deleted)."
+  # A deleted stack's record is kept here until its name is used again.
   ListStacks:
     list:
       resource: stack
       member: StackSummaries
       paginate: model
+      filter: >-
+        !('StackStatusFilter' in input) || input.StackStatusFilter == null || size(input.StackStatusFilter) == 0
+        || item.Status in input.StackStatusFilter
     output:
       StackSummaries: >-
         items.map(s, merge({'StackName': s.Name, 'StackId': s.ID,
@@ -167,7 +209,11 @@ operations:
     reads:
       s: { resource: stack }
     require:
-      - { cond: s_found, error: Validation }
+      - *stackPattern
+      - &stackExists
+        cond: "s_found && (string(input.StackName).startsWith('arn:') ? s.ID == string(input.StackName) : s.Status != 'DELETE_COMPLETE')"
+        error: Validation
+        message_expr: "'Stack [' + string(input.StackName) + '] does not exist'"
     output:
       TemplateBody: s.Template
       StagesAvailable: "['Original']"
@@ -176,7 +222,8 @@ operations:
     reads:
       s: { resource: stack }
     require:
-      - { cond: s_found, error: Validation }
+      - *stackPattern
+      - *stackExists
     output:
       StackResourceSummaries: >-
         ('Resources' in s && s.Resources != null ? s.Resources : []).map(r, merge({'LogicalResourceId': r.Logical,
@@ -188,12 +235,16 @@ operations:
     reads:
       s: { resource: stack }
     require:
-      - { cond: s_found, error: Validation }
+      - *stackPattern
+      - *stackExists
     output:
       StackEvents: >-
         ('Resources' in s && s.Resources != null ? s.Resources : []).map(r, merge({'LogicalResourceId': r.Logical,
           'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
           'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE', 'StackName': s.Name,
+          'StackId': s.ID}, 'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))
+        + ('Events' in s && s.Events != null ? s.Events : []).map(r, merge({'LogicalResourceId': r.Logical,
+          'PhysicalResourceId': r.Physical, 'ResourceType': r.Type, 'ResourceStatus': r.Status, 'StackName': s.Name,
           'StackId': s.ID}, 'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))
         + [{'LogicalResourceId': s.Name,
             'ResourceType': 'AWS::CloudFormation::Stack',
@@ -205,7 +256,8 @@ operations:
     let:
       rs: "s_found && 'Resources' in s && s.Resources != null ? s.Resources : []"
     require:
-      - { cond: s_found, error: Validation }
+      - *stackPattern
+      - *stackExists
       - cond: "rs.exists(r, r.Logical == string(input.LogicalResourceId))"
         error: Validation
     output:
@@ -219,13 +271,18 @@ operations:
   # The pack also deprovisions every stack resource into the sibling
   # services' collections before deleting the record; that loop is the shadow
   # reason and is not transcribed.
-  # A missing stack answers no resources rather than faulting.
+  # A missing stack answers no resources rather than faulting, and so does a
+  # stack id the stack of that name no longer has.
   DescribeStackResources:
     reads:
       s: { resource: stack }
+    require:
+      - *stackPattern
+    let:
+      ok: "s_found && (string(input.StackName).startsWith('arn:') ? s.ID == string(input.StackName) : s.Status != 'DELETE_COMPLETE')"
     output:
       StackResources: >-
-        s_found && 'Resources' in s && s.Resources != null
+        ok && 'Resources' in s && s.Resources != null
           ? s.Resources.map(r, merge({'LogicalResourceId': r.Logical, 'PhysicalResourceId': r.Physical,
               'ResourceType': r.Type, 'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'},
               'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))
@@ -242,19 +299,23 @@ operations:
   # neither operation could carry out what it says: RollbackStack and
   # CancelUpdateStack refuse every stack, a record in a state they accept
   # included, rather than answer a success that changes nothing; a
-  # ROLLBACK_FAILED stack's way forward is
-  # DeleteStack. ContinueUpdateRollback refuses every stack too, and writes
-  # nothing, so the stack record has no writer but the engine. Every refusal is ValidationError, in the words
+  # ROLLBACK_FAILED stack's way forward is DeleteStack. ContinueUpdateRollback
+  # (native, below) retries a rollback that failed. Every refusal is
+  # ValidationError, in the words
   # CancelUpdateStack uses, and changes nothing; an absent stack does not
   # exist.
   RollbackStack:
     reads:
       s: { resource: stack }
     require:
-      - &stackExists
-        cond: s_found
+      - &stackNameOrId
+        cond: "!('StackName' in input) || string(input.StackName) != ''"
         error: Validation
-        message_expr: "'Stack [' + string(input.StackName) + '] does not exist'"
+        message_expr: >-
+          "1 validation error detected: Value '" + ('StackName' in input ? string(input.StackName) : '')
+          + "' at 'stackName' failed to satisfy constraint: Member must have length greater than or equal to 1"
+      - *stackPattern
+      - *stackExists
       - cond: "false" # it accepts CREATE_FAILED and UPDATE_FAILED, which no stack here rests in
         error: Validation
         message: "RollbackStack cannot be called from current stack status"
@@ -265,21 +326,15 @@ operations:
     reads:
       s: { resource: stack }
     require:
+      - *stackPattern
       - *stackExists
       - cond: "false" # it accepts UPDATE_IN_PROGRESS, which no stack here rests in
         error: Validation
         message: "CancelUpdateStack cannot be called from current stack status"
     output: {}
 
-  ContinueUpdateRollback:
-    reads:
-      s: { resource: stack }
-    require:
-      - *stackExists
-      - cond: "false" # it accepts UPDATE_ROLLBACK_FAILED, which no stack here rests in: a failed update is not rolled back
-        error: Validation
-        message: "ContinueUpdateRollback cannot be called from current stack status"
-    output: {}
+  # ContinueUpdateRollback is native: it retries the rollback's deletes and
+  # restores, which reach the services that own the resources.
 
   # --- change sets -----------------------------------------------------------
   # ExecuteChangeSet is the shadow reason (it provisions the stored
@@ -290,6 +345,9 @@ operations:
   # CreateChangeSet, ExecuteChangeSet and DeleteChangeSet are native: each
   # writes a change set, and CreateChangeSet a stack too, in one store
   # transaction with what the engine writes of the stack (cfn.go).
+  # CreateChangeSet parses and validates the template as it records the
+  # change set, FAILED with the error as its StatusReason when the template is
+  # wrong.
 
   # The pack answers the whole stored record, TemplateBody included; the
   # response shape does not declare TemplateBody, so the bundle answers the
@@ -298,14 +356,19 @@ operations:
     reads:
       cs: { resource: changeset }
     require:
+      - *stackNameOrId
+      - *stackPattern
       - { cond: cs_found, error: ChangeSetNotFound }
+    # StatusReason: "if your attempt to create a change set failed,
+    # CloudFormation shows the error message".
+    omit_null: [StatusReason]
     output:
       ChangeSetId: cs.ChangeSetId
       ChangeSetName: cs.ChangeSetName
       StackName: cs.StackName
       StackId: "'StackId' in cs ? cs.StackId : null"
       Status: cs.Status
-      StatusReason: "'StatusReason' in cs ? cs.StatusReason : null"
+      StatusReason: "'StatusReason' in cs ? cs.StatusReason : dyn(null)"
       ExecutionStatus: "'ExecutionStatus' in cs ? cs.ExecutionStatus : 'AVAILABLE'"
       Parameters: "'Parameters' in cs ? cs.Parameters : []"
       NotificationARNs: "'NotificationARNs' in cs && cs.NotificationARNs != null ? cs.NotificationARNs : []"
@@ -313,6 +376,7 @@ operations:
       Capabilities: "'Capabilities' in cs ? cs.Capabilities : []"
 
   ListChangeSets:
+    require: [*stackNameOrId, *stackPattern]
     list:
       resource: changeset
       member: Summaries
@@ -328,6 +392,7 @@ operations:
           merge('StackId' in c ? {'StackId': c.StackId} : {}, 'StatusReason' in c ? {'StatusReason': c.StatusReason} : {})))
 
   SignalResource:
+    require: [*stackNameOrId, *stackPattern]
 
   # --- stack sets ------------------------------------------------------------
 
@@ -521,6 +586,7 @@ operations:
   # stored so DescribeStackDriftDetectionStatus can read them back.
 
   DetectStackDrift:
+    require: [*stackNameOrId, *stackPattern]
     effects:
       - create:
           resource: drift
@@ -545,6 +611,7 @@ operations:
       OperationId: id
 
   DetectStackResourceDrift:
+    require: [*stackNameOrId, *stackPattern]
     effects:
       - create:
           resource: drift
@@ -569,6 +636,7 @@ operations:
   # answers both under StackResourceDrifts; ListStackInstanceResourceDrifts
   # declares Summaries instead, and both empty answers compare blank.
   DescribeStackResourceDrifts:
+    require: [*stackNameOrId, *stackPattern]
     output:
       StackResourceDrifts: "[]"
 
@@ -911,6 +979,7 @@ operations:
       AccountLimits: "[{'Name': 'StackLimit', 'Value': 200}]"
 
   DescribeChangeSetHooks:
+    require: [*stackNameOrId, *stackPattern]
     output:
       Hooks: "[]"
 
@@ -926,6 +995,7 @@ operations:
     output: {}
 
   DescribeEvents:
+    require: [*stackNameOrId, *stackPattern]
     output:
       OperationEvents: "[]"
 

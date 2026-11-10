@@ -249,7 +249,9 @@ func TestCloudFormationReview5AEveryKindLegacyAndCurrent(t *testing.T) {
 							if err := rv28Update(h, "lg", map[string]any{"R": two}); err != nil {
 								t.Errorf("the update after: %v", err)
 							}
-							t.Logf("after a good update: %s", k.state(h, id))
+							if rv31IDs(h, "lg")["R"] != id {
+								t.Errorf("the update after replaced the resource: %v", rv31IDs(h, "lg"))
+							}
 						}
 					})
 				}

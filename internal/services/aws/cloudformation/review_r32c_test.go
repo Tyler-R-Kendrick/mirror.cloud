@@ -136,8 +136,9 @@ func TestCloudFormationReview5CContinueFailsThenSucceeds(t *testing.T) {
 			t.Errorf("a continued rollback that fails: %v, %s", err, st)
 		}
 		rveSettled(t, h, "cf")
-		evs, _ := h.invoke("DescribeStackEvents", map[string]any{"StackName": "cf"})
-		t.Logf("events: %d", len(spi.Slice(evs["StackEvents"])))
+		if evs, err := h.invoke("DescribeStackEvents", map[string]any{"StackName": "cf"}); err != nil || len(spi.Slice(evs["StackEvents"])) != 2 {
+			t.Errorf("continue %d: the events are %v (%v); want the rule's and the trigger's, and no more with each retry", i, evs["StackEvents"], err)
+		}
 	}
 	rveContinue(t, h, "cf")
 	var tids []string

@@ -5636,7 +5636,7 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-a-rollback-is-stopped-by-a-count-kinesis-refuses",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `err != nil && !(r.Type == "AWS::Kinesis::Stream" && strings.HasPrefix(err.Error(), "ValidationException")) {`,
+		old:  `err != nil && !(strings.Contains(err.Error(), "UpdateShardCount is only supported")) {`,
 		new:  `err != nil {`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationAStreamMadeOnDemandOutsideItsTemplateIsUpdated",
@@ -5644,7 +5644,7 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-a-continued-rollback-is-stopped-by-a-count-kinesis-refuses",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `[err != nil && r.Type == "AWS::Kinesis::Stream" && strings.HasPrefix(err.Error(), "ValidationException")]`,
+		old:  `[err != nil && strings.Contains(err.Error(), "UpdateShardCount is only supported")]`,
 		new:  `[false]`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationAStreamMadeOnDemandOutsideItsTemplateIsUpdated",
@@ -5652,10 +5652,18 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-a-refusal-of-another-kind-is-nothing-to-put-back",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `err != nil && !(r.Type == "AWS::Kinesis::Stream" && strings.HasPrefix(err.Error(), "ValidationException")) {`,
-		new:  `err != nil && !(strings.HasPrefix(err.Error(), "ValidationException")) {`,
+		old:  `err != nil && !(strings.Contains(err.Error(), "UpdateShardCount is only supported")) {`,
+		new:  `err != nil && !(strings.Contains(err.Error(), "ValidationException")) {`,
 		pkg:  "./internal/services/aws/cloudformation",
-		run:  "TestCloudFormation",
+		run:  "TestCloudFormationAStreamsRestoreThatFailsIsAFailedRollback",
+	},
+	{
+		name: "cloudformation-a-continued-rollback-passes-any-validation-failure",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `[err != nil && strings.Contains(err.Error(), "UpdateShardCount is only supported")]`,
+		new:  `[err != nil && strings.Contains(err.Error(), "ValidationException")]`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationAStreamsRestoreThatFailsIsAFailedRollback",
 	},
 	{
 		name: "cloudformation-what-is-kept-has-no-bound",

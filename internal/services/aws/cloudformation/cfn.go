@@ -1262,7 +1262,7 @@ func (p *Pack) rollback(ctx context.Context, req *spi.Request, seen, old stack, 
 			continue
 		}
 		props := maps.Collect(maps.All(p.Props(tpl, r.Logical, old.Refs, old.Name)))
-		if _, err := p.provision(ctx, req, r.Type, r.Logical, under(old, r, props), props, prior{props: was}, r.Physical, old.ID); err != nil && !(r.Type == "AWS::Kinesis::Stream" && strings.HasPrefix(err.Error(), "ValidationException")) { // UPDATE_FAILED, for ContinueUpdateRollback; but a count Kinesis refuses an on-demand stream was refused the update too: nothing is left to put back
+		if _, err := p.provision(ctx, req, r.Type, r.Logical, under(old, r, props), props, prior{props: was}, r.Physical, old.ID); err != nil && !(strings.Contains(err.Error(), "UpdateShardCount is only supported")) { // UPDATE_FAILED, for ContinueUpdateRollback; but the count call's refusal of an on-demand stream, and that alone, was the update's too: nothing is left to put back
 			old.Resources[i].Status, old.Resources[i].Reason = "UPDATE_FAILED", err.Error() // the stack's reason in the service's words
 			old.Resources[i].Gave, old.Resources[i].Targets, old.Resources[i].Took = gave(was, props)
 			first = cmp.Or(first, error(invalid("The following resource(s) failed to update: ["+r.Logical+"].")))
@@ -1313,7 +1313,7 @@ func (p *Pack) resume(ctx context.Context, req *spi.Request, name string) (*spi.
 			continue
 		} else if r.Status == "UPDATE_FAILED" && !slices.Contains(skip, any(r.Logical)) {
 			_, err = p.provision(ctx, req, r.Type, r.Logical, under(st, r, props), props, recorded(r), r.Physical, st.ID)
-			err = map[bool]error{false: err}[err != nil && r.Type == "AWS::Kinesis::Stream" && strings.HasPrefix(err.Error(), "ValidationException")] // as a rollback: a count refused an on-demand stream is nothing left to put back
+			err = map[bool]error{false: err}[err != nil && strings.Contains(err.Error(), "UpdateShardCount is only supported")] // as a rollback: a count refused an on-demand stream is nothing left to put back
 		}
 		if r.Status == "UPDATE_FAILED" && err != nil {
 			r.Reason, first, err = err.Error(), cmp.Or(first, err), nil

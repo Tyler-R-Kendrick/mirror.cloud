@@ -291,3 +291,47 @@ func TestCloudFormationAModeSwitchLeavesAStreamsShards(t *testing.T) {
 		}
 	}
 }
+
+// A restore that fails is a failed rollback, whatever it is. A rollback and a continued one passed any
+// ValidationException from a stream's restore, to let through the one case that is nothing to put back:
+// a count Kinesis refuses an on-demand stream. A stored template whose mode Kinesis refuses, here
+// "on_demand", was then reported rolled back with the stream left as the failed update made it. Only the
+// count call's refusal is passed.
+func TestCloudFormationAStreamsRestoreThatFailsIsAFailedRollback(t *testing.T) {
+	t.Parallel()
+	stream := func(properties map[string]any) map[string]any {
+		return map[string]any{"R": map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": properties}}
+	}
+	for _, continued := range []bool{false, true} {
+		h := newStacks(t)
+		if err := rveCreate(h, "bm", stream(map[string]any{"ShardCount": 2})); err != nil {
+			t.Fatal(err)
+		}
+		id := rv31IDs(h, "bm")["R"]
+		// The stored template, as an earlier build could have taken it: a mode Kinesis does not know.
+		rec := h.record("bm")
+		rec["Template"] = rv19Body(map[string]any{"Resources": stream(map[string]any{"ShardCount": 2, "StreamModeDetails": rv34Mode("on_demand")})})
+		if err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "bm", []byte(spi.JSONText(rec))); err != nil {
+			t.Fatal(err)
+		}
+		failing := stream(map[string]any{"ShardCount": 2, "StreamModeDetails": rv34Mode("ON_DEMAND")})
+		failing["Z"] = rv31Dep(rv31Bad, "R")
+		err := rv28Update(h, "bm", failing)
+		st, reason, _ := h.status("bm")
+		if err == nil || st != "UPDATE_ROLLBACK_FAILED" || rv34Stream(h, id) != "ON_DEMAND 2" {
+			t.Fatalf("the update whose restore Kinesis refuses answered %v and left the stack %s (%s), the stream %s; want UPDATE_ROLLBACK_FAILED", err, st, reason, rv34Stream(h, id))
+		}
+		if !strings.Contains(spi.JSONText(h.record("bm")["Resources"]), "enum value set") {
+			t.Errorf("the stream's record does not say why its restore failed: %s", spi.JSONText(h.record("bm")["Resources"]))
+		}
+		if continued {
+			rveSettled(t, h, "bm")
+			if _, err := h.invoke("ContinueUpdateRollback", map[string]any{"StackName": "bm"}); err == nil {
+				t.Errorf("ContinueUpdateRollback, whose restore Kinesis refuses again, answered nothing")
+			}
+			if st, _, _ := h.status("bm"); st != "UPDATE_ROLLBACK_FAILED" {
+				t.Errorf("after ContinueUpdateRollback the stack is %s; want UPDATE_ROLLBACK_FAILED still", st)
+			}
+		}
+	}
+}

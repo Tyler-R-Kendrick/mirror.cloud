@@ -51,7 +51,7 @@ func TestRV15SubUnknownAndUnselected(t *testing.T) {
 			"Value": map[string]any{"Fn::Sub": []any{"${T}${X}", map[string]any{"X": map[string]any{"Fn::Select": []any{5, []any{"a"}}}}}}}},
 	}}
 	_, err := h.invoke("CreateStack", map[string]any{"StackName": "us", "TemplateBody": rv15Body(tpl)})
-	rec, ok := h.live("us")
+	rec, ok := h.stored("us")
 	t.Logf("create answered %v; stack %v %v", err, ok, rec["Status"])
 	if ok {
 		t.Errorf("BUG: refused only after making (stack %v), want refused before anything is made", rec["Status"])
@@ -169,7 +169,7 @@ func TestRV15Names(t *testing.T) {
 		_, err := h.invoke("CreateStack", map[string]any{"StackName": n, "TemplateBody": topicTpl()})
 		_, err2 := h.invoke("CreateChangeSet", map[string]any{"StackName": n + "x", "ChangeSetName": "c", "ChangeSetType": "CREATE", "TemplateBody": topicTpl()})
 		t.Logf("%q: create %v; cs %v", n, err, err2)
-		if want := map[int]string{0: "length greater than or equal to 1", 129: "length less than or equal to 128"}[len(n)]; want != "" && !strings.Contains(fmt.Sprint(err), want) {
+		if want := map[int]string{0: "StackName required", 129: "length less than or equal to 128"}[len(n)]; want != "" && !strings.Contains(fmt.Sprint(err), want) {
 			t.Errorf("BUG: CreateStack of a %d-character name answered %v, want %q", len(n), err, want)
 		}
 	}
@@ -221,7 +221,7 @@ func TestRV15TwoExecutionsSameName(t *testing.T) {
 	if heldFromDelete(t, h, g, done) { // since round 18 the scenario below cannot happen
 		return
 	}
-	if _, ok := h.live("s"); ok {
+	if _, ok := h.stored("s"); ok {
 		t.Fatal("s still stored")
 	}
 	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "s", "TemplateBody": topicTpl()}); err != nil {
@@ -259,7 +259,7 @@ func TestRV15TwoExecutionsSameName(t *testing.T) {
 		out, _ := h.invoke("DescribeStackResources", map[string]any{"StackName": "s"})
 		t.Logf("resources: %s", spi.JSONText(out))
 	}
-	rec, _ := h.live("s")
+	rec, _ := h.stored("s")
 	t.Logf("stack: %v", rec["Status"])
 }
 
@@ -278,7 +278,7 @@ func TestRV15UpdateExecVsDelete(t *testing.T) {
 	}
 	close(g.release)
 	err := within(t, done, "a")
-	rec, ok := h.live("s")
+	rec, ok := h.stored("s")
 	t.Logf("a answered %v; stack %v %v; params %v", err, ok, rec["Status"], h.params("s-"))
 	if ok || len(h.params("s-")) > 0 {
 		t.Errorf("BUG: stack %v %v, params left %v", ok, rec["Status"], h.params("s-"))
@@ -300,7 +300,7 @@ func TestRV15UpdateExecVsDelete(t *testing.T) {
 	}
 	close(g2.release)
 	err = within(t, done, "update")
-	rec, ok = h2.live("u")
+	rec, ok = h2.stored("u")
 	t.Logf("update answered %v; stack %v %v; params %v", err, ok, rec["Status"], h2.params("u-"))
 	if ok || len(h2.params("u-")) > 0 {
 		t.Errorf("BUG: stack %v, params left %v", ok, h2.params("u-"))

@@ -84,23 +84,6 @@ func JSONObject(raw []byte) map[string]any {
 	return m
 }
 
-// Integer answers v as an int: an int, int64 or float64 (truncated), or a
-// string's decimal digits; 0 for anything else.
-func Integer(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
-	case string:
-		i, _ := strconv.Atoi(n)
-		return i
-	}
-	return 0
-}
-
 // Members is the list the query protocol spells name.member.1, name.member.2 and on, in that order, to
 // the first index missing: a gap ends the list, as the query decoder's (awsquery's listAt) does.
 func Members(in map[string]any, name string) []any {
@@ -112,16 +95,6 @@ func Members(in map[string]any, name string) []any {
 		}
 		values = append(values, v)
 	}
-}
-
-// PutJSON stores v in c under key as its JSON: the encode and the write every
-// record store makes, and the error of either.
-func PutJSON(ctx context.Context, c Collection, key string, v any) error {
-	raw, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	return c.Put(ctx, key, raw)
 }
 
 // Decode answers raw's JSON as a T: the read every stored record's reader makes, its zero value when raw
@@ -177,6 +150,33 @@ func Fold(m map[string]string, key string) string {
 		}
 	}
 	return ""
+}
+
+// PutJSON stores v in c under key as its JSON: the encode and the write every
+// record store makes, and the error of either.
+func PutJSON(ctx context.Context, c Collection, key string, v any) error {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return c.Put(ctx, key, raw)
+}
+
+// Integer answers v as an int: an int, int64 or float64 (truncated), or a
+// string's decimal digits; 0 for anything else.
+func Integer(v any) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	case string:
+		i, _ := strconv.Atoi(n)
+		return i
+	}
+	return 0
 }
 
 // Await blocks a worker until its clock reaches next, for good when next is zero, or until it is woken:

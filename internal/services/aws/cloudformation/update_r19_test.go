@@ -192,8 +192,8 @@ func TestCloudFormationAFailedUpdateKeepsWhatItCannotDelete(t *testing.T) {
 	if _, err := h.service("aws.sns", "GetTopicAttributes", map[string]any{"TopicArn": held}); err != nil {
 		t.Errorf("topic T the stack held before the failed update is gone: %v", err)
 	}
-	if got := h.statuses("pu")["A"]; got != "DELETE_FAILED" { // this branch lists it with the stack's resources, for ContinueUpdateRollback
-		t.Errorf("bucket A the failed update could not delete is %q on the stack; want DELETE_FAILED", got)
+	if rec := h.record("pu"); !strings.Contains(spi.JSONText(rec["Left"]), `"Physical":"rv19bkt","Reason":"BucketNotEmpty`) || !strings.Contains(spi.JSONText(rec["Left"]), `"Status":"DELETE_FAILED"`) {
+		t.Errorf("bucket A the failed update could not delete is not left on the stack, DELETE_FAILED: %v", rec["Left"])
 	}
 	h.fill("rv19bkt", false)
 	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "pu"}); err != nil {
@@ -234,7 +234,7 @@ type panicStore struct {
 func (p *panicStore) Scope(a, r string) spi.Scope { return panicScope{p.Store.Scope(a, r), p.match} }
 
 // A panic between an update's reservation and its settle answers the service's InternalFailure (500)
-// and ends the reservation as a failure does: the stack is rolled back, and can be deleted.
+// and ends the reservation as a failure does: the stack is as it was, and can be deleted.
 func TestCloudFormationAPanickedUpdateEndsItsReservation(t *testing.T) {
 	t.Parallel()
 	h := newStacks(t)
@@ -248,8 +248,8 @@ func TestCloudFormationAPanickedUpdateEndsItsReservation(t *testing.T) {
 	if f := (*spi.Fault)(nil); !errors.As(err, &f) || f.Code != "InternalFailure" || f.HTTPStatus != 500 {
 		t.Errorf("the panicked update answered %v; want InternalFailure (500)", err)
 	}
-	if st, _, _ := h.status("pn"); st != "UPDATE_ROLLBACK_COMPLETE" {
-		t.Errorf("the stack is %s after the panicked update; want UPDATE_ROLLBACK_COMPLETE, as a failed update leaves it", st)
+	if st, _, _ := h.status("pn"); st != "CREATE_COMPLETE" {
+		t.Errorf("the stack is %s after the panicked update; want CREATE_COMPLETE, as it was", st)
 	}
 	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "pn"}); err != nil {
 		t.Errorf("DeleteStack after the panicked update answered %v", err)

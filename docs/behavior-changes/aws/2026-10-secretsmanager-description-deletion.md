@@ -177,7 +177,7 @@ The oracle is AWS's documentation as it ships in the vendored model
     case. A queue with `FifoQueue` true is made a FIFO queue (`FifoQueue` was
     not passed to `CreateQueue` before), and its name, when the engine makes
     it, ends in `.fifo`. Characters other than letters, digits and hyphens are
-    dropped from the logical id (a stack name never holds one, below), and the stack name and logical id are cut, never the suffix, to
+    dropped, and the stack name and logical id are cut, never the suffix, to
     fit the service's longest name: 80 for a queue, 64 for a rule, a role or a
     function, 128 for a stream, 255 for a table, 256 for a topic and 63 for a
     bucket. Before, a secret's suffix was the stack id's, and most other types
@@ -228,13 +228,7 @@ The oracle is AWS's documentation as it ships in the vendored model
     just before its create instead. Resources are made in dependency order,
     each after those its properties name by `Ref`, `Fn::GetAtt` or `Fn::Sub`
     ("Resource B is created before resource A", Template Reference, DependsOn
-    attribute), and after the resources its `DependsOn` names ("that
-    resource is created only after the creation of the resource specified in
-    the DependsOn attribute", which "can take a single string or list of
-    strings"), and otherwise by logical id. A `DependsOn` naming no resource
-    the template declares is "Template format error: Unresolved resource
-    dependencies [Nope] in the Resources block of the template", and a cycle
-    through it is the cycle's error (below). Before, `DependsOn` was not read.
+    attribute), and otherwise by logical id; `DependsOn` itself is not read.
     `Fn::Sub` substitutes every form its Template Reference gives:
     `${Name.Attribute}` is that resource's `Fn::GetAtt`, a name its variable
     map defines is the variable's value, and `${!Literal}` is the literal
@@ -360,7 +354,7 @@ The oracle is AWS's documentation as it ships in the vendored model
     first, which then belonged to no stack, and creates racing on one name
     each made a set.
   - `CreateChangeSet` refuses the stacks `UpdateStack` refuses, a
-    `ROLLBACK_*` or `*_FAILED` one too (round 8 refused only one in
+    `ROLLBACK_*` or `DELETE_FAILED` one too (round 8 refused only one in
     progress), and `GetTemplateSummary` reads the stored template only when
     the request gives none, so an oversize `TemplateBody` beside a
     `StackName` is the member's constraint error.
@@ -400,8 +394,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     case, so `TRUE` protects; it is required, so a request without it is
     `ValidationError` naming it, as the bundle answered, and one that is no
     Boolean, `maybe`, is `ValidationError` too, where round 9 read either as
-    false and turned the protection off), as `ContinueUpdateRollback` and
-    every other native write already did. Before, the bundle's `UpdateTerminationProtection` read the
+    false and turned the protection off), and `ContinueUpdateRollback`, whose one
+    accepted state, `UPDATE_ROLLBACK_FAILED`, no stack here rests in (a
+    failed update is not rolled back), refuses every stack and writes
+    nothing. Before, the bundle's `UpdateTerminationProtection` read the
     record and wrote it back separately, so a create that finished between
     the two was written back `CREATE_IN_PROGRESS`, and a `DeleteStack` then
     left it `DELETE_IN_PROGRESS` for good; `TRUE` left a stack unprotected.
@@ -414,87 +410,8 @@ The oracle is AWS's documentation as it ships in the vendored model
     records nothing. The rollback deletes only what this create made: no two
     stacks share a name the engine makes, and a given name another resource
     already holds is refused before anything is made (above). `OnFailure` is
-    not read, so every failed create rolls back.
-  - A stack name follows `CreateStack`'s rule: "A stack name can contain
-    only alphanumeric characters (case sensitive) and hyphens. It must start
-    with an alphabetical character and can't be longer than 128 characters."
-    Any other name is `ValidationError` in the framework's wording ("1
-    validation error detected: Value 'under_score' at 'stackName' failed to
-    satisfy constraint: Member must satisfy regular expression pattern:
-    [a-zA-Z][-a-zA-Z0-9]*", or "Member must have length less than or equal to
-    128"), and nothing is made. `UpdateStack`, `DeleteStack` and
-    `DescribeStacks` take "The name or unique stack ID", so they check the
-    same pattern with a stack id admitted. Before, any name was taken.
-  - Every operation that takes "The name or unique stack ID" finds a stack by
-    its `StackId` (`arn:...:stack/<name>/<id>`) as well as by its name, and
-    only while the stack of that name has that id: `DescribeStacks`,
-    `DescribeStackResources`, `ListStackResources`, `DescribeStackEvents`,
-    `DescribeStackResource`, `GetTemplate`, `GetTemplateSummary`,
-    `UpdateTerminationProtection`, the rollback family, `UpdateStack`,
-    `DeleteStack` and the change sets. Stacks stay keyed by name; no record is
-    keyed by an id. `UpdateStack`, and `ExecuteChangeSet` of an `UPDATE`
-    change set (the default `ChangeSetType`, which `CreateChangeSet` now
-    records), of a stack that does not exist is `ValidationError`, "Stack [x]
-    does not exist", and makes nothing. Before, the reads did not find a stack
-    by its id, an update of a missing stack created it, and an `UpdateStack`
-    by id made a second stack keyed by the id.
-  - Where the model's input uses `StackNameOrId` (`ContinueUpdateRollback`,
-    `CreateChangeSet`, `DeleteChangeSet`, `DescribeChangeSet`,
-    `DescribeChangeSetHooks`, `DescribeEvents`,
-    `DescribeStackResourceDrifts`, `DetectStackDrift`,
-    `DetectStackResourceDrift`, `ExecuteChangeSet`, `GetTemplateSummary`,
-    `ListChangeSets`, `RollbackStack`, `SignalResource`,
-    `UpdateTerminationProtection`), the name is held to its length (1 or
-    more) and the model's pattern,
-    `^([a-zA-Z][-a-zA-Z0-9]*)|(arn:\b(aws|aws-us-gov|aws-cn)\b:[-a-zA-Z0-9:/._+]*)$`,
-    each alternative matched whole, so a bare `arn:`, or an id in another
-    partition, is `ValidationError` in the framework's wording. The reads
-    that take a name or id (`DescribeStacks` and the rest above) and
-    `UpdateStack` and `DeleteStack` check the same pattern. Before, those
-    operations took any name, and the reads admitted any `arn:` text.
-  - "Before you can delete the rule, you must remove all targets, using
-    RemoveTargets" (EventBridge, `DeleteRule`), and `Force` "is ignored for
-    rules that are not managed rules". So EventBridge's `DeleteRule` of a rule
-    that still has targets is `ValidationException` ("Rule can't be deleted
-    since it has targets.") and deletes nothing, and CloudFormation removes a
-    rule's targets with `RemoveTargets` before it deletes the rule, on
-    `DeleteStack`, on a rollback and on an update's cleanup, and no longer
-    passes `Force`. A later rule of that name starts with no targets. The
-    EventBridge trace gains a `RemoveTargets` of `r1`'s last target before its
-    delete (step 50). Before, `DeleteRule` deleted a rule and kept its
-    targets, which a new rule of the name inherited.
-  - A rule whose targets EventBridge did not all add fails. `PutTargets` "can
-    partially fail ... FailedEntryCount is non-zero in the response and each
-    entry in FailedEntries provides the ID of the failed target and the error
-    code", so the rule is not the one the template declares. The resource's
-    error is the first entry's code, with a message naming every failed entry,
-    and the stack rolls back, on create and on update. Before, the stack
-    finished `CREATE_COMPLETE` or `UPDATE_COMPLETE` without those targets.
-  - A `Ref` or `Fn::GetAtt` in the Resources block must name a resource the
-    template declares, or, for a `Ref`, a parameter it declares or a pseudo
-    parameter; one that names neither is CloudFormation's `ValidationError`,
-    "Template format error: Unresolved resource dependencies [Q] in the
-    Resources block of the template", every such name listed, on
-    `CreateStack`, `UpdateStack`, `ValidateTemplate` and
-    `GetTemplateSummary`, and a change set of such a template is `FAILED`
-    (below); nothing is made. Before, such a `Ref` answered its own text.
-  - A change set's template is parsed and validated when `CreateChangeSet`
-    makes it, as CloudFormation does: the call answers the change set's `Id`,
-    and a template that is wrong, by every check its execution would make
-    (a parameter or condition without a value, an output naming a resource
-    its condition leaves out, round 10 checked the parse alone), leaves the
-    change set `FAILED` with the
-    error as its `StatusReason` ("if your attempt to create a change set
-    failed, CloudFormation shows the error message"), which
-    `DescribeChangeSet` and `ListChangeSets` answer. `ExecuteChangeSet` of a
-    `FAILED` change set is `InvalidChangeSetStatus` (the model's
-    `InvalidChangeSetStatusException`, "The specified change set can't be
-    used to update the stack"; the message is the emulator's) and changes
-    nothing. `CreateChangeSet` is the engine's now; it still takes the
-    template as `TemplateBody` only, as the bundle did. The CloudFormation trace's `cs1` has no Resources, so its
-    `ListChangeSets` summary (step 26) is re-cut to `FAILED`. Before, the body
-    was stored unread, the change set was `CREATE_COMPLETE`, and only
-    `ExecuteChangeSet` found the error.
+    not read, so every failed create rolls back. A failed `UpdateStack` is not
+    rolled back.
   - "The Resources section is required in every CloudFormation template"
     (User Guide, Template sections), so a template without one is
     `ValidationError`, "Template format error: At least one Resources member
@@ -528,118 +445,6 @@ The oracle is AWS's documentation as it ships in the vendored model
     service's not-found error) counts as deleted. Before, a failed create left
     no stack, and `DeleteStack` dropped every delete error and removed the
     stack whatever was left.
-  - A failed `UpdateStack` rolls back as `UPDATE_ROLLBACK` does: what it
-    created is deleted, what it changed is provisioned again from the
-    previous template (a secret gets its previous value and description back
-    through `UpdateSecret`, as a new version), and the stack keeps its
-    previous template and resources as `UPDATE_ROLLBACK_COMPLETE`. A failed
-    update has deleted nothing old (its cleanup runs only after a success,
-    below), so none needs recreating. What the update made is recorded the moment it exists, so a half-made one is
-    deleted too. A resource the rollback cannot delete stays listed by
-    `DescribeStackResources` as `DELETE_FAILED`, the stack is
-    `UPDATE_ROLLBACK_FAILED` with the error as its `StackStatusReason` (an
-    `UpdateStack` of it is `ValidationError`, as of any stack in a
-    `ROLLBACK_` or `_FAILED` state), and `DeleteStack` removes the resource
-    with the rest. Before, the changes stayed and the new resources were left
-    behind.
-  - An update compares each resource's type and resolved properties with
-    what the stack recorded ("CloudFormation updates resources based on
-    differences between what you submit and the stack's current template",
-    Template Reference, UpdateReplacePolicy). An unchanged resource is not
-    touched: no call, and the same physical id. A change to properties the
-    type updates in place ("Update requires: No interruption" or "Some
-    interruptions" on its Template Reference page) is made through its
-    service's update under the same id: `UpdateKeyDescription`,
-    `PutParameter` with `Overwrite`, `UpdateTable`,
-    `UpdateAssumeRolePolicy`, `UpdateFunctionConfiguration`,
-    `UpdateShardCount`, `UpdateSecret`, `UpdateRestApi`, `PutRule` with the
-    rule's targets set to the template's (others removed), and a bucket's
-    configuration; a queue, topic or log group has no property the engine
-    applies but its name, so a change to another of theirs calls nothing. A
-    change to a property that "Update requires: Replacement" (a name,
-    `FifoQueue`, `FifoTopic`, a role's `Path`, a key's `KeySpec`,
-    `KeyUsage` or `MultiRegion`, a rule's `EventBusName`, a function's
-    `PackageType` and so on) makes a new resource, under a new generated
-    name, and the cleanup deletes the old one; a resource whose name the
-    template gives and keeps is `ValidationError`, CloudFormation's
-    "CloudFormation cannot update a stack when a custom-named resource
-    requires replacing. Rename <name> and update the stack again.", and the
-    stack rolls back. One no template can name, a KMS key or a Kinesis
-    resource policy, is replaced as any other (round 8 compared its two
-    empty names and refused it, "Rename  and update the stack again."). A
-    `Ref` to a kept resource answers its id. Before, every
-    update made every resource again: a new KMS key and REST API, whose old
-    ones the cleanup then deleted, and a failure on any parameter, table, log
-    group, function, role or stream, which could only be created. A stream
-    is made with the template's `ShardCount`.
-  - A failed update's rollback puts back exactly the properties the stack
-    had: what the update changed in place is updated back through the same
-    update, given the previous template's properties, so a property the
-    failed update added is taken away (a rule's targets are its previous
-    template's and no others; a secret given a description has an empty one,
-    which Secrets Manager no longer answers, as it "only returns fields that
-    have a value"); what the update kept is not called. Before, the rollback
-    provisioned the previous properties on top of the new ones, and every
-    kept resource again.
-  - `DeletionPolicy` and `UpdateReplacePolicy` are read as the Template
-    Reference gives them (the model's `TemplateConfiguration` names the same
-    `DELETE` and `RETAIN`). `Retain` "keeps the resource without deleting the
-    resource or its contents": on `DeleteStack`, on an update that drops the
-    resource ("it's deleted from CloudFormation's scope"), or whose
-    condition it turns off (round 10 read such a resource, still declared,
-    as replaced and took its `UpdateReplacePolicy`), and on the rollback
-    of the create, or of the update, that made it, since
-    `RetainExceptOnCreate` is the one that "deletes the resource" when "the
-    stack operation that created the resource is rolled back" and otherwise
-    retains it. `UpdateReplacePolicy: Retain` keeps the old resource a
-    replacement leaves; its `Snapshot` "reverts to the default option, which
-    is Delete" for a type with no snapshots, which is every type the engine
-    makes. `DeletionPolicy: Snapshot` is for the types the page lists, none
-    of them the engine's, so it is refused, as is a value neither attribute
-    has: `ValidationError`, "Template format error: Q's DeletionPolicy must
-    be one of [Delete, Retain, RetainExceptOnCreate], not "Snapshot"" (this
-    wording is the emulator's). A retained resource leaves the stack and is
-    listed by `DescribeStackEvents` as `DELETE_SKIPPED`, the model's
-    `ResourceStatus`. A deleted stack's record stays, `DELETE_COMPLETE`,
-    answered by its stack id alone (`DescribeStacks`, `DescribeStackEvents`
-    and the other reads; `ListStacks` lists it), and exports nothing, its
-    `Outputs` `[]` (round 9 left them null); by its name it does not exist,
-    and the name is free. Nothing changes it: `UpdateTerminationProtection`
-    by its stack id is "does not exist" (round 9 protected the deleted
-    record).
-  - A stack's stored template is read as it is stored, its JSON or YAML
-    and nothing more: the stack was made from it, and a check added since
-    may refuse it. Round 10 parsed it in full wherever it read it
-    (`DeleteStack`, an update's comparison, rollback and cleanup,
-    `ContinueUpdateRollback`, `GetTemplateSummary`) and dropped the error,
-    so a template a newer check refuses read as none, and `DeleteStack`
-    deleted a `Retain` resource.
-  - An update settles the previous template's conditions again, from the
-    record's parameters and the stack's pseudo parameters, before it
-    compares: a record written before round 9 holds none in its `Refs`, so
-    its `Fn::If` read as written and an unchanged resource was updated (or,
-    on a replacing property, replaced). Before, neither attribute
-    was read, every resource was deleted, and a deleted stack was gone.
-  - A finished `UpdateStack` cleans up. "CloudFormation will replace the
-    resource by creating a new one and deleting the old one"
-    (`ResourceChange.Replacement`), and for an update "it begins disposing of
-    old resources immediately once the operation completes"
-    (`RollbackConfiguration`). Once every resource of the update is in place,
-    each old resource the stack no longer holds is deleted: one the update
-    replaced with a new physical id (a new name, say) and one the template
-    dropped. A delete that fails there leaves the stack `UPDATE_COMPLETE`, as
-    in CloudFormation, and abandons the resource, as CloudFormation does: it
-    leaves the stack's resources, and is recorded once, as a `DELETE_FAILED`
-    event with the error as its `ResourceStatusReason` ("Success/failure
-    message associated with the resource"), and as the stack's
-    `StackStatusReason`. No later update or `DeleteStack` touches it, and no
-    CloudFormation delete touches a physical resource another stack's record
-    holds: such a one leaves the stack `DELETE_SKIPPED`, its reason naming
-    the holder. Before, the abandoned resource stayed listed and every later
-    update retried its delete, which, once it was gone and another stack had
-    made one of its name, deleted the other stack's. Stack statuses here have no `_IN_PROGRESS` grain, so
-    `UPDATE_COMPLETE_CLEANUP_IN_PROGRESS` is never seen. Before, an update
-    never deleted what it replaced or dropped.
   - The rollback family accepts only the states the API reference gives
     each operation: `RollbackStack` rolls back "from CREATE_FAILED or
     UPDATE_FAILED stack statuses", `ContinueUpdateRollback` "from
@@ -654,18 +459,9 @@ The oracle is AWS's documentation as it ships in the vendored model
     `DELETE_FAILED` orphan included (its way forward is `DeleteStack`), is
     `ValidationError` ("RollbackStack cannot be called from current stack
     status", in the words `CancelUpdateStack` uses) and changes nothing, and
-    an absent stack "does not exist". `ContinueUpdateRollback` is the
-    engine's: from `UPDATE_ROLLBACK_FAILED` it deletes again what the
-    rollback could not delete and updates back what it could not restore
-    (left `UPDATE_FAILED`), but the `ResourcesToSkip`, which "CloudFormation
-    sets ... to UPDATE_COMPLETE" and which may name only "resources that are
-    in the UPDATE_FAILED state because a rollback failed" (any other is
-    `ValidationError`). Success is `UPDATE_ROLLBACK_COMPLETE`, and the stack
-    can then be updated, a skipped resource kept as any other the stack
-    holds (round 8 took only a resource with no status for one the stack
-    holds, so the next update made a skipped one again and failed, the
-    service's error for a name taken); a retry that fails leaves it
-    `UPDATE_ROLLBACK_FAILED` with the error as its reason. Before, each operation marked any stack complete,
+    an absent stack "does not exist". `ContinueUpdateRollback` never marks a
+    stack complete while a `DELETE_FAILED` resource remains, since it cannot
+    retry the delete. Before, each operation marked any stack complete,
     orphans and all, and made a stack out of a name that had none. The
     CloudFormation trace's steps 9 to 22 are re-cut accordingly: s1 and s2
     are never made.

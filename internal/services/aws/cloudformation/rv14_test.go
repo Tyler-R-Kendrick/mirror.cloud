@@ -76,14 +76,14 @@ func TestRV14UpdateVsDeleteResurrects(t *testing.T) {
 	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "s"}); err != nil {
 		t.Fatal(err)
 	}
-	if rec, ok := h.stored("s"); ok && rec["Status"] != "DELETE_COMPLETE" { // this branch keeps a deleted stack's record
+	if _, ok := h.stored("s"); ok {
 		t.Fatal("stack still stored after DeleteStack")
 	}
 	close(g.release)
 	err := within(t, done, "update")
 	rec, ok := h.stored("s")
 	t.Logf("update answered %v; record after: %v %v", err, ok, rec["Status"])
-	if ok && rec["Status"] != "DELETE_COMPLETE" {
+	if ok {
 		t.Errorf("BUG: the deleted stack was written back by the racing UpdateStack: %v", rec)
 	}
 	if err == nil || !strings.Contains(err.Error(), "Stack [s] does not exist") {
@@ -194,7 +194,7 @@ func TestRV14ExecuteCreateVsDeleteStack(t *testing.T) {
 	if code(err) != "ChangeSetNotFound" {
 		t.Errorf("BUG: the execution of a change set DeleteStack removed answered %v, want ChangeSetNotFound", err)
 	}
-	if err == nil || ok && rec["Status"] != "DELETE_COMPLETE" {
+	if err == nil || ok {
 		t.Errorf("BUG: a CREATE change set whose stack (and itself) DeleteStack removed was executed: stack %v", rec["Status"])
 	}
 }

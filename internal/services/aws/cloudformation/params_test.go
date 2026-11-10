@@ -303,8 +303,11 @@ func TestCloudFormationIAMResourcesNeedTheirCapabilities(t *testing.T) {
 			t.Errorf("the refused stack %s was made", c.name)
 		}
 	}
-	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "cs", "ChangeSetName": "role", "ChangeSetType": "CREATE", "TemplateBody": role(map[string]any{})}); code(err) != "InsufficientCapabilitiesException" {
-		t.Errorf("CreateChangeSet without CAPABILITY_IAM answered %v, want InsufficientCapabilitiesException, an error CreateChangeSet lists", err)
+	if _, err := h.invoke("CreateChangeSet", map[string]any{"StackName": "cs", "ChangeSetName": "role", "ChangeSetType": "CREATE", "TemplateBody": role(map[string]any{})}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("ExecuteChangeSet", map[string]any{"StackName": "cs", "ChangeSetName": "role"}); code(err) != "InsufficientCapabilitiesException" {
+		t.Errorf("ExecuteChangeSet of a change set without CAPABILITY_IAM answered %v, want InsufficientCapabilitiesException", err)
 	}
 }
 

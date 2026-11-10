@@ -2,6 +2,7 @@ package cloudformation
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"sync"
@@ -45,7 +46,7 @@ func TestCloudFormationTakesOverAStackItsOperationLeft(t *testing.T) {
 	}{
 		"create":     {"CREATE_IN_PROGRESS", "/gone-1", "ROLLBACK_FAILED"},
 		"create-old": {"CREATE_IN_PROGRESS", "", "ROLLBACK_FAILED"}, // a record from before operations had ids
-		"update":     {"UPDATE_IN_PROGRESS", "/gone-2", "UPDATE_ROLLBACK_FAILED"},
+		"update":     {"UPDATE_IN_PROGRESS", "CREATE_COMPLETE/gone-2", "CREATE_COMPLETE"},
 		"update-old": {"UPDATE_IN_PROGRESS", "", "UPDATE_ROLLBACK_FAILED"},
 		"delete":     {"DELETE_IN_PROGRESS", "/gone-3", "DELETE_FAILED"},
 	} {
@@ -62,7 +63,7 @@ func TestCloudFormationTakesOverAStackItsOperationLeft(t *testing.T) {
 		if st, reason, _ := h.status(name); st != c.settled || !strings.Contains(reason, "ended before it settled") || h.record(name)["Op"] != nil {
 			t.Errorf("%s: the stack is %s (%q), held by %v; want %s, with why, held by none", name, st, reason, h.record(name)["Op"], c.settled)
 		}
-		refused := true // UpdateStack takes no stack that failed
+		refused := strings.HasSuffix(c.settled, "_FAILED") // as UpdateStack takes each state: UPDATE_ROLLBACK_FAILED takes a delete, no update
 		_, err := h.invoke("UpdateStack", map[string]any{"StackName": name, "TemplateBody": rv19Body(map[string]any{"Resources": map[string]any{"K": rv22Topic, "N": rv22Topic}})})
 		if refused != (err != nil && strings.Contains(err.Error(), "is in "+c.settled+" state")) || !refused && err != nil {
 			t.Errorf("%s: UpdateStack answered %v; want it refused: %v", name, err, refused)
@@ -70,8 +71,8 @@ func TestCloudFormationTakesOverAStackItsOperationLeft(t *testing.T) {
 		if _, err := h.invoke("DeleteStack", map[string]any{"StackName": name}); err != nil {
 			t.Errorf("%s: DeleteStack answered %v", name, err)
 		}
-		if rec, _ := h.stored(name); rec != nil && rec["Status"] != "DELETE_COMPLETE" { // this branch keeps a deleted stack's record
-			t.Errorf("%s: the stack is %v after DeleteStack; want DELETE_COMPLETE", name, rec["Status"])
+		if _, held := h.stored(name); held {
+			t.Errorf("%s: still stored after DeleteStack", name)
 		}
 	}
 	review := stack{Name: "rv", ID: "arn:aws:cloudformation:us-east-1:000000000000:stack/rv/1", Status: "REVIEW_IN_PROGRESS", Resources: []res{}, Outputs: []any{}}
@@ -95,7 +96,7 @@ func TestCloudFormationARunningOperationKeepsItsStack(t *testing.T) {
 	}{
 		"create": {"CreateStack", "CREATE_IN_PROGRESS", "is in CREATE_IN_PROGRESS state", "CREATE_COMPLETE"},
 		"update": {"UpdateStack", "UPDATE_IN_PROGRESS", "is in UPDATE_IN_PROGRESS state", "UPDATE_COMPLETE"},
-		"delete": {"DeleteStack", "DELETE_IN_PROGRESS", "is in DELETE_IN_PROGRESS state", "DELETE_COMPLETE"},
+		"delete": {"DeleteStack", "DELETE_IN_PROGRESS", "is in DELETE_IN_PROGRESS state", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -184,8 +185,8 @@ func TestCloudFormationSettlesAStackWhoseWritesFailed(t *testing.T) {
 		if err := invoked(t, h, "DeleteStack", map[string]any{"StackName": "ps"}); err != nil {
 			t.Errorf("%s (%d failed writes): DeleteStack, the store healed, answered %v", c.op, c.n, err)
 		}
-		if rec, _ := h.stored("ps"); rec != nil && rec["Status"] != "DELETE_COMPLETE" {
-			t.Errorf("%s (%d failed writes): the stack is %v after DeleteStack; want DELETE_COMPLETE", c.op, c.n, rec["Status"])
+		if rec, held := h.stored("ps"); held {
+			t.Errorf("%s (%d failed writes): the stack is still stored, %v, after DeleteStack", c.op, c.n, rec["Status"])
 		}
 	}
 	h := newStacks(t)
@@ -210,8 +211,8 @@ func TestCloudFormationSettlesAStackWhoseWritesFailed(t *testing.T) {
 	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "s"}); err != nil {
 		t.Errorf("DeleteStack after the create answered %v", err)
 	}
-	if rec, _ := h.stored("s"); rec != nil && rec["Status"] != "DELETE_COMPLETE" {
-		t.Errorf("the stack is %v after DeleteStack; want DELETE_COMPLETE", rec["Status"])
+	if rec, held := h.stored("s"); held {
+		t.Errorf("the stack is still stored, %v, after DeleteStack", rec["Status"])
 	}
 	if _, err := h.service("aws.sns", "GetTopicAttributes", map[string]any{"TopicArn": "arn:aws:sns:us-east-1:000000000000:rv22m"}); err == nil {
 		t.Errorf("topic rv22m, which the create made, survives the stack")
@@ -238,15 +239,73 @@ func TestCloudFormationAFailedUpdateWhoseCleanupPanicsKeepsWhatRemains(t *testin
 	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "uo", "TemplateBody": topicTpl()}); err == nil { // any operation settles it
 		t.Fatal("CreateStack of the stack's name was taken")
 	}
-	rec := h.record("uo") // this branch lists what remains with the stack's resources, for ContinueUpdateRollback
-	if left := spi.JSONText(rec["Resources"]); rec["Status"] != "UPDATE_ROLLBACK_FAILED" || rec["Reason"] != err.Error() || !strings.Contains(left, "rv22orphan") || !strings.Contains(left, `"Status":"DELETE_FAILED"`) || !strings.Contains(left, `"Reason":"`) {
-		t.Errorf("the stack is %v (%v), holding %s; want UPDATE_ROLLBACK_FAILED, the update's error, and topic rv22orphan listed DELETE_FAILED with why", rec["Status"], rec["Reason"], left)
+	rec := h.record("uo")
+	if left := spi.JSONText(rec["Left"]); rec["Status"] != "CREATE_COMPLETE" || rec["Reason"] != err.Error() || !strings.Contains(left, "rv22orphan") || !strings.Contains(left, `"Status":"DELETE_FAILED"`) || !strings.Contains(left, `"Reason":"`) {
+		t.Errorf("the stack is %v (%v), left %s; want CREATE_COMPLETE, the update's error, and topic rv22orphan left DELETE_FAILED with why", rec["Status"], rec["Reason"], left)
 	}
 	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "uo"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.service("aws.sns", "GetTopicAttributes", map[string]any{"TopicArn": "arn:aws:sns:us-east-1:000000000000:rv22orphan"}); err == nil {
 		t.Errorf("topic rv22orphan, made by the failed update, survives the stack")
+	}
+}
+
+// A stack takes back what its own failed update left: the update again, the bucket emptied, succeeds and
+// holds the bucket, with nothing left; while the bucket could not be deleted and the update is not
+// retried, it stays left. (Round 22's S5.)
+func TestCloudFormationAStackTakesBackWhatItsUpdateLeft(t *testing.T) {
+	t.Parallel()
+	h := newStacks(t)
+	bucket := func(n string) map[string]any {
+		return map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": n}}
+	}
+	if err := rvMake(t, h, "tb", map[string]any{"Resources": map[string]any{"A": bucket("rv22a")}}); err != nil {
+		t.Fatal(err)
+	}
+	g := h.gateOn(func(_, key string, _ []byte) bool { return strings.Contains(key, "rv22mm") })
+	update := func(bad bool) map[string]any {
+		r := map[string]any{"A": bucket("rv22a"), "B": bucket("rv22b"), "M": map[string]any{"Type": "AWS::SNS::Topic", "DependsOn": "B", "Properties": map[string]any{"TopicName": "rv22mm"}}}
+		if bad {
+			r["Z"] = rv22Bad("rv22-nofifo3", "M")
+		}
+		return map[string]any{"StackName": "tb", "TemplateBody": rv19Body(map[string]any{"Resources": r})}
+	}
+	done := make(chan error, 1)
+	go func() { _, err := h.invoke("UpdateStack", update(true)); done <- err }()
+	within(t, g.reached, "the update reaching M")
+	h.fill("rv22b", true)
+	close(g.release)
+	if err := within(t, done, "the update"); err == nil || !strings.Contains(spi.JSONText(h.record("tb")["Left"]), "rv22b") {
+		t.Fatalf("the update answered %v and left %v; want it failed, leaving bucket rv22b", err, h.record("tb")["Left"])
+	}
+	if rec := h.record("tb"); rec["Status"] != "CREATE_COMPLETE" || rec["Op"] != nil { // at once, by no later operation
+		t.Errorf("the failed update left the stack %v, held by %v; want CREATE_COMPLETE, held by none", rec["Status"], rec["Op"])
+	}
+	h.fill("rv22b", false)
+	if _, err := h.invoke("UpdateStack", update(false)); err != nil {
+		t.Fatalf("the update again, of the bucket the stack left, answered %v", err)
+	}
+	rec := h.record("tb")
+	if !strings.Contains(spi.JSONText(rec["Resources"]), `"Logical":"B","Name":"rv22b","Physical":"rv22b"`) || rec["Left"] != nil {
+		t.Errorf("the stack holds %v and has left %v; want it to hold B (rv22b) with nothing left", rec["Resources"], rec["Left"])
+	}
+	if _, err := h.service("aws.s3", "HeadBucket", map[string]any{"Bucket": "rv22b"}); err != nil {
+		t.Errorf("bucket rv22b, which the stack holds again, is gone: %v", err)
+	}
+	// a parameter left is taken back as one the stack holds is: put over, where a create of its name is refused
+	if _, err := h.service("aws.ssm", "PutParameter", map[string]any{"Name": "rv22p", "Type": "String", "Value": "old"}); err != nil {
+		t.Fatal(err)
+	}
+	left := stack{Name: "tp", ID: "arn:aws:cloudformation:us-east-1:000000000000:stack/tp/1", Status: "CREATE_COMPLETE", Template: topicTpl(), Resources: []res{}, Outputs: []any{},
+		Left: []res{{Logical: "P", Physical: "rv22p", Type: "AWS::SSM::Parameter", Name: "rv22p", Status: "DELETE_FAILED"}}}
+	_ = h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "tp", []byte(spi.JSONText(left)))
+	if _, err := h.invoke("UpdateStack", map[string]any{"StackName": "tp", "TemplateBody": rv19Body(map[string]any{"Resources": map[string]any{
+		"P": map[string]any{"Type": "AWS::SSM::Parameter", "Properties": map[string]any{"Name": "rv22p", "Type": "String", "Value": "new"}}}})}); err != nil {
+		t.Errorf("the update that declares the parameter the stack left answered %v", err)
+	}
+	if out, err := h.service("aws.ssm", "GetParameter", map[string]any{"Name": "rv22p"}); err != nil || asMap(out["Parameter"])["Value"] != "new" {
+		t.Errorf("the parameter the stack took back is %v (%v); want its value new", out["Parameter"], err)
 	}
 }
 
@@ -277,8 +336,8 @@ func TestCloudFormationNoPanicEscapesAFailingOperation(t *testing.T) {
 	}
 }
 
-// A stack's resources are deleted newest first. (Round 22's N7; this branch keeps nothing apart from a
-// stack's resources, so the other half of #441's test has no counterpart here.)
+// A stack's resources are deleted newest first; a DeleteStack that deletes them but not what an update
+// left fails, DELETE_FAILED with the error it answers as the stack's reason. (Round 22's N7.)
 func TestCloudFormationDeletesNewestFirstAndFailsOnWhatWasLeft(t *testing.T) {
 	t.Parallel()
 	h := newStacks(t)
@@ -304,5 +363,19 @@ func TestCloudFormationDeletesNewestFirstAndFailsOnWhatWasLeft(t *testing.T) {
 	off()
 	if !slices.Equal(order, []string{"rv22third", "rv22second", "rv22first"}) {
 		t.Errorf("the topics were deleted in the order %v; want newest first", order)
+	}
+	full := stack{Name: "lf", ID: "arn:aws:cloudformation:us-east-1:000000000000:stack/lf/1", Status: "CREATE_COMPLETE", Template: topicTpl(), Resources: []res{}, Outputs: []any{},
+		Left: []res{{Logical: "B", Physical: "rv22left", Type: "AWS::S3::Bucket", Name: "rv22left", Status: "DELETE_FAILED"}}}
+	if _, err := h.service("aws.s3", "CreateBucket", map[string]any{"Bucket": "rv22left"}); err != nil {
+		t.Fatal(err)
+	}
+	h.fill("rv22left", true)
+	_ = h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "lf", []byte(spi.JSONText(full)))
+	_, err := h.invoke("DeleteStack", map[string]any{"StackName": "lf"})
+	if f := (*spi.Fault)(nil); !errors.As(err, &f) || f.Code != "BucketNotEmpty" {
+		t.Errorf("DeleteStack of a stack whose leftover bucket is full answered %v; want BucketNotEmpty", err)
+	}
+	if st, reason, _ := h.status("lf"); st != "DELETE_FAILED" || err == nil || reason != err.Error() {
+		t.Errorf("the stack is %s (%q); want DELETE_FAILED, with the error DeleteStack answered", st, reason)
 	}
 }

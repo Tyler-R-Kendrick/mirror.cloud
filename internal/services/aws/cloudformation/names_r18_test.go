@@ -96,8 +96,7 @@ func TestCloudFormationAFailedUpdateDeletesWhatItMade(t *testing.T) {
 func TestCloudFormationADeleteWaitsForAnUpdate(t *testing.T) {
 	h := newStacks(t)
 	tpl := func(extra bool) string {
-		r := map[string]any{"B": map[string]any{"Type": "AWS::S3::Bucket", "Properties": map[string]any{"BucketName": "r18b", // this branch updates a bucket in place: its CORS, which the gate holds, changes with the version
-			"CorsConfiguration": map[string]any{"CorsRules": []any{map[string]any{"AllowedMethods": []any{"GET"}, "AllowedOrigins": []any{map[bool]string{true: "https://b", false: "https://a"}[extra]}}}}}}, "Q": map[string]any{"Type": "AWS::SQS::Queue", "Properties": map[string]any{"QueueName": "rv18-old"}}}
+		r := map[string]any{"B": asMap(paused(0)["P150b"]), "Q": map[string]any{"Type": "AWS::SQS::Queue", "Properties": map[string]any{"QueueName": "rv18-old"}}}
 		if extra {
 			r["A"] = map[string]any{"Type": "AWS::SNS::Topic", "Properties": map[string]any{"TopicName": "rv18-orphan"}}
 		}

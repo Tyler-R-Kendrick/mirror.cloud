@@ -187,7 +187,7 @@ func TestCloudFormationACreateChangeSetMakesAStackInReview(t *testing.T) {
 	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "abandoned"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := h.status("abandoned"); code(err) != "ValidationError" {
-		t.Errorf("after DeleteStack of a stack in review, DescribeStacks answered %v, want ValidationError: it does not exist", err)
+	if _, left := h.stored("abandoned"); left {
+		t.Errorf("DeleteStack of a stack in review left it")
 	}
 }

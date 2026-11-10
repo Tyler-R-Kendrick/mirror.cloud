@@ -20807,6 +20807,14 @@ var mutants = []mutant{
 		run:  "TestDynamoDBTableMetadataCharacterization",
 	},
 	{
+		name: "dynamodb-a-table-switched-back-still-reads-on-demand",
+		file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
+		old:  `if billing == "PAY_PER_REQUEST" || table["BillingModeSummary"] != nil {`,
+		new:  `if billing == "PAY_PER_REQUEST" {`,
+		pkg:  "./internal/services/aws/dynamodb",
+		run:  "TestDynamoDBATableSwitchedBackReadsProvisioned",
+	},
+	{
 		name: "dynamodb-table-metadata-drop-billing-summary",
 		file: filepath.Join("internal", "services", "aws", "dynamodb", "dynamodb.go"),
 		old:  `table["BillingModeSummary"] = map[string]any{"BillingMode": billing}`,

@@ -951,6 +951,10 @@ func TestBootedServerAzureQueue(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("peek with numofmessages=007: %d %s", code, raw)
 	}
+	code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true&numofmessages=0000000000000000001", "", nil)
+	if code != 200 {
+		t.Fatalf("peek with numofmessages padded to nineteen characters: %d %s", code, raw)
+	}
 	// A timeout that is not a number is an invalid value, not a server error.
 	for _, c := range []struct{ method, path, body string }{
 		{http.MethodPost, "/q1/messages?visibilitytimeout=abc", envelope("x")},

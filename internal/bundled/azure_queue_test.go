@@ -562,7 +562,11 @@ func TestAzureQueueMalformedQueryParameters(t *testing.T) {
 		extra := inv("PutMessage", in)
 		inv("DeleteMessage", map[string]any{"messageid": fmt.Sprint(extra["id"]), "popreceipt": fmt.Sprint(extra["pop_receipt"])})
 	}
-	for _, n := range []string{"+1", "01", "001"} {
+	// However many zeros: nineteen characters of them are still the number 1.
+	padded := inv("PutMessage", map[string]any{"message": "x", "visibilitytimeout": "0000000000000000001", "messagettl": "+0000000000000000000000005"})
+	inv("DeleteMessage", map[string]any{"messageid": fmt.Sprint(padded["id"]), "popreceipt": fmt.Sprint(padded["pop_receipt"])})
+	fault(invalid, "PutMessage", map[string]any{"message": "x", "visibilitytimeout": "01000000000000000000"})
+	for _, n := range []string{"+1", "01", "001", "0000000000000000001"} {
 		if got := inv("PeekMessages", map[string]any{"numofmessages": n})["_list"].([]any); len(got) != 1 {
 			t.Fatalf("peek numofmessages=%s: %d messages", n, len(got))
 		}

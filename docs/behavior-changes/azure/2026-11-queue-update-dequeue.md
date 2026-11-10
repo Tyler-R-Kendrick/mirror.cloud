@@ -54,13 +54,15 @@ Update Message).
   Get Messages, Peek Messages and Update Message. A number outside the
   documented range is still `OutOfRangeQueryParameterValue`.
   - A decimal integer is one with a sign or leading zeros too (`+5`, `007`,
-    `-0`): they were accepted before and still are, for all three parameters.
-    The reference does not say how Azure reads them.
+    `-0`, `0000000000000000001`): they were accepted before and still are,
+    however many the zeros, for all three parameters. The reference does not
+    say how Azure reads them.
   - A parameter with an empty value (`?messagettl=`) is read as not sent, as
     before: it never reached these rules and was never a 500. The reference
     does not say whether Azure refuses an empty value.
-  - A number of nineteen digits or more is refused as not a number, where
-    one of up to eighteen digits is refused as out of range.
+  - A number of nineteen digits or more, not counting leading zeros, is
+    refused as not a number, where one of up to eighteen digits is refused as
+    out of range.
   - These rules run where the range rules already ran, after the queue and
     the message are looked up: a bad parameter on a missing queue is still
     `QueueNotFound`.

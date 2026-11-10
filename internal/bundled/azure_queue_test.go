@@ -145,6 +145,12 @@ func TestAzureQueueMessages(t *testing.T) {
 	_ = inv("PutMessage", map[string]any{"queue": "q", "message": "x", "messagettl": "-1"})
 	fault("PutMessage", map[string]any{"queue": "q", "message": strings.Repeat("a", 65537)}, 400, "RequestBodyTooLarge")
 	fault("GetMessages", map[string]any{"queue": "q", "numofmessages": "33"}, 400, "OutOfRangeQueryParameterValue")
+	// A dequeue hides the message for at least a second, seven days at most.
+	fault("GetMessages", map[string]any{"queue": "q", "visibilitytimeout": "0"}, 400, "OutOfRangeQueryParameterValue")
+	fault("GetMessages", map[string]any{"queue": "q", "visibilitytimeout": "604801"}, 400, "OutOfRangeQueryParameterValue")
+	if n := len(inv("GetMessages", map[string]any{"queue": "q", "visibilitytimeout": "604800"}).Output["_list"].([]any)); n != 1 {
+		t.Fatalf("dequeue with the longest timeout: %d messages", n)
+	}
 	fault("PutMessage", map[string]any{"queue": "q", "body_invalid": true}, 400, "InvalidXmlDocument")
 }
 

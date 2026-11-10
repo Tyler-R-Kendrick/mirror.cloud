@@ -21,3 +21,9 @@ Update Message).
   message is subsequently dequeued." Before, Get Messages and Peek Messages
   rendered `<DequeueCount></DequeueCount>`, empty, for any message that had
   been dequeued; only a never-dequeued message carried a number (`0`).
+- **Get Messages refuses `visibilitytimeout=0`.** Get Messages documents that
+  "a specified value must be larger than or equal to 1 second, and it can't be
+  greater than 7 days", and that an out-of-range value is 400
+  `OutOfRangeQueryParameterValue`. Before, `0` was accepted and the message was
+  dequeued (count and receipt moved) while staying visible. Put Message and
+  Update Message still take `0`, as each documents.

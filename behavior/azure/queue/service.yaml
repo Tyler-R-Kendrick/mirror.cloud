@@ -240,7 +240,9 @@ operations:
     require:
       - { cond: q_found, error: QueueNotFound, message: "The specified queue does not exist." }
       - { cond: "!('numofmessages' in input && input.numofmessages != null) || (int(input.numofmessages) >= 1 && int(input.numofmessages) <= 32)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
-      - { cond: "!('visibilitytimeout' in input && input.visibilitytimeout != null) || (int(input.visibilitytimeout) >= 0 && int(input.visibilitytimeout) <= 604800)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
+      # A dequeue's timeout is at least a second; only Put Message and Update
+      # Message take 0.
+      - { cond: "!('visibilitytimeout' in input && input.visibilitytimeout != null) || (int(input.visibilitytimeout) >= 1 && int(input.visibilitytimeout) <= 604800)", error: OutOfRangeQueryParameterValue, message: "One of the query parameters specified in the request URI is outside the permissible range." }
     select:
       binding: msgs
       resource: message

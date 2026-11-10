@@ -66,17 +66,28 @@ evaluation error before unless said otherwise:
 
 A client may send a command argument as a JSON number, and `@upstash/redis`
 does: `incrby("n", 1000000)`, `expire("k", 2592000)`. Redis is sent the
-number's text. A whole number up to 2^53 either way is now spelled in digits
-wherever it is read: as a key, a value, seconds or an increment.
+number's text. A whole number short of 2^53 either way (a safe integer, the
+largest being 9007199254740991) is now spelled in digits wherever it is read:
+as a key, a value, seconds or an increment.
 
 Before, a number from a million up was spelled in exponent form (`1e+06`):
 `SET n 1000000` then `GET n` answered `1e+06`, `INCRBY n 1000000` added
 nothing, and `EXPIRE k 2592000` answered `ERR invalid expire time in expire`.
 
-A fraction keeps its own spelling (`1.5`) and is not an integer. A number past
-2^53 is decoded to a float before the bundle sees it, so its digits are not
-all there to spell; it keeps the float's spelling and is not read as an
-integer. Sent as a string it is exact.
+What follows from it:
+
+- **From 2^53 on, a number is not read as an integer.** It is decoded to a
+  float before the bundle sees it, and several JSON texts decode to one float
+  (9007199254740992 and 9007199254740993 are the same), so the digits sent
+  cannot be told. It keeps the float's spelling. Sent as a string it is exact.
+- **A number that is not whole is spelled as the float prints it**, as before:
+  `1.5`, and in exponent form when large or tiny (`1234567.5` is
+  `1.2345675e+06`). It is not an integer.
+- **`-0` is now `0`.** It is a whole number, and its digits are `0`.
+- **A numeric key of a million or more is now its digits.** `SET 5000000 v`
+  writes the key `5000000`, where an older build wrote `5e+06`. A snapshot
+  from such a build that holds a key under its exponent spelling is found by
+  that spelling as a string, not by the number.
 
 ## Error texts
 

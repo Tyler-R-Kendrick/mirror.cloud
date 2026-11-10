@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -348,14 +349,41 @@ func TestVercelKVSpellsJSONNumbersInDecimal(t *testing.T) {
 	want("by number", "GET", 5000000.0)
 	want("1", "DEL", 5000000.0)
 	want("<nil>", "GET", "5000000")
-	// The largest whole number a JSON double holds exactly, and its negative.
-	want("OK", "SET", "big", 9007199254740992.0)
-	want("9007199254740992", "GET", "big")
-	want("OK", "SET", "big", -9007199254740992.0)
-	want("-9007199254740992", "GET", "big")
+	// The largest whole number that only one JSON text decodes to, and its
+	// negative: the safe integers end a step short of 2^53.
+	want("OK", "SET", "big", 9007199254740991.0)
+	want("9007199254740991", "GET", "big")
+	want("OK", "SET", "big", -9007199254740991.0)
+	want("-9007199254740991", "GET", "big")
+	want("OK", "SET", "c", "0")
+	want("9007199254740991", "INCRBY", "c", 9007199254740991.0)
+	// 2^53 itself is where that stops: 9007199254740992 and 9007199254740993
+	// are one float, so the digits sent cannot be told, and neither is read
+	// as an integer or spelled as one.
+	for _, twoTo53 := range []float64{9007199254740992, 9007199254740993, -9007199254740992} {
+		for _, argv := range [][]any{{"INCRBY", "c", twoTo53}, {"DECRBY", "c", twoTo53}, {"EXPIRE", "c", twoTo53}, {"SETEX", "c", twoTo53, "v"}} {
+			_, err := cmd(argv...)
+			if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR value is not an int or out of range" {
+				t.Fatalf("%v: %#v", argv, err)
+			}
+		}
+		want("OK", "SET", twoTo53, "v")
+		for _, digits := range []string{"9007199254740992", "-9007199254740992", "9007199254740993"} {
+			want("<nil>", "GET", digits)
+		}
+		want("1", "DEL", twoTo53)
+	}
+	want("9007199254740991", "GET", "c")
+	want("-1", "TTL", "c")
 	// A fraction is its own spelling, and no integer.
 	want("OK", "SET", "f", 1.5)
 	want("1.5", "GET", "f")
+	// A large one is in the float's exponent form, as it always was.
+	want("OK", "SET", "f", 1234567.5)
+	want("1.2345675e+06", "GET", "f")
+	// Minus zero is the whole number zero.
+	want("OK", "SET", "z", math.Copysign(0, -1))
+	want("0", "GET", "z")
 	_, err := cmd("INCRBY", "n", 1.5)
 	if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR value is not an int or out of range" {
 		t.Fatalf("INCRBY by a fraction: %#v", err)

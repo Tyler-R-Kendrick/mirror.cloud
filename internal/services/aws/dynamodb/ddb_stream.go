@@ -253,9 +253,8 @@ func (p *Pack) nextStreamSeq(ctx context.Context, req *spi.Request, table string
 
 func (p *Pack) listStreams(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	want := spi.First(req.Input, "TableName")
-	kvs, _, _ := p.col(req, "tables").List(ctx, "", "", 0)
 	streams := []any{}
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, p.col(req, "tables"), "", "", 0) {
 		if want != "" && kv.Key != want {
 			continue
 		}

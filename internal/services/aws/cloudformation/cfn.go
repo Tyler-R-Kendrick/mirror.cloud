@@ -16,6 +16,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
@@ -55,8 +57,16 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 }
 
 // Invoke serves one native operation.
-func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
+func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (out *spi.Response, err error) {
 	name := str(req.Input["StackName"])
+	defer func() { // no panic of the engine's own escapes an operation: the service's InternalFailure
+		if recover() != nil {
+			out, err = nil, internalFailure()
+		}
+	}()
+	if slices.Contains(natives[:5], req.Operation) || req.Operation == "ContinueUpdateRollback" { // each takes over a stack its last operation left in progress
+		_ = recovered(func() error { p.orphan(ctx, req, name); return nil })
+	}
 	if _, given := req.Input["StackName"]; given && (req.Operation == "ExecuteChangeSet" || req.Operation == "GetTemplateSummary" || req.Operation == "ContinueUpdateRollback" || req.Operation == "CreateChangeSet" || req.Operation == "UpdateTerminationProtection") {
 		if err := checkStackName(name, true); err != nil { // the model's StackNameOrId
 			return nil, err
@@ -279,6 +289,7 @@ type stack struct {
 	Refs                       map[string]string
 	NotificationARNs, Tags     []any
 	Protect                    bool
+	Op                         string `json:",omitempty"` // while *_IN_PROGRESS: "/" and its operation's id (ops)
 }
 
 // res is a resource a stack made, the name it was made under and, once a
@@ -317,7 +328,9 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	// old is what an update finds, and held the record it reserves it with, UPDATE_IN_PROGRESS; a create
 	// reserves the name, CREATE_IN_PROGRESS, in the same transaction.
 	var old, held stack
-	reserved := stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags}
+	var leave *stack // what a failing operation leaves, until it has settled it: the next operation's to settle (orphan)
+	op, release := p.hold()
+	reserved := stack{Name: name, ID: id, Status: "CREATE_IN_PROGRESS", Template: body, Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags, Op: op}
 	if err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
 		tx := stx.Collection("cfn")
 		raw, found, _ := tx.Get(name)
@@ -335,7 +348,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		} else if found && !updatable(old) {
 			return invalid("Stack:" + old.ID + " is in " + old.Status + " state and can not be updated.")
 		} else if id, held = cmp.Or(old.ID, id), old; update { // "is in UPDATE_IN_PROGRESS state" to another change
-			held.Status = "UPDATE_IN_PROGRESS"
+			held.Status, held.Op = "UPDATE_IN_PROGRESS", op
 			return tx.Put(name, []byte(spi.JSONText(held)))
 		}
 		return tx.Put(name, []byte(spi.JSONText(reserved)))
@@ -355,25 +368,39 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 	st := stack{Name: name, ID: id, Status: map[bool]string{false: "CREATE_COMPLETE", true: "UPDATE_COMPLETE"}[update], Template: body, Refs: refs,
 		Resources: []res{}, Outputs: []any{}, NotificationARNs: arns, Tags: tags} // never null: every read of a stack lists them
 	changed := map[string]bool{} // what the update changed in place, which a rollback changes back
-	fail := func(cause error) (_ *spi.Response, err error) {
-		err, st.Reason, old.Reason = cause, cause.Error(), cause.Error()
-		created := !update || old.ID == ""
-		defer func() { // the reservation ends whatever the rollback below does, a panic of its own included
-			_ = recover()
-			st.Status, old.Status = "ROLLBACK_FAILED", "UPDATE_ROLLBACK_FAILED" // where a rollback that panicked leaves it; else it settled
-			_, _, _ = p.settle(ctx, req, map[bool]stack{true: reserved, false: read}[created], map[bool]stack{true: st, false: old}[created])
-			p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", err)
-		}()
-		if created { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
+	defer func() {
+		if leave == &old { // an update: what it made, which its rollback did not settle, is listed for ContinueUpdateRollback
+			for _, r := range st.Resources {
+				if !slices.ContainsFunc(old.Resources, func(o res) bool { return o.Physical == r.Physical }) {
+					r.Status, r.Reason = "DELETE_FAILED", old.Reason
+					old.Resources = append(old.Resources, r)
+				}
+			}
+		}
+		st.Status, old.Status = "ROLLBACK_FAILED", "UPDATE_ROLLBACK_FAILED" // where a rollback that did not settle leaves it
+		release(leave)
+	}()
+	fail := func(cause error) (*spi.Response, error) {
+		st.Reason, old.Reason = cause.Error(), cause.Error()
+		if leave = &st; !update || old.ID == "" { // a failed create rolls back what it made (OnFailure ROLLBACK, the default) and keeps the stack, and why
 			_ = p.unwind(ctx, req, reserved, st, nil, st.Resources, nil, "ROLLBACK_COMPLETE", "ROLLBACK_FAILED", retains(tpl, "DeletionPolicy", "Retain"))
 		} else {
+			leave = &old
 			_ = p.rollback(ctx, req, read, old, st.Resources, changed, retains(tpl, "DeletionPolicy", "Retain"))
 		}
-		return nil, err
+		if raw, _, _ := p.col(req, "cfn").Get(ctx, name); spi.Decode[stack](raw).Op != op { // settled: nothing is left
+			leave = nil
+		}
+		p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", cause)
+		return nil, cause
 	}
-	defer func() { // a panic of the engine's own, after the reservation, fails the operation as any failure does
+	defer func() { // a panic of the engine's own, after the reservation, fails the operation as any failure does;
+		// one in that rollback leaves what remains, with why, for the next operation to settle
 		if recover() != nil {
-			out, err = fail(internalFailure())
+			out, err = nil, internalFailure()
+			if st.Reason, old.Reason = err.Error(), err.Error(); leave == nil { // not one in the rollback itself
+				_ = recovered(func() error { _, _ = fail(err); return nil })
+			}
 		}
 	}()
 	planned := maps.Clone(st.Refs)
@@ -397,10 +424,13 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			phys, err = p.provision(ctx, req, typ, logical, n, props, map[string]string{"update": prev.Physical}[how], id)
 		}
 		changed[logical] = how == "update"
-		if phys != "" { // recorded once it exists, so a rollback finds a half-made one too
+		if phys != "" { // recorded once it exists, before anything is set on it, so a rollback finds a half-made one too
 			st.Refs[logical] = phys
 			attribute(st.Refs, req, typ, logical, phys)
 			st.Resources = append(st.Resources, res{Logical: logical, Physical: phys, Type: typ, Name: n})
+		}
+		if how != "" && how != "update" && err == nil && typ == "AWS::S3::Bucket" {
+			err = p.configureBucket(ctx, req, phys, props)
 		}
 		if err != nil {
 			return fail(err)
@@ -625,19 +655,16 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 		// "Once the call completes successfully, stack deletion starts" (API reference): the record is
 		// DELETE_IN_PROGRESS, written only over the record read. One being created is left to its create,
 		// which deletes what it made, and then the stack.
-		del.Status = "DELETE_IN_PROGRESS"
+		op, release := p.hold() // the create's, when it ends a create: that create ends this delete
+		defer release(nil)
+		del.Status, del.Op = "DELETE_IN_PROGRESS", cmp.Or(st.Op, op)
 		tpl := stored(st.Template)
 		if _, started, settleErr := p.settle(ctx, req, st, del); settleErr != nil {
 			return nil, settleErr
 		} else if !started { // it changed since it was read
 			return p.drop(ctx, req, name)
 		} else if was != "CREATE_IN_PROGRESS" {
-			err = recovered(func() error {
-				return p.unwind(ctx, req, del, del, nil, st.Resources, nil, "DELETE_COMPLETE", "DELETE_FAILED", retains(tpl, "DeletionPolicy", "Retain", "RetainExceptOnCreate"))
-			})
-			failed := del // where an unwind that panicked leaves it
-			failed.Status, failed.Reason = "DELETE_FAILED", cmp.Or(err, error(internalFailure())).Error()
-			_, _, _ = p.settle(ctx, req, del, failed)
+			err = p.unwind(ctx, req, del, del, nil, st.Resources, nil, "DELETE_COMPLETE", "DELETE_FAILED", retains(tpl, "DeletionPolicy", "Retain", "RetainExceptOnCreate"))
 		}
 	}
 	return &spi.Response{Output: map[string]any{}}, err
@@ -664,7 +691,7 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, seen, st stack, kep
 			}
 		}
 	}
-	st.Status = done
+	st.Status, st.Op = done, "" // settled: no operation holds it
 	if first != nil {
 		st.Status, st.Reason = failed, first.Error()
 	}
@@ -688,31 +715,72 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, seen, st stack, kep
 // keyed by no change set). settle answers the record it found and whether it wrote.
 func (p *Pack) settle(ctx context.Context, req *spi.Request, seen, st stack, sets ...func(spi.Tx) error) (stack, bool, error) {
 	var cur stack
-	var err error
 	wrote := false
-	if st.Status == "DELETE_COMPLETE" { // its change sets go with it
-		sets = append(sets, retire(st.Name, changeSet{key: st.Name}))
-	}
-	for try := 0; try < 2 && (try == 0 || err != nil); try++ { // a store that failed, or panicked, is tried once more
-		err = recovered(func() error {
-			return p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
-				tx, cs := stx.Collection("cfn"), stx.Collection("cfn-cs")
-				raw, _, _ := tx.Get(st.Name)
-				cur, wrote = spi.Decode[stack](raw), false
-				if st.Protect, seen.Protect = cur.Protect, cur.Protect; spi.JSONText(cur) != spi.JSONText(seen) {
-					return nil
-				}
-				for _, write := range sets {
-					if err := write(cs); err != nil {
-						return err
-					}
-				}
-				wrote = true
-				return tx.Put(st.Name, []byte(spi.JSONText(st)))
-			})
-		})
-	}
+	err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
+		tx, cs := stx.Collection("cfn"), stx.Collection("cfn-cs")
+		raw, _, _ := tx.Get(st.Name)
+		if cur = spi.Decode[stack](raw); st.Status == "DELETE_COMPLETE" { // its change sets go with it
+			sets = append(sets, retire(st.Name, changeSet{key: st.Name}))
+		}
+		if st.Protect, seen.Protect = cur.Protect, cur.Protect; spi.JSONText(cur) != spi.JSONText(seen) {
+			return nil
+		}
+		for _, write := range sets {
+			if err := write(cs); err != nil {
+				return err
+			}
+		}
+		wrote = true
+		return tx.Put(st.Name, []byte(spi.JSONText(st)))
+	})
 	return cur, wrote, err
+}
+
+// ops are the operations running in this process, by the id each writes on the record it holds (Op). An
+// *_IN_PROGRESS record whose operation is not among them was left by one that ended without settling it,
+// or by a process that ended: no operation will settle it, so the next one on the stack does (orphan).
+var ops sync.Map
+var opSeq atomic.Int64 // numbers them
+
+// hold registers a running operation, and answers its id, after a "/", and its release, which the
+// operation defers: given the record a failed operation could not settle, the release keeps it for the
+// operation that takes the stack over.
+func (p *Pack) hold() (string, func(*stack)) {
+	id := p.deps.Rand.Derive("cloudformation-op").Hex(8) + "-" + strconv.FormatInt(opSeq.Add(1), 10)
+	ops.Store(id, nil)
+	return "/" + id, func(left *stack) {
+		if ops.Delete(id); left != nil {
+			ops.Store(id, *left)
+		}
+	}
+}
+
+// orphan settles a record left *_IN_PROGRESS by an operation that is not running as that operation's
+// failure: a create ROLLBACK_FAILED, a delete DELETE_FAILED, an update UPDATE_ROLLBACK_FAILED, each with
+// why. The operation that meets it goes on from that state.
+func (p *Pack) orphan(ctx context.Context, req *spi.Request, name string) {
+	var cur stack // read as settle reads it: in a transaction
+	_ = p.col(req, "cfn").Txn(ctx, func(tx spi.Tx) error {
+		raw, _, err := tx.Get(named(name))
+		cur = spi.Decode[stack](raw)
+		return err
+	})
+	id := strings.TrimPrefix(cur.Op, "/")
+	v, known := ops.Load(id)
+	next, kept := v.(stack) // what its operation, ended in this process, could not write
+	if !strings.HasSuffix(cur.Status, "_IN_PROGRESS") || cur.Status == "REVIEW_IN_PROGRESS" || known && !kept {
+		return
+	} else if kept {
+		ops.Delete(id)
+	} else {
+		next = cur
+		next.Status = cmp.Or(map[string]string{"CREATE_IN_PROGRESS": "ROLLBACK_FAILED"}[cur.Status], "UPDATE_ROLLBACK_FAILED")
+		next.Reason = "The operation on the stack ended before it settled the stack." // the wording is a reading
+	}
+	if next.Op = ""; cur.Status == "DELETE_IN_PROGRESS" {
+		next.Status = "DELETE_FAILED"
+	}
+	_, _, _ = p.settle(ctx, req, cur, next)
 }
 
 // updatable is whether UpdateStack takes the stack st: not ROLLBACK_*, which only DeleteStack leaves, nor
@@ -1288,7 +1356,7 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 			}
 			err = putErr
 		}
-	} else if err == nil && typ == "AWS::S3::Bucket" {
+	} else if err == nil && typ == "AWS::S3::Bucket" && existing != "" { // one it makes, upsert configures once it is recorded
 		err = p.configureBucket(ctx, req, n, props)
 	} else if err != nil && existing == "" { // none once a create failed
 		phys = ""

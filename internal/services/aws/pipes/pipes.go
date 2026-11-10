@@ -307,7 +307,7 @@ func streamRecordExpired(now time.Time, event, parameters map[string]any) bool {
 	return ok && now.Sub(time.UnixMilli(int64(timestamp*1000))) > time.Duration(maximumAge)*time.Second
 }
 
-func (p *worker) processBatch(ctx context.Context, identity spi.Identity, pipe map[string]any, source, queue string, messages []any) map[string]bool {
+func (p *worker) processBatch(ctx context.Context, identity spi.Identity, pipe map[string]any, source, queue string, messages []any) {
 	records, ids := make([]any, 0, len(messages)), make([]string, 0, len(messages))
 	byID := map[string]map[string]any{}
 	for _, raw := range messages {
@@ -315,11 +315,9 @@ func (p *worker) processBatch(ctx context.Context, identity spi.Identity, pipe m
 		id := spi.Str(message["MessageId"])
 		records, ids, byID[id] = append(records, sqsRecord(message, source, identity.Region)), append(ids, id), message
 	}
-	succeeded := p.processRecords(ctx, identity, pipe, records, ids)
-	for id := range succeeded {
+	for id := range p.processRecords(ctx, identity, pipe, records, ids) {
 		p.deleteMessage(ctx, identity, queue, spi.Str(byID[id]["ReceiptHandle"]))
 	}
-	return succeeded
 }
 
 func (p *worker) processRecords(ctx context.Context, identity spi.Identity, pipe map[string]any, records []any, ids []string) map[string]bool {

@@ -238,9 +238,8 @@ func (p *Pack) globalTable(ctx context.Context, req *spi.Request) (*spi.Response
 		rec := spi.JSONObject(b)
 		return &spi.Response{Output: map[string]any{"GlobalTableDescription": rec}}, nil
 	case "ListGlobalTables":
-		kvs, _, _ := col.List(ctx, "", "", 0)
 		var out []any
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, col, "", "", 0) {
 			rec := spi.JSONObject(kv.Value)
 			out = append(out, rec)
 		}
@@ -482,9 +481,8 @@ func (p *Pack) searchVectors(ctx context.Context, req *spi.Request) (*spi.Respon
 	if q == "" {
 		q = spi.Str(req.Input["VectorSearch"])
 	}
-	kvs, _, _ := p.col(req, "items:"+table).List(ctx, "", "", 0)
 	var hits []any
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, p.col(req, "items:"+table), "", "", 0) {
 		if q != "" && !strings.Contains(string(kv.Value), q) {
 			continue
 		}

@@ -142,12 +142,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		b, _ := json.Marshal(item)
 		var old map[string]any
 		if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
-			if raw, ok, err := tx.Get(key); err != nil {
-				return err
-			} else if ok {
-				_ = json.Unmarshal(raw, &old)
-			}
-			if err := p.checkCond(req, old); err != nil {
+			cur, err := p.current(req, tx, key)
+			if old = cur; err != nil {
 				return err
 			}
 			return tx.Put(key, b)
@@ -172,12 +168,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		key := p.itemKeyFrom(ctx, req, table, spi.Object(req.Input["Key"]))
 		var old map[string]any
 		if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
-			if raw, ok, err := tx.Get(key); err != nil {
-				return err
-			} else if ok {
-				_ = json.Unmarshal(raw, &old)
-			}
-			if err := p.checkCond(req, old); err != nil {
+			cur, err := p.current(req, tx, key)
+			if old = cur; err != nil {
 				return err
 			}
 			return tx.Delete(key)
@@ -204,12 +196,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		var old, item map[string]any
 		var touched []string
 		if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
-			if raw, ok, err := tx.Get(key); err != nil {
-				return err
-			} else if ok {
-				_ = json.Unmarshal(raw, &old)
-			}
-			if err := p.checkCond(req, old); err != nil {
+			cur, err := p.current(req, tx, key)
+			if old = cur; err != nil {
 				return err
 			}
 			item = cloneMap(old)
@@ -635,6 +623,17 @@ func (p *Pack) loadItem(ctx context.Context, req *spi.Request, table, key string
 	}
 	item := spi.JSONObject(b)
 	return item
+}
+
+// current reads the item tx holds under key, none when it holds none, and checks the request's condition
+// against it.
+func (p *Pack) current(req *spi.Request, tx spi.Tx, key string) (old map[string]any, err error) {
+	if raw, ok, err := tx.Get(key); err != nil {
+		return nil, err
+	} else if ok {
+		_ = json.Unmarshal(raw, &old)
+	}
+	return old, p.checkCond(req, old)
 }
 
 func (p *Pack) checkCond(req *spi.Request, item map[string]any) error {

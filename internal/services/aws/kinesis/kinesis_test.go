@@ -470,3 +470,109 @@ func TestKinesisAStreamNotFoundIsNamed(t *testing.T) {
 		t.Errorf("UpdateStreamMode answered %s", got)
 	}
 }
+
+// A request's StreamModeDetails is read whole, whatever it holds. The checks of the mode ran before the
+// operation's required members were looked at and read the mode as a member of a structure, so an
+// UpdateStreamMode with no StreamModeDetails, with {}, with a string or with null was InternalFailure
+// (500) where main answered that the member is required, and a CreateStream whose StreamMode was null was
+// InternalFailure too, while {} and a string were taken as provisioned.
+//
+// A StreamModeDetails that is absent or null is not given: CreateStream makes a provisioned stream, and
+// UpdateStreamMode answers what it answers for a required member that is missing. One that is given must
+// hold a StreamMode ("Required: Yes", API reference, StreamModeDetails) of the two values; anything else
+// is ValidationException. The messages for a missing StreamMode and for a value that is no structure are
+// this emulator's, in the service's form for a null member. A required member that is missing is still
+// answered first: a StreamName where UpdateStreamMode takes a StreamARN is "StreamARN is required",
+// whether or not the stream exists.
+func TestKinesisAStreamModeIsReadWhole(t *testing.T) {
+	try := kinesisTries(t)
+	answer := func(op, body string) string {
+		status, out := try(op, body)
+		return strings.TrimSuffix(fmt.Sprint(status, " ", out["__type"], ": ", out["message"]), " <nil>: <nil>")
+	}
+	answer("CreateStream", `{"StreamName":"s","ShardCount":2}`)
+	const arn = `"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s"`
+	const null = "400 ValidationException: 1 validation error detected: Value null at 'streamModeDetails.streamMode' failed to satisfy constraint: Member must not be null"
+	const shape = "400 ValidationException: 1 validation error detected: Value at 'streamModeDetails' failed to satisfy constraint: Member must be a structure with a StreamMode"
+	enum := func(value string) string {
+		return "400 ValidationException: 1 validation error detected: Value '" + value + "' at 'streamModeDetails.streamMode' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]"
+	}
+	for _, row := range []struct{ op, body, want string }{
+		{"UpdateStreamMode", `{` + arn + `}`, "400 ValidationException: StreamModeDetails is required"},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":null}`, "400 ValidationException: StreamModeDetails is required"},
+		{"UpdateStreamMode", `{}`, "400 ValidationException: StreamARN is required"},
+		{"UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/ghost"}`, "400 ValidationException: StreamModeDetails is required"},
+		{"UpdateStreamMode", `{"StreamName":"ghost","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "400 ValidationException: StreamARN is required"},
+		{"UpdateStreamMode", `{"StreamName":"s","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "400 ValidationException: StreamARN is required"},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":{}}`, null},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":{"StreamMode":null}}`, null},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":"ON_DEMAND"}`, shape},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":["ON_DEMAND"]}`, shape},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":{"StreamMode":7}}`, enum("7")},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":{"StreamMode":{"a":1}}}`, enum(`{"a":1}`)},
+		{"UpdateStreamMode", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/ghost","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "400 ResourceNotFoundException: Stream ghost under account 000000000000 not found."},
+		{"UpdateStreamMode", `{` + arn + `,"StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "200"},
+		{"CreateStream", `{"StreamName":"a","StreamModeDetails":{"StreamMode":null}}`, null},
+		{"CreateStream", `{"StreamName":"a","StreamModeDetails":{}}`, null},
+		{"CreateStream", `{"StreamName":"a","StreamModeDetails":"ON_DEMAND"}`, shape},
+		{"CreateStream", `{"StreamName":"a","StreamModeDetails":{"StreamMode":7}}`, enum("7")},
+		{"CreateStream", `{"StreamName":"a","StreamModeDetails":{"StreamMode":["ON_DEMAND"]}}`, enum(`["ON_DEMAND"]`)},
+		{"DescribeStreamSummary", `{"StreamName":"a"}`, "400 ResourceNotFoundException: "},
+		{"CreateStream", `{"StreamName":"a","StreamModeDetails":null}`, "200"},
+	} {
+		if got := answer(row.op, row.body); got != row.want {
+			t.Errorf("%s %s answered %s; want %s", row.op, row.body, got, row.want)
+		}
+	}
+	// What the last two made: the stream whose mode was given, and the one whose mode was null.
+	for stream, want := range map[string]string{"s": "ON_DEMAND", "a": "PROVISIONED"} {
+		if got := answer("DescribeStreamSummary", `{"StreamName":"`+stream+`"}`); got != "200" {
+			t.Fatalf("stream %s: %s", stream, got)
+		}
+		_, out := try("DescribeStreamSummary", `{"StreamName":"`+stream+`"}`)
+		if mode := out["StreamDescriptionSummary"].(map[string]any)["StreamModeDetails"].(map[string]any)["StreamMode"]; mode != want {
+			t.Errorf("stream %s has the mode %v; want %s", stream, mode, want)
+		}
+	}
+}
+
+// A stream record an earlier build stored with a StreamModeDetails that is null or a string, which its
+// UpdateStreamMode wrote as it was given, is a provisioned stream to every operation. Reading the mode
+// as a member of a structure failed on such a record: CreateStream of any provisioned stream and
+// UpdateShardCount were InternalFailure once one was in the account, as DescribeLimits and
+// DescribeStreamSummary were before.
+func TestKinesisAnOlderRecordsModeIsProvisioned(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := bundled.Handler("aws.kinesis", deps)
+	request := func(operation string, input map[string]any) map[string]any {
+		t.Helper()
+		response, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: operation, Input: input})
+		if err != nil {
+			t.Fatalf("%s: %v", operation, err)
+		}
+		return response.Output
+	}
+	streams := deps.Store.Scope(id.Account, id.Region).Collection("kinesis")
+	for name, mode := range map[string]string{"null": `null`, "text": `"ON_DEMAND"`, "number": `7`, "empty": `{}`, "list": `["ON_DEMAND"]`, "inner": `{"StreamMode":null}`} {
+		if err := streams.Put(context.Background(), name, []byte(`{"StreamName":"`+name+`","Seq":0,"OpenShardCount":3,"StreamModeDetails":`+mode+`}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request("CreateStream", map[string]any{"StreamName": "new", "ShardCount": 2})
+	request("CreateStream", map[string]any{"StreamName": "od", "StreamModeDetails": map[string]any{"StreamMode": "ON_DEMAND"}})
+	if limits := request("DescribeLimits", map[string]any{}); fmt.Sprint(limits["OpenShardCount"], limits["OnDemandStreamCount"]) != "20 1" {
+		t.Errorf("the limits read %v; want the six older records' eighteen shards and the new stream's two, and one on-demand stream", limits)
+	}
+	for _, name := range []string{"null", "text", "number", "empty", "list", "inner"} {
+		summary := request("DescribeStreamSummary", map[string]any{"StreamName": name})["StreamDescriptionSummary"].(map[string]any)
+		moved := request("UpdateShardCount", map[string]any{"StreamName": name, "TargetShardCount": 4, "ScalingType": "UNIFORM_SCALING"})
+		if mode := summary["StreamModeDetails"].(map[string]any)["StreamMode"]; mode != "PROVISIONED" || fmt.Sprint(moved["CurrentShardCount"], moved["TargetShardCount"]) != "3 4" {
+			t.Errorf("the record whose mode is stored as %s is summarized %v and its count moved %v; want a provisioned stream, from 3 to 4", name, mode, moved)
+		}
+	}
+	request("UpdateStreamMode", map[string]any{"StreamARN": "arn:aws:kinesis:us-east-1:123456789012:stream/text", "StreamModeDetails": map[string]any{"StreamMode": "ON_DEMAND"}})
+	if limits := request("DescribeLimits", map[string]any{}); fmt.Sprint(limits["OpenShardCount"], limits["OnDemandStreamCount"]) != "22 2" {
+		t.Errorf("after one older record is made on-demand the limits read %v", limits)
+	}
+}

@@ -82,16 +82,25 @@ operations:
       resource: stream
       filter: "string(item.StreamName) != string(input.StreamName)"
     let:
-      mode: "'StreamModeDetails' in input && type(input.StreamModeDetails) == map && 'StreamMode' in input.StreamModeDetails ? string(input.StreamModeDetails.StreamMode) : 'PROVISIONED'"
+      given: "'StreamModeDetails' in input && input.StreamModeDetails != null"
+      structure: "given && type(input.StreamModeDetails) == map"
+      raw: "structure && 'StreamMode' in input.StreamModeDetails ? input.StreamModeDetails.StreamMode : null"
+      mode: "raw == null ? (given ? '' : 'PROVISIONED') : (type(raw) == string ? string(raw) : toJSON(raw))"
       shards: "'ShardCount' in input && int(input.ShardCount) > 0 ? int(input.ShardCount) : (mode == 'ON_DEMAND' ? 4 : 1)"
     require:
-      - cond: "mode in ['PROVISIONED', 'ON_DEMAND']"
+      - cond: "!given || structure"
+        error: Validation
+        message: "1 validation error detected: Value at 'streamModeDetails' failed to satisfy constraint: Member must be a structure with a StreamMode"
+      - cond: "!given || raw != null"
+        error: Validation
+        message: "1 validation error detected: Value null at 'streamModeDetails.streamMode' failed to satisfy constraint: Member must not be null"
+      - cond: "!given || mode in ['PROVISIONED', 'ON_DEMAND']"
         error: Validation
         message_expr: "'1 validation error detected: Value \\'' + mode + '\\' at \\'streamModeDetails.streamMode\\' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]'"
-      - cond: "mode == 'ON_DEMAND' || sum(streams.filter(s, !('StreamModeDetails' in s && 'StreamMode' in s.StreamModeDetails && string(s.StreamModeDetails.StreamMode) == 'ON_DEMAND')).map(s, 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1)) + shards <= 500"
+      - cond: "mode == 'ON_DEMAND' || sum(streams.filter(s, !('StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND')).map(s, 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1)) + shards <= 500"
         error: LimitExceeded
         message: This request would exceed the shard limit for the account.
-      - cond: "mode != 'ON_DEMAND' || size(streams.filter(s, 'StreamModeDetails' in s && 'StreamMode' in s.StreamModeDetails && string(s.StreamModeDetails.StreamMode) == 'ON_DEMAND')) < 50"
+      - cond: "mode != 'ON_DEMAND' || size(streams.filter(s, 'StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND')) < 50"
         error: LimitExceeded
         message: This request would exceed the limit of on-demand streams for the account.
     effects:
@@ -147,7 +156,7 @@ operations:
         {'StreamName': s.StreamName,
          'StreamARN': 'arn:aws:kinesis:' + identity.region + ':' + identity.account + ':stream/' + string(s.StreamName),
          'StreamStatus': 'ACTIVE',
-         'StreamModeDetails': {'StreamMode': 'StreamModeDetails' in s && 'StreamMode' in s.StreamModeDetails ? string(s.StreamModeDetails.StreamMode) : 'PROVISIONED'},
+         'StreamModeDetails': {'StreamMode': 'StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND' ? 'ON_DEMAND' : 'PROVISIONED'},
          'OpenShardCount': 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1}
 
   ListShards:
@@ -351,10 +360,10 @@ operations:
       - cond: s_found
         error: NotFound
         message_expr: "'Stream ' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
-      - cond: "!('StreamModeDetails' in s && 'StreamMode' in s.StreamModeDetails && string(s.StreamModeDetails.StreamMode) == 'ON_DEMAND')"
+      - cond: "!('StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND')"
         error: Validation
         message: UpdateShardCount is only supported for data streams with the provisioned capacity mode.
-      - cond: "sum(others.filter(o, !('StreamModeDetails' in o && 'StreamMode' in o.StreamModeDetails && string(o.StreamModeDetails.StreamMode) == 'ON_DEMAND')).map(o, 'OpenShardCount' in o && int(o.OpenShardCount) > 0 ? int(o.OpenShardCount) : 1)) + target <= 500"
+      - cond: "sum(others.filter(o, !('StreamModeDetails' in o && type(o.StreamModeDetails) == map && 'StreamMode' in o.StreamModeDetails && o.StreamModeDetails.StreamMode == 'ON_DEMAND')).map(o, 'OpenShardCount' in o && int(o.OpenShardCount) > 0 ? int(o.OpenShardCount) : 1)) + target <= 500"
         error: LimitExceeded
         message: This request would exceed the shard limit for the account.
     effects:
@@ -396,8 +405,8 @@ operations:
       filter: "true"
     output:
       ShardLimit: "500"
-      OpenShardCount: "sum(streams.filter(s, !('StreamModeDetails' in s && 'StreamMode' in s.StreamModeDetails && string(s.StreamModeDetails.StreamMode) == 'ON_DEMAND')).map(s, 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1))"
-      OnDemandStreamCount: "size(streams.filter(s, 'StreamModeDetails' in s && 'StreamMode' in s.StreamModeDetails && string(s.StreamModeDetails.StreamMode) == 'ON_DEMAND'))"
+      OpenShardCount: "sum(streams.filter(s, !('StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND')).map(s, 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1))"
+      OnDemandStreamCount: "size(streams.filter(s, 'StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND'))"
       OnDemandStreamCountLimit: "50"
 
   # The pack stores the request verbatim under a fixed key and answers it
@@ -438,18 +447,31 @@ operations:
       resource: stream
       filter: "string(item.StreamName) != ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : '')))"
     let:
-      mode: "string(input.StreamModeDetails.StreamMode)"
+      given: "'StreamModeDetails' in input && input.StreamModeDetails != null"
+      structure: "given && type(input.StreamModeDetails) == map"
+      raw: "structure && 'StreamMode' in input.StreamModeDetails ? input.StreamModeDetails.StreamMode : null"
+      mode: "raw == null ? (given ? '' : 'PROVISIONED') : (type(raw) == string ? string(raw) : toJSON(raw))"
+      asked: "given && 'StreamARN' in input && input.StreamARN != null"
     require:
-      - cond: "mode in ['PROVISIONED', 'ON_DEMAND']"
+      - cond: "given || !('StreamModeDetails' in input)"
+        error: Validation
+        message: StreamModeDetails is required
+      - cond: "!given || structure"
+        error: Validation
+        message: "1 validation error detected: Value at 'streamModeDetails' failed to satisfy constraint: Member must be a structure with a StreamMode"
+      - cond: "!given || raw != null"
+        error: Validation
+        message: "1 validation error detected: Value null at 'streamModeDetails.streamMode' failed to satisfy constraint: Member must not be null"
+      - cond: "!given || mode in ['PROVISIONED', 'ON_DEMAND']"
         error: Validation
         message_expr: "'1 validation error detected: Value \\'' + mode + '\\' at \\'streamModeDetails.streamMode\\' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]'"
-      - cond: s_found
+      - cond: "!asked || s_found"
         error: NotFound
-        message_expr: "'Stream ' + ('StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))) + ' under account ' + identity.account + ' not found.'"
-      - cond: "mode != 'ON_DEMAND' || size(others.filter(o, 'StreamModeDetails' in o && 'StreamMode' in o.StreamModeDetails && string(o.StreamModeDetails.StreamMode) == 'ON_DEMAND')) < 50"
+        message_expr: "'Stream ' + lastSegment(string(input.StreamARN), '/') + ' under account ' + identity.account + ' not found.'"
+      - cond: "!asked || mode != 'ON_DEMAND' || size(others.filter(o, 'StreamModeDetails' in o && type(o.StreamModeDetails) == map && 'StreamMode' in o.StreamModeDetails && o.StreamModeDetails.StreamMode == 'ON_DEMAND')) < 50"
         error: LimitExceeded
         message: This request would exceed the limit of on-demand streams for the account.
-      - cond: "mode != 'PROVISIONED' || sum(others.filter(o, !('StreamModeDetails' in o && 'StreamMode' in o.StreamModeDetails && string(o.StreamModeDetails.StreamMode) == 'ON_DEMAND')).map(o, 'OpenShardCount' in o && int(o.OpenShardCount) > 0 ? int(o.OpenShardCount) : 1)) + ('OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1) <= 500"
+      - cond: "!asked || mode != 'PROVISIONED' || sum(others.filter(o, !('StreamModeDetails' in o && type(o.StreamModeDetails) == map && 'StreamMode' in o.StreamModeDetails && o.StreamModeDetails.StreamMode == 'ON_DEMAND')).map(o, 'OpenShardCount' in o && int(o.OpenShardCount) > 0 ? int(o.OpenShardCount) : 1)) + ('OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1) <= 500"
         error: LimitExceeded
         message: This request would exceed the shard limit for the account.
     effects:
@@ -457,7 +479,7 @@ operations:
           resource: stream
           key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
           record:
-            StreamModeDetails: "input.StreamModeDetails"
+            StreamModeDetails: "{'StreamMode': mode}"
     output: {}
 
   UpdateStreamWarmThroughput:
@@ -481,7 +503,9 @@ quirks:
     note: >
       An absent StreamName faults ValidationException from the engine's model
       check, the same code the pack answered. StreamModeDetails is recorded,
-      PROVISIONED when absent, and ShardCount as the stream's open shard
+      PROVISIONED when it is absent or null; one that is given must be a
+      structure whose StreamMode is PROVISIONED or ON_DEMAND, or the create
+      faults ValidationException. ShardCount is recorded as the stream's open shard
       count: when it is absent or not positive, four for an on-demand stream
       and one for a provisioned one. A provisioned create that would take the
       account's provisioned shards past the ShardLimit DescribeLimits reports,
@@ -543,15 +567,30 @@ quirks:
       it, and the consumer named is not checked to exist.
   - operation: UpdateShardCount
     note: >
-      A stream that does not exist faults ResourceNotFoundException, and a
-      target that would take the account's open shards past its ShardLimit
+      A stream that does not exist faults ResourceNotFoundException with the
+      service's message, an on-demand stream ValidationException (the
+      operation is a provisioned stream's alone), and a target that would
+      take the account's provisioned shards past its ShardLimit
       LimitExceededException; none of the service's other rules on how far or
       how often a count moves is applied, and the answer is the count found
-      and the target. The count is a number on the stream record with a floor of 1; Split and
+      and the target. A record stored with a StreamModeDetails that is not a
+      structure is a provisioned stream, here and everywhere. The count is a number on the stream record with a floor of 1; Split and
       Merge answer StreamName, CurrentShardCount and TargetShardCount where
       their output shapes are Unit, so the bundle answers nothing there and
       the recorded steps are superseded. ScalingType is required by the model
       and ignored. No shards actually exist to split or merge.
+  - operation: UpdateStreamMode
+    note: >
+      StreamARN and StreamModeDetails are required, and a missing one is
+      answered before anything else, a StreamModeDetails that is null as a
+      missing one. The mode must be PROVISIONED or ON_DEMAND, in a structure,
+      or the fault is ValidationException. A stream that does not exist faults
+      ResourceNotFoundException; a change to ON_DEMAND is held to the
+      on-demand streams' limit and one to PROVISIONED to the ShardLimit for
+      the shards the stream has, each over the caller's other streams, with
+      LimitExceededException. The service's limit of two changes in 24 hours
+      is not applied, the stream is never UPDATING, and its shards stay as
+      they are.
   - operation: StartStreamEncryption
     note: >
       EncryptionType comes from the operation name, not the request: Start is

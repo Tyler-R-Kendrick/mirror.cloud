@@ -600,8 +600,10 @@ The oracle is AWS's documentation as it ships in the vendored model
     service's update under the same id: `UpdateKeyDescription`,
     `PutParameter` with `Overwrite`, `UpdateTable`,
     `UpdateAssumeRolePolicy`, `UpdateFunctionConfiguration`,
-    `UpdateShardCount`, `UpdateSecret`, `UpdateRestApi`, `PutRule` with the
-    rule's targets set to the template's (others removed), and a bucket's
+    `UpdateShardCount`, `UpdateSecret`, `UpdateRestApi`, `PutRule`, with the
+    targets the previous template gave and the new one does not removed and
+    the template's put (a target put on the rule outside its template
+    stays), and a bucket's
     configuration; a queue, topic or log group has no property the engine
     applies but its name, so a change to another of theirs calls nothing. A
     change to a property that "Update requires: Replacement" (a name,
@@ -623,8 +625,7 @@ The oracle is AWS's documentation as it ships in the vendored model
   - A failed update's rollback puts back exactly the properties the stack
     had: what the update changed in place is updated back through the same
     update, given the previous template's properties, so a property the
-    failed update added is taken away (a rule's targets are its previous
-    template's and no others; a secret given a description has an empty one,
+    failed update added is taken away (a target the failed update gave a rule is removed; a secret given a description has an empty one,
     which Secrets Manager no longer answers, as it "only returns fields that
     have a value"); what the update kept is not called. Before, the rollback
     provisioned the previous properties on top of the new ones, and every
@@ -719,11 +720,25 @@ The oracle is AWS's documentation as it ships in the vendored model
     What was set on a resource outside its template stays, through an
     update of another property, an update that changes nothing and a
     rollback; a resource declared with no `Properties` was given nothing.
-    `ContinueUpdateRollback` is the one exception: what the failed update
-    gave is not recorded, so it clears every such property the template
-    lacks, one set outside the template included, and suspends a bucket's
-    versioning only where it is on. A table's `DeletionProtectionEnabled` is
-    not among these: the table service here keeps it false.
+    The rule is one for every type: a secret's and a key's description are
+    cleared only when the previous template gave one, a stream goes back to
+    one shard only when the previous template gave a `ShardCount`, and a
+    rule's targets are removed only when the previous template gave them.
+    A resource that is `UPDATE_FAILED` records the names of the properties
+    the failed update gave it (names, never values), so
+    `ContinueUpdateRollback` clears by the same rule; knowing a rule's
+    targets by name alone, it removes every target the template does not
+    give where the failed update gave any. A record written before the
+    names were kept has none: for it alone `ContinueUpdateRollback` clears
+    every such property the template lacks, and suspends a bucket's
+    versioning only where it is on. Three updates replace what is there
+    with the template's, because the template must give it and the call is
+    a whole replacement: a parameter's value and type, a role's trust
+    policy, and a rule ("If you omit arguments in PutRule, the old values
+    for those arguments are not kept"), so a rule's description or state
+    set outside the template does not outlive an update of the rule, in the
+    service as here. A table's `DeletionProtectionEnabled` is not sent at
+    all: the table service here keeps it false.
     One property cannot be cleared, in the service as here: a secret's
     value. Secrets Manager has no call that takes a value away (a new value
     is a new version, and `AWSCURRENT` is moved, never removed), so a secret
@@ -763,10 +778,15 @@ The oracle is AWS's documentation as it ships in the vendored model
     to resources with a deletion policy attribute of retain"), and
     `RetainExceptOnCreate`'s is deleted. Before, a rollback that was taken
     over listed both for `ContinueUpdateRollback`, which deleted both.
-  - A rollback that ends before it has put everything back leaves each
+  - A rollback puts back every resource the update changed in place, one
+    whose change was not finished included (a failure of the engine's own
+    part way through a bucket's update leaves its tags changed and its
+    stored configuration not: both are put back). A rollback that ends
+    before it has put everything back leaves each
     resource the update changed in place and it had not restored
     `UPDATE_FAILED` on the record the next operation settles, so
-    `ContinueUpdateRollback` restores it. Before, such a resource was left
+    `ContinueUpdateRollback` restores it; what it had restored is not
+    marked. Before, such a resource was left
     as it was listed, `ContinueUpdateRollback` answered
     `UPDATE_ROLLBACK_COMPLETE`, and the resource kept the failed update's
     values under the previous template.

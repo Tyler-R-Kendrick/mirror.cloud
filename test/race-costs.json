@@ -92,7 +92,7 @@
   "./internal/services/aws/redshift": 41.5,
   "./internal/services/aws/s3": 63.2,
   "./internal/services/aws/s3tables": 40.0,
-  "./internal/services/aws/scheduleexpr": 1.0,
+  "./internal/scheduleexpr": 1.0,
   "./internal/services/aws/scheduler": 40.6,
   "./internal/services/aws/sns": 37.7,
   "./internal/services/aws/ssm": 39.5,

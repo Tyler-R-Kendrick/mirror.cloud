@@ -141,8 +141,8 @@ only the services in `profiles/core.txt`, measured on linux/amd64:
 |---|---|---|
 | download (`.tar.gz`) | 14.1 MB | 7.8 MB |
 | binary | 29.5 MB | 20.8 MB |
-| `mirror up` until it listens | 4.6 s | 0.8 s |
-| resident memory after start | 415 MB | 59 MB |
+| `mirror up` until it listens | 2.9 s | 0.6 s |
+| resident memory after start | 340 MB | 63 MB |
 
 For a different set, build it: `make build-slim SERVICES="aws.s3 aws.sqs"`
 (or `SERVICES=@your-list.txt`), or

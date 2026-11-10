@@ -9,12 +9,14 @@ import (
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spitest"
 
 	_ "github.com/tyler-r-kendrick/mirror.cloud/internal/allservices"
 )
 
 func TestSupportMatrixMatchesDocs(t *testing.T) {
+	needEveryService(t)
 	got := SupportMatrix()
 	root := findGoMod(t)
 	want, err := os.ReadFile(filepath.Join(root, "docs", "SUPPORT.md"))
@@ -27,6 +29,7 @@ func TestSupportMatrixMatchesDocs(t *testing.T) {
 }
 
 func TestSupportMatrixEmulateCountsMatchPacks(t *testing.T) {
+	needEveryService(t)
 	want := packEmulateCounts(t)
 	if len(want) == 0 {
 		t.Fatal("no emulate packs registered")
@@ -91,4 +94,13 @@ func findGoMod(t *testing.T) string {
 	}
 	t.Fatal("go.mod")
 	return ""
+}
+
+// needEveryService skips a test that compares the whole catalog with what is
+// committed, in a sparse checkout that holds only some of it.
+func needEveryService(t *testing.T) {
+	t.Helper()
+	if !specboot.Complete() {
+		t.Skip("this tree holds only some of the services (scripts/sparse.py)")
+	}
 }

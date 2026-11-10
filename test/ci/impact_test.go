@@ -257,6 +257,7 @@ func TestPlanOutputsAreWhatThePlanEmits(t *testing.T) {
 // every pull request that touches the list or a fuzz test, in seconds.
 func TestFuzzTargetsNameRealTargets(t *testing.T) {
 	root := repo(t)
+	needEveryService(t, root)
 	raw, err := os.ReadFile(filepath.Join(root, "scripts", "fuzz-targets.txt"))
 	if err != nil {
 		t.Fatal(err)
@@ -310,6 +311,7 @@ func TestFuzzScriptRefusesAStalePackage(t *testing.T) {
 // The stand-in go writes that noise and runs the real one.
 func TestFuzzScriptCheckIgnoresGoStderr(t *testing.T) {
 	root := repo(t)
+	needEveryService(t, root)
 	goBin, err := exec.LookPath("go")
 	if err != nil {
 		t.Fatal(err)

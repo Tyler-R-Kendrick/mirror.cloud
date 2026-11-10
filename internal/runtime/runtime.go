@@ -26,7 +26,6 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/rand"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/registry"
-	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/iam"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/store"
@@ -497,7 +496,10 @@ func Boot(cfg config.Config) (*Runtime, error) {
 		S3AllowNonstandardRegions: cfg.S3AllowNonstandardRegions,
 		SQSEndpointStrategy:       cfg.SQSEndpointStrategy,
 	}
-	deps.Authorizer = iam.NewAuthorizer(deps.Store)
+	deps.Authorizer = spi.AllowAllAuthorizer{}
+	if spi.NewPolicyAuthorizer != nil { // the IAM service, when this binary has it
+		deps.Authorizer = spi.NewPolicyAuthorizer(deps.Store)
+	}
 	kvBackend := &execution.NativeKV{Store: deps.Store, Clock: clk}
 	kvReg, err := execution.NewRegistry(kvBackend)
 	if err != nil {

@@ -21,6 +21,11 @@ func moduleGraph(t *testing.T) (*Graph, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// These tests describe the whole module; a sparse checkout (scripts/sparse.py)
+	// holds only some of it, and CI runs them on the full tree.
+	if out, _ := exec.Command("git", "-C", root, "config", "core.sparseCheckout").Output(); strings.TrimSpace(string(out)) == "true" {
+		t.Skip("this is a sparse checkout; the full tree is CI's")
+	}
 	graphOnce.Do(func() { theGraph, graphErr = Load(root) })
 	if graphErr != nil {
 		t.Fatal(graphErr)
@@ -177,10 +182,10 @@ func TestRepresentativeSelections(t *testing.T) {
 	}{
 		"root markdown":         {files: []string{"README.md", "AGENTS.md"}, only: []string{}},
 		"testing docs":          {files: []string{"docs/TESTING.md"}, only: []string{"./internal/check", "./internal/mutation", "./internal/runtime", "./test/behavior/cloudflare", "./test/behavior/vercel"}, jobs: []string{"cloudflare-miniflare"}},
-		"one leaf package":      {files: []string{"internal/services/aws/scheduleexpr/scheduleexpr.go"}, linked: []string{"./internal/services/aws/scheduleexpr", "./internal/services/aws/scheduler", "./cmd/mirror", "./internal/allservices"}, jobs: []string{"cloudflare-miniflare", "image"}},
+		"one leaf package":      {files: []string{"internal/scheduleexpr/expression.go"}, linked: []string{"./internal/scheduleexpr", "./internal/services/aws/scheduler", "./cmd/mirror", "./internal/allservices"}, jobs: []string{"cloudflare-miniflare", "image", "sparse"}},
 		"a test file":           {files: []string{"test/ci/cache_test.go"}, linked: []string{"./test/ci"}, only: []string{"./internal/check", "./internal/mutation", "./test/ci"}},
 		"a fuzz target's tests": {files: []string{"internal/proto/aws/httpuri/httpuri_fuzz_test.go"}, linked: []string{"./internal/proto/aws/httpuri"}, only: []string{"./internal/check", "./internal/mutation", "./internal/proto/aws/httpuri"}},
-		"a pinned spec":         {files: []string{"specs/mirror.lock"}, only: []string{"./cmd/mirror", "./cmd/mirrorgen", "./internal/check", "./internal/mutation", "./internal/specboot", "./test/behavior/vercel"}, jobs: []string{"generated-models", "image"}},
+		"a pinned spec":         {files: []string{"specs/mirror.lock"}, only: []string{"./cmd/mirror", "./cmd/mirrorgen", "./internal/check", "./internal/mutation", "./internal/specboot", "./test/behavior/vercel"}, jobs: []string{"generated-models", "image", "sparse"}},
 		"the sdk module":        {files: []string{"test/sdk/go/go.mod"}, only: []string{}},
 		"a deleted root file":   {files: []string{"RELEASE"}, only: []string{}},
 		"the dockerfile":        {files: []string{"Dockerfile"}, only: []string{}, jobs: []string{"image"}},

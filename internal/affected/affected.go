@@ -428,6 +428,14 @@ var gates = map[string]gate{
 		paths: []string{"Dockerfile", "Dockerfile.release", ".dockerignore", "profiles/**", "scripts/slim-overlay.py"},
 		pkgs:  []string{"./cmd/mirror"},
 	},
+	// A partial checkout of a service set (scripts/sparse.py) built and tested on
+	// its own: whatever a service is made of, what decides the set, and ./cmd/mirror,
+	// which every package the binary links reaches.
+	"sparse": {
+		paths: []string{"internal/services/**", "internal/generated/**", "internal/allservices/**", "behavior/**",
+			"profiles/**", "scripts/sparse.py", "scripts/service-graph.py", "scripts/slim-overlay.py", "Makefile", "go.mod", "go.sum"},
+		pkgs: []string{"./cmd/mirror"},
+	},
 	// The live miniflare suite: internal/execution and test/behavior/cloudflare
 	// built with -tags miniflare, against the pinned runtime under tools/.
 	"cloudflare-miniflare": {

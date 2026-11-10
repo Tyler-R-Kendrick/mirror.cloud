@@ -22,6 +22,7 @@
       "mutation": "every mutant whose tests are in a package internal/affected selects, whose file or a file beside it changed, or whose entry changed (internal/mutation select_test.go)",
       "image": "when cmd/mirror, a Dockerfile or a profile changes",
       "generated-models": "when specs, internal/generated or cmd/mirrorgen change",
+      "sparse": "when a service, its model or bundle, profiles/graph.txt, scripts/sparse.py or what ./cmd/mirror links changes: a partial clone of each of five service sets must build, vet and pass every test it holds",
       "cloudflare-miniflare": "when a package the -tags miniflare suite compiles, test/behavior/cloudflare or tools/cloudflare-runtime change",
       "test": "fails unless every required job passed or was skipped as unaffected"
     },
@@ -35,6 +36,7 @@
       "mutation": "every mutant",
       "image": "always",
       "generated-models": "always",
+      "sparse": "always",
       "cloudflare-miniflare": "always",
       "test": "fails unless every required job passed"
     },

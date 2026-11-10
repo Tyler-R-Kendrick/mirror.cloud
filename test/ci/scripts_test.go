@@ -167,6 +167,7 @@ func TestFuzzScriptFailsWhereGoTestStaysGreen(t *testing.T) {
 // matters here, since nothing else would notice.
 func TestSlimBuildServesExactlyTheServicesItWasGiven(t *testing.T) {
 	root := repo(t)
+	needEveryService(t, root)
 	script := filepath.Join(root, "scripts", "slim-overlay.py")
 	dir := t.TempDir()
 
@@ -384,5 +385,164 @@ esac
 		if err := check(t, c.variant, "1.2.3", c.imageVersion, c.services, c.binary); err == nil {
 			t.Errorf("accepted %s", name)
 		}
+	}
+}
+
+// A service pack is a directory a developer can leave out of a sparse checkout
+// (scripts/sparse.sh), so nothing the binary is built from may import one except
+// the list that names them, allservices, and other packs, which sparse.sh follows.
+// A core package that reached into a pack would stop building the moment the
+// pack was absent.
+func TestNoCorePackageImportsAServicePack(t *testing.T) {
+	root, _ := filepath.Abs("../..")
+	out, err := run(t, root, nil, "go", "list", "-f", "{{.ImportPath}} {{join .Imports \" \"}}", "./...")
+	if err != nil {
+		t.Skipf("go list: %v", err) // a sparse tree may not build everything
+	}
+	const mod = "github.com/tyler-r-kendrick/mirror.cloud/"
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		f := strings.Fields(line)
+		pkg := strings.TrimPrefix(f[0], mod)
+		if strings.HasPrefix(pkg, "internal/services/") || pkg == "internal/allservices" {
+			continue
+		}
+		for _, imp := range f[1:] {
+			if strings.HasPrefix(imp, mod+"internal/services/") {
+				t.Errorf("%s imports %s: core must not import a service pack (use a hook in internal/spi)", pkg, strings.TrimPrefix(imp, mod))
+			}
+		}
+	}
+}
+
+// scripts/sparse.py decides what a sparse checkout leaves out from
+// profiles/graph.txt alone, so a stale graph is a checkout that does not build.
+// The file is rebuilt from the tree and compared; a sparse tree has not got the
+// whole tree to rebuild it from.
+func TestServiceGraphMatchesTheTree(t *testing.T) {
+	root, _ := filepath.Abs("../..")
+	needEveryService(t, root)
+	got, err := run(t, root, nil, "python3", "scripts/service-graph.py")
+	if err != nil {
+		t.Fatalf("service-graph.py: %v\n%s", err, got)
+	}
+	want, err := os.ReadFile(filepath.Join(root, "profiles", "graph.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != string(want) {
+		t.Fatal("profiles/graph.txt is stale; run `make graph` and commit it")
+	}
+}
+
+// What a sparse checkout brings for a service is what the graph says it needs,
+// all the way down, and no more. Read from the committed tree, so it checks the
+// graph and the script together without cloning.
+func TestSparseBringsWhatAServiceNeedsAndNothingElse(t *testing.T) {
+	root, _ := filepath.Abs("../..")
+	if out, _ := run(t, root, nil, "git", "rev-parse", "--verify", "-q", "HEAD:profiles/graph.txt"); out == "" {
+		t.Skip("profiles/graph.txt is not committed yet")
+	}
+	list := func(args ...string) string {
+		out, err := run(t, root, nil, "python3", append([]string{"scripts/sparse.py", "--list"}, args...)...)
+		if err != nil {
+			t.Fatalf("sparse.py %v: %v\n%s", args, err, out)
+		}
+		return out
+	}
+	s3 := list("aws.s3")
+	for _, want := range []string{
+		"/internal/services/aws/s3/", "/behavior/aws/s3/", "/internal/generated/aws/s3/", "/internal/allservices/svc_aws_s3.go",
+		// what S3 imports, what it names ("aws.sqs" is reached through the registry), and what its tests use
+		"/internal/services/aws/sns/", "/internal/generated/aws/sqs/", "/internal/services/aws/events/", "/internal/generated/aws/kms/",
+		// what those need in turn
+		"/internal/services/aws/eventhttp/", "/internal/services/aws/states/",
+		// the placeholder that keeps behavior's embed pattern matching
+		"/behavior/none/placeholder/",
+		// a pack that is only here to be built is not tested
+		"!/internal/services/aws/sns/**/*_test.go",
+		// the tree is not complete
+		"!/internal/specboot/complete.go",
+	} {
+		if !strings.Contains(s3+"\n", "\n"+want+"\n") {
+			t.Errorf("aws.s3 does not bring %s", want)
+		}
+	}
+	for _, unwanted := range []string{"/internal/services/aws/dynamodb/", "/internal/generated/aws/ec2/", "/internal/services/gcp/", "/behavior/vercel/"} {
+		if strings.Contains(s3+"\n", "\n"+unwanted+"\n") {
+			t.Errorf("aws.s3 brings %s, which nothing it uses needs", unwanted)
+		}
+	}
+	if !strings.Contains(s3, "!/test/behavior/aws/") {
+		t.Error("the AWS behavior suite imports packs aws.s3 does not bring, so it must be left out")
+	}
+	// A pack that serves its service under another name is found by the service's.
+	if !strings.Contains("\n"+list("gcp.storage"), "\n/internal/services/gcp/gcs/\n") {
+		t.Error("gcp.storage does not bring the gcp/gcs pack that serves it")
+	}
+	// A whole provider brings its specs and its behavior suite, which also names
+	// aws.s3, so that suite waits until S3 is asked for too.
+	if strings.Contains("\n"+list("vercel.*"), "\n/test/behavior/vercel/\n") {
+		t.Error("the Vercel suite names aws.s3 and must wait for it")
+	}
+	v := list("vercel.*", "aws.s3")
+	for _, want := range []string{"/specs/vercel/", "/test/behavior/vercel/"} {
+		if !strings.Contains(v+"\n", "\n"+want+"\n") {
+			t.Errorf("vercel.* does not bring %s", want)
+		}
+	}
+	if out, err := run(t, root, nil, "python3", "scripts/sparse.py", "--list", "aws.nonesuch"); err == nil {
+		t.Errorf("a service that does not exist was accepted:\n%s", out)
+	}
+}
+
+// needEveryService skips a test that uses services as examples, or rebuilds
+// something from the whole tree, in a sparse checkout (scripts/sparse.py).
+func needEveryService(t *testing.T, root string) {
+	t.Helper()
+	if out, _ := run(t, root, nil, "git", "config", "core.sparseCheckout"); strings.TrimSpace(out) == "true" {
+		t.Skip("this is a sparse checkout; the full tree is CI's")
+	}
+}
+
+// A rune literal or a comment that holds a quote must not change which text the
+// graph reads as a string: s3_extra.go, pipes.go and others contain '"', and a
+// pairing that went wrong there would drop every service named after it.
+func TestServiceGraphReadsOnlyStringLiterals(t *testing.T) {
+	root, _ := filepath.Abs("../..")
+	script := `
+import re, sys
+src = open("scripts/service-graph.py").read().split("# ---- end of the tokenizer")[0]
+ns = {}
+exec(src, ns)
+got = ns["string_text"](sys.stdin.read())
+for want in ("aws.sqs", "aws.kms", "aws.sns"):
+    assert want in got, (want, got)
+for unwanted in ("aws.comment", "aws.block"):
+    assert unwanted not in got, (unwanted, got)
+`
+	cmd := exec.Command("python3", "-c", script)
+	cmd.Dir = root
+	cmd.Stdin = strings.NewReader("c := '\"'\n" + `x := "aws.sqs" // "aws.comment` + "\n" +
+		"/* \"aws.block\" */ y := `aws.kms` + \"aws.sns\"\nz := '\\'' + \"aws.kms\"\n")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+}
+
+// Asking for a service whose pack has another name keeps that pack in a slim build.
+func TestSlimBuildKeepsThePackThatServesAService(t *testing.T) {
+	root, _ := filepath.Abs("../..")
+	needEveryService(t, root)
+	overlay := filepath.Join(t.TempDir(), "o.json")
+	if out, err := run(t, root, nil, "python3", "-I", filepath.Join(root, "scripts", "slim-overlay.py"), overlay, "gcp.storage"); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	body, _ := os.ReadFile(overlay)
+	// "" in the overlay hides a file; the gcs pack's file must not be one of them.
+	if strings.Contains(string(body), `svc_gcp_gcs.go": ""`) {
+		t.Error("gcp.storage was built without gcp/gcs, the pack that serves it")
+	}
+	if !strings.Contains(string(body), `svc_aws_s3.go": ""`) {
+		t.Error("the other services' packs were not left out")
 	}
 }

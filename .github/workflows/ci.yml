@@ -27,6 +27,7 @@ jobs:
       mutation-count: ${{ steps.mutation.outputs.count }}
       generated-models: ${{ steps.affected.outputs.generated-models }}
       image: ${{ steps.affected.outputs.image }}
+      sparse: ${{ steps.affected.outputs.sparse }}
       cloudflare-miniflare: ${{ steps.affected.outputs.cloudflare-miniflare }}
     steps:
       - uses: actions/checkout@v6
@@ -321,8 +322,76 @@ jobs:
 
   # Fails unless every job above passed. A job that is skipped or cancelled is
   # not a pass, and `needs` alone would skip this one with it.
+  # What a developer gets from `git clone --filter=blob:none` and scripts/sparse.py:
+  # only the services they name and what those need. Each set is a real partial
+  # checkout, not a copy of this one, and must build, vet and pass every test it
+  # holds, so a service that grew a dependency on another's files, or a test that
+  # assumed the whole catalog, fails here before it fails someone's clone.
+  #
+  # Path-gated like image: it runs when something a service set is made of can have
+  # changed (cmd/affected's gates), and otherwise passes as skipped, so `test`
+  # still requires it.
+  sparse:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      GATE: ${{ needs.plan.outputs.sparse }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # A pack and what it reaches, a leaf pack, a pack under another name than
+        # its service's, a bundle with no pack of its own, and a whole provider.
+        services: ["aws.s3", "aws.dynamodb", "gcp.storage", "aws.sqs", "vercel.* aws.s3"]
+    steps:
+      - name: skipped as unaffected
+        if: env.GATE == 'false'
+        run: echo "nothing a sparse checkout is made of changed"
+      - name: the plan named this gate
+        # Anything but true or false means the plan did not say; run nothing
+        # and fail, rather than read a missing answer as unaffected.
+        if: env.GATE != 'true' && env.GATE != 'false'
+        run: echo "::error::plan gave this gate '$GATE', not true or false" && exit 1
+      - uses: actions/checkout@v6
+        if: env.GATE != 'false'
+        with:
+          filter: blob:none
+          sparse-checkout: |
+            .github
+            scripts
+            profiles
+      - uses: ./.github/actions/go
+        if: env.GATE != 'false'
+        with:
+          cache: test
+          save: "false"
+      - name: check out only those services
+        if: env.GATE != 'false'
+        env:
+          SERVICES: ${{ matrix.services }}
+        run: |
+          set -f
+          python3 scripts/sparse.py $SERVICES
+          # Nothing unrelated came along: no set here asks for these, and nothing
+          # a set asks for needs them.
+          for p in internal/generated/aws/ec2 behavior/azure specs/cloudflare; do
+            if [ -e "$p" ]; then echo "::error::$p was checked out for: $SERVICES"; exit 1; fi
+          done
+          du -sh --exclude=.git . ; du -sh .git
+      - name: build and vet
+        if: env.GATE != 'false'
+        run: go build ./... && go vet ./...
+      - name: every test the tree holds
+        if: env.GATE != 'false'
+        run: go test ./...
+      - name: the tests of those services alone
+        if: env.GATE != 'false'
+        env:
+          SERVICES: ${{ matrix.services }}
+        run: set -f; make test-service SERVICES="$SERVICES"
+
   test:
-    needs: [plan, check, unit, coverage, fuzz, race, image, generated-models, cloudflare-miniflare]
+    needs: [plan, check, unit, coverage, fuzz, race, image, generated-models, cloudflare-miniflare, sparse]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

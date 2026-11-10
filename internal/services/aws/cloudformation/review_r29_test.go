@@ -156,10 +156,8 @@ func TestCloudFormationAContinuedRollbackClearsABucket(t *testing.T) {
 		if _, err := h.invoke("ContinueUpdateRollback", map[string]any{"StackName": "cb"}); err != nil {
 			t.Fatal(err)
 		}
-		if got, want := rv29Bucket(h, b), "versioning="+map[bool]string{true: "Suspended"}[versioned]+" block=set ownership=set tags=none"; got != want {
+		if got, want := rv29Bucket(h, b), "versioning="+map[bool]string{true: "Suspended"}[versioned]+" block=none ownership=none tags=none"; got != want {
 			t.Errorf("after ContinueUpdateRollback (versioned: %t) the bucket has %s; want %s", versioned, got, want)
-		} else if got := rv32Bucket(h, b); !strings.Contains(got, `"IgnorePublicAcls":true`) || !strings.HasSuffix(got, "ownership=BucketOwnerEnforced") {
-			t.Errorf("after ContinueUpdateRollback (versioned: %t) the bucket has %s; want the block and the ownership S3 gives a new bucket", versioned, got)
 		}
 	}
 }

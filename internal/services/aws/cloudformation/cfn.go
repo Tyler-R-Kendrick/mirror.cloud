@@ -1452,13 +1452,11 @@ func typed(svc *model.Service, shapeID string, v any) any {
 }
 
 // bucketOps are the bucket properties that map one to one onto an S3 operation: the one that sets each,
-// and what clears it, an operation or, as JSON, the value S3 gives a new bucket ("all four Block Public
-// Access settings enabled and ACLs disabled", S3 User Guide), which the first sets again. Versioning has
-// none: "Once you version-enable a bucket, it can never return to an unversioned state. You can, however,
-// suspend versioning on that bucket" (S3 User Guide), so an update that drops it suspends it.
+// and the one that clears it. Versioning has none: "Once you version-enable a bucket, it can never return
+// to an unversioned state. You can, however, suspend versioning on that bucket" (S3 User Guide), so an
+// update that drops it suspends it.
 var bucketOps = map[string][2]string{"VersioningConfiguration": {"PutBucketVersioning", ""}, "Tags": {"PutBucketTagging", "DeleteBucketTagging"},
-	"PublicAccessBlockConfiguration": {"PutPublicAccessBlock", `{"BlockPublicAcls":true,"IgnorePublicAcls":true,"BlockPublicPolicy":true,"RestrictPublicBuckets":true}`},
-	"OwnershipControls":              {"PutBucketOwnershipControls", `{"Rules":[{"ObjectOwnership":"BucketOwnerEnforced"}]}`}}
+	"PublicAccessBlockConfiguration": {"PutPublicAccessBlock", "DeletePublicAccessBlock"}, "OwnershipControls": {"PutBucketOwnershipControls", "DeleteBucketOwnershipControls"}}
 
 // configureBucket applies the bucket properties that map one to one onto an S3 operation, and stores the
 // rest as they are given, and clears each that the template it is updated from gave (was) and the template
@@ -1477,9 +1475,7 @@ func (p *Pack) configureBucket(ctx context.Context, req *spi.Request, bucket str
 			tagging := asMap(input("aws.s3", op, map[string]any{"Tagging": map[string]any{"TagSet": v}})["Tagging"])
 			in = map[string]any{"Bucket": bucket, "Tagging": tagging, "TagSet": tagging["TagSet"]}
 		}
-		if dropped(property) && strings.HasPrefix(ops[1], "{") {
-			in[property] = spi.JSONObject([]byte(ops[1]))
-		} else if dropped(property) && ops[1] != "" {
+		if dropped(property) && ops[1] != "" {
 			op, in = ops[1], map[string]any{"Bucket": bucket}
 		} else if dropped(property) { // versioning: suspended, where it is on
 			if cur, _ := p.call(ctx, req, "aws.s3", "GetBucketVersioning", map[string]any{"Bucket": bucket}); cur["Status"] != "Enabled" {

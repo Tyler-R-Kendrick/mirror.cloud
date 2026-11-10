@@ -710,12 +710,14 @@ The oracle is AWS's documentation as it ships in the vendored model
     `Timeout` ("The default is 3 seconds"), `MemorySize` ("128 MB"),
     `Layers`, `KMSKeyArn`, `DeadLetterConfig`, `TracingConfig` and
     `EphemeralStorage` are the values a function made without them has; a
-    bucket's tags and stored configurations are deleted, and its public
-    access block and ownership controls are the ones S3 gives a new bucket
-    (all four settings on, `BucketOwnerEnforced`; that the service sends
-    them when a template stops giving the property is a reading). They were
-    deleted, which left a bucket rolled back from an update that gave it a
-    block with none where it had S3's. A bucket's versioning is suspended, since
+    bucket's tags, public access block, ownership controls and stored
+    configurations are deleted. What the service's bucket handler does when
+    a template stops giving a public access block or ownership controls was
+    not established, so the deletion is a reading, and it has a known
+    consequence: a new bucket has S3's own block (all four settings on) and
+    `BucketOwnerEnforced`, and after such a clear, a rollback of an update
+    that gave the bucket a block included, it has none.
+    A bucket's versioning is suspended, since
     "Once you version-enable a bucket, it can never return to an unversioned
     state. You can, however, suspend versioning on that bucket". Only what
     the template the resource is updated from gave is cleared: an update

@@ -1228,6 +1228,8 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	spec, phys := k.create, ""
 	if !known {
 		return "", invalid("unsupported resource type " + typ)
+	} else if _, list := props["Targets"].([]any); typ == "AWS::Events::Rule" && props["Targets"] != nil && !list { // "Array of Target", before the rule is touched
+		return "", invalid("Properties validation failed for resource " + logical + ": Targets must be a list, not " + spi.JSONText(props["Targets"]))
 	} else if existing != "" {
 		spec = k.update
 		for _, c := range strings.Fields(clears[typ]) {
@@ -1408,12 +1410,12 @@ func gone(err error) bool {
 // alone (a continued rollback), every target but those keep names: all of them before the rule is deleted
 // ("Before you can delete the rule, you must remove all targets, using RemoveTargets", EventBridge).
 func (p *Pack) dropTargets(ctx context.Context, req *spi.Request, rule string, keep []any, was prior) error {
-	if !was.gave("Targets") {
+	gave, listed2 := was.props["Targets"].([]any) // the targets themselves, when the previous properties are known in full
+	if !was.gave("Targets") || was.props["Targets"] != nil && !listed2 { // none given, or a value refused before it gave any
 		return nil
 	}
 	listed, err := p.do(ctx, req, "aws.events ListTargetsByRule Rule={rule} EventBusName={bus}", "", rule, nil)
 	targets, _ := listed["Targets"].([]any)
-	gave, listed2 := was.props["Targets"].([]any) // the targets themselves, when the previous properties are known in full
 	named := func(in []any, t any) bool {
 		return slices.ContainsFunc(in, func(k any) bool { return str(asMap(k)["Id"]) == str(asMap(t)["Id"]) })
 	}

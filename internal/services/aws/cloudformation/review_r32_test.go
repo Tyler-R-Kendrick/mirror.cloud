@@ -2,6 +2,7 @@ package cloudformation
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -159,5 +160,48 @@ func TestCloudFormationAStringThatReadsAsNothingIsAValue(t *testing.T) {
 	}
 	if err := rv28Update(h, "nl", secret(map[string]any{"SecretString": "v"})); err != nil || described() != nil {
 		t.Errorf("the update that takes the description away answered %v and left %v", err, described())
+	}
+}
+
+// A rule's Targets is a list ("Targets: Array of Target", Template Reference, AWS::Events::Rule). One that
+// is anything else is refused as the rule is made or updated, before the rule is touched: it was read as
+// no list at all, so the rule was written and every target on it removed, the ones put outside the
+// template included. The refusal's wording is this emulator's.
+func TestCloudFormationARuleWhoseTargetsAreNotAListIsRefused(t *testing.T) {
+	t.Parallel()
+	h := newStacks(t)
+	rule := func(schedule string, targets any) map[string]any {
+		return map[string]any{"E": map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"ScheduleExpression": schedule, "Targets": targets}}}
+	}
+	one := map[string]any{"Id": "a", "Arn": "arn:aws:sqs:us-east-1:000000000000:q"}
+	for _, bad := range []any{"a", one, 3.0, true} {
+		err := rvMake(t, h, "bad", map[string]any{"Resources": rule("rate(5 minutes)", bad)})
+		if reason := fmt.Sprint(err, h.events("bad", "E"), h.record("bad")["Reason"]); err == nil || !strings.Contains(reason, "Targets must be a list") {
+			t.Fatalf("a rule whose Targets is %#v was answered %v", bad, reason)
+		}
+		if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "bad"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := rvMake(t, h, "ok", map[string]any{"Resources": rule("rate(5 minutes)", []any{one})}); err != nil {
+		t.Fatal(err)
+	}
+	name := spi.LastSlash(rv31IDs(h, "ok")["E"])
+	if _, err := h.service("aws.events", "PutTargets", map[string]any{"Rule": name, "Targets": []any{map[string]any{"Id": "outside", "Arn": "arn:aws:sqs:us-east-1:000000000000:o"}}}); err != nil {
+		t.Fatal(err)
+	}
+	state := func() string {
+		ids := []string{}
+		for _, target := range spi.Slice(rv31Get(h, "aws.events", "ListTargetsByRule", map[string]any{"Rule": name})["Targets"]) {
+			ids = append(ids, str(asMap(target)["Id"]))
+		}
+		slices.Sort(ids)
+		return fmt.Sprint(rv31Get(h, "aws.events", "DescribeRule", map[string]any{"Name": name})["ScheduleExpression"], " ", ids)
+	}
+	if err := rv28Update(h, "ok", rule("rate(6 minutes)", one)); err == nil || state() != "rate(5 minutes) [a outside]" {
+		t.Errorf("the update whose Targets is an object answered %v and left the rule %s; want it refused and the rule as it was", err, state())
+	}
+	if status, _, _ := h.status("ok"); status != "UPDATE_ROLLBACK_COMPLETE" {
+		t.Errorf("the stack is %s", status)
 	}
 }

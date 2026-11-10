@@ -5258,8 +5258,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-a-rule-update-removes-targets-it-never-gave",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  "\tif !was.gave(\"Targets\") {\n\t\treturn nil\n\t}",
-		new:  "\tif false && !was.gave(\"Targets\") {\n\t\treturn nil\n\t}",
+		old:  `if !was.gave("Targets") || was.props["Targets"] != nil && !listed2 {`,
+		new:  `if was.props["Targets"] != nil && !listed2 {`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationASecretAndARuleKeepWhatWasSetOutsideTheirTemplates",
 	},
@@ -5504,6 +5504,22 @@ var mutants = []mutant{
 		new:  `if spi.JSONText(before[k]) == spi.JSONText(props[k]) {`,
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationAStringThatReadsAsNothingIsAValue",
+	},
+	{
+		name: "cloudformation-a-rule-takes-targets-that-are-not-a-list",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `typ == "AWS::Events::Rule" && props["Targets"] != nil && !list {`,
+		new:  `typ == "AWS::Events::Rule" && false && !list {`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationARuleWhoseTargetsAreNotAListIsRefused",
+	},
+	{
+		name: "cloudformation-targets-refused-are-removed-as-if-given",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `|| was.props["Targets"] != nil && !listed2 {`,
+		new:  `|| false && !listed2 {`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationARuleWhoseTargetsAreNotAListIsRefused",
 	},
 	{
 		name: "cloudformation-what-is-kept-has-no-bound",

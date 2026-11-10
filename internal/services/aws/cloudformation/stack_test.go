@@ -37,8 +37,10 @@ type stacks struct {
 
 func newStacks(t *testing.T) *stacks {
 	deps := spitest.Deps(t)
-	return &stacks{t: t, deps: deps, cfn: bundled.Handler("aws.cloudformation", deps), pack: New(deps), ctx: context.Background(),
+	h := &stacks{t: t, deps: deps, cfn: bundled.Handler("aws.cloudformation", deps), pack: New(deps), ctx: context.Background(),
 		id: spi.Identity{Account: "000000000000", Region: "us-east-1"}}
+	t.Cleanup(func() { settledHoldNoOperation(t, h) }) // every test's end state: a settled record is no operation's
+	return h
 }
 
 // status answers DescribeStacks' StackStatus and StackStatusReason for the stack.

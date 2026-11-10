@@ -4,6 +4,7 @@ package cloudformation
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -65,7 +66,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (out *spi.Response,
 		}
 	}()
 	if slices.Contains(natives[:5], req.Operation) || req.Operation == "ContinueUpdateRollback" { // each takes over a stack its last operation left in progress
-		_ = recovered(func() error { p.orphan(ctx, req, name); return nil })
+		p.orphan(ctx, req, name)
 	}
 	if _, given := req.Input["StackName"]; given && (req.Operation == "ExecuteChangeSet" || req.Operation == "GetTemplateSummary" || req.Operation == "ContinueUpdateRollback" || req.Operation == "CreateChangeSet" || req.Operation == "UpdateTerminationProtection") {
 		if err := checkStackName(name, true); err != nil { // the model's StackNameOrId
@@ -388,7 +389,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 			leave = &old
 			_ = p.rollback(ctx, req, read, old, st.Resources, changed, retains(tpl, "DeletionPolicy", "Retain"))
 		}
-		if raw, _, _ := p.col(req, "cfn").Get(ctx, name); spi.Decode[stack](raw).Op != op { // settled: nothing is left
+		if raw, _, err := p.col(req, "cfn").Get(ctx, name); err == nil && spi.Decode[stack](raw).Op != op { // settled: nothing is left
 			leave = nil
 		}
 		p.unsettled(ctx, req, cs, "EXECUTE_IN_PROGRESS", cause)
@@ -399,7 +400,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		if recover() != nil {
 			out, err = nil, internalFailure()
 			if st.Reason, old.Reason = err.Error(), err.Error(); leave == nil { // not one in the rollback itself
-				_ = recovered(func() error { _, _ = fail(err); return nil })
+				_, _ = fail(err) // a panic of its own is Invoke's to answer, and what remains the next operation's
 			}
 		}
 	}()
@@ -657,7 +658,7 @@ func (p *Pack) drop(ctx context.Context, req *spi.Request, name string) (*spi.Re
 		// which deletes what it made, and then the stack.
 		op, release := p.hold() // the create's, when it ends a create: that create ends this delete
 		defer release(nil)
-		del.Status, del.Op = "DELETE_IN_PROGRESS", cmp.Or(st.Op, op)
+		del.Status, del.Op = "DELETE_IN_PROGRESS", map[bool]string{true: st.Op, false: op}[was == "CREATE_IN_PROGRESS"]
 		tpl := stored(st.Template)
 		if _, started, settleErr := p.settle(ctx, req, st, del); settleErr != nil {
 			return nil, settleErr
@@ -691,7 +692,7 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, seen, st stack, kep
 			}
 		}
 	}
-	st.Status, st.Op = done, "" // settled: no operation holds it
+	st.Status = done
 	if first != nil {
 		st.Status, st.Reason = failed, first.Error()
 	}
@@ -716,6 +717,9 @@ func (p *Pack) unwind(ctx context.Context, req *spi.Request, seen, st stack, kep
 func (p *Pack) settle(ctx context.Context, req *spi.Request, seen, st stack, sets ...func(spi.Tx) error) (stack, bool, error) {
 	var cur stack
 	wrote := false
+	if !strings.HasSuffix(st.Status, "_IN_PROGRESS") { // a settled record is no operation's
+		st.Op = ""
+	}
 	err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(stx spi.ScopeTx) error {
 		tx, cs := stx.Collection("cfn"), stx.Collection("cfn-cs")
 		raw, _, _ := tx.Get(st.Name)
@@ -740,16 +744,21 @@ func (p *Pack) settle(ctx context.Context, req *spi.Request, seen, st stack, set
 // *_IN_PROGRESS record whose operation is not among them was left by one that ended without settling it,
 // or by a process that ended: no operation will settle it, so the next one on the stack does (orphan).
 var ops sync.Map
-var opSeq atomic.Int64 // numbers them
+var opSeq, opKept atomic.Int64 // numbers them, and counts what they keep
+var opNonce = func() string {  // this process's: an id in a record another process left, or a restored one, is never one of ours
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}()
 
 // hold registers a running operation, and answers its id, after a "/", and its release, which the
-// operation defers: given the record a failed operation could not settle, the release keeps it for the
-// operation that takes the stack over.
+// operation defers: given the record a failed operation could not settle, the release keeps it (of the
+// last thousand or so) for the operation that takes the stack over.
 func (p *Pack) hold() (string, func(*stack)) {
-	id := p.deps.Rand.Derive("cloudformation-op").Hex(8) + "-" + strconv.FormatInt(opSeq.Add(1), 10)
+	id := opNonce + "-" + strconv.FormatInt(opSeq.Add(1), 10)
 	ops.Store(id, nil)
 	return "/" + id, func(left *stack) {
-		if ops.Delete(id); left != nil {
+		if ops.Delete(id); left != nil && opKept.Add(1) <= 1024 {
 			ops.Store(id, *left)
 		}
 	}
@@ -767,20 +776,22 @@ func (p *Pack) orphan(ctx context.Context, req *spi.Request, name string) {
 	})
 	id := strings.TrimPrefix(cur.Op, "/")
 	v, known := ops.Load(id)
-	next, kept := v.(stack) // what its operation, ended in this process, could not write
-	if !strings.HasSuffix(cur.Status, "_IN_PROGRESS") || cur.Status == "REVIEW_IN_PROGRESS" || known && !kept {
+	next, mine := v.(stack) // what its operation, ended in this process, could not write
+	kept := mine && next.ID == cur.ID
+	if !strings.HasSuffix(cur.Status, "_IN_PROGRESS") || cur.Status == "REVIEW_IN_PROGRESS" || known && !mine { // not one in progress, or one running
 		return
-	} else if kept {
-		ops.Delete(id)
-	} else {
+	} else if !kept {
 		next = cur
 		next.Status = cmp.Or(map[string]string{"CREATE_IN_PROGRESS": "ROLLBACK_FAILED"}[cur.Status], "UPDATE_ROLLBACK_FAILED")
 		next.Reason = "The operation on the stack ended before it settled the stack." // the wording is a reading
 	}
-	if next.Op = ""; cur.Status == "DELETE_IN_PROGRESS" {
+	if cur.Status == "DELETE_IN_PROGRESS" {
 		next.Status = "DELETE_FAILED"
 	}
-	_, _, _ = p.settle(ctx, req, cur, next)
+	if _, wrote, err := p.settle(ctx, req, cur, next); wrote && err == nil && kept { // kept until it is written
+		ops.Delete(id)
+		opKept.Add(-1)
+	}
 }
 
 // updatable is whether UpdateStack takes the stack st: not ROLLBACK_*, which only DeleteStack leaves, nor

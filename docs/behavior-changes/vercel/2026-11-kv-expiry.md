@@ -24,3 +24,18 @@ as for any `EXPIRE` that found the key (`0` when there was none). Before,
 `EXPIRE k 0` and `EXPIRE k -1` answered 400 `ERR invalid expire time in
 expire` and left the key. `SETEX` with a TTL that is not positive is still
 that error, as in Redis.
+
+## SETEX and EXPIRE read their seconds as Redis reads an integer
+
+Redis parses the seconds with `string2ll`: a signed 64-bit integer in its one
+canonical spelling. Answers that change:
+
+- **Not that spelling is `ERR value is not an integer or out of range`.** A
+  leading zero (`007`), a plus sign (`+5`), `-0`, a fraction, a space or a
+  word. Before, `007` was accepted as 7 and the rest answered `ERR invalid
+  expire time in setex` / `in expire`; a number past 64 bits answered that
+  too.
+- **Sixteen digits and more are accepted when they fit.** The seconds are
+  refused as `ERR invalid expire time in setex` / `in expire` only when they
+  cannot be turned into milliseconds and added to the clock, as in Redis.
+  Before, every number of sixteen digits or more was refused.

@@ -175,33 +175,58 @@ func TestVercelKVExpireNowDeletesTheKey(t *testing.T) {
 	want("v", "GET", "k")
 }
 
-// A TTL too large to add to the clock is refused as Redis refuses it, not
-// answered with whatever the arithmetic does.
-func TestVercelKVRefusesAnExpiryThatOverflows(t *testing.T) {
+// SETEX and EXPIRE read their seconds as Redis does: a signed 64-bit integer in
+// its one canonical spelling. What is not one is "not an integer"; what is one
+// and cannot be added to the clock is an invalid expire time.
+func TestVercelKVReadsSecondsAsRedisDoes(t *testing.T) {
 	cmd := kvPack(t)
-	if _, err := cmd("SET", "k", "v"); err != nil {
-		t.Fatal(err)
-	}
-	for _, seconds := range []string{"9223372036854775807", "9223372036854776", "99999999999999999999", "-99999999999999999999"} {
-		for verb, argv := range map[string][]any{"setex": {"SETEX", "k", seconds, "v"}, "expire": {"EXPIRE", "k", seconds}} {
-			_, err := cmd(argv...)
-			if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != "ERR invalid expire time in "+verb {
-				t.Fatalf("%v: %#v", argv, err)
-			}
+	refused := func(message string, argv ...any) {
+		t.Helper()
+		_, err := cmd(argv...)
+		if f, ok := err.(*spi.Fault); !ok || f.HTTPStatus != 400 || f.Message != message {
+			t.Fatalf("%v: got %#v, want 400 %q", argv, err, message)
 		}
 	}
-	if got, err := cmd("TTL", "k"); err != nil || got != "-1" {
-		t.Fatalf("after the refusals: TTL %q, %v", got, err)
-	}
-	// The largest TTL taken: about thirty million years.
-	for _, argv := range [][]any{{"SETEX", "big", "999999999999999", "v"}, {"EXPIRE", "k", "999999999999999"}} {
-		if _, err := cmd(argv...); err != nil {
-			t.Fatalf("%v: %v", argv, err)
+	want := func(want string, argv ...any) {
+		t.Helper()
+		if got, err := cmd(argv...); err != nil || got != want {
+			t.Fatalf("%v: got %q, %v; want %q", argv, got, err, want)
 		}
 	}
-	if got, err := cmd("TTL", "k"); err != nil || got != "999999999999999" {
-		t.Fatalf("TTL of the largest expiry: %q, %v", got, err)
+	const notInt = "ERR value is not an integer or out of range"
+	want("OK", "SET", "k", "v")
+
+	// Not an integer as Redis parses one: a sign it does not take, a leading
+	// zero, a minus zero, a fraction, a space, nothing, or past 64 bits.
+	for _, seconds := range []string{"soon", "+5", "007", "00", "-0", "-05", "5.5", " 5", "5 ", "", "-", "9223372036854775808", "-9223372036854775809", "99999999999999999999", "-99999999999999999999"} {
+		refused(notInt, "SETEX", "k", seconds, "v")
+		refused(notInt, "EXPIRE", "k", seconds)
 	}
+	// An integer that cannot be turned into milliseconds on the clock. The
+	// test clock stands at zero, so the last second that fits is 2^63/1000.
+	for _, seconds := range []string{"9223372036854775807", "9223372036854776", "1000000000000000000"} {
+		refused("ERR invalid expire time in setex", "SETEX", "k", seconds, "v")
+		refused("ERR invalid expire time in expire", "EXPIRE", "k", seconds)
+	}
+	refused("ERR invalid expire time in expire", "EXPIRE", "k", "-9223372036854775808")
+	refused("ERR invalid expire time in expire", "EXPIRE", "k", "-9223372036854776")
+	for _, seconds := range []string{"0", "-1", "-9223372036854775808"} {
+		refused("ERR invalid expire time in setex", "SETEX", "k", seconds, "v")
+	}
+	want("v", "GET", "k")
+	want("-1", "TTL", "k")
+
+	// Sixteen digits are an integer like any other: the largest that fits.
+	want("OK", "SETEX", "big", "9223372036854775", "v")
+	want("9223372036854775", "TTL", "big")
+	want("1", "EXPIRE", "k", "1000000000000000")
+	want("1000000000000000", "TTL", "k")
+	// A number in the JSON array is its decimal spelling.
+	want("1", "EXPIRE", "k", 5.0)
+	want("5", "TTL", "k")
+	// The most negative seconds that fit delete the key, as any negative does.
+	want("1", "EXPIRE", "k", "-9223372036854775")
+	want("<nil>", "GET", "k")
 }
 
 // What the bundle's quirk note says of SET options: they are ignored, not

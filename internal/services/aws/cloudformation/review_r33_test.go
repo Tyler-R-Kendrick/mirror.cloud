@@ -83,3 +83,49 @@ func TestCloudFormationAScalarInsideADocumentKeepsItsType(t *testing.T) {
 		}
 	}
 }
+
+// The refusal of a rule whose Targets is not a list is of a template as it is given, never of a stored one
+// as it is restored. It ran wherever a rule was written, so a stack whose stored template holds such a
+// value (one recorded before the refusal) was not restored at all: the restore was refused before the
+// rule was written. It is read again as it always was: the rule is written, with its description, and its
+// targets are EventBridge's to judge, which refuses this one as it did before ("Targets must contain
+// between 1 and 10 entries": an object is no list of targets). An update that leaves that rule as it is
+// does not meet the refusal either.
+func TestCloudFormationAStoredTemplateIsRestoredAsItWasRead(t *testing.T) {
+	t.Parallel()
+	one := map[string]any{"Id": "a", "Arn": "arn:aws:sqs:us-east-1:000000000000:q"}
+	rule := func(description string, targets any) map[string]any {
+		return map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"ScheduleExpression": "rate(5 minutes)", "Description": description, "Targets": targets}}
+	}
+	for _, continued := range []bool{false, true} {
+		h := newStacks(t)
+		if err := rvMake(t, h, "ol", map[string]any{"Resources": map[string]any{"R": rule("one", []any{one})}}); err != nil {
+			t.Fatal(err)
+		}
+		// The older record, made by hand: its template gives the one target as an object, not a list of one.
+		rec := h.record("ol")
+		rec["Template"] = rv19Body(map[string]any{"Resources": map[string]any{"R": rule("one", one)}})
+		if err := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("cfn").Put(h.ctx, "ol", []byte(spi.JSONText(rec))); err != nil {
+			t.Fatal(err)
+		}
+		name := spi.LastSlash(rv31IDs(h, "ol")["R"])
+		described := func() any {
+			return rv31Get(h, "aws.events", "DescribeRule", map[string]any{"Name": name})["Description"]
+		}
+		told := func(err error) string {
+			_, reason, _ := h.status("ol")
+			return fmt.Sprint(err, " ", reason, " ", spi.JSONText(h.record("ol")["Resources"]))
+		}
+		if err := rv28Update(h, "ol", map[string]any{"R": rule("one", one), "K": rv28Topic}); err != nil {
+			t.Errorf("continued=%v: an update that leaves the rule as its stored template has it answered %v", continued, err)
+		}
+		rveFailed(t, h, "ol", rule("two", []any{one}), continued)
+		var err error
+		if continued {
+			_, err = h.invoke("ContinueUpdateRollback", map[string]any{"StackName": "ol"})
+		}
+		if got := told(err); strings.Contains(got, "must be a list") || !strings.Contains(got, "between 1 and 10 entries") || described() != "one" {
+			t.Errorf("continued=%v: restored from its stored template the stack tells %s and the rule is described %v; want the rule written, described one, and EventBridge's own answer for its targets", continued, got, described())
+		}
+	}
+}

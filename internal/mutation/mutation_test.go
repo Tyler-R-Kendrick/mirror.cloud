@@ -5258,8 +5258,8 @@ var mutants = []mutant{
 	{
 		name: "cloudformation-a-rule-update-removes-targets-it-never-gave",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `if !was.gave("Targets") || was.props["Targets"] != nil && !listed2 {`,
-		new:  `if was.props["Targets"] != nil && !listed2 {`,
+		old:  "\tif !was.gave(\"Targets\") {\n\t\treturn nil\n\t}",
+		new:  "\tif false && !was.gave(\"Targets\") {\n\t\treturn nil\n\t}",
 		pkg:  "./internal/services/aws/cloudformation",
 		run:  "TestCloudFormationASecretAndARuleKeepWhatWasSetOutsideTheirTemplates",
 	},
@@ -5514,14 +5514,6 @@ var mutants = []mutant{
 		run:  "TestCloudFormationARuleWhoseTargetsAreNotAListIsRefused",
 	},
 	{
-		name: "cloudformation-targets-refused-are-removed-as-if-given",
-		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
-		old:  `|| was.props["Targets"] != nil && !listed2 {`,
-		new:  `|| false && !listed2 {`,
-		pkg:  "./internal/services/aws/cloudformation",
-		run:  "TestCloudFormationARuleWhoseTargetsAreNotAListIsRefused",
-	},
-	{
 		name: "cloudformation-a-resource-that-lost-nothing-records-a-list-of-it",
 		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
 		old:  "\tif len(lost) > 0 {\n\t\ttook = &lost",
@@ -5576,6 +5568,14 @@ var mutants = []mutant{
 		new:  `return spi.JSONText([]any{a}) == spi.JSONText([]any{b}) || a != nil && b != nil && Str(a) == Str(b)`,
 		pkg:  "./internal/cfntemplate",
 		run:  "TestSameComparesScalarsByTextAndTheRestExactly",
+	},
+	{
+		name: "cloudformation-a-stored-rule-left-as-it-is-meets-the-refusal",
+		file: filepath.Join("internal", "services", "aws", "cloudformation", "cfn.go"),
+		old:  `how != "" && typ == "AWS::Events::Rule" && props["Targets"] != nil`,
+		new:  `typ == "AWS::Events::Rule" && props["Targets"] != nil`,
+		pkg:  "./internal/services/aws/cloudformation",
+		run:  "TestCloudFormationAStoredTemplateIsRestoredAsItWasRead",
 	},
 	{
 		name: "cloudformation-what-is-kept-has-no-bound",

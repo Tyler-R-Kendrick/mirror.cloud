@@ -1128,7 +1128,10 @@ func (p *Pack) change(req *spi.Request, old stack, logical, typ string, props ma
 // one the template does not name, a KMS key's or a resource policy's none, is replaced as any other.
 func (p *Pack) next(ctx context.Context, req *spi.Request, st, old stack, logical, typ string, props map[string]any) (res, string, string, error) {
 	prev, how := p.change(req, old, logical, typ, props)
-	if how == "" || how == "update" && prev.Name != "" {
+	if _, list := props["Targets"].([]any); how != "" && typ == "AWS::Events::Rule" && props["Targets"] != nil && !list {
+		// "Array of Target": refused as a template gives it, before anything is made, never as a stored one is restored
+		return prev, how, "", invalid("Properties validation failed for resource " + logical + ": Targets must be a list, not " + spi.JSONText(props["Targets"]))
+	} else if how == "" || how == "update" && prev.Name != "" {
 		return prev, how, prev.Name, nil
 	} else if how == "replace" {
 		st.ID += "/" + prev.Physical
@@ -1193,8 +1196,6 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	spec, phys := k.create, ""
 	if !known {
 		return "", invalid("unsupported resource type " + typ)
-	} else if _, list := props["Targets"].([]any); typ == "AWS::Events::Rule" && props["Targets"] != nil && !list { // "Array of Target", before the rule is touched
-		return "", invalid("Properties validation failed for resource " + logical + ": Targets must be a list, not " + spi.JSONText(props["Targets"]))
 	} else if existing != "" {
 		spec = k.update
 		for _, c := range strings.Fields(clears[typ]) {
@@ -1367,12 +1368,12 @@ func gone(err error) bool {
 // alone (a continued rollback), every target but those keep names: all of them before the rule is deleted
 // ("Before you can delete the rule, you must remove all targets, using RemoveTargets", EventBridge).
 func (p *Pack) dropTargets(ctx context.Context, req *spi.Request, rule string, keep []any, was prior) error {
-	gave, listed2 := was.props["Targets"].([]any)                        // the targets themselves, when the previous properties are known in full
-	if !was.gave("Targets") || was.props["Targets"] != nil && !listed2 { // none given, or a value refused before it gave any
+	if !was.gave("Targets") {
 		return nil
 	}
 	listed, err := p.do(ctx, req, "aws.events ListTargetsByRule Rule={rule} EventBusName={bus}", "", rule, nil)
 	targets, _ := listed["Targets"].([]any)
+	gave, listed2 := was.props["Targets"].([]any) // the targets themselves, when the previous properties are known in full
 	named := func(in []any, t any) bool {
 		return slices.ContainsFunc(in, func(k any) bool { return str(asMap(k)["Id"]) == str(asMap(t)["Id"]) })
 	}

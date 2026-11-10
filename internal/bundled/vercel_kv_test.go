@@ -203,3 +203,21 @@ func TestVercelKVRefusesAnExpiryThatOverflows(t *testing.T) {
 		t.Fatalf("TTL of the largest expiry: %q, %v", got, err)
 	}
 }
+
+// What the bundle's quirk note says of SET options: they are ignored, not
+// refused. The value is stored and an earlier TTL is cleared.
+func TestVercelKVSetIgnoresItsOptions(t *testing.T) {
+	cmd := kvPack(t)
+	if _, err := cmd("SETEX", "k", "100", "old"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := cmd("SET", "k", "v", "EX", "10"); err != nil || got != "OK" {
+		t.Fatalf("SET with EX: %q, %v", got, err)
+	}
+	if got, err := cmd("GET", "k"); err != nil || got != "v" {
+		t.Fatalf("GET: %q, %v", got, err)
+	}
+	if got, err := cmd("TTL", "k"); err != nil || got != "-1" {
+		t.Fatalf("TTL after SET with EX: %q, %v", got, err)
+	}
+}

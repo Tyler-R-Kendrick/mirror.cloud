@@ -211,14 +211,14 @@ quirks:
     note: >
       LocalStack-class string surface for Upstash REST: SET, GET, DEL, EXISTS,
       PING, INCR, DECR, INCRBY, DECRBY, APPEND, STRLEN, EXPIRE, TTL, SETEX.
-      Hashes, lists, sets, sorted sets, MGET/MSET, pipelines and SET options
-      (EX/PX/NX/XX as argv) answer 501 `MirrorNotImplemented` with the
-      x-mirror-not-implemented header. SET with those options still stores the
-      value and clears TTL the way a bare SET does -- argv beyond key/value are
-      ignored, matching the old pack's silence on EX/PX rather than inventing
-      option parsing without a probe.
+      Hashes, lists, sets, sorted sets, MGET/MSET and pipelines answer 501
+      `MirrorNotImplemented` with the x-mirror-not-implemented header. SET
+      options (EX/PX/NX/XX as argv) are not one of those: SET answers OK,
+      stores the value and clears any TTL the way a bare SET does -- argv
+      beyond key and value are ignored, matching the old pack's silence on
+      EX/PX rather than inventing option parsing without a probe.
 
       EXPIRE/SETEX take whole seconds and run them in full from the command,
       against the injected clock; TTL answers the time left rounded to the
-      nearest second, as Redis does. Sub-second PEXPIRE is not in the served
-      set.
+      nearest second, as Redis does. EXPIRE with zero or negative seconds
+      deletes the key. Sub-second PEXPIRE is not in the served set.

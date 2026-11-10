@@ -930,7 +930,7 @@ var kinds = map[string]kind{
 	"AWS::Logs::LogGroup":          {"LogGroupName", 512, "aws.logs DescribeLogGroups logGroupNamePrefix={n}", "ResourceAlreadyExistsException", "{n}", "LogGroupName", "aws.logs CreateLogGroup logGroupName={n}", "logGroupName", "", "aws.logs DeleteLogGroup logGroupName={id}", "Arn=arn:aws:logs:{r}:{a}:log-group:{id}:*"},
 	"AWS::Events::Rule":            {"Name", 64, "aws.events DescribeRule Name={n} EventBusName=$EventBusName", "ResourceAlreadyExistsException", "{n}", "Name EventBusName", "aws.events PutRule Name={n} ScheduleExpression=$ScheduleExpression State=$State Description=$Description EventBusName=$EventBusName EventPattern=%EventPattern", "RuleArn", "aws.events PutRule Name={n} ScheduleExpression=$ScheduleExpression State=$State Description=$Description EventBusName=$EventBusName EventPattern=%EventPattern", "aws.events DeleteRule Name={rule} EventBusName={bus}", "Arn=arn:aws:events:{r}:{a}:rule/{bus/}{rule} RuleName={rule}"},
 	"AWS::Lambda::Function":        {"FunctionName", 64, "aws.lambda GetFunction FunctionName={n}", "ResourceConflictException", "{n}", "FunctionName PackageType DurableConfig TenancyConfig", "aws.lambda CreateFunction * FunctionName={n}", "FunctionName", "aws.lambda UpdateFunctionConfiguration * FunctionName={id:}", "aws.lambda DeleteFunction FunctionName={id:}", "Arn=arn:aws:lambda:{r}:{a}:function:{id}"},
-	"AWS::Kinesis::Stream":         {"Name", 128, "aws.kinesis DescribeStreamSummary StreamName={n}", "ResourceInUseException", "{n}", "Name", "aws.kinesis CreateStream StreamName={n} ShardCount", "StreamName", "aws.kinesis UpdateShardCount StreamName={id} TargetShardCount=@ShardCount ScalingType=UNIFORM_SCALING need:TargetShardCount", "aws.kinesis DeleteStream StreamName={id}", "Arn=arn:aws:kinesis:{r}:{a}:stream/{id}"},
+	"AWS::Kinesis::Stream":         {"Name", 128, "aws.kinesis DescribeStreamSummary StreamName={n}", "ResourceInUseException", "{n}", "Name", "aws.kinesis CreateStream StreamName={n} ShardCount StreamModeDetails", "StreamName", "aws.kinesis UpdateStreamMode StreamARN=arn:aws:kinesis:{r}:{a}:stream/{id} StreamModeDetails need:StreamModeDetails", "aws.kinesis DeleteStream StreamName={id}", "Arn=arn:aws:kinesis:{r}:{a}:stream/{id}"},
 	"AWS::Kinesis::ResourcePolicy": {"", 0, "", "", "", "ResourceArn", "aws.kinesis PutResourcePolicy ResourceARN=$ResourceARN ResourceARN=$ResourceArn Policy=%Policy Policy=%ResourcePolicy", "ResourceARN", "aws.kinesis PutResourcePolicy ResourceARN=$ResourceARN ResourceARN=$ResourceArn Policy=%Policy Policy=%ResourcePolicy", "aws.kinesis DeleteResourcePolicy ResourceARN={id}", ""},
 	"AWS::ApiGateway::RestApi":     {"Name", 1024, "", "", "", "", "aws.apigateway CreateRestApi name={n}", "id", "aws.apigateway UpdateRestApi restApiId={id} name={n}", "aws.apigateway DeleteRestApi restApiId={id}", "RestApiId={id}"},
 }
@@ -1015,9 +1015,9 @@ func under(st stack, r res, props map[string]any) string {
 // properties and nothing that was set outside it is touched: each service's update keeps what a call does
 // not name, so the value is the one its API reference gives a resource made without the property (Lambda's
 // Timeout "The default is 3 seconds", MemorySize "The default value is 128 MB"; DynamoDB's StreamEnabled
-// false, BillingMode PROVISIONED, TableClass STANDARD; an empty description; a stream's one shard). An
-// entry is the member to send, named as its property, or property>member where the names differ. A
-// bucket's are bucketOps, a rule's targets provision's, and a secret's value is sent only when the
+// false, BillingMode PROVISIONED, TableClass STANDARD; an empty description; a stream's provisioned mode).
+// An entry is the member to send, named as its property. A stream's one shard is sent by its own call, after its
+// mode. A bucket's are bucketOps, a rule's targets provision's, and a secret's value is sent only when the
 // template's differs (provision). Four updates send what the template gives whatever was there, because
 // the template must give it and the call is a whole replacement: a parameter's value and type
 // (PutParameter), a role's trust policy, a stream's resource policy, and a rule (PutRule: "If you omit arguments in
@@ -1029,7 +1029,7 @@ var clears = map[string]string{
 	"AWS::Lambda::Function":       `Description= Timeout=3 MemorySize=128 Environment=^{"Variables":{}} Layers=^[] KMSKeyArn= DeadLetterConfig=^{"TargetArn":""} TracingConfig=^{"Mode":"PassThrough"} EphemeralStorage=^{"Size":512}`,
 	"AWS::SecretsManager::Secret": `Description=`,
 	"AWS::KMS::Key":               `Description=`,
-	"AWS::Kinesis::Stream":        `ShardCount>TargetShardCount=1`,
+	"AWS::Kinesis::Stream":        `StreamModeDetails=^{"StreamMode":"PROVISIONED"}`,
 }
 
 // do makes a call a kind spells "service Operation member=value ...", and answers the answer over the
@@ -1201,12 +1201,8 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 	} else if existing != "" {
 		spec = k.update
 		for _, c := range strings.Fields(clears[typ]) {
-			property, send, renamed := strings.Cut(c, ">")
-			if !renamed {
-				property, send = c[:strings.Index(c, "=")], c
-			}
-			if props[property] == nil && was.gave(property) {
-				spec += " " + send
+			if property := c[:strings.Index(c, "=")]; props[property] == nil && was.gave(property) {
+				spec += " " + c
 			}
 		}
 	}
@@ -1243,6 +1239,9 @@ func (p *Pack) provision(ctx context.Context, req *spi.Request, typ, logical, n 
 			}
 			err = putErr
 		}
+	} else if err == nil && typ == "AWS::Kinesis::Stream" && existing != "" && str(asMap(props["StreamModeDetails"])["StreamMode"]) != "ON_DEMAND" {
+		// The count after the mode, and never an on-demand stream's: UpdateShardCount "is only supported for the data streams with the provisioned capacity mode".
+		_, err = p.do(ctx, req, "aws.kinesis UpdateShardCount StreamName={id} ScalingType=UNIFORM_SCALING TargetShardCount=@ShardCount need:TargetShardCount"+map[bool]string{true: " TargetShardCount=1"}[props["ShardCount"] == nil && was.gave("ShardCount")], n, existing, props)
 	} else if err == nil && typ == "AWS::S3::Bucket" && existing != "" { // one it makes, upsert configures once it is recorded
 		err = p.configureBucket(ctx, req, n, props, was)
 	} else if err != nil && existing == "" { // none once a create failed

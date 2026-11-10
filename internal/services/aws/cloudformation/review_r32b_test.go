@@ -267,6 +267,7 @@ func TestCloudFormationReview5BRemovedIsPutBack(t *testing.T) {
 			func(h *stacks, id string) string {
 				return "desc=" + str(asMap(rv31Get(h, "aws.kms", "DescribeKey", map[string]any{"KeyId": id})["KeyMetadata"])["Description"])
 			}},
+		{"stream-mode", rveProps("AWS::Kinesis::Stream", map[string]any{"StreamModeDetails": rv34Mode("ON_DEMAND"), "RetentionPeriodHours": 24}), rveProps("AWS::Kinesis::Stream", map[string]any{"RetentionPeriodHours": 48}), rv34Stream},
 		{"stream", rveProps("AWS::Kinesis::Stream", map[string]any{"ShardCount": 3, "RetentionPeriodHours": 24}), rveProps("AWS::Kinesis::Stream", map[string]any{"RetentionPeriodHours": 48}),
 			func(h *stacks, id string) string {
 				raw, _, _ := h.deps.Store.Scope(h.id.Account, h.id.Region).Collection("kinesis").Get(h.ctx, id)

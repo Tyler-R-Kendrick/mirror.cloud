@@ -99,18 +99,14 @@
   and limits), still move an on-demand stream's count.
 - `SplitShard`, `MergeShards` and the retention operations still make a
   record for a stream that does not exist, as the recorded trace has them.
-- A CloudFormation `AWS::Kinesis::Stream` does not pass its
-  `StreamModeDetails` on: its streams are provisioned.
-- `DescribeStream` and `ListShards` still list exactly one shard,
-  `shardId-000000000000`, with the full hash-key range, whatever the count.
-  Shards are not records here: listing a stream's real shards needs one
-  record per shard with its hash-key range (a 128-bit split the bundle's
-  expressions cannot compute), parent and adjacent shards for splits and
-  merges, and a record plane that routes a partition key to a shard and
-  hands out one iterator per shard. `PutRecord` writes to that one shard.
-- `UpdateShardCount` applies at once: the stream is never `UPDATING`, and
-  none of the service's limits on how far or how often a count may move is
-  applied.
+- A CloudFormation `AWS::Kinesis::Stream` has the mode its template gives:
+  `StreamModeDetails` goes to `CreateStream`, and its "Update requires: No
+  interruption" (Template Reference) is an `UpdateStreamMode` in place,
+  before the shard count; a stream whose template makes it on-demand is sent
+  no count. A rollback, and a continued one, put the previous mode back, and
+  a template that stops giving a mode leaves a provisioned stream, cleared
+  only when the previous template gave one. That the service's handler
+  orders the two calls so is a reading.
 
 ## Recorded trace
 

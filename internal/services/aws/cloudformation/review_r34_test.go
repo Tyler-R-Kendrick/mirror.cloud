@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/model"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/specboot"
@@ -20,6 +21,14 @@ func rv34Stream(h *stacks, id string) string {
 }
 
 func rv34Mode(mode string) map[string]any { return map[string]any{"StreamMode": mode} }
+
+// rv34Day moves the clock on 25 hours: past the window in which a stream changes mode twice.
+func rv34Day(t *testing.T, h *stacks) {
+	t.Helper()
+	if err := h.deps.Clock.Advance(25 * time.Hour); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // A stream has the capacity mode its template gives. StreamModeDetails "Specifies the capacity mode to
 // which you want to set your data stream" and its "Update requires: No interruption" (Template Reference,
@@ -53,7 +62,9 @@ func TestCloudFormationAStreamHasTheModeItsTemplateGives(t *testing.T) {
 		}
 		step("each takes the other's mode, the one that becomes provisioned with three shards", map[string]any{"StreamModeDetails": rv34Mode("PROVISIONED"), "ShardCount": 3}, map[string]any{"StreamModeDetails": rv34Mode("ON_DEMAND"), "ShardCount": 2}, "PROVISIONED 3, ON_DEMAND 2")
 		step("another property of an on-demand stream whose template gives a count", map[string]any{"StreamModeDetails": rv34Mode("PROVISIONED"), "ShardCount": 3}, map[string]any{"StreamModeDetails": rv34Mode("ON_DEMAND"), "ShardCount": 2, "RetentionPeriodHours": 48}, "PROVISIONED 3, ON_DEMAND 2")
-		// A failed update that changes both modes, and its rollback: each has the mode it had.
+		// A failed update that changes both modes, and its rollback: each has the mode it had. (A day on:
+		// a stream changes mode twice in 24 hours, and each has changed once.)
+		rv34Day(t, h)
 		rveFailed(t, h, "sm", stream(map[string]any{"StreamModeDetails": rv34Mode("ON_DEMAND")}), continued)
 		if continued {
 			if state() != "ON_DEMAND 3, ON_DEMAND 2" {
@@ -282,6 +293,7 @@ func TestCloudFormationAModeSwitchLeavesAStreamsShards(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, continued := range []bool{false, true} {
+		rv34Day(t, h) // the stream changes mode twice in each pass, which is a day's allowance
 		rveFailed(t, h, "b2", stream(map[string]any{"StreamModeDetails": rv34Mode("PROVISIONED"), "ShardCount": 5}), continued)
 		if continued {
 			rveContinue(t, h, "b2")
@@ -333,5 +345,48 @@ func TestCloudFormationAStreamsRestoreThatFailsIsAFailedRollback(t *testing.T) {
 				t.Errorf("after ContinueUpdateRollback the stack is %s; want UPDATE_ROLLBACK_FAILED still", st)
 			}
 		}
+	}
+}
+
+// A change of mode that Kinesis refuses fails as any refused call does, in a rollback too. A stream
+// changes mode twice in 24 hours ("you can switch between the on-demand and provisioned capacity modes
+// twice within 24 hours", Kinesis Developer Guide, Quotas and limits), and the engine does nothing
+// special about it: a rollback whose restore is a third change inside the window leaves the stack
+// UPDATE_ROLLBACK_FAILED with Kinesis's reason, a ContinueUpdateRollback inside the window fails the same
+// way, and one after it has passed puts the previous mode back.
+func TestCloudFormationARollbackWaitsForAStreamsNextChangeOfMode(t *testing.T) {
+	t.Parallel()
+	h := newStacks(t)
+	stream := func(mode string) map[string]any {
+		return map[string]any{"R": map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": map[string]any{"StreamModeDetails": rv34Mode(mode)}}}
+	}
+	if err := rveCreate(h, "tw", stream("PROVISIONED")); err != nil {
+		t.Fatal(err)
+	}
+	id := rv31IDs(h, "tw")["R"]
+	state := func() string {
+		st, reason, _ := h.status("tw")
+		return st + ", " + rv34Stream(h, id) + ", " + reason
+	}
+	const refused = "has changed its capacity mode twice in the last 24 hours"
+	if err := rv28Update(h, "tw", stream("ON_DEMAND")); err != nil { // the first change
+		t.Fatal(err)
+	}
+	failing := stream("PROVISIONED") // the second, with a failure after it: its rollback is a third
+	failing["Z"] = rv31Dep(rv31Bad, "R")
+	if err := rv28Update(h, "tw", failing); err == nil || !strings.HasPrefix(state(), "UPDATE_ROLLBACK_FAILED, PROVISIONED 1, ") || !strings.Contains(spi.JSONText(h.record("tw")["Resources"]), refused) {
+		t.Fatalf("the update whose rollback is a third change of mode answered %v and left %s, the record %s; want UPDATE_ROLLBACK_FAILED and Kinesis's reason on the stream", err, state(), spi.JSONText(h.record("tw")["Resources"]))
+	}
+	if err := h.deps.Clock.Advance(23 * time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("ContinueUpdateRollback", map[string]any{"StackName": "tw"}); err == nil || !strings.Contains(err.Error(), refused) || !strings.HasPrefix(state(), "UPDATE_ROLLBACK_FAILED, PROVISIONED 1, ") {
+		t.Errorf("ContinueUpdateRollback inside the window answered %v and left %s; want Kinesis's refusal again", err, state())
+	}
+	if err := h.deps.Clock.Advance(2 * time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.invoke("ContinueUpdateRollback", map[string]any{"StackName": "tw"}); err != nil || state() != "UPDATE_ROLLBACK_COMPLETE, ON_DEMAND 1, " {
+		t.Errorf("ContinueUpdateRollback after the window answered %v and left %s; want the stream on-demand again", err, state())
 	}
 }

@@ -678,3 +678,70 @@ func TestKinesisEveryNotFoundNamesWhatWasNotFound(t *testing.T) {
 		t.Errorf("a consumer that exists is described %v; registered as %v", described, made)
 	}
 }
+
+// A stream changes mode twice in 24 hours and no more: "For each data stream in your AWS account, you
+// can switch between the on-demand and provisioned capacity modes twice within 24 hours" (Developer
+// Guide, Quotas and limits). Any number of changes was taken. A third within 24 hours of the first of
+// two is refused; a call that asks for the mode the stream has is no change and is not counted; and the
+// window is each stream's own, and moves: 24 hours after a change it no longer counts. The guide names
+// no error: LimitExceededException, which UpdateStreamMode lists for "the requested resource exceeds
+// the maximum number allowed", its message, and that the 24 hours are a moving window, are a reading.
+func TestKinesisAStreamChangesModeTwiceInADay(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	deps := spitest.Deps(t)
+	p := bundled.Handler("aws.kinesis", deps)
+	mode := func(stream, to string) string {
+		t.Helper()
+		_, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "UpdateStreamMode", Input: map[string]any{
+			"StreamARN": "arn:aws:kinesis:us-east-1:123456789012:stream/" + stream, "StreamModeDetails": map[string]any{"StreamMode": to}}})
+		if err != nil {
+			return err.Error()
+		}
+		out, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "DescribeStreamSummary", Input: map[string]any{"StreamName": stream}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return fmt.Sprint(out.Output["StreamDescriptionSummary"].(map[string]any)["StreamModeDetails"].(map[string]any)["StreamMode"])
+	}
+	after := func(d time.Duration) {
+		t.Helper()
+		if err := deps.Clock.Advance(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, stream := range []string{"a", "b"} {
+		if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateStream", Input: map[string]any{"StreamName": stream, "ShardCount": 1}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const refused = "LimitExceededException: Stream a under account 123456789012 has changed its capacity mode twice in the last 24 hours."
+	for _, step := range []struct {
+		wait       time.Duration
+		stream, to string
+		want       string
+	}{
+		{0, "a", "PROVISIONED", "PROVISIONED"},                     // the mode it has: no change
+		{0, "a", "ON_DEMAND", "ON_DEMAND"},                         // the first, at 0h
+		{0, "a", "ON_DEMAND", "ON_DEMAND"},                         // no change
+		{10 * time.Hour, "a", "PROVISIONED", "PROVISIONED"},        // the second, at 10h
+		{0, "a", "ON_DEMAND", refused},                             // a third, the same hour
+		{0, "a", "PROVISIONED", "PROVISIONED"},                     // the mode it has is still answered
+		{0, "b", "ON_DEMAND", "ON_DEMAND"},                         // another stream has its own two
+		{13*time.Hour + 59*time.Minute, "a", "ON_DEMAND", refused}, // 23h59 after the first
+		{time.Minute, "a", "ON_DEMAND", "ON_DEMAND"},               // 24h after the first: it no longer counts
+		{0, "a", "PROVISIONED", "LimitExceededException: Stream a under account 123456789012 has changed its capacity mode twice in the last 24 hours."},
+		{10 * time.Hour, "a", "PROVISIONED", "PROVISIONED"}, // 24h after the second
+	} {
+		after(step.wait)
+		if got := mode(step.stream, step.to); got != step.want {
+			t.Errorf("at %s, stream %s to %s: %s; want %s", deps.Clock.Now().Format("15:04 Jan 2"), step.stream, step.to, got, step.want)
+		}
+	}
+	// A stream created again over its name is a new stream, with its own two.
+	if _, err := p.Invoke(context.Background(), &spi.Request{Identity: id, Operation: "CreateStream", Input: map[string]any{"StreamName": "a", "ShardCount": 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := mode("a", "ON_DEMAND") + " " + mode("a", "PROVISIONED") + " " + mode("a", "ON_DEMAND"); got != "ON_DEMAND PROVISIONED "+refused {
+		t.Errorf("a stream created again changed mode: %s", got)
+	}
+}

@@ -477,7 +477,9 @@ operations:
 
   # A stream that changes mode is held to the limit of the mode it takes, over
   # the other streams: the on-demand streams' limit, or the shard limit for
-  # the shards it has.
+  # the shards it has. It changes twice in 24 hours and no more: the record
+  # keeps the times of its changes in that window (ModeChanges), and a call
+  # for the mode it has is no change.
   UpdateStreamMode:
     reads:
       s: { resource: stream, key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))" }
@@ -491,6 +493,8 @@ operations:
       raw: "structure && 'StreamMode' in input.StreamModeDetails ? input.StreamModeDetails.StreamMode : null"
       mode: "raw == null ? (given ? '' : 'PROVISIONED') : (type(raw) == string ? string(raw) : toJSON(raw))"
       asked: "given && 'StreamARN' in input && input.StreamARN != null"
+      changing: "s_found && mode != (('StreamModeDetails' in s && type(s.StreamModeDetails) == map && 'StreamMode' in s.StreamModeDetails && s.StreamModeDetails.StreamMode == 'ON_DEMAND') ? 'ON_DEMAND' : 'PROVISIONED')"
+      recent: "s_found && 'ModeChanges' in s && type(s.ModeChanges) == list ? s.ModeChanges.filter(t, now_ms - int(t) < 86400000) : []"
     require:
       - cond: "given || !('StreamModeDetails' in input)"
         error: Validation
@@ -507,6 +511,9 @@ operations:
       - cond: "!asked || s_found"
         error: NotFound
         message_expr: "'Stream ' + lastSegment(string(input.StreamARN), '/') + ' under account ' + identity.account + ' not found.'"
+      - cond: "!asked || !changing || size(recent) < 2"
+        error: LimitExceeded
+        message_expr: "'Stream ' + lastSegment(string(input.StreamARN), '/') + ' under account ' + identity.account + ' has changed its capacity mode twice in the last 24 hours.'"
       - cond: "!asked || mode != 'ON_DEMAND' || size(others.filter(o, 'StreamModeDetails' in o && type(o.StreamModeDetails) == map && 'StreamMode' in o.StreamModeDetails && o.StreamModeDetails.StreamMode == 'ON_DEMAND')) < 50"
         error: LimitExceeded
         message: This request would exceed the limit of on-demand streams for the account.
@@ -519,6 +526,7 @@ operations:
           key: "'StreamName' in input && string(input.StreamName) != '' ? string(input.StreamName) : ('StreamARN' in input && string(input.StreamARN) != '' ? lastSegment(string(input.StreamARN), '/') : ('StreamArn' in input && string(input.StreamArn) != '' ? lastSegment(string(input.StreamArn), '/') : ''))"
           record:
             StreamModeDetails: "{'StreamMode': mode}"
+            ModeChanges: "changing ? recent + [now_ms] : recent"
     output: {}
 
   UpdateStreamWarmThroughput:
@@ -627,9 +635,10 @@ quirks:
       ResourceNotFoundException; a change to ON_DEMAND is held to the
       on-demand streams' limit and one to PROVISIONED to the ShardLimit for
       the shards the stream has, each over the caller's other streams, with
-      LimitExceededException. The service's limit of two changes in 24 hours
-      is not applied, the stream is never UPDATING, and its shards stay as
-      they are.
+      LimitExceededException. A stream changes mode twice in 24 hours: a
+      third change inside that moving window is LimitExceededException too,
+      and a call for the mode the stream has is no change. The stream is
+      never UPDATING, and its shards stay as they are.
   - operation: StartStreamEncryption
     note: >
       EncryptionType comes from the operation name, not the request: Start is

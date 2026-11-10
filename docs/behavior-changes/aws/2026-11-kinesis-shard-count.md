@@ -66,6 +66,7 @@
 | `SplitShard` or `MergeShards` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException`, "Stream <name> under account <id> not found." |
 | `IncreaseStreamRetentionPeriod` or `DecreaseStreamRetentionPeriod` on a stream that does not exist | 200, and a stream record that `DescribeStream` then answered | `ResourceNotFoundException`, with the message; no record |
 | `DescribeStream`, `DescribeStreamSummary`, `PutRecord` or `DescribeStreamConsumer` of what does not exist | `ResourceNotFoundException` with no message | The same, with the message |
+| A third change of a stream's mode within 24 hours | Accepted | `LimitExceededException` |
 | `UpdateStreamMode` with no `StreamModeDetails`, or a null one | `ValidationException`, "StreamModeDetails is required" | The same (it was `InternalFailure`, 500, between the two changes of this note) |
 | `CreateStream` or `UpdateStreamMode` with a `StreamModeDetails` that is `{}`, holds a null `StreamMode`, or is no structure | Taken as provisioned, or `InternalFailure` | `ValidationException` |
 | `UpdateStreamMode` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException` |
@@ -150,9 +151,23 @@
   expressions cannot compute), parent and adjacent shards for splits and
   merges, and a record plane that routes a partition key to a shard and
   hands out one iterator per shard. `PutRecord` writes to that one shard.
+- "For each data stream in your AWS account, you can switch between the
+  on-demand and provisioned capacity modes twice within 24 hours" (Quotas
+  and limits). A third change within 24 hours of the first of two is
+  refused. The guide names no error and the `UpdateStreamMode` page does
+  not mention the limit: `LimitExceededException` (which the operation
+  lists, "The requested resource exceeds the maximum number allowed"), its
+  message, that the 24 hours are a moving window, and that a call for the
+  mode the stream already has is no switch, are readings. A stream created
+  again over its name starts afresh.
+- CloudFormation does nothing special about that limit. An update, a
+  rollback or a continued rollback that needs a change of mode Kinesis
+  refuses fails as any refused call does: a rollback is left
+  `UPDATE_ROLLBACK_FAILED` with Kinesis's reason, and
+  `ContinueUpdateRollback` succeeds once the window has passed.
 - `UpdateShardCount` and `UpdateStreamMode` apply at once: the stream is
   never `UPDATING`, and none of the service's limits on how far or how
-  often a count or a mode may move is applied.
+  often a count may move is applied.
 
 ## Recorded trace
 

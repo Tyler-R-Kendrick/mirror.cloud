@@ -137,9 +137,8 @@ func listBacking(ctx context.Context, collection spi.Collection, typeName string
 }
 
 func listRecords(ctx context.Context, c spi.Collection, typeName string) []any {
-	kvs, _, _ := c.List(ctx, "", "", 0)
 	var items []any
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, c, "", "", 0) {
 		rec := spi.JSONObject(kv.Value)
 		if typeName != "" && rec["TypeName"] != typeName {
 			continue

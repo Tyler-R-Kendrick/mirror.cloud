@@ -212,7 +212,7 @@ func eval(n node, item, values map[string]any) (any, error) {
 		if n.val == "false" {
 			return false, nil
 		}
-		if f, err := strconvParse(n.val); err == nil {
+		if f, err := strconv.ParseFloat(n.val, 64); err == nil {
 			return f, nil
 		}
 		return n.val, nil
@@ -315,8 +315,8 @@ func eval(n node, item, values map[string]any) (any, error) {
 	case "+", "-":
 		a, _ := eval(kid(0), item, values)
 		b, _ := eval(kid(1), item, values)
-		af, _ := toFloat(a)
-		bf, _ := toFloat(b)
+		af := toFloat(a)
+		bf := toFloat(b)
 		if n.op == "-" {
 			return af - bf, nil
 		}
@@ -344,7 +344,7 @@ func unwrap(v any) any {
 		return s
 	}
 	if n, ok := m["N"].(string); ok {
-		f, _ := strconvParse(n)
+		f, _ := strconv.ParseFloat(n, 64)
 		return f
 	}
 	if b, ok := m["BOOL"].(bool); ok {
@@ -420,8 +420,8 @@ func addAttr(cur, delta any) any {
 			return map[string]any{"SS": out}
 		}
 	}
-	cf, _ := toFloat(unwrap(cur))
-	df, _ := toFloat(unwrap(delta))
+	cf := toFloat(unwrap(cur))
+	df := toFloat(unwrap(delta))
 	return map[string]any{"N": strconv.FormatFloat(cf+df, 'f', -1, 64)}
 }
 
@@ -486,8 +486,8 @@ func compare(a, b any) int {
 	if aok && bok {
 		return strings.Compare(as, bs)
 	}
-	af, _ := toFloat(a)
-	bf, _ := toFloat(b)
+	af := toFloat(a)
+	bf := toFloat(b)
 	if af < bf {
 		return -1
 	}
@@ -497,20 +497,18 @@ func compare(a, b any) int {
 	return 0
 }
 
-func toFloat(v any) (float64, bool) {
+func toFloat(v any) float64 {
 	switch t := v.(type) {
 	case float64:
-		return t, true
+		return t
 	case int:
-		return float64(t), true
+		return float64(t)
 	case string:
-		f, err := strconvParse(t)
-		return f, err == nil
+		f, _ := strconv.ParseFloat(t, 64)
+		return f
 	}
-	return 0, false
+	return 0
 }
-
-func strconvParse(s string) (float64, error) { return strconv.ParseFloat(s, 64) }
 
 func splitTop(s string) []string {
 	var out []string

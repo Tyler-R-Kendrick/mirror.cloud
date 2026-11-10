@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // Members reads name.member.1, name.member.2 and on to the first index
@@ -80,3 +81,45 @@ func (memCollection) List(context.Context, string, string, int) ([]KV, bool, err
 	return nil, false, nil
 }
 func (memCollection) Txn(context.Context, func(Tx) error) error { return nil }
+
+// awaitClock is a Clock whose AfterTime answers a channel the test fires.
+type awaitClock struct {
+	Clock
+	due chan time.Time
+}
+
+func (c awaitClock) AfterTime(time.Time) <-chan time.Time { return c.due }
+
+// Await ends true when the clock reaches next or the worker is woken, false when it is stopped, and with
+// no next it asks the clock for nothing.
+func TestAwaitWaitsForTheClockAWakeOrAStop(t *testing.T) {
+	next := time.Unix(1, 0)
+	for name, c := range map[string]struct {
+		next            time.Time
+		due, wake, stop bool
+		want            bool
+	}{
+		"due":           {next, true, false, false, true},
+		"woken":         {next, false, true, false, true},
+		"stopped":       {next, false, false, true, false},
+		"idle, woken":   {time.Time{}, true, true, false, true}, // the clock's channel is not read with no next
+		"idle, stopped": {time.Time{}, true, false, true, false},
+	} {
+		clock, wake, stop := awaitClock{due: make(chan time.Time, 1)}, make(chan struct{}, 1), make(chan struct{}, 1)
+		if c.due {
+			clock.due <- next
+		}
+		if c.wake {
+			wake <- struct{}{}
+		}
+		if c.stop {
+			stop <- struct{}{}
+		}
+		if got := Await(clock, c.next, wake, stop); got != c.want {
+			t.Errorf("%s: Await = %v, want %v", name, got, c.want)
+		}
+		if c.next.IsZero() && len(clock.due) != 1 {
+			t.Errorf("%s: Await read the clock with no next", name)
+		}
+	}
+}

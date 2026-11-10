@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The value helpers below read the loosely typed members a request or a
@@ -176,4 +177,20 @@ func Integer(v any) int {
 		return i
 	}
 	return 0
+}
+
+// Await blocks a worker until its clock reaches next, for good when next is zero, or until it is woken:
+// false once it is stopped.
+func Await(clock Clock, next time.Time, wake, stop <-chan struct{}) bool {
+	var due <-chan time.Time
+	if !next.IsZero() {
+		due = clock.AfterTime(next)
+	}
+	select {
+	case <-due:
+	case <-wake:
+	case <-stop:
+		return false
+	}
+	return true
 }

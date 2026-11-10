@@ -10806,9 +10806,9 @@ var mutants = []mutant{
 		name: "firehose-ignore-http-secret-credentials",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 		old: `accessKey, hasAccessKey := endpoint["AccessKey"].(string)
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {`,
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled {`,
 		new: `accessKey, hasAccessKey := endpoint["AccessKey"].(string)
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); false {`,
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled && false {`,
 		pkg: "./internal/services/aws/firehose",
 		run: "TestFirehoseHTTPEndpointDestination",
 	},
@@ -11043,9 +11043,9 @@ var mutants = []mutant{
 		name: "firehose-ignore-splunk-secret-credentials",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 		old: `token := spi.First(destination, "HECToken")
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {`,
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled {`,
 		new: `token := spi.First(destination, "HECToken")
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); false {`,
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled && false {`,
 		pkg: "./internal/services/aws/firehose",
 		run: "TestFirehoseSplunkSecretAndPersistentRetry",
 	},
@@ -11162,9 +11162,9 @@ var mutants = []mutant{
 		name: "firehose-ignore-redshift-secret-credentials",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 		old: `username, password := spi.First(destination, "Username"), spi.First(destination, "Password")
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {`,
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled {`,
 		new: `username, password := spi.First(destination, "Username"), spi.First(destination, "Password")
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); false {`,
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled && false {`,
 		pkg: "./internal/services/aws/firehose",
 		run: "TestFirehoseRedshiftPersistentRetry",
 	},
@@ -11414,9 +11414,9 @@ var mutants = []mutant{
 		name: "firehose-ignore-snowflake-secret",
 		file: filepath.Join("internal", "services", "aws", "firehose", "firehose.go"),
 		old: `func (p *Pack) validateSnowflakeCredentials(ctx context.Context, req *spi.Request, destination map[string]any) error {
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {`,
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled {`,
 		new: `func (p *Pack) validateSnowflakeCredentials(ctx context.Context, req *spi.Request, destination map[string]any) error {
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); false {`,
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled && false {`,
 		pkg: "./internal/services/aws/firehose",
 		run: "TestFirehoseSnowflakeSecretAndPersistentBuffer",
 	},
@@ -15441,17 +15441,17 @@ var mutants = []mutant{
 	},
 	{
 		name: "states-schedule-relative-wait-deadline",
-		file: filepath.Join("internal", "services", "aws", "states", "states.go"),
-		old:  `case <-p.deps.Clock.AfterTime(next):`,
-		new:  `case <-p.deps.Clock.After(next.Sub(p.deps.Clock.Now())):`,
+		file: filepath.Join("internal", "spi", "values.go"),
+		old:  `due = clock.AfterTime(next)`,
+		new:  `due = clock.After(next.Sub(clock.Now()))`,
 		pkg:  "./internal/services/aws/states",
 		run:  "TestStatesWaitLoopUsesAbsoluteDeadline",
 	},
 	{
 		name: "events-schedule-relative-rule-deadline",
-		file: filepath.Join("internal", "services", "aws", "events", "events.go"),
-		old:  `case <-p.deps.Clock.AfterTime(next):`,
-		new:  `case <-p.deps.Clock.After(next.Sub(p.deps.Clock.Now())):`,
+		file: filepath.Join("internal", "spi", "values.go"),
+		old:  `due = clock.AfterTime(next)`,
+		new:  `due = clock.After(next.Sub(clock.Now()))`,
 		pkg:  "./internal/services/aws/events",
 		run:  "TestSchedulerUsesAbsoluteDeadline",
 	},

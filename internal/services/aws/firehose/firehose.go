@@ -1498,14 +1498,7 @@ func validateElasticsearchDestination(destination map[string]any, region string)
 	if options, ok := destination["DocumentIdOptions"].(map[string]any); destination["DocumentIdOptions"] != nil && (!ok || (spi.First(options, "DefaultDocumentIdFormat") != "FIREHOSE_DEFAULT" && spi.First(options, "DefaultDocumentIdFormat") != "NO_DOCUMENT_ID")) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	s3, ok := destination["S3Configuration"].(map[string]any)
-	if !ok {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if err := validateS3Configuration(s3, region, false); err != nil {
-		return err
-	}
-	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+	if err := loggedS3(destination, region); err != nil {
 		return err
 	}
 	if err := validateVPCConfiguration(destination["VpcConfiguration"]); err != nil {
@@ -1534,11 +1527,7 @@ func validateOpenSearchServerlessDestination(destination map[string]any, region 
 	if mode := spi.First(destination, "S3BackupMode"); mode != "" && mode != "FailedDocumentsOnly" && mode != "AllDocuments" {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	s3, ok := destination["S3Configuration"].(map[string]any)
-	if !ok {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if err := validateS3Configuration(s3, region, false); err != nil {
+	if _, err := requiredS3(destination, region); err != nil {
 		return err
 	}
 	if err := validateVPCConfiguration(destination["VpcConfiguration"]); err != nil {
@@ -1613,11 +1602,8 @@ func validateRedshiftDestination(destination map[string]any, region string) erro
 	if mode != "" && mode != "Disabled" && mode != "Enabled" {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	s3, ok := destination["S3Configuration"].(map[string]any)
-	if !ok {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if err := validateS3Configuration(s3, region, false); err != nil {
+	s3, err := requiredS3(destination, region)
+	if err != nil {
 		return err
 	}
 	if compression := spi.First(s3, "CompressionFormat"); compression != "" && compression != "UNCOMPRESSED" && compression != "GZIP" {
@@ -1674,14 +1660,7 @@ func validateSplunkDestination(destination map[string]any, region string) error 
 	if !enabled && token == "" {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	s3, ok := destination["S3Configuration"].(map[string]any)
-	if !ok {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if err := validateS3Configuration(s3, region, false); err != nil {
-		return err
-	}
-	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+	if err := loggedS3(destination, region); err != nil {
 		return err
 	}
 	if raw := destination["ProcessingConfiguration"]; raw != nil {
@@ -1760,14 +1739,7 @@ func validateSnowflakeDestination(destination map[string]any, region string) err
 	if vpc, ok := destination["SnowflakeVpcConfiguration"].(map[string]any); destination["SnowflakeVpcConfiguration"] != nil && (!ok || len(spi.First(vpc, "PrivateLinkVpceId")) < 47 || len(spi.First(vpc, "PrivateLinkVpceId")) > 255 || !firehoseVPCEndpointService.MatchString(spi.First(vpc, "PrivateLinkVpceId"))) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	s3, ok := destination["S3Configuration"].(map[string]any)
-	if !ok {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if err := validateS3Configuration(s3, region, false); err != nil {
-		return err
-	}
-	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+	if err := loggedS3(destination, region); err != nil {
 		return err
 	}
 	return validateProcessingConfiguration(destination["ProcessingConfiguration"])
@@ -1813,14 +1785,7 @@ func validateHTTPEndpointDestination(destination map[string]any, region string) 
 	if role := spi.First(destination, "RoleARN"); role != "" && !validRoleARN(role) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	s3, ok := destination["S3Configuration"].(map[string]any)
-	if !ok {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if err := validateS3Configuration(s3, region, false); err != nil {
-		return err
-	}
-	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+	if err := loggedS3(destination, region); err != nil {
 		return err
 	}
 	if raw, exists := destination["ProcessingConfiguration"]; exists {
@@ -2587,15 +2552,8 @@ func (p *Pack) deliverRedshiftRecords(ctx context.Context, req *spi.Request, des
 
 func (p *Pack) redshiftCredentials(ctx context.Context, req *spi.Request, destination map[string]any) (string, string, error) {
 	username, password := spi.First(destination, "Username"), spi.First(destination, "Password")
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
-		response, err := bundled.Handler("aws.secretsmanager", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": spi.First(secrets, "SecretARN")}})
-		var secret string
-		var ok bool
-		if response != nil {
-			secret, ok = response.Output["SecretString"].(string)
-		}
-		value := map[string]any{}
-		if err != nil || !ok || json.Unmarshal([]byte(secret), &value) != nil {
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled {
+		if !ok {
 			return "", "", errors.New("unable to retrieve Redshift credentials")
 		}
 		username, ok = value["username"].(string)
@@ -3377,18 +3335,7 @@ func (p *Pack) httpRetryLoop() {
 		next = sooner(next, p.runHTTPRetries(context.Background()))
 		next = sooner(next, p.runSearchWork(context.Background()))
 		next = sooner(next, p.runRedshiftRetries(context.Background()))
-		if next.IsZero() {
-			select {
-			case <-p.wake:
-			case <-p.stop:
-				return
-			}
-			continue
-		}
-		select {
-		case <-p.deps.Clock.AfterTime(next):
-		case <-p.wake:
-		case <-p.stop:
+		if !spi.Await(p.deps.Clock, next, p.wake, p.stop) {
 			return
 		}
 	}
@@ -3689,16 +3636,42 @@ func (p *Pack) deliverSnowflake(ctx context.Context, req *spi.Request, destinati
 	return true, false, "", ""
 }
 
+// requiredS3 is a destination's S3Configuration, which it must have, once validated.
+func requiredS3(destination map[string]any, region string) (map[string]any, error) {
+	s3, ok := destination["S3Configuration"].(map[string]any)
+	if !ok {
+		return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	return s3, validateS3Configuration(s3, region, false)
+}
+
+// loggedS3 checks a destination's required S3Configuration, and then its CloudWatchLoggingOptions.
+func loggedS3(destination map[string]any, region string) error {
+	if _, err := requiredS3(destination, region); err != nil {
+		return err
+	}
+	return validateCloudWatchLogging(destination["CloudWatchLoggingOptions"])
+}
+
+// secretValue reads the JSON object in the secret a destination's SecretsManagerConfiguration names: whether
+// the configuration is enabled, and whether the secret was read as one.
+func (p *Pack) secretValue(ctx context.Context, req *spi.Request, destination map[string]any) (value map[string]any, enabled, ok bool) {
+	secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any)
+	if secrets["Enabled"] != true {
+		return nil, false, false
+	}
+	response, err := bundled.Handler("aws.secretsmanager", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": spi.First(secrets, "SecretARN")}})
+	var secret string
+	if response != nil {
+		secret, ok = response.Output["SecretString"].(string)
+	}
+	value = map[string]any{}
+	return value, true, err == nil && ok && json.Unmarshal([]byte(secret), &value) == nil
+}
+
 func (p *Pack) validateSnowflakeCredentials(ctx context.Context, req *spi.Request, destination map[string]any) error {
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
-		response, err := bundled.Handler("aws.secretsmanager", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": spi.First(secrets, "SecretARN")}})
-		var secret string
-		var ok bool
-		if response != nil {
-			secret, ok = response.Output["SecretString"].(string)
-		}
-		value := map[string]any{}
-		if err != nil || !ok || json.Unmarshal([]byte(secret), &value) != nil {
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled {
+		if !ok {
 			return errors.New("unable to retrieve Snowflake credentials")
 		}
 		user, userOK := value["user"].(string)
@@ -3731,15 +3704,8 @@ func (p *Pack) deliverSnowflakeFailure(ctx context.Context, req *spi.Request, s3
 
 func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination map[string]any, requestID string, data [][]byte) (bool, bool, string, string) {
 	token := spi.First(destination, "HECToken")
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
-		response, err := bundled.Handler("aws.secretsmanager", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": spi.First(secrets, "SecretARN")}})
-		var secret string
-		var ok bool
-		if response != nil {
-			secret, ok = response.Output["SecretString"].(string)
-		}
-		value := map[string]any{}
-		if err != nil || !ok || json.Unmarshal([]byte(secret), &value) != nil {
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled {
+		if !ok {
 			return false, false, "Splunk.InvalidToken", "unable to retrieve Splunk HEC token"
 		}
 		token, ok = value["hec_token"].(string)
@@ -3881,15 +3847,8 @@ func (p *Pack) deliverHTTP(ctx context.Context, req *spi.Request, stream, destin
 	}
 	endpoint, _ := destination["EndpointConfiguration"].(map[string]any)
 	accessKey, hasAccessKey := endpoint["AccessKey"].(string)
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
-		response, err := bundled.Handler("aws.secretsmanager", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": spi.First(secrets, "SecretARN")}})
-		var secret string
-		var ok bool
-		if response != nil {
-			secret, ok = response.Output["SecretString"].(string)
-		}
-		value := map[string]any{}
-		if err != nil || !ok || json.Unmarshal([]byte(secret), &value) != nil {
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled {
+		if !ok {
 			return false, false, "unable to retrieve HTTP endpoint access key"
 		}
 		accessKey, hasAccessKey = value["api_key"].(string)

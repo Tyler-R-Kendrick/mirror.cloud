@@ -150,18 +150,7 @@ func (p *Pack) waitLoop() {
 	defer close(p.done)
 	for {
 		next := p.runDueWaits(context.Background())
-		if next.IsZero() {
-			select {
-			case <-p.wake:
-			case <-p.stop:
-				return
-			}
-			continue
-		}
-		select {
-		case <-p.deps.Clock.AfterTime(next):
-		case <-p.wake:
-		case <-p.stop:
+		if !spi.Await(p.deps.Clock, next, p.wake, p.stop) {
 			return
 		}
 	}

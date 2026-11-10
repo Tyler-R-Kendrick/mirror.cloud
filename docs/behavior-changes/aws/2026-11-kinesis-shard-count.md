@@ -114,9 +114,20 @@
   rollback, and a continued one, put the previous mode back, and a template
   that stops giving a mode leaves a provisioned stream, cleared only when
   the previous template gave one.
-- A CloudFormation stream's shard count is sent only when its template's
-  `ShardCount` differs from what the previous template gave, after the mode,
-  and never to a stream whose template makes it on-demand. A change of mode
+- A CloudFormation stream's shard count is sent, after the mode, when its
+  template's `ShardCount` differs from what the previous template gave, or
+  when the update takes the stream from on-demand by its template to not
+  on-demand and the template gives a count; never to a stream whose
+  template makes it on-demand. The second case is there because a count
+  given or changed while the template made the stream on-demand was never
+  sent: `{}`, then `ON_DEMAND` with 7, then `PROVISIONED` with 7 ended
+  with one shard, and `ON_DEMAND` with 7, then with 9, then `PROVISIONED`
+  with 9 ended with seven. A restore does the same, so a rollback from
+  on-demand to a provisioned template puts that template's count back. A
+  continued rollback knows only that the mode changed, not what it was,
+  and takes a changed mode for a stream that was on-demand (a reading: it
+  can send a count the stream already has). A template that gives no count
+  is sent none on leaving on-demand, and keeps the shards it has. A change of mode
   in place leaves the stream's shards as they are, as Kinesis itself does.
   Two consequences are readings of what the service's handler would do,
   pinned as they are: a stream made on-demand in place keeps the count it
@@ -134,8 +145,15 @@
   to `UPDATE_ROLLBACK_COMPLETE`: the restore's count is refused as the
   update's was, and since the update's never applied there is nothing to
   put back, so that one refusal, of the count call alone, does not stop a
-  rollback or `ContinueUpdateRollback`. Any other restore that fails is a
-  failed rollback.
+  rollback or `ContinueUpdateRollback`. It is recognised whole, by its code
+  and its full sentence, and only on a stream: an error that merely
+  contains those words, as `ResourceNotFoundException` does for a stream so
+  named, or the enum refusal for a stored mode so spelled, is a failed
+  restore like any other. Any other restore that fails is a failed
+  rollback. The same reading holds on a continued rollback of a count that
+  did apply: `ShardCount` 2 updated to 5, the restore failing for another
+  reason, the stream then made on-demand outside the stack, ends
+  `UPDATE_ROLLBACK_COMPLETE` with the stream on-demand and five shards.
 - A request's `StreamModeDetails` that is absent or null is not given:
   `CreateStream` makes a provisioned stream and `UpdateStreamMode` answers
   "StreamModeDetails is required", as for any required member, before

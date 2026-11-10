@@ -540,7 +540,7 @@ func TestAzureQueueMalformedQueryParameters(t *testing.T) {
 	mid, receipt := fmt.Sprint(put["id"]), fmt.Sprint(put["pop_receipt"])
 
 	const invalid, outOfRange = "InvalidQueryParameterValue", "OutOfRangeQueryParameterValue"
-	for _, v := range []string{"abc", "", "1.5", "1e3", " 5", "5s", "0x10", "+5", "--1", "99999999999999999999"} {
+	for _, v := range []string{"abc", "1.5", "1e3", " 5", "5s", "0x10", "--1", "+-1", "+", "-", "99999999999999999999"} {
 		fault(invalid, "PutMessage", map[string]any{"message": "x", "visibilitytimeout": v})
 		fault(invalid, "PutMessage", map[string]any{"message": "x", "messagettl": v})
 		fault(invalid, "GetMessages", map[string]any{"visibilitytimeout": v})
@@ -552,6 +552,23 @@ func TestAzureQueueMalformedQueryParameters(t *testing.T) {
 	fault(outOfRange, "PutMessage", map[string]any{"message": "x", "visibilitytimeout": "999999999999"})
 	fault(outOfRange, "GetMessages", map[string]any{"numofmessages": "-1"})
 	fault(outOfRange, "UpdateMessage", map[string]any{"messageid": mid, "popreceipt": receipt, "visibilitytimeout": "-1", "message": "x"})
+
+	// A decimal integer is one with a sign or leading zeros too, as it always
+	// was here: only what is not a decimal integer is refused.
+	for _, in := range []map[string]any{
+		{"message": "x", "messagettl": "+5"}, {"message": "x", "messagettl": "007"},
+		{"message": "x", "visibilitytimeout": "+1"}, {"message": "x", "visibilitytimeout": "-0"}, {"message": "x", "visibilitytimeout": "000"},
+	} {
+		extra := inv("PutMessage", in)
+		inv("DeleteMessage", map[string]any{"messageid": fmt.Sprint(extra["id"]), "popreceipt": fmt.Sprint(extra["pop_receipt"])})
+	}
+	for _, n := range []string{"+1", "01", "001"} {
+		if got := inv("PeekMessages", map[string]any{"numofmessages": n})["_list"].([]any); len(got) != 1 {
+			t.Fatalf("peek numofmessages=%s: %d messages", n, len(got))
+		}
+	}
+	fault(outOfRange, "GetMessages", map[string]any{"numofmessages": "-0"})
+	fault(outOfRange, "GetMessages", map[string]any{"visibilitytimeout": "+0"})
 
 	// Update Message's timeout is required.
 	fault("MissingRequiredQueryParameter", "UpdateMessage", map[string]any{"messageid": mid, "popreceipt": receipt, "message": "x"})

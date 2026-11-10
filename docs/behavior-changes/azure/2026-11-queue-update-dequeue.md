@@ -50,9 +50,20 @@ Update Message).
   `InvalidQueryParameterValue`.** The common REST error codes give it for "an
   invalid value was specified for one of the query parameters in the request
   URI". `visibilitytimeout`, `messagettl` and `numofmessages` that are not a
-  decimal integer (`abc`, an empty value, `1.5`) answered 500 before, on Put
-  Message, Get Messages, Peek Messages and Update Message. A number outside
-  the documented range is still `OutOfRangeQueryParameterValue`.
+  decimal integer (`abc`, `1.5`, `5s`) answered 500 before, on Put Message,
+  Get Messages, Peek Messages and Update Message. A number outside the
+  documented range is still `OutOfRangeQueryParameterValue`.
+  - A decimal integer is one with a sign or leading zeros too (`+5`, `007`,
+    `-0`): they were accepted before and still are, for all three parameters.
+    The reference does not say how Azure reads them.
+  - A parameter with an empty value (`?messagettl=`) is read as not sent, as
+    before: it never reached these rules and was never a 500. The reference
+    does not say whether Azure refuses an empty value.
+  - A number of nineteen digits or more is refused as not a number, where
+    one of up to eighteen digits is refused as out of range.
+  - These rules run where the range rules already ran, after the queue and
+    the message are looked up: a bad parameter on a missing queue is still
+    `QueueNotFound`.
 - **Update Message without `visibilitytimeout` is 400
   `MissingRequiredQueryParameter`.** Update Message marks the parameter
   Required, and the common REST error codes give that code for "a required

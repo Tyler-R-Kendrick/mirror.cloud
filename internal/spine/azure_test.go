@@ -920,6 +920,25 @@ func TestBootedServerAzureQueue(t *testing.T) {
 	if code != 400 || eh.Get("x-ms-error-code") != "MissingRequiredQueryParameter" {
 		t.Fatalf("update with no visibilitytimeout: %d %#v %s", code, eh, raw)
 	}
+	// A parameter with an empty value is read as not sent: the update is
+	// short its timeout, and a put takes its defaults.
+	code, raw, eh = do(http.MethodPut, "/q1/messages/"+msgID+"?popreceipt="+url.QueryEscape(h.Get("x-ms-popreceipt"))+"&visibilitytimeout=", envelope("x"), nil)
+	if code != 400 || eh.Get("x-ms-error-code") != "MissingRequiredQueryParameter" {
+		t.Fatalf("update with an empty visibilitytimeout: %d %#v %s", code, eh, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true&numofmessages=", "", nil)
+	if code != 200 {
+		t.Fatalf("peek with an empty numofmessages: %d %s", code, raw)
+	}
+	// A sign or leading zeros still make a decimal integer.
+	code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true&numofmessages=%2B1", "", nil)
+	if code != 200 {
+		t.Fatalf("peek with numofmessages=+1: %d %s", code, raw)
+	}
+	code, raw, _ = do(http.MethodGet, "/q1/messages?peekonly=true&numofmessages=007", "", nil)
+	if code != 200 {
+		t.Fatalf("peek with numofmessages=007: %d %s", code, raw)
+	}
 	// A timeout that is not a number is an invalid value, not a server error.
 	for _, c := range []struct{ method, path, body string }{
 		{http.MethodPost, "/q1/messages?visibilitytimeout=abc", envelope("x")},

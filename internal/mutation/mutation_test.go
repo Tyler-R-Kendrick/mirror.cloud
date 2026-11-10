@@ -4349,6 +4349,24 @@ var mutants = []mutant{
 		run: "TestSecretsManagerRotateOfAScheduledSecretWithNoValueNamesTheDeletion",
 	},
 	{
+		// GetSecretValue of a secret with no value names the staging label it was asked for.
+		name: "secretsmanager-get-not-found-always-names-awscurrent",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `: "Secrets Manager can't find the specified secret value for staging label: " + effstage`,
+		new:  `: "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerGetOfASecretWithNoValueNamesWhatWasAsked",
+	},
+	{
+		// Asked by VersionId, it names the VersionId.
+		name: "secretsmanager-get-not-found-ignores-the-version-id",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old:  `? "Secrets Manager can't find the specified secret value for VersionId: " + vid`,
+		new:  `? "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"`,
+		pkg:  "./internal/bundled",
+		run:  "TestSecretsManagerGetOfASecretWithNoValueNamesWhatWasAsked",
+	},
+	{
 		// A secret created without a value has none to rotate.
 		name: "secretsmanager-rotate-a-secret-with-no-value",
 		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),

@@ -1405,6 +1405,29 @@ func TestSecretsManagerRotateOfAScheduledSecretWithNoValueNamesTheDeletion(t *te
 	}
 }
 
+// GetSecretValue of a secret with no value names what it was asked for and
+// did not find: the staging label asked for, AWSCURRENT when none was, or the
+// VersionId ("Secrets Manager can't find the specified secret value for
+// VersionId: abc", the service's text). Before, every one of them said
+// "for staging label: AWSCURRENT".
+func TestSecretsManagerGetOfASecretWithNoValueNamesWhatWasAsked(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "empty"})
+	for _, c := range []struct {
+		in   map[string]any
+		want string
+	}{
+		{map[string]any{"SecretId": "empty"}, "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"},
+		{map[string]any{"SecretId": "empty", "VersionStage": "AWSPREVIOUS"}, "Secrets Manager can't find the specified secret value for staging label: AWSPREVIOUS"},
+		{map[string]any{"SecretId": "empty", "VersionId": "abc"}, "Secrets Manager can't find the specified secret value for VersionId: abc"},
+	} {
+		_, err := call("GetSecretValue", c.in)
+		if f, isFault := err.(*spi.Fault); !isFault || f.Code != "ResourceNotFoundException" || f.Message != c.want {
+			t.Errorf("GetSecretValue %v answered %v, want ResourceNotFoundException: %s", c.in, err, c.want)
+		}
+	}
+}
+
 // withoutAWSCURRENT rewrites a stored secret so that none of its versions
 // holds AWSCURRENT, and names the version that held it. No call makes such a
 // record (UpdateSecretVersionStage refuses to remove the label); a store

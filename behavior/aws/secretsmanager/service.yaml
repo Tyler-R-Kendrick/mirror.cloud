@@ -326,9 +326,14 @@ operations:
       # leaves a secret that way (UpdateSecretVersionStage); a store written
       # before it refused can hold one, and RotateSecret and
       # BatchGetSecretValue read it the same.
+      # The message names what was asked for: the VersionId, or the staging
+      # label, AWSCURRENT when none was given.
       - cond: "size(vers) > 0 && (vid != '' || effstage != 'AWSCURRENT' || vers.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT')))"
         error: NotFound
-        message: "Secrets Manager can't find the specified secret value for staging label: AWSCURRENT"
+        message_expr: >-
+          vid != ''
+          ? "Secrets Manager can't find the specified secret value for VersionId: " + vid
+          : "Secrets Manager can't find the specified secret value for staging label: " + effstage
     output:
       ARN: s.ARN
       Name: s.Name

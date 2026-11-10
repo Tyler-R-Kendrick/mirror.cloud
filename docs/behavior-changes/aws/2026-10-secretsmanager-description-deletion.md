@@ -659,7 +659,11 @@ The oracle is AWS's documentation as it ships in the vendored model
   secret with no value "Secrets Manager can't find the specified secret value
   for staging label: AWSCURRENT". `GetSecretValue` of a scheduled secret
   answers the same message as the other refused calls. Before, a not-found
-  row had no `Message` and the single call's was empty.
+  row had no `Message` and the single call's was empty. `GetSecretValue` of a
+  secret with no value names what it was asked for: a `VersionStage` is "for
+  staging label: AWSPREVIOUS" (the label asked for), and a `VersionId` is
+  "Secrets Manager can't find the specified secret value for VersionId: abc".
+  It said "for staging label: AWSCURRENT" whatever was asked.
 - **A member with no value is left out.** `DescribeSecret` "only returns
   fields that have a value in the response", so `Description`, `DeletedDate`,
   `Tags`, `ReplicationStatus` and the rotation members are absent when unset,

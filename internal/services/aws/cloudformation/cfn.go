@@ -185,7 +185,7 @@ func (p *Pack) createChangeSet(ctx context.Context, req *spi.Request, name strin
 			return invalid("Stack [" + name + "] does not exist")
 		} else if found && create && !review {
 			return fault("AlreadyExistsException", "Stack ["+name+"] already exists and cannot be created again with the changeSet ["+csn+"].")
-		} else if found && !review && (strings.HasSuffix(cur.Status, "_IN_PROGRESS") || strings.HasPrefix(cur.Status, "ROLLBACK_") || cur.Status == "DELETE_FAILED") {
+		} else if found && !review && !updatable(cur) {
 			return invalid("Stack:" + cur.ID + " is in " + cur.Status + " state and can not be updated.")
 		} else if found {
 			previous(req.Input, cur)
@@ -347,7 +347,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		}
 		if found && !update {
 			return fault("AlreadyExistsException", "Stack ["+name+"] already exists")
-		} else if found && (strings.HasPrefix(old.Status, "ROLLBACK_") || strings.HasSuffix(old.Status, "_IN_PROGRESS") || strings.HasSuffix(old.Status, "_FAILED")) { // UPDATE_ROLLBACK_FAILED takes a delete, no update
+		} else if found && !updatable(old) {
 			return invalid("Stack:" + old.ID + " is in " + old.Status + " state and can not be updated.")
 		} else if id, held = cmp.Or(old.ID, id), old; update { // "is in UPDATE_IN_PROGRESS state" to another change
 			held.Status, held.Op = "UPDATE_IN_PROGRESS", old.Status+op
@@ -422,7 +422,7 @@ func (p *Pack) upsert(ctx context.Context, req *spi.Request, name string, update
 		if err == nil {
 			n, err = p.claim(ctx, req, st, old, logical, typ, props) // again: a name may come from a resource made before it
 		}
-		if i := slices.IndexFunc(old.Left, func(r res) bool { return r.Logical == logical }); err == nil {
+		if i := slices.IndexFunc(old.Left, func(r res) bool { return r.Logical == logical && r.Name == n }); err == nil {
 			existing := old.Refs[logical]
 			if i >= 0 { // one its failed update left is its own: taken back, as one it holds is
 				existing = old.Left[i].Physical
@@ -504,11 +504,12 @@ func (p *Pack) settle(ctx context.Context, req *spi.Request, name string, take f
 // or by a process that ended: no operation will settle it, so the next one on the stack does (orphan).
 var ops sync.Map
 var opSeq, opKept atomic.Int64 // numbers them, and counts what they keep
-var opNonce = func() string {  // this process's: an id in a record another process left, or a restored one, is never one of ours
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
-}()
+var opNonce = rand.Text()      // this process's: an id in a record another process left, or a restored one, is never one of ours
+
+// updatable is whether UpdateStack or a change set takes st: not one rolled back, failed or changing.
+func updatable(st stack) bool {
+	return !strings.HasPrefix(st.Status, "ROLLBACK_") && !strings.HasSuffix(st.Status, "_FAILED") && !strings.HasSuffix(st.Status, "_IN_PROGRESS")
+}
 
 // hold registers a running operation, and answers its id (after a "/": an update writes the status it
 // found before it) and its release, which the operation defers: given the record a failed operation could
@@ -517,7 +518,8 @@ func (p *Pack) hold() (string, func(*stack)) {
 	id := opNonce + "-" + strconv.FormatInt(opSeq.Add(1), 10)
 	ops.Store(id, nil)
 	return "/" + id, func(left *stack) {
-		if ops.Delete(id); left != nil && opKept.Add(1) <= 1024 {
+		if ops.Delete(id); left != nil && opKept.Load() < 1024 { // counted as it is kept, and as it is written
+			opKept.Add(1)
 			ops.Store(id, *left)
 		}
 	}

@@ -253,6 +253,11 @@ func TestCloudFormationAnOperationIdIsItsProcesss(t *testing.T) {
 	if pa := h.record("pa"); pa["Name"] != "pa" || !strings.Contains(spi.JSONText(pa["Resources"]), "rv23-pa") || pa["Status"] != "UPDATE_ROLLBACK_FAILED" {
 		t.Errorf("stack pa's record is now %v's, %v, holding %v; want it left pa's, and settled UPDATE_ROLLBACK_FAILED", pa["Name"], pa["Status"], pa["Resources"])
 	}
+	// pb's own next operation takes what was kept for it: the test leaves nothing in the process's registry,
+	// which a later run in the same process would count.
+	if _, err := h.invoke("DeleteStack", map[string]any{"StackName": "pb"}); err != nil || h.record("pb")["Status"] != "DELETE_COMPLETE" {
+		t.Errorf("deleting pb, whose update never settled, answered %v and left it %v", err, h.record("pb")["Status"])
+	}
 }
 
 // Every operation that changes a stack takes over one left in progress, CreateChangeSet and

@@ -18,6 +18,7 @@ import (
 // back, and are marked by the operation's own ending (cfn.go, the deferred marking). S's description alone
 // changed: a rotation since must outlive the continued rollback; R's target put outside must stay.
 func TestCloudFormationReview5CTakeoverMarksWhatChanged(t *testing.T) {
+	live0, kept0, counter0 := rv30Ops() // the registry is the process's: a run before this one may have left something
 	h := newStacks(t)
 	rule := func(id string, dep ...any) map[string]any {
 		m := map[string]any{"Type": "AWS::Events::Rule", "Properties": map[string]any{"ScheduleExpression": "rate(5 minutes)",
@@ -64,14 +65,15 @@ func TestCloudFormationReview5CTakeoverMarksWhatChanged(t *testing.T) {
 	if rveValue(h, ids["S"]) != "ROT" || desc != "one" || fmt.Sprint(tids) != "[a outside]" || !strings.Contains(string(cors), `"one"`) {
 		t.Errorf("want the rotated value, the description one, the targets a and outside, the CORS origin one")
 	}
-	if live, records, counter := rv30Ops(); live != 0 || records != 0 || counter != 0 {
-		t.Errorf("registered after: %d live, %d kept, counter %d", live, records, counter)
+	if live, records, counter := rv30Ops(); live != live0 || records != kept0 || counter != counter0 {
+		t.Errorf("registered after: %d live, %d kept, counter %d; before, %d, %d and %d", live, records, counter, live0, kept0, counter0)
 	}
 }
 
 // Many ContinueUpdateRollback calls at once on a stack whose secret is UPDATE_FAILED: one settles it, none
 // leaves it in progress, the value is the template's.
 func TestCloudFormationReview5CConcurrentContinues(t *testing.T) {
+	live0, kept0, counter0 := rv30Ops() // the registry is the process's: a run before this one may have left something
 	for round := 0; round < 8; round++ {
 		h := newStacks(t)
 		if err := rveCreate(h, "cc", map[string]any{"R": rveSecret(map[string]any{"SecretString": "A", "Description": "one"})}); err != nil {
@@ -102,8 +104,8 @@ func TestCloudFormationReview5CConcurrentContinues(t *testing.T) {
 			t.Errorf("round %d: the update after: %v %q", round, err, rveValue(h, id))
 		}
 	}
-	if live, records, counter := rv30Ops(); live != 0 || records != 0 || counter != 0 {
-		t.Errorf("registered after: %d live, %d kept, counter %d", live, records, counter)
+	if live, records, counter := rv30Ops(); live != live0 || records != kept0 || counter != counter0 {
+		t.Errorf("registered after: %d live, %d kept, counter %d; before, %d, %d and %d", live, records, counter, live0, kept0, counter0)
 	}
 }
 

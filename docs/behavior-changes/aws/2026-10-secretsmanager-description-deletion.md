@@ -48,7 +48,10 @@ The oracle is AWS's documentation as it ships in the vendored model
   before `UpdateSecretVersionStage` refused to remove it; see the next
   entry), and the refusal says so: "The secret has no
   value to rotate: it has no AWSCURRENT version." checks for that stage, not
-  for any version.
+  for any version. A secret that is both without a value and scheduled for
+  deletion is refused for the deletion ("You can't perform this operation on
+  the secret because it was marked for deletion."), as every other write to
+  it is: that rule comes first.
 - **AWSCURRENT is moved, never removed.** `UpdateSecretVersionStage` that
   would take `AWSCURRENT` off the version holding it without seating it on
   another is `InvalidParameterException`, "You can only move staging label

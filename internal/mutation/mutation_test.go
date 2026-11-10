@@ -4335,6 +4335,20 @@ var mutants = []mutant{
 		run:  "TestSecretsManagerNoAWSCURRENTVersionIsNoCurrentValue",
 	},
 	{
+		// A secret with no value that is scheduled for deletion is refused for the deletion: that rule comes first.
+		name: "secretsmanager-rotate-checks-the-value-before-the-deletion",
+		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),
+		old: `      - *scheduled
+      # "the operation starts a rotation with the values already stored in the`,
+		new: `      - cond: "vers.exists(v, 'VersionStages' in v && v.VersionStages.exists(st, st == 'AWSCURRENT'))"
+        error: InvalidRequest
+        message: "The secret has no value to rotate: it has no AWSCURRENT version."
+      - *scheduled
+      # "the operation starts a rotation with the values already stored in the`,
+		pkg: "./internal/bundled",
+		run: "TestSecretsManagerRotateOfAScheduledSecretWithNoValueNamesTheDeletion",
+	},
+	{
 		// A secret created without a value has none to rotate.
 		name: "secretsmanager-rotate-a-secret-with-no-value",
 		file: filepath.Join("behavior", "aws", "secretsmanager", "service.yaml"),

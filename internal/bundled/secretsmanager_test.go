@@ -1385,6 +1385,26 @@ func TestSecretsManagerListBoundsAndTokens(t *testing.T) {
 	ok(t, "ListSecrets", map[string]any{"MaxResults": 100})
 }
 
+// A secret with no value that is also scheduled for deletion is refused for
+// the deletion: both refusals are InvalidRequestException, and the documented
+// cause, "The secret is scheduled for deletion", is the one RestoreSecret
+// undoes and every other write to it answers. Restored, it is refused for
+// having no value.
+func TestSecretsManagerRotateOfAScheduledSecretWithNoValueNamesTheDeletion(t *testing.T) {
+	call, ok, _ := secretsManager(t)
+	ok(t, "CreateSecret", map[string]any{"Name": "empty"})
+	ok(t, "DeleteSecret", map[string]any{"SecretId": "empty"})
+	_, err := call("RotateSecret", map[string]any{"SecretId": "empty"})
+	if f, isFault := err.(*spi.Fault); !isFault || f.Code != "InvalidRequestException" || f.Message != "You can't perform this operation on the secret because it was marked for deletion." {
+		t.Errorf("RotateSecret of a scheduled secret with no value answered %v, want the deletion's InvalidRequestException", err)
+	}
+	ok(t, "RestoreSecret", map[string]any{"SecretId": "empty"})
+	_, err = call("RotateSecret", map[string]any{"SecretId": "empty"})
+	if f, isFault := err.(*spi.Fault); !isFault || f.Code != "InvalidRequestException" || !strings.Contains(f.Message, "no AWSCURRENT version") {
+		t.Errorf("RotateSecret of the restored secret answered %v, want InvalidRequestException: ... no AWSCURRENT version", err)
+	}
+}
+
 // withoutAWSCURRENT rewrites a stored secret so that none of its versions
 // holds AWSCURRENT, and names the version that held it. No call makes such a
 // record (UpdateSecretVersionStage refuses to remove the label); a store

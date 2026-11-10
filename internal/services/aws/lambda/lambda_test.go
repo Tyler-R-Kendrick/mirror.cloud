@@ -137,7 +137,7 @@ func TestSQSEventSourceMappingInvokesAndDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(anySlice(got.Output["Messages"])) != 0 {
+	if len(spi.Slice(got.Output["Messages"])) != 0 {
 		t.Fatalf("event source mapping left messages: %#v", got.Output)
 	}
 	if err := deps.Clock.Advance(31 * time.Second); err != nil {
@@ -147,7 +147,7 @@ func TestSQSEventSourceMappingInvokesAndDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(anySlice(got.Output["Messages"])) != 0 {
+	if len(spi.Slice(got.Output["Messages"])) != 0 {
 		t.Fatalf("event source mapping did not delete message: %#v", got.Output)
 	}
 	_ = function.Close()
@@ -186,7 +186,7 @@ func TestSQSEventSourceMappingPreservesPartialFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(anySlice(got.Output["Messages"])) != 1 {
+	if len(spi.Slice(got.Output["Messages"])) != 1 {
 		t.Fatalf("partial failure deletion %#v", got.Output)
 	}
 	_ = function.Close()
@@ -229,12 +229,12 @@ func TestSQSEventSourceMappingRedrivesFailedMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	messages := anySlice(got.Output["Messages"])
+	messages := spi.Slice(got.Output["Messages"])
 	if len(messages) != 1 {
 		t.Fatalf("dead-letter message %#v sent=%#v", got.Output, sent.Output)
 	}
 	message, _ := messages[0].(map[string]any)
-	if stringValue(message["MessageId"]) != stringValue(sent.Output["MessageId"]) {
+	if spi.Str(message["MessageId"]) != spi.Str(sent.Output["MessageId"]) {
 		t.Fatalf("dead-letter id %#v sent=%#v", message, sent.Output)
 	}
 	_ = function.Close()

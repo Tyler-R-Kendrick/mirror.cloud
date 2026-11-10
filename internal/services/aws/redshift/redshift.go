@@ -54,8 +54,7 @@ func (w *Warehouse) CreateTable(ctx context.Context, identity spi.Identity, clus
 			return errors.New("Redshift table column is empty")
 		}
 	}
-	body, _ := json.Marshal(tableData{Cluster: cluster, Columns: columns})
-	return w.col(identity, "rstable").Put(ctx, redshiftTableKey(cluster, database, table), body)
+	return spi.PutJSON(ctx, w.col(identity, "rstable"), redshiftTableKey(cluster, database, table), tableData{Cluster: cluster, Columns: columns})
 }
 
 // Copy loads records into a declared table using the common Firehose COPY formats.
@@ -64,18 +63,16 @@ func (w *Warehouse) Copy(ctx context.Context, identity spi.Identity, input CopyI
 	if !ok {
 		return errors.New("Redshift cluster not found")
 	}
-	var cluster map[string]any
-	_ = json.Unmarshal(clusterBody, &cluster)
-	if first(cluster, "ClusterStatus") != "available" || first(cluster, "DBName") != input.Database {
+	cluster := spi.JSONObject(clusterBody)
+	if spi.First(cluster, "ClusterStatus") != "available" || spi.First(cluster, "DBName") != input.Database {
 		return errors.New("Redshift cluster is unavailable or database does not exist")
 	}
 	credentialBody, ok, _ := w.col(identity, "rscredential").Get(ctx, input.Cluster)
 	if !ok {
 		return errors.New("Redshift credentials are unavailable")
 	}
-	var credential map[string]any
-	_ = json.Unmarshal(credentialBody, &credential)
-	if first(credential, "Username") != input.Username || first(credential, "PasswordHash") != fmt.Sprintf("%x", sha256.Sum256([]byte(input.Password))) {
+	credential := spi.JSONObject(credentialBody)
+	if spi.First(credential, "Username") != input.Username || spi.First(credential, "PasswordHash") != fmt.Sprintf("%x", sha256.Sum256([]byte(input.Password))) {
 		return errors.New("Redshift credentials are invalid")
 	}
 	key := redshiftTableKey(input.Cluster, input.Database, input.Table)
@@ -195,33 +192,4 @@ func parseCopyRows(data [][]byte, columns []string, options string) ([]map[strin
 		return nil, errors.New("Redshift COPY contains no rows")
 	}
 	return rows, nil
-}
-
-func listOrGet(ctx context.Context, c spi.Collection, id, listKey string) (*spi.Response, error) {
-	if id != "" {
-		b, ok, _ := c.Get(ctx, id)
-		if !ok {
-			return nil, &spi.Fault{Code: "ClusterNotFound", HTTPStatus: 404, Fault: "client"}
-		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		return &spi.Response{Output: map[string]any{listKey: []any{rec}}}, nil
-	}
-	kvs, _, _ := c.List(ctx, "", "", 0)
-	var items []any
-	for _, kv := range kvs {
-		var rec map[string]any
-		_ = json.Unmarshal(kv.Value, &rec)
-		items = append(items, rec)
-	}
-	return &spi.Response{Output: map[string]any{listKey: items}}, nil
-}
-
-func first(in map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if s, ok := in[k].(string); ok && s != "" {
-			return s
-		}
-	}
-	return ""
 }

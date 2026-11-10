@@ -1,239 +1,127 @@
 package cloudformation
 
 import (
+	"cmp"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
-// parseYAML is a CFN-shaped YAML subset: maps, lists, scalars, !Ref/!GetAtt/!Sub.
-// ponytail: not a full YAML 1.1 parser; anchors/merge keys/complex tags fail loud.
+// parseYAML reads a YAML template into the shape a JSON template has. The
+// short-form intrinsics become their long forms: !Ref x is {"Ref": x},
+// !GetAtt A.B is {"Fn::GetAtt": [A, B]}, and any other !Name is {"Fn::Name": ...}.
 func parseYAML(src string) (map[string]any, error) {
-	lines := yamlLines(src)
-	v, _, err := parseYAMLBlock(lines, 0, 0)
-	if err != nil {
+	var root yaml.Node
+	if err := yaml.Unmarshal([]byte(src), &root); err != nil {
 		return nil, err
 	}
-	m, ok := v.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("yaml root must be a map")
+	v, err := yamlValue(&root)
+	if m, ok := v.(map[string]any); ok || err != nil {
+		return m, err
 	}
-	return m, nil
+	return nil, fmt.Errorf("yaml root must be a map")
 }
 
-type yline struct {
-	n      int
-	indent int
-	text   string
-}
-
-func yamlLines(src string) []yline {
-	var out []yline
-	for i, raw := range strings.Split(strings.ReplaceAll(src, "\r\n", "\n"), "\n") {
-		s := strings.TrimRight(raw, " \t")
-		if strings.TrimSpace(s) == "" || strings.HasPrefix(strings.TrimSpace(s), "#") {
-			continue
+// CloudFormation "doesn't support ... Aliases[,] Hash merges" (User Guide, Template formats), so an alias
+// or a merge key is refused, and no node is read twice: a template's size bounds its walk (templateBody),
+// and yaml.v3 its depth, 10,000 levels. The sentence names no anchor: one no alias refers to is read as if
+// it were not there.
+func yamlValue(n *yaml.Node) (any, error) {
+	if n.Kind == yaml.AliasNode || n.Tag == "!!merge" {
+		return nil, fmt.Errorf("line %d: YAML aliases and merge keys are not supported", n.Line)
+	} else if tag := n.ShortTag(); n.Style&yaml.TaggedStyle != 0 && strings.Contains(" !!binary !!omap !!pairs !!set !!timestamp ", " "+tag+" ") {
+		return nil, fmt.Errorf("line %d: the YAML %s tag is not supported", n.Line, tag) // "The binary, omap, pairs, set, and timestamp tags"
+	}
+	tag := ""
+	if strings.HasPrefix(n.Tag, "!") && !strings.HasPrefix(n.Tag, "!!") {
+		tag, n.Tag = n.Tag[1:], ""
+	}
+	var v any
+	switch n.Kind {
+	case yaml.DocumentNode:
+		if len(n.Content) == 0 {
+			return nil, nil
 		}
-		ind := 0
-		for _, c := range s {
-			if c == ' ' {
-				ind++
-				continue
+		return yamlValue(n.Content[0])
+	case yaml.MappingNode:
+		m := map[string]any{}
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			_, err := yamlValue(n.Content[i]) // a key can be a merge key
+			item, itemErr := yamlValue(n.Content[i+1])
+			if err = cmp.Or(err, itemErr); err != nil {
+				return nil, err
 			}
-			if c == '\t' {
-				ind += 2
-				continue
-			}
-			break
+			m[n.Content[i].Value] = item
 		}
-		out = append(out, yline{n: i + 1, indent: ind, text: strings.TrimSpace(s)})
-	}
-	return out
-}
-
-func parseYAMLBlock(lines []yline, i, indent int) (any, int, error) {
-	if i >= len(lines) {
-		return map[string]any{}, i, nil
-	}
-	if strings.HasPrefix(lines[i].text, "- ") || lines[i].text == "-" {
-		return parseYAMLList(lines, i, indent)
-	}
-	return parseYAMLMap(lines, i, indent)
-}
-
-func parseYAMLMap(lines []yline, i, indent int) (map[string]any, int, error) {
-	m := map[string]any{}
-	for i < len(lines) {
-		ln := lines[i]
-		if ln.indent < indent {
-			break
-		}
-		if ln.indent > indent {
-			return nil, i, fmt.Errorf("yaml line %d: unexpected indent", ln.n)
-		}
-		key, rest, ok := splitKey(ln.text)
-		if !ok {
-			return nil, i, fmt.Errorf("yaml line %d: expected key:", ln.n)
-		}
-		if rest != "" {
-			m[key] = yamlScalar(rest)
-			i++
-			continue
-		}
-		if i+1 >= len(lines) || lines[i+1].indent <= indent {
-			m[key] = map[string]any{}
-			i++
-			continue
-		}
-		child, ni, err := parseYAMLBlock(lines, i+1, lines[i+1].indent)
-		if err != nil {
-			return nil, ni, err
-		}
-		m[key] = child
-		i = ni
-	}
-	return m, i, nil
-}
-
-func parseYAMLList(lines []yline, i, indent int) ([]any, int, error) {
-	var out []any
-	for i < len(lines) {
-		ln := lines[i]
-		if ln.indent < indent {
-			break
-		}
-		if ln.indent > indent {
-			return nil, i, fmt.Errorf("yaml line %d: unexpected indent", ln.n)
-		}
-		if !strings.HasPrefix(ln.text, "-") {
-			break
-		}
-		rest := strings.TrimSpace(strings.TrimPrefix(ln.text, "-"))
-		if rest == "" {
-			if i+1 < len(lines) && lines[i+1].indent > indent {
-				child, ni, err := parseYAMLBlock(lines, i+1, lines[i+1].indent)
-				if err != nil {
-					return nil, ni, err
-				}
-				out = append(out, child)
-				i = ni
-				continue
-			}
-			out = append(out, nil)
-			i++
-			continue
-		}
-		if key, val, ok := splitKey(rest); ok {
-			item := map[string]any{}
-			if val != "" {
-				item[key] = yamlScalar(val)
-				i++
-			} else if i+1 < len(lines) && lines[i+1].indent > indent {
-				child, ni, err := parseYAMLBlock(lines, i+1, lines[i+1].indent)
-				if err != nil {
-					return nil, ni, err
-				}
-				item[key] = child
-				i = ni
-			} else {
-				item[key] = map[string]any{}
-				i++
-			}
-			for i < len(lines) && lines[i].indent > indent && !strings.HasPrefix(lines[i].text, "-") {
-				k2, r2, ok2 := splitKey(lines[i].text)
-				if !ok2 {
-					return nil, i, fmt.Errorf("yaml line %d: expected key", lines[i].n)
-				}
-				if r2 != "" {
-					item[k2] = yamlScalar(r2)
-					i++
-					continue
-				}
-				if i+1 < len(lines) && lines[i+1].indent > lines[i].indent {
-					child, ni, err := parseYAMLBlock(lines, i+1, lines[i+1].indent)
-					if err != nil {
-						return nil, ni, err
-					}
-					item[k2] = child
-					i = ni
-					continue
-				}
-				item[k2] = map[string]any{}
-				i++
+		v = m
+	case yaml.SequenceNode:
+		out := []any{}
+		for _, c := range n.Content {
+			item, err := yamlValue(c)
+			if err != nil {
+				return nil, err
 			}
 			out = append(out, item)
-			continue
 		}
-		out = append(out, yamlScalar(rest))
-		i++
+		v = out
+	default:
+		if quoted := yaml.DoubleQuotedStyle | yaml.SingleQuotedStyle | yaml.LiteralStyle | yaml.FoldedStyle; n.Style&quoted == 0 && n.Tag == "" || n.Style&(quoted|yaml.TaggedStyle) == 0 {
+			v = yaml11(n.Value) // a plain scalar, untagged or under an intrinsic's tag
+		} else if err := n.Decode(&v); err != nil {
+			return nil, err
+		}
 	}
-	return out, i, nil
+	if tag == "" {
+		return v, nil
+	}
+	if tag == "Ref" || tag == "Condition" {
+		return map[string]any{tag: v}, nil
+	}
+	if s, ok := v.(string); ok && tag == "GetAtt" {
+		if logical, attr, found := strings.Cut(s, "."); found {
+			v = []any{logical, attr}
+		}
+	}
+	return map[string]any{"Fn::" + tag: v}, nil
 }
 
-func splitKey(s string) (key, rest string, ok bool) {
-	if strings.HasPrefix(s, "-") {
-		return "", "", false
-	}
-	i := strings.IndexByte(s, ':')
-	if i <= 0 {
-		return "", "", false
-	}
-	key = strings.TrimSpace(s[:i])
-	if key == "" {
-		return "", "", false
-	}
-	rest = strings.TrimSpace(s[i+1:])
-	if strings.HasPrefix(rest, "#") {
-		rest = ""
-	}
-	return key, rest, true
-}
+// The YAML 1.1 type repository's plain scalars (yaml.org/type/bool.html, int.html, float.html): CloudFormation
+// "supports the YAML Version 1.1 specification" (User Guide, Template formats), where yaml.v3 reads 1.2. Its
+// .inf and .nan are left as text, which a template's JSON form could not hold, and so are y and n, which
+// PyYAML and SnakeYAML, the 1.1 parsers in use, leave strings though bool.html lists them.
+var (
+	yaml11Bool  = regexp.MustCompile(`^(yes|Yes|YES|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF)$`)
+	yaml11Int   = regexp.MustCompile(`^[-+]?(0b[01_]+|0[0-7_]+|0|[1-9][0-9_]*|0x[0-9a-fA-F_]+|[1-9][0-9_]*(:[0-5]?[0-9])+)$`)
+	yaml11Float = regexp.MustCompile(`^[-+]?(([0-9][0-9_]*)?\.[0-9.]*([eE][-+][0-9]+)?|[0-9][0-9_]*(:[0-5]?[0-9])+\.[0-9_]*)$`)
+)
 
-func yamlScalar(s string) any {
-	if i := strings.Index(s, " #"); i >= 0 {
-		s = strings.TrimSpace(s[:i])
+// yaml11 is a plain scalar as YAML 1.1 reads it: null, a bool, an int (binary, octal, decimal, hexadecimal
+// or sexagesimal) or a float, else the string it is.
+func yaml11(text string) any {
+	plain, sexagesimal := strings.ReplaceAll(text, "_", ""), 0.0
+	for _, part := range strings.Split(strings.TrimLeft(plain, "+-"), ":") {
+		n, _ := strconv.ParseFloat(part, 64)
+		sexagesimal = sexagesimal*60 + n
 	}
-	switch {
-	case strings.HasPrefix(s, "!Ref "):
-		return map[string]any{"Ref": strings.TrimSpace(s[len("!Ref "):])}
-	case strings.HasPrefix(s, "!GetAtt "):
-		att := strings.TrimSpace(s[len("!GetAtt "):])
-		att = strings.Trim(att, "[] ")
-		if j := strings.IndexByte(att, '.'); j >= 0 {
-			return map[string]any{"Fn::GetAtt": []any{att[:j], att[j+1:]}}
-		}
-		if j := strings.Index(att, ", "); j >= 0 {
-			return map[string]any{"Fn::GetAtt": []any{strings.TrimSpace(att[:j]), strings.TrimSpace(att[j+2:])}}
-		}
-		return map[string]any{"Fn::GetAtt": att}
-	case strings.HasPrefix(s, "!Sub "):
-		return map[string]any{"Fn::Sub": unquote(strings.TrimSpace(s[len("!Sub "):]))}
-	case s == "true" || s == "True":
-		return true
-	case s == "false" || s == "False":
-		return false
-	case s == "null" || s == "~" || s == "Null":
+	if strings.HasPrefix(text, "-") {
+		sexagesimal = -sexagesimal
+	}
+	n, intErr := strconv.ParseInt(plain, 0, 64) // base 0 reads 0b, 0x and a leading 0's octal, as 1.1 does
+	f, floatErr := strconv.ParseFloat(plain, 64)
+	switch isInt, isFloat := yaml11Int.MatchString(text), yaml11Float.MatchString(text); {
+	case text == "" || strings.Contains(" ~ null Null NULL ", " "+text+" "):
 		return nil
-	}
-	if n, err := strconv.Atoi(s); err == nil {
-		return n
-	}
-	if f, err := strconv.ParseFloat(s, 64); err == nil && strings.Contains(s, ".") {
+	case yaml11Bool.MatchString(text):
+		return strings.ContainsAny(text[:1], "yYtT") || strings.EqualFold(text, "on")
+	case strings.Contains(text, ":") && (isInt || isFloat):
+		return map[bool]any{true: int(sexagesimal), false: sexagesimal}[isInt]
+	case isInt && intErr == nil:
+		return int(n)
+	case isFloat && floatErr == nil:
 		return f
 	}
-	return unquote(s)
-}
-
-func unquote(s string) string {
-	if len(s) >= 2 {
-		if s[0] == '"' && s[len(s)-1] == '"' {
-			inner := s[1 : len(s)-1]
-			inner = strings.ReplaceAll(inner, `\"`, `"`)
-			return inner
-		}
-		if s[0] == '\'' && s[len(s)-1] == '\'' {
-			return s[1 : len(s)-1]
-		}
-	}
-	return s
+	return text
 }

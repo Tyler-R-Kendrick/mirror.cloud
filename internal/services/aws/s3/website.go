@@ -57,7 +57,7 @@ func (p *Pack) websiteObject(ctx context.Context, req *spi.Request) (*spi.Respon
 `, html.EscapeString(strings.ToUpper(req.HTTP.Method)), html.EscapeString(logging.RequestID(ctx)), websiteHostID)), nil
 	}
 
-	bucket := str(req.Input["Bucket"])
+	bucket := spi.Str(req.Input["Bucket"])
 	if err := p.requireBucket(ctx, req, bucket); err != nil {
 		if fault, ok := err.(*spi.Fault); ok {
 			return website404(ctx, fault.Code, fault.Message, bucket, ""), nil
@@ -75,13 +75,13 @@ func (p *Pack) websiteObject(ctx context.Context, req *spi.Request) (*spi.Respon
 	if err := json.Unmarshal(raw, &stored); err != nil {
 		return nil, err
 	}
-	configuration := asMap(stored["WebsiteConfiguration"])
-	if redirect := asMap(configuration["RedirectAllRequestsTo"]); len(redirect) != 0 {
-		return websiteRedirect(req.HTTP, str(redirect["HostName"]), str(redirect["Protocol"]), "", "", http.StatusMovedPermanently), nil
+	configuration := spi.Object(stored["WebsiteConfiguration"])
+	if redirect := spi.Object(configuration["RedirectAllRequestsTo"]); len(redirect) != 0 {
+		return websiteRedirect(req.HTTP, spi.Str(redirect["HostName"]), spi.Str(redirect["Protocol"]), "", "", http.StatusMovedPermanently), nil
 	}
 
-	key := str(req.Input["Key"])
-	rules := asSlice(configuration["RoutingRules"])
+	key := spi.Str(req.Input["Key"])
+	rules := spi.Slice(configuration["RoutingRules"])
 	if key != "" {
 		if rule := matchingWebsiteRule(rules, key, 0); rule != nil {
 			return websiteRuleRedirect(req.HTTP, key, rule), nil
@@ -89,12 +89,12 @@ func (p *Pack) websiteObject(ctx context.Context, req *spi.Request) (*spi.Respon
 	}
 	isFolder := strings.HasSuffix(req.HTTP.URL.Path, "/")
 	if key == "" || isFolder {
-		key += str(asMap(configuration["IndexDocument"])["Suffix"])
+		key += spi.Str(spi.Object(configuration["IndexDocument"])["Suffix"])
 	}
 	response, err := p.websiteRawObject(ctx, req, bucket, key)
 	if faultCode(err) == "NoSuchKey" {
 		if !isFolder {
-			index := strings.TrimSuffix(key, "/") + "/" + str(asMap(configuration["IndexDocument"])["Suffix"])
+			index := strings.TrimSuffix(key, "/") + "/" + spi.Str(spi.Object(configuration["IndexDocument"])["Suffix"])
 			if indexed, indexedErr := p.websiteRawObject(ctx, req, bucket, index); indexedErr == nil {
 				if indexed.Stream != nil {
 					_ = indexed.Stream.Close()
@@ -105,7 +105,7 @@ func (p *Pack) websiteObject(ctx context.Context, req *spi.Request) (*spi.Respon
 		if rule := matchingWebsiteRule(rules, key, http.StatusNotFound); rule != nil {
 			return websiteRuleRedirect(req.HTTP, key, rule), nil
 		}
-		if errorKey := str(asMap(configuration["ErrorDocument"])["Key"]); errorKey != "" {
+		if errorKey := spi.Str(spi.Object(configuration["ErrorDocument"])["Key"]); errorKey != "" {
 			errorResponse, errorErr := p.websiteRawObject(ctx, req, bucket, errorKey)
 			if errorErr == nil {
 				if location := errorResponse.Headers.Get("x-amz-website-redirect-location"); location != "" {
@@ -144,13 +144,13 @@ func (p *Pack) websiteRawObject(ctx context.Context, req *spi.Request, bucket, k
 
 func matchingWebsiteRule(rules []any, key string, errorCode int) map[string]any {
 	for _, value := range rules {
-		rule := asMap(value)
-		condition := asMap(rule["Condition"])
+		rule := spi.Object(value)
+		condition := spi.Object(rule["Condition"])
 		if len(condition) == 0 {
 			return rule
 		}
-		prefix := str(condition["KeyPrefixEquals"])
-		code := str(condition["HttpErrorCodeReturnedEquals"])
+		prefix := spi.Str(condition["KeyPrefixEquals"])
+		code := spi.Str(condition["HttpErrorCodeReturnedEquals"])
 		if prefix != "" && code != "" {
 			if strings.HasPrefix(key, prefix) && code == strconv.Itoa(errorCode) {
 				return rule
@@ -165,19 +165,19 @@ func matchingWebsiteRule(rules []any, key string, errorCode int) map[string]any 
 }
 
 func websiteRuleRedirect(request *http.Request, key string, rule map[string]any) *spi.Response {
-	redirect := asMap(rule["Redirect"])
-	status, _ := strconv.Atoi(str(redirect["HttpRedirectCode"]))
+	redirect := spi.Object(rule["Redirect"])
+	status, _ := strconv.Atoi(spi.Str(redirect["HttpRedirectCode"]))
 	if status == 0 {
 		status = http.StatusMovedPermanently
 	}
 	replace, replacement := "", ""
-	if value := str(redirect["ReplaceKeyWith"]); value != "" {
+	if value := spi.Str(redirect["ReplaceKeyWith"]); value != "" {
 		replace, replacement = key, value
 	} else if _, exists := redirect["ReplaceKeyPrefixWith"]; exists {
-		replace = str(asMap(rule["Condition"])["KeyPrefixEquals"])
-		replacement = str(redirect["ReplaceKeyPrefixWith"])
+		replace = spi.Str(spi.Object(rule["Condition"])["KeyPrefixEquals"])
+		replacement = spi.Str(redirect["ReplaceKeyPrefixWith"])
 	}
-	return websiteRedirect(request, str(redirect["HostName"]), str(redirect["Protocol"]), replace, replacement, status)
+	return websiteRedirect(request, spi.Str(redirect["HostName"]), spi.Str(redirect["Protocol"]), replace, replacement, status)
 }
 
 func websiteRedirect(request *http.Request, host, protocol, replace, replacement string, status int) *spi.Response {

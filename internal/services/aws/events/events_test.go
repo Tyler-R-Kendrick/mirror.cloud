@@ -16,6 +16,7 @@ import (
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/bundled"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/config"
 	rtpkg "github.com/tyler-r-kendrick/mirror.cloud/internal/runtime"
+	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/eventhttp"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/sns"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/services/aws/states"
 	"github.com/tyler-r-kendrick/mirror.cloud/internal/spi"
@@ -39,7 +40,7 @@ func TestPutEventsDeliversOnlyMatchingRules(t *testing.T) {
 	for _, name := range []string{"direct", "via-sns", "ignored"} {
 		invoke(sp, "CreateQueue", map[string]any{"QueueName": name})
 	}
-	topic := str(invoke(np, "CreateTopic", map[string]any{"Name": "matched"}).Output["TopicArn"])
+	topic := spi.Str(invoke(np, "CreateTopic", map[string]any{"Name": "matched"}).Output["TopicArn"])
 	invoke(np, "Subscribe", map[string]any{
 		"TopicArn": topic, "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:1:via-sns", "RawMessageDelivery": "true",
 	})
@@ -65,7 +66,7 @@ func TestPutEventsDeliversOnlyMatchingRules(t *testing.T) {
 			t.Fatalf("%s received %d messages, want 2", queue, len(got))
 		}
 		var event map[string]any
-		if json.Unmarshal([]byte(str(got[0].(map[string]any)["Body"])), &event) != nil || event["source"] != "app" || event["detail-type"] != "order" {
+		if json.Unmarshal([]byte(spi.Str(got[0].(map[string]any)["Body"])), &event) != nil || event["source"] != "app" || event["detail-type"] != "order" {
 			t.Fatalf("%s event %#v", queue, got[0])
 		}
 	}
@@ -138,7 +139,7 @@ func TestEventBridgeRequestValidation(t *testing.T) {
 	}
 	five := make([]any, 5)
 	for i := range five {
-		five[i] = map[string]any{"Id": "target-" + toString(i), "Arn": "arn:aws:sqs:us-east-1:1:q"}
+		five[i] = map[string]any{"Id": "target-" + spi.JSONText(i), "Arn": "arn:aws:sqs:us-east-1:1:q"}
 	}
 	if response, err = call("PutTargets", map[string]any{"Rule": "rule", "Targets": five}); err != nil || response.Output["FailedEntryCount"] != 0 {
 		t.Fatalf("five targets response=%#v err=%v", response, err)
@@ -205,7 +206,7 @@ func TestScheduledRulesPersistAndRespectState(t *testing.T) {
 	_ = deps.Clock.Advance(time.Second)
 	eventuallyEvent(t, func() bool { return len(messages("scheduled")) == 1 })
 	var event map[string]any
-	if json.Unmarshal([]byte(str(messages("scheduled")[0]["body"])), &event) != nil || event["source"] != "aws.events" || event["detail-type"] != "Scheduled Event" || event["time"] != "1970-01-01T00:01:00Z" || !strings.HasSuffix(event["resources"].([]any)[0].(string), ":rule/scheduled") {
+	if json.Unmarshal([]byte(spi.Str(messages("scheduled")[0]["body"])), &event) != nil || event["source"] != "aws.events" || event["detail-type"] != "Scheduled Event" || event["time"] != "1970-01-01T00:01:00Z" || !strings.HasSuffix(event["resources"].([]any)[0].(string), ":rule/scheduled") {
 		t.Fatalf("scheduled event %#v", event)
 	}
 
@@ -298,7 +299,7 @@ func TestPutEventsRetriesAndDeadLettersTargets(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
 		if succeed.Load() == 0 {
-			w.Header().Set("Retry-After", toString(retryDelay.Load()))
+			w.Header().Set("Retry-After", spi.JSONText(retryDelay.Load()))
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 	}))
@@ -324,7 +325,7 @@ func TestPutEventsRetriesAndDeadLettersTargets(t *testing.T) {
 	destination := invoke(p, "CreateApiDestination", map[string]any{
 		"Name": "retry", "ConnectionArn": connection.Output["ConnectionArn"], "InvocationEndpoint": server.URL, "HttpMethod": "POST",
 	})
-	destinationARN := str(destination.Output["ApiDestinationArn"])
+	destinationARN := spi.Str(destination.Output["ApiDestinationArn"])
 	invoke(p, "PutRule", map[string]any{"Name": "retry", "EventPattern": `{"source":["retry"]}`})
 	invoke(p, "PutTargets", map[string]any{"Rule": "retry", "Targets": []any{map[string]any{
 		"Id": "destination", "Arn": destinationARN, "RetryPolicy": map[string]any{"MaximumEventAgeInSeconds": 60, "MaximumRetryAttempts": 1},
@@ -372,7 +373,7 @@ func TestPutEventsRetriesAndDeadLettersTargets(t *testing.T) {
 		t.Fatalf("dead letters %#v", dead)
 	}
 	attributes := dead[0].(map[string]any)["MessageAttributes"].(map[string]any)
-	attribute := func(name string) string { return str(attributes[name].(map[string]any)["StringValue"]) }
+	attribute := func(name string) string { return spi.Str(attributes[name].(map[string]any)["StringValue"]) }
 	if attribute("ERROR_CODE") != "ERROR_FROM_TARGET" || attribute("EXHAUSTED_RETRY_CONDITION") != "MaximumRetryAttempts" || attribute("RETRY_ATTEMPTS") != "0" || !strings.HasSuffix(attribute("RULE_ARN"), ":rule/dead") || attribute("TARGET_ARN") != destinationARN {
 		t.Fatalf("dead-letter attributes %#v", attributes)
 	}
@@ -388,7 +389,7 @@ func TestPutEventsRetriesAndDeadLettersTargets(t *testing.T) {
 		t.Fatalf("permanent dead letters %#v", permanent)
 	}
 	attributes = permanent[0].(map[string]any)["MessageAttributes"].(map[string]any)
-	if str(attributes["ERROR_CODE"].(map[string]any)["StringValue"]) != "NO_RESOURCE" || attributes["EXHAUSTED_RETRY_CONDITION"] != nil {
+	if spi.Str(attributes["ERROR_CODE"].(map[string]any)["StringValue"]) != "NO_RESOURCE" || attributes["EXHAUSTED_RETRY_CONDITION"] != nil {
 		t.Fatalf("permanent attributes %#v", attributes)
 	}
 
@@ -409,7 +410,7 @@ func TestPutEventsRetriesAndDeadLettersTargets(t *testing.T) {
 			return false
 		}
 		attributes = messages[0].(map[string]any)["MessageAttributes"].(map[string]any)
-		return str(attributes["EXHAUSTED_RETRY_CONDITION"].(map[string]any)["StringValue"]) == "MaximumEventAgeInSeconds"
+		return spi.Str(attributes["EXHAUSTED_RETRY_CONDITION"].(map[string]any)["StringValue"]) == "MaximumEventAgeInSeconds"
 	})
 	if calls.Load() != beforeAge+1 {
 		t.Fatalf("expired event retried: calls before=%d after=%d", beforeAge, calls.Load())
@@ -527,7 +528,7 @@ func TestDeliverTargetStepFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	arn := str(created.Output["stateMachineArn"])
+	arn := spi.Str(created.Output["stateMachineArn"])
 	for _, invocation := range []string{"REQUEST_RESPONSE", "FIRE_AND_FORGET"} {
 		if err := DeliverTarget(context.Background(), deps, id, arn, map[string]any{"StateMachineParameters": map[string]any{"InvocationType": invocation}}, []byte(`{"value":1}`)); err != nil {
 			t.Fatalf("%s: %v", invocation, err)
@@ -540,10 +541,10 @@ func TestDeliverTargetStepFunctions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := DeliverTarget(context.Background(), deps, id, str(standard.Output["stateMachineArn"]), map[string]any{}, []byte(`{}`)); err != nil {
+	if err := DeliverTarget(context.Background(), deps, id, spi.Str(standard.Output["stateMachineArn"]), map[string]any{}, []byte(`{}`)); err != nil {
 		t.Fatalf("default async: %v", err)
 	}
-	if err := DeliverTarget(context.Background(), deps, id, str(standard.Output["stateMachineArn"]), map[string]any{"StateMachineParameters": map[string]any{"InvocationType": "REQUEST_RESPONSE"}}, []byte(`{}`)); err == nil {
+	if err := DeliverTarget(context.Background(), deps, id, spi.Str(standard.Output["stateMachineArn"]), map[string]any{"StateMachineParameters": map[string]any{"InvocationType": "REQUEST_RESPONSE"}}, []byte(`{}`)); err == nil {
 		t.Fatal("synchronous Standard invocation succeeded")
 	}
 	executions, _, err := deps.Store.Scope(id.Account, id.Region).Collection("ex").List(context.Background(), "", "", 0)
@@ -591,7 +592,7 @@ func TestInvokeAPIDestinationBasicAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := InvokeAPIDestination(context.Background(), deps, id, str(destination.Output["ApiDestinationArn"]), map[string]any{
+	body, err := InvokeAPIDestination(context.Background(), deps, id, spi.Str(destination.Output["ApiDestinationArn"]), map[string]any{
 		"PathParameterValues": []any{"widget"}, "QueryStringParameters": map[string]any{"source": "target"}, "HeaderParameters": map[string]any{"X-Test": "target"},
 	}, []byte(`{"value":"target","target":"yes"}`))
 	if err != nil || string(body) != `{"ok":true}` || !<-seen {
@@ -622,11 +623,11 @@ func TestInvokeAPIDestinationOAuth(t *testing.T) {
 			if !ok || username != "client" || password != "secret" || r.FormValue("grant_type") != "client_credentials" {
 				t.Errorf("OAuth request auth=%v username=%q password=%q form=%v", ok, username, password, r.Form)
 			}
-			_, _ = w.Write([]byte(`{"access_token":"token-` + toString(tokenCalls) + `","token_type":"Bearer"}`))
+			_, _ = w.Write([]byte(`{"access_token":"token-` + spi.JSONText(tokenCalls) + `","token_type":"Bearer"}`))
 		case "/unauthorized", "/proxy-auth-required":
 			destinationCalls[r.URL.Path]++
 			payload, _ := io.ReadAll(r.Body)
-			if r.Header.Get("Authorization") != "Bearer token-"+toString(tokenCalls) || string(payload) != `{}` {
+			if r.Header.Get("Authorization") != "Bearer token-"+spi.JSONText(tokenCalls) || string(payload) != `{}` {
 				t.Errorf("Authorization %q", r.Header.Get("Authorization"))
 			}
 			if destinationCalls[r.URL.Path] == 1 {
@@ -666,7 +667,7 @@ func TestInvokeAPIDestinationOAuth(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		body, err := InvokeAPIDestination(context.Background(), deps, id, str(destination.Output["ApiDestinationArn"]), nil, []byte(`{}`))
+		body, err := InvokeAPIDestination(context.Background(), deps, id, spi.Str(destination.Output["ApiDestinationArn"]), nil, []byte(`{}`))
 		if err != nil || string(body) != `{"ok":true}` || destinationCalls["/"+path] != 2 {
 			t.Fatalf("OAuth %s destination body=%s tokenCalls=%d destinationCalls=%v err=%v", path, body, tokenCalls, destinationCalls, err)
 		}
@@ -680,7 +681,7 @@ func TestInvokeAPIDestinationOAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = InvokeAPIDestination(context.Background(), deps, id, str(retryDestination.Output["ApiDestinationArn"]), nil, []byte(`{}`))
+	_, err = InvokeAPIDestination(context.Background(), deps, id, spi.Str(retryDestination.Output["ApiDestinationArn"]), nil, []byte(`{}`))
 	fault, ok := err.(*spi.Fault)
 	if !ok || fault.HTTPStatus != http.StatusTooManyRequests || fault.Fields["RetryAfter"] != "3" {
 		t.Fatalf("retryable fault=%#v err=%v", fault, err)
@@ -712,7 +713,7 @@ func TestAPIDestinationControlPlane(t *testing.T) {
 		"Name": "control", "Description": "original", "AuthorizationType": "API_KEY",
 		"AuthParameters": map[string]any{"ApiKeyAuthParameters": map[string]any{"ApiKeyName": "X-Key", "ApiKeyValue": "secret"}},
 	})
-	if err != nil || connection.Output["ConnectionState"] != "AUTHORIZED" || !strings.Contains(str(connection.Output["ConnectionArn"]), ":connection/control/") {
+	if err != nil || connection.Output["ConnectionState"] != "AUTHORIZED" || !strings.Contains(spi.Str(connection.Output["ConnectionArn"]), ":connection/control/") {
 		t.Fatalf("create connection %#v err=%v", connection, err)
 	}
 	wantFault("CreateConnection", map[string]any{
@@ -744,7 +745,7 @@ func TestAPIDestinationControlPlane(t *testing.T) {
 	destination, err := invoke("CreateApiDestination", map[string]any{
 		"Name": "control", "ConnectionArn": connection.Output["ConnectionArn"], "InvocationEndpoint": "https://example.test/original", "HttpMethod": "POST",
 	})
-	if err != nil || destination.Output["ApiDestinationState"] != "ACTIVE" || !strings.Contains(str(destination.Output["ApiDestinationArn"]), ":api-destination/control/") {
+	if err != nil || destination.Output["ApiDestinationState"] != "ACTIVE" || !strings.Contains(spi.Str(destination.Output["ApiDestinationArn"]), ":api-destination/control/") {
 		t.Fatalf("create API destination %#v err=%v", destination, err)
 	}
 	if _, err := invoke("UpdateApiDestination", map[string]any{"Name": "control", "Description": "updated"}); err != nil {
@@ -762,7 +763,7 @@ func TestAPIDestinationControlPlane(t *testing.T) {
 	if err != nil || deauthorized.Output["ConnectionState"] != "DEAUTHORIZED" || storedConnection["AuthParameters"] != nil {
 		t.Fatalf("deauthorize connection %#v stored=%#v err=%v", deauthorized, storedConnection, err)
 	}
-	_, err = InvokeAPIDestination(ctx, deps, id, str(destination.Output["ApiDestinationArn"]), nil, []byte(`{}`))
+	_, err = InvokeAPIDestination(ctx, deps, id, spi.Str(destination.Output["ApiDestinationArn"]), nil, []byte(`{}`))
 	if fault, ok := err.(*spi.Fault); !ok || fault.Code != "ConnectionFailure" {
 		t.Fatalf("deauthorized invocation fault=%v", err)
 	}
@@ -790,7 +791,7 @@ func TestAPIDestinationRateLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	arn := str(destination.Output["ApiDestinationArn"])
+	arn := spi.Str(destination.Output["ApiDestinationArn"])
 	if _, err := InvokeAPIDestination(ctx, deps, id, arn, nil, []byte(`{}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -868,11 +869,11 @@ func TestTargetsUpsertRemoveAndEventBusIsolation(t *testing.T) {
 	}
 	invoke(p, "RemoveTargets", map[string]any{"Rule": "same", "Ids": []any{"b"}})
 	listed = invoke(p, "ListTargetsByRule", map[string]any{"Rule": "same"}).Output["Targets"].([]any)
-	if len(listed) != 1 || str(listed[0].(map[string]any)["Arn"]) != "arn:aws:sqs:us-east-1:1:updated" {
+	if len(listed) != 1 || spi.Str(listed[0].(map[string]any)["Arn"]) != "arn:aws:sqs:us-east-1:1:updated" {
 		t.Fatalf("remove targets %#v", listed)
 	}
 	custom := invoke(p, "PutRule", map[string]any{"Name": "same", "EventBusName": "custom", "EventPattern": `{}`})
-	if str(custom.Output["RuleArn"]) != "arn:aws:events:us-east-1:1:rule/custom/same" {
+	if spi.Str(custom.Output["RuleArn"]) != "arn:aws:events:us-east-1:1:rule/custom/same" {
 		t.Fatalf("custom rule ARN %#v", custom.Output)
 	}
 	invoke(p, "PutTargets", map[string]any{"Rule": "same", "EventBusName": "custom", "Targets": []any{
@@ -934,7 +935,7 @@ func TestTargetInputTransformations(t *testing.T) {
 			t.Fatalf("%s received %d messages", queue, len(messages))
 		}
 		var got map[string]any
-		_ = json.Unmarshal([]byte(str(messages[0].(map[string]any)["Body"])), &got)
+		_ = json.Unmarshal([]byte(spi.Str(messages[0].(map[string]any)["Body"])), &got)
 		if !reflect.DeepEqual(got, expected) {
 			t.Fatalf("%s body %#v, want %#v", queue, got, expected)
 		}
@@ -994,7 +995,7 @@ func TestBootedServerEventBridgePutEvents(t *testing.T) {
 	_, connection := call("CreateConnection", `{"Name":"c1","AuthorizationType":"API_KEY","AuthParameters":{"ApiKeyAuthParameters":{"ApiKeyName":"X-Key","ApiKeyValue":"value"}}}`)
 	call("DescribeConnection", `{"Name":"c1"}`)
 	call("ListConnections", `{}`)
-	call("CreateApiDestination", `{"Name":"d1","ConnectionArn":"`+str(connection["ConnectionArn"])+`","InvocationEndpoint":"https://example.test","HttpMethod":"POST"}`)
+	call("CreateApiDestination", `{"Name":"d1","ConnectionArn":"`+spi.Str(connection["ConnectionArn"])+`","InvocationEndpoint":"https://example.test","HttpMethod":"POST"}`)
 	call("ListApiDestinations", `{}`)
 	call("CreateEndpoint", `{"Name":"e1","RoutingConfig":{"FailoverConfig":{"Primary":{"HealthCheck":"h"},"Secondary":{"Route":"us-west-2"}}},"EventBuses":[{"EventBusArn":"a"},{"EventBusArn":"b"}]}`)
 	call("ListEndpoints", `{}`)
@@ -1094,4 +1095,10 @@ func TestBootedServerEventsExtraOps(t *testing.T) {
 	for _, op := range bundled.Handler("aws.events", spitest.Deps(t)).Operations() {
 		soft(op, payload)
 	}
+}
+
+// mergeConnectionBody merges a connection's body parameters into a payload
+// under API destinations' 64 KB request bound, as eventhttp's call does.
+func mergeConnectionBody(payload []byte, raw any) ([]byte, error) {
+	return eventhttp.MergeBody(payload, raw, 64<<10)
 }

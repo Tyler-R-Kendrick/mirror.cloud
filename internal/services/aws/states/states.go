@@ -3,6 +3,7 @@ package states
 
 import (
 	"bytes"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"crypto/md5"
@@ -149,18 +150,7 @@ func (p *Pack) waitLoop() {
 	defer close(p.done)
 	for {
 		next := p.runDueWaits(context.Background())
-		if next.IsZero() {
-			select {
-			case <-p.wake:
-			case <-p.stop:
-				return
-			}
-			continue
-		}
-		select {
-		case <-p.deps.Clock.AfterTime(next):
-		case <-p.wake:
-		case <-p.stop:
+		if !spi.Await(p.deps.Clock, next, p.wake, p.stop) {
 			return
 		}
 	}
@@ -238,11 +228,11 @@ func (p *Pack) pendingExecution(ctx context.Context, req *spi.Request, token, ex
 		return nil, false
 	}
 	var record map[string]any
-	if json.Unmarshal(encoded, &record) != nil || first(record, "status") != "RUNNING" {
+	if json.Unmarshal(encoded, &record) != nil || spi.First(record, "status") != "RUNNING" {
 		_ = p.col(req, "pending").Delete(ctx, token)
 		return nil, false
 	}
-	if first(record, "pendingToken") != token {
+	if spi.First(record, "pendingToken") != token {
 		return nil, false
 	}
 	return record, true
@@ -255,11 +245,10 @@ func (p *Pack) timeoutExecution(ctx context.Context, req *spi.Request, token str
 	}
 	record["status"], record["error"], record["cause"] = "TIMED_OUT", "States.Timeout", "States.Timeout"
 	record["stopDate"] = float64(p.deps.Clock.Now().Unix())
-	history := asSlice(record["history"])
+	history := spi.Slice(record["history"])
 	record["history"] = append(history, map[string]any{"type": "ExecutionTimedOut", "id": len(history) + 1, "error": "States.Timeout", "cause": "States.Timeout"})
 	delete(record, "pendingToken")
-	body, _ := json.Marshal(record)
-	_ = p.col(req, "ex").Put(ctx, wait.ExecARN, body)
+	_ = spi.PutJSON(ctx, p.col(req, "ex"), wait.ExecARN, record)
 	_ = p.col(req, "pending").Delete(ctx, token)
 }
 
@@ -271,7 +260,7 @@ func (p *Pack) resumeWait(ctx context.Context, req *spi.Request, token string, w
 	walkRequest := *req
 	walkRequest.Input = map[string]any{
 		"_stateMachineArn": record["stateMachineArn"], "_executionArn": wait.ExecARN, "_executionName": record["name"],
-		"_executionInput": parseJSON(first(record, "input")), "_executionStartTime": time.Unix(int64(toFloat(record["startDate"])), 0).UTC().Format(time.RFC3339),
+		"_executionInput": parseJSON(spi.First(record, "input")), "_executionStartTime": time.Unix(int64(toFloat(record["startDate"])), 0).UTC().Format(time.RFC3339),
 		"_executionRoleArn": record["roleArn"], "_executionType": record["type"], "_executionRedriveCount": record["redriveCount"], "_executionDeadline": wait.Deadline,
 	}
 	definition, from := wait.Definition, wait.StateName
@@ -291,7 +280,7 @@ func (p *Pack) resumeWait(ctx context.Context, req *spi.Request, token string, w
 	now := p.deps.Clock.Now().Unix()
 	output, _ := json.Marshal(result.out)
 	record["status"], record["output"], record["cause"] = result.status, string(output), result.cause
-	record["history"] = append(asSlice(record["history"]), result.hist...)
+	record["history"] = append(spi.Slice(record["history"]), result.hist...)
 	delete(record, "error")
 	delete(record, "pendingToken")
 	if result.errorName != "" {
@@ -305,22 +294,19 @@ func (p *Pack) resumeWait(ctx context.Context, req *spi.Request, token string, w
 	}
 	if result.pending != nil {
 		result.pending.ExecARN, result.pending.Definition = wait.ExecARN, wait.Definition
-		pendingBytes, _ := json.Marshal(result.pending)
-		_ = p.col(req, "pending").Put(ctx, result.pending.Token, pendingBytes)
+		_ = spi.PutJSON(ctx, p.col(req, "pending"), result.pending.Token, result.pending)
 		record["pendingToken"] = result.pending.Token
 	}
 	for _, run := range result.mapRuns {
 		arn := run.arn
 		if arn == "" {
-			arn = p.mapRunARN(req, first(record, "stateMachineName"), run.label)
+			arn = p.mapRunARN(req, spi.First(record, "stateMachineName"), run.label)
 		}
 		run.record["mapRunArn"], run.record["executionArn"], run.record["stateMachineArn"] = arn, wait.ExecARN, record["stateMachineArn"]
 		run.record["startDate"], run.record["stopDate"] = float64(now), float64(now)
-		body, _ := json.Marshal(run.record)
-		_ = p.col(req, "maprun").Put(ctx, arn, body)
+		_ = spi.PutJSON(ctx, p.col(req, "maprun"), arn, run.record)
 	}
-	body, _ := json.Marshal(record)
-	_ = p.col(req, "ex").Put(ctx, wait.ExecARN, body)
+	_ = spi.PutJSON(ctx, p.col(req, "ex"), wait.ExecARN, record)
 	_ = p.col(req, "pending").Delete(ctx, token)
 	if result.pending != nil {
 		p.signalWaits()
@@ -331,24 +317,24 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	now := p.deps.Clock.Now().Unix()
 	switch req.Operation {
 	case "CreateStateMachine":
-		name := first(req.Input, "name", "Name")
+		name := spi.First(req.Input, "name", "Name")
 		if !validResourceName(name) {
 			return nil, &spi.Fault{Code: "InvalidName", HTTPStatus: 400, Fault: "client"}
 		}
-		machineType := first(req.Input, "type", "Type")
+		machineType := spi.First(req.Input, "type", "Type")
 		if machineType == "" {
 			machineType = "STANDARD"
 		}
-		definition := first(req.Input, "definition", "Definition")
+		definition := spi.First(req.Input, "definition", "Definition")
 		if len(definition) < 1 || len(definition) > 1048576 || len(validateDefinition(definition, machineType)) > 0 {
 			return nil, &spi.Fault{Code: "InvalidDefinition", HTTPStatus: 400, Fault: "client"}
 		}
-		roleARN := first(req.Input, "roleArn", "RoleArn")
+		roleARN := spi.First(req.Input, "roleArn", "RoleArn")
 		if !validRoleARN(roleARN) {
 			return nil, &spi.Fault{Code: "InvalidArn", HTTPStatus: 400, Fault: "client"}
 		}
 		publish := inputBool(req.Input, "publish", "Publish")
-		versionDescription := first(req.Input, "versionDescription", "VersionDescription")
+		versionDescription := spi.First(req.Input, "versionDescription", "VersionDescription")
 		if len(versionDescription) > 256 || versionDescription != "" && !publish {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -377,13 +363,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, &spi.Fault{Code: tagFault, HTTPStatus: 400, Fault: "client"}
 		}
 		if existing, found := getRecord(ctx, p.col(req, "sm"), name); found {
-			if first(existing, "definition") != definition || first(existing, "type") != machineType ||
+			if spi.First(existing, "definition") != definition || spi.First(existing, "type") != machineType ||
 				!reflect.DeepEqual(existing["_logging"], logging) || !reflect.DeepEqual(existing["_tracing"], tracing) ||
-				!reflect.DeepEqual(existing["_encryption"], encryption) || toBool(existing["_publish"]) != publish || first(existing, "_versionDescription") != versionDescription {
+				!reflect.DeepEqual(existing["_encryption"], encryption) || toBool(existing["_publish"]) != publish || spi.First(existing, "_versionDescription") != versionDescription {
 				return nil, &spi.Fault{Code: "StateMachineAlreadyExists", HTTPStatus: 400, Fault: "client"}
 			}
 			output := map[string]any{"stateMachineArn": arn, "creationDate": existing["creationDate"]}
-			if versionARN := first(existing, "_publishedVersionArn"); versionARN != "" {
+			if versionARN := spi.First(existing, "_publishedVersionArn"); versionARN != "" {
 				output["stateMachineVersionArn"] = versionARN
 			}
 			return &spi.Response{Output: output}, nil
@@ -397,8 +383,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		b, _ := json.Marshal(rec)
 		_ = p.col(req, "sm").Put(ctx, name, b)
 		if tags != nil {
-			tagsJSON, _ := json.Marshal(tags)
-			_ = p.col(req, "tag").Put(ctx, arn, tagsJSON)
+			_ = spi.PutJSON(ctx, p.col(req, "tag"), arn, tags)
 		}
 		output := map[string]any{"stateMachineArn": arn, "creationDate": float64(now)}
 		if publish {
@@ -413,27 +398,26 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: output}, nil
 	case "UpdateStateMachine":
-		name := smName(first(req.Input, "stateMachineArn", "StateMachineArn"))
+		name := smName(spi.First(req.Input, "stateMachineArn", "StateMachineArn"))
 		b, ok, _ := p.col(req, "sm").Get(ctx, name)
 		if !ok {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		publish := inputBool(req.Input, "publish", "Publish")
-		versionDescription := first(req.Input, "versionDescription", "VersionDescription")
+		versionDescription := spi.First(req.Input, "versionDescription", "VersionDescription")
 		if len(versionDescription) > 256 || versionDescription != "" && !publish {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
 		changed := false
-		if d := first(req.Input, "definition", "Definition"); d != "" {
-			if len(d) > 1048576 || len(validateDefinition(d, first(rec, "type"))) > 0 {
+		if d := spi.First(req.Input, "definition", "Definition"); d != "" {
+			if len(d) > 1048576 || len(validateDefinition(d, spi.First(rec, "type"))) > 0 {
 				return nil, &spi.Fault{Code: "InvalidDefinition", HTTPStatus: 400, Fault: "client"}
 			}
 			rec["definition"] = d
 			changed = true
 		}
-		if r := first(req.Input, "roleArn", "RoleArn"); r != "" {
+		if r := spi.First(req.Input, "roleArn", "RoleArn"); r != "" {
 			if !validRoleARN(r) {
 				return nil, &spi.Fault{Code: "InvalidArn", HTTPStatus: 400, Fault: "client"}
 			}
@@ -473,7 +457,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: output}, nil
 	case "DeleteStateMachine":
-		arn := first(req.Input, "stateMachineArn", "StateMachineArn")
+		arn := spi.First(req.Input, "stateMachineArn", "StateMachineArn")
 		name := baseSMName(arn)
 		if smName(arn) != name {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
@@ -493,7 +477,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "tag").Delete(ctx, arn)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "DescribeStateMachine":
-		arn := first(req.Input, "stateMachineArn", "StateMachineArn")
+		arn := spi.First(req.Input, "stateMachineArn", "StateMachineArn")
 		name := baseSMName(arn)
 		collection, key := "sm", name
 		if versionNumber(arn) > 0 {
@@ -503,8 +487,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		if collection == "ver" {
 			rec["stateMachineArn"], rec["name"], rec["status"] = arn, name, "ACTIVE"
 		}
@@ -520,19 +503,18 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		})
 		return pagedResponse(req.Input, items, "stateMachines")
 	case "PublishStateMachineVersion":
-		arn := first(req.Input, "stateMachineArn", "StateMachineArn")
+		arn := spi.First(req.Input, "stateMachineArn", "StateMachineArn")
 		name := baseSMName(arn)
-		if smName(arn) != name || len(first(req.Input, "description", "Description")) > 256 {
+		if smName(arn) != name || len(spi.First(req.Input, "description", "Description")) > 256 {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
 		b, ok, _ := p.col(req, "sm").Get(ctx, name)
 		if !ok {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var machine map[string]any
-		_ = json.Unmarshal(b, &machine)
-		revision := first(machine, "revisionId")
-		if wanted := first(req.Input, "revisionId", "RevisionId"); wanted != "" && wanted != revision {
+		machine := spi.JSONObject(b)
+		revision := spi.First(machine, "revisionId")
+		if wanted := spi.First(req.Input, "revisionId", "RevisionId"); wanted != "" && wanted != revision {
 			return nil, &spi.Fault{Code: "ConflictException", HTTPStatus: 409, Fault: "client"}
 		}
 		versions, _, _ := p.col(req, "ver").List(ctx, name+":", "", 0)
@@ -541,42 +523,39 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		next := 1
 		for _, version := range versions {
-			var record map[string]any
-			_ = json.Unmarshal(version.Value, &record)
-			if first(record, "revisionId") == revision {
+			record := spi.JSONObject(version.Value)
+			if spi.First(record, "revisionId") == revision {
 				return &spi.Response{Output: map[string]any{"stateMachineVersionArn": record["stateMachineVersionArn"], "creationDate": record["creationDate"]}}, nil
 			}
-			if number := versionNumber(first(record, "stateMachineVersionArn")); number >= next {
+			if number := versionNumber(spi.First(record, "stateMachineVersionArn")); number >= next {
 				next = number + 1
 			}
 		}
-		baseARN := first(machine, "stateMachineArn")
+		baseARN := spi.First(machine, "stateMachineArn")
 		versionARN := baseARN + ":" + strconv.Itoa(next)
 		record := map[string]any{
-			"stateMachineVersionArn": versionARN, "creationDate": float64(now), "description": first(req.Input, "description", "Description"),
+			"stateMachineVersionArn": versionARN, "creationDate": float64(now), "description": spi.First(req.Input, "description", "Description"),
 			"revisionId": revision, "definition": machine["definition"], "roleArn": machine["roleArn"], "type": machine["type"],
 		}
-		encoded, _ := json.Marshal(record)
-		_ = p.col(req, "ver").Put(ctx, name+":"+strconv.Itoa(next), encoded)
+		_ = spi.PutJSON(ctx, p.col(req, "ver"), name+":"+strconv.Itoa(next), record)
 		return &spi.Response{Output: map[string]any{"stateMachineVersionArn": versionARN, "creationDate": float64(now)}}, nil
 	case "ListStateMachineVersions":
-		name := baseSMName(first(req.Input, "stateMachineArn", "StateMachineArn"))
+		name := baseSMName(spi.First(req.Input, "stateMachineArn", "StateMachineArn"))
 		if _, found := getRecord(ctx, p.col(req, "sm"), name); !found {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
 		versions, _, _ := p.col(req, "ver").List(ctx, name+":", "", 0)
 		items := make([]any, 0, len(versions))
 		for _, version := range versions {
-			var record map[string]any
-			_ = json.Unmarshal(version.Value, &record)
+			record := spi.JSONObject(version.Value)
 			items = append(items, map[string]any{"stateMachineVersionArn": record["stateMachineVersionArn"], "creationDate": record["creationDate"], "description": record["description"]})
 		}
 		sort.Slice(items, func(i, j int) bool {
-			return versionNumber(first(items[i].(map[string]any), "stateMachineVersionArn")) > versionNumber(first(items[j].(map[string]any), "stateMachineVersionArn"))
+			return versionNumber(spi.First(items[i].(map[string]any), "stateMachineVersionArn")) > versionNumber(spi.First(items[j].(map[string]any), "stateMachineVersionArn"))
 		})
 		return pagedResponse(req.Input, items, "stateMachineVersions")
 	case "DeleteStateMachineVersion":
-		arn := first(req.Input, "stateMachineVersionArn", "StateMachineVersionArn")
+		arn := spi.First(req.Input, "stateMachineVersionArn", "StateMachineVersionArn")
 		versionKey := baseSMName(arn) + ":" + strconv.Itoa(versionNumber(arn))
 		if versionNumber(arn) < 1 {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
@@ -584,13 +563,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if _, found := getRecord(ctx, p.col(req, "ver"), versionKey); !found {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		aliases, _, _ := p.col(req, "alias").List(ctx, "", "", 0)
-		for _, alias := range aliases {
-			var record map[string]any
-			_ = json.Unmarshal(alias.Value, &record)
-			for _, raw := range asSlice(record["routingConfiguration"]) {
+		for _, alias := range spi.Entries(ctx, p.col(req, "alias"), "", "", 0) {
+			record := spi.JSONObject(alias.Value)
+			for _, raw := range spi.Slice(record["routingConfiguration"]) {
 				route, _ := raw.(map[string]any)
-				if first(route, "stateMachineVersionArn", "StateMachineVersionArn") == arn {
+				if spi.First(route, "stateMachineVersionArn", "StateMachineVersionArn") == arn {
 					return nil, &spi.Fault{Code: "ConflictException", HTTPStatus: 409, Fault: "client"}
 				}
 			}
@@ -598,10 +575,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "ver").Delete(ctx, versionKey)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "CreateStateMachineAlias":
-		name := first(req.Input, "name", "Name")
+		name := spi.First(req.Input, "name", "Name")
 		routes := aliasRoutes(req.Input)
 		baseARN, valid := p.validateAliasRoutes(ctx, req, routes)
-		if !validAliasName(name) || !valid || len(first(req.Input, "description", "Description")) > 256 {
+		if !validAliasName(name) || !valid || len(spi.First(req.Input, "description", "Description")) > 256 {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
 		aliasARN := baseARN + ":" + name
@@ -609,14 +586,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, &spi.Fault{Code: "ConflictException", HTTPStatus: 409, Fault: "client"}
 		}
 		record := map[string]any{
-			"stateMachineAliasArn": aliasARN, "name": name, "description": first(req.Input, "description", "Description"),
+			"stateMachineAliasArn": aliasARN, "name": name, "description": spi.First(req.Input, "description", "Description"),
 			"routingConfiguration": routes, "creationDate": float64(now), "updateDate": float64(now),
 		}
-		encoded, _ := json.Marshal(record)
-		_ = p.col(req, "alias").Put(ctx, aliasARN, encoded)
+		_ = spi.PutJSON(ctx, p.col(req, "alias"), aliasARN, record)
 		return &spi.Response{Output: map[string]any{"stateMachineAliasArn": aliasARN, "creationDate": float64(now)}}, nil
 	case "ListStateMachineAliases":
-		requestedARN := first(req.Input, "stateMachineArn", "StateMachineArn")
+		requestedARN := spi.First(req.Input, "stateMachineArn", "StateMachineArn")
 		baseARN := stateMachineBaseARN(requestedARN)
 		if _, found := getRecord(ctx, p.col(req, "sm"), baseSMName(baseARN)); !found {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
@@ -624,8 +600,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		aliases, _, _ := p.col(req, "alias").List(ctx, baseARN+":", "", 0)
 		items := make([]any, 0, len(aliases))
 		for _, alias := range aliases {
-			var record map[string]any
-			_ = json.Unmarshal(alias.Value, &record)
+			record := spi.JSONObject(alias.Value)
 			if versionNumber(requestedARN) > 0 && !aliasReferences(record, requestedARN) {
 				continue
 			}
@@ -636,19 +611,18 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		})
 		return pagedResponse(req.Input, items, "stateMachineAliases")
 	case "UpdateStateMachineAlias":
-		arn := first(req.Input, "stateMachineAliasArn", "StateMachineAliasArn")
+		arn := spi.First(req.Input, "stateMachineAliasArn", "StateMachineAliasArn")
 		b, ok, _ := p.col(req, "alias").Get(ctx, arn)
 		if !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFound", HTTPStatus: 400, Fault: "client"}
 		}
-		var record map[string]any
-		_ = json.Unmarshal(b, &record)
+		record := spi.JSONObject(b)
 		routesValue, hasRoutes := inputValue(req.Input, "routingConfiguration", "RoutingConfiguration")
 		description, hasDescription := inputValue(req.Input, "description", "Description")
 		if !hasRoutes && !hasDescription || hasDescription && len(fmt.Sprint(description)) > 256 {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
-		if routes := asSlice(routesValue); hasRoutes {
+		if routes := spi.Slice(routesValue); hasRoutes {
 			baseARN, valid := p.validateAliasRoutes(ctx, req, routes)
 			if !valid || baseARN != stateMachineBaseARN(arn) {
 				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
@@ -659,11 +633,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			record["description"] = description
 		}
 		record["updateDate"] = float64(now)
-		encoded, _ := json.Marshal(record)
-		_ = p.col(req, "alias").Put(ctx, arn, encoded)
+		_ = spi.PutJSON(ctx, p.col(req, "alias"), arn, record)
 		return &spi.Response{Output: map[string]any{"updateDate": float64(now)}}, nil
 	case "StartExecution", "StartSyncExecution":
-		arn := first(req.Input, "stateMachineArn", "StateMachineArn")
+		arn := spi.First(req.Input, "stateMachineArn", "StateMachineArn")
 		if len(arn) < 1 || len(arn) > 256 || strings.Contains(arn, "/") {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -672,30 +645,30 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		if req.Operation == "StartSyncExecution" && first(sm, "type", "Type") != "EXPRESS" {
+		if req.Operation == "StartSyncExecution" && spi.First(sm, "type", "Type") != "EXPRESS" {
 			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
 		}
-		exName := first(req.Input, "name", "Name")
+		exName := spi.First(req.Input, "name", "Name")
 		if exName == "" {
 			exName = p.deps.Rand.UUID()
 		} else if !validResourceName(exName) {
 			return nil, &spi.Fault{Code: "InvalidName", HTTPStatus: 400, Fault: "client"}
 		}
 		execARN := p.execARN(req, name, exName)
-		inputJSON := first(req.Input, "input", "Input")
+		inputJSON := spi.First(req.Input, "input", "Input")
 		if inputJSON == "" {
 			inputJSON = "{}"
 		}
 		if len(inputJSON) > 262144 || !json.Valid([]byte(inputJSON)) {
 			return nil, &spi.Fault{Code: "InvalidExecutionInput", HTTPStatus: 400, Fault: "client"}
 		}
-		traceHeader := first(req.Input, "traceHeader", "TraceHeader")
+		traceHeader := spi.First(req.Input, "traceHeader", "TraceHeader")
 		if len(traceHeader) > 256 || !asciiString(traceHeader) {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
-		if req.Operation == "StartExecution" && first(sm, "type") == "STANDARD" {
+		if req.Operation == "StartExecution" && spi.First(sm, "type") == "STANDARD" {
 			if existing, found := getRecord(ctx, p.col(req, "ex"), execARN); found {
-				if first(existing, "status") == "RUNNING" && first(existing, "input") == inputJSON {
+				if spi.First(existing, "status") == "RUNNING" && spi.First(existing, "input") == inputJSON {
 					return &spi.Response{Output: map[string]any{"executionArn": execARN, "startDate": existing["startDate"]}}, nil
 				}
 				return nil, &spi.Fault{Code: "ExecutionAlreadyExists", HTTPStatus: 400, Fault: "client"}
@@ -712,7 +685,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		walkRequest.Input["_executionRoleArn"] = sm["roleArn"]
 		walkRequest.Input["_executionType"] = sm["type"]
 		walkRequest.Input["_executionRedriveCount"] = 0.0
-		walkRequest.Input["_executionDeadline"] = executionDeadline(def, first(sm, "type"), p.deps.Clock.Now())
+		walkRequest.Input["_executionDeadline"] = executionDeadline(def, spi.First(sm, "type"), p.deps.Clock.Now())
 		wr := p.walk(ctx, &walkRequest, def, "", in, nil)
 		baseARN := p.smARN(req, name)
 		for _, run := range wr.mapRuns {
@@ -722,8 +695,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			run.record["mapRunArn"], run.record["executionArn"], run.record["stateMachineArn"] = mapRunARN, execARN, baseARN
 			run.record["startDate"], run.record["stopDate"] = float64(now), float64(now)
-			encoded, _ := json.Marshal(run.record)
-			_ = p.col(req, "maprun").Put(ctx, mapRunARN, encoded)
+			_ = spi.PutJSON(ctx, p.col(req, "maprun"), mapRunARN, run.record)
 		}
 		ob, _ := json.Marshal(wr.out)
 		rec := map[string]any{
@@ -735,10 +707,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if traceHeader != "" {
 			rec["traceHeader"] = traceHeader
 		}
-		if versionARN := first(sm, "_resolvedVersionArn"); versionARN != "" {
+		if versionARN := spi.First(sm, "_resolvedVersionArn"); versionARN != "" {
 			rec["stateMachineVersionArn"] = versionARN
 		}
-		if aliasARN := first(sm, "_resolvedAliasArn"); aliasARN != "" {
+		if aliasARN := spi.First(sm, "_resolvedAliasArn"); aliasARN != "" {
 			rec["stateMachineAliasArn"] = aliasARN
 		}
 		if wr.failedState != "" {
@@ -753,8 +725,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if wr.pending != nil {
 			wr.pending.ExecARN = execARN
 			wr.pending.Definition = def
-			pb, _ := json.Marshal(wr.pending)
-			_ = p.col(req, "pending").Put(ctx, wr.pending.Token, pb)
+			_ = spi.PutJSON(ctx, p.col(req, "pending"), wr.pending.Token, wr.pending)
 			rec["pendingToken"] = wr.pending.Token
 		}
 		eb, _ := json.Marshal(rec)
@@ -777,7 +748,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: output}, nil
 	case "StopExecution":
-		ex := first(req.Input, "executionArn", "ExecutionArn")
+		ex := spi.First(req.Input, "executionArn", "ExecutionArn")
 		if !validErrorCause(req.Input) {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -785,9 +756,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		if first(rec, "type") == "EXPRESS" {
+		rec := spi.JSONObject(b)
+		if spi.First(rec, "type") == "EXPRESS" {
 			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
 		}
 		if value, exists := inputValue(req.Input, "error", "Error"); exists {
@@ -796,10 +766,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if value, exists := inputValue(req.Input, "cause", "Cause"); exists {
 			rec["cause"] = value
 		}
-		if token := first(rec, "pendingToken"); token != "" {
+		if token := spi.First(rec, "pendingToken"); token != "" {
 			if pendingRecord, found, _ := p.col(req, "pending").Get(ctx, token); found {
-				var pending pending
-				_ = json.Unmarshal(pendingRecord, &pending)
+				pending := spi.Decode[pending](pendingRecord)
 				rec["redriveState"], rec["redriveInput"] = pending.StateName, pending.StateInput
 			}
 			_ = p.col(req, "pending").Delete(ctx, token)
@@ -811,14 +780,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "ex").Put(ctx, ex, nb)
 		return &spi.Response{Output: map[string]any{"stopDate": float64(now)}}, nil
 	case "DescribeExecution":
-		ex := first(req.Input, "executionArn", "ExecutionArn")
+		ex := spi.First(req.Input, "executionArn", "ExecutionArn")
 		b, ok, _ := p.col(req, "ex").Get(ctx, ex)
 		if !ok {
 			return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		if first(rec, "type") == "EXPRESS" && first(rec, "mapRunArn") == "" {
+		rec := spi.JSONObject(b)
+		if spi.First(rec, "type") == "EXPRESS" && spi.First(rec, "mapRunArn") == "" {
 			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
 		}
 		delete(rec, "history")
@@ -827,8 +795,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: rec}, nil
 	case "ListExecutions":
-		stateMachineARN := first(req.Input, "stateMachineArn", "StateMachineArn")
-		mapRunARN := first(req.Input, "mapRunArn", "MapRunArn")
+		stateMachineARN := spi.First(req.Input, "stateMachineArn", "StateMachineArn")
+		mapRunARN := spi.First(req.Input, "mapRunArn", "MapRunArn")
 		if (stateMachineARN == "") == (mapRunARN == "") {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -838,17 +806,17 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 		} else if machine, found := p.resolveStateMachine(ctx, req, stateMachineARN); !found {
 			return nil, &spi.Fault{Code: "StateMachineDoesNotExist", HTTPStatus: 400, Fault: "client"}
-		} else if first(machine, "type") == "EXPRESS" {
+		} else if spi.First(machine, "type") == "EXPRESS" {
 			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
 		}
-		status := first(req.Input, "statusFilter", "StatusFilter")
-		redrive := first(req.Input, "redriveFilter", "RedriveFilter")
+		status := spi.First(req.Input, "statusFilter", "StatusFilter")
+		redrive := spi.First(req.Input, "redriveFilter", "RedriveFilter")
 		if mapRunARN == "" && redrive != "" || status != "" && !slices.Contains([]string{"RUNNING", "SUCCEEDED", "FAILED", "TIMED_OUT", "ABORTED", "PENDING_REDRIVE"}, status) {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
 		items := listRecords(ctx, p.col(req, "ex"), func(record map[string]any) (map[string]any, bool) {
-			matches := mapRunARN != "" && first(record, "mapRunArn") == mapRunARN || stateMachineARN != "" && executionMatchesMachine(record, stateMachineARN)
-			if !matches || status != "" && first(record, "status") != status || redrive == "REDRIVEN" && toFloat(record["redriveCount"]) == 0 || redrive == "NOT_REDRIVEN" && toFloat(record["redriveCount"]) > 0 {
+			matches := mapRunARN != "" && spi.First(record, "mapRunArn") == mapRunARN || stateMachineARN != "" && executionMatchesMachine(record, stateMachineARN)
+			if !matches || status != "" && spi.First(record, "status") != status || redrive == "REDRIVEN" && toFloat(record["redriveCount"]) == 0 || redrive == "NOT_REDRIVEN" && toFloat(record["redriveCount"]) > 0 {
 				return nil, false
 			}
 			item := map[string]any{
@@ -867,7 +835,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		})
 		return pagedResponse(req.Input, items, "executions")
 	case "ListMapRuns":
-		executionARN := first(req.Input, "executionArn", "ExecutionArn")
+		executionARN := spi.First(req.Input, "executionArn", "ExecutionArn")
 		if _, ok := getRecord(ctx, p.col(req, "ex"), executionARN); !ok {
 			return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
@@ -879,7 +847,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
 		offset := 0
-		if token := first(req.Input, "nextToken", "NextToken"); token != "" {
+		if token := spi.First(req.Input, "nextToken", "NextToken"); token != "" {
 			var err error
 			offset, err = strconv.Atoi(token)
 			if err != nil || offset < 0 {
@@ -889,9 +857,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		records, _, _ := p.col(req, "maprun").List(ctx, "", "", 0)
 		items := make([]any, 0)
 		for _, item := range records {
-			var record map[string]any
-			_ = json.Unmarshal(item.Value, &record)
-			if first(record, "executionArn") == executionARN {
+			record := spi.JSONObject(item.Value)
+			if spi.First(record, "executionArn") == executionARN {
 				items = append(items, map[string]any{
 					"executionArn": record["executionArn"], "mapRunArn": record["mapRunArn"], "startDate": record["startDate"],
 					"stateMachineArn": record["stateMachineArn"], "stopDate": record["stopDate"],
@@ -910,12 +877,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: output}, nil
 	case "UpdateMapRun":
-		arn := first(req.Input, "mapRunArn", "MapRunArn")
+		arn := spi.First(req.Input, "mapRunArn", "MapRunArn")
 		record, ok := getRecord(ctx, p.col(req, "maprun"), arn)
 		if !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFound", HTTPStatus: 400, Fault: "client"}
 		}
-		if first(record, "status") != "RUNNING" {
+		if spi.First(record, "status") != "RUNNING" {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
 		updated := false
@@ -938,16 +905,15 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !updated {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
-		encoded, _ := json.Marshal(record)
-		_ = p.col(req, "maprun").Put(ctx, arn, encoded)
+		_ = spi.PutJSON(ctx, p.col(req, "maprun"), arn, record)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "DescribeStateMachineForExecution":
-		executionARN := first(req.Input, "executionArn", "ExecutionArn")
+		executionARN := spi.First(req.Input, "executionArn", "ExecutionArn")
 		record, ok := getRecord(ctx, p.col(req, "ex"), executionARN)
 		if !ok {
 			return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		if first(record, "type") == "EXPRESS" {
+		if spi.First(record, "type") == "EXPRESS" {
 			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
 		}
 		return &spi.Response{Output: map[string]any{
@@ -957,17 +923,16 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "RedriveExecution":
 		return p.redriveExecution(ctx, req, now)
 	case "GetExecutionHistory":
-		ex := first(req.Input, "executionArn", "ExecutionArn")
+		ex := spi.First(req.Input, "executionArn", "ExecutionArn")
 		b, ok, _ := p.col(req, "ex").Get(ctx, ex)
 		if !ok {
 			return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		if first(rec, "type") == "EXPRESS" {
+		rec := spi.JSONObject(b)
+		if spi.First(rec, "type") == "EXPRESS" {
 			return nil, &spi.Fault{Code: "StateMachineTypeNotSupported", HTTPStatus: 400, Fault: "client"}
 		}
-		events := asSlice(rec["history"])
+		events := spi.Slice(rec["history"])
 		if inputBool(req.Input, "reverseOrder", "ReverseOrder") {
 			for left, right := 0, len(events)-1; left < right; left, right = left+1, right-1 {
 				events[left], events[right] = events[right], events[left]
@@ -975,7 +940,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return pagedResponse(req.Input, events, "events")
 	case "CreateActivity":
-		name := first(req.Input, "name", "Name")
+		name := spi.First(req.Input, "name", "Name")
 		if !validResourceName(name) {
 			return nil, &spi.Fault{Code: "InvalidName", HTTPStatus: 400, Fault: "client"}
 		}
@@ -1002,12 +967,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		b, _ := json.Marshal(rec)
 		_ = p.col(req, "act").Put(ctx, name, b)
 		if tags != nil {
-			tagsJSON, _ := json.Marshal(tags)
-			_ = p.col(req, "tag").Put(ctx, arn, tagsJSON)
+			_ = spi.PutJSON(ctx, p.col(req, "tag"), arn, tags)
 		}
 		return &spi.Response{Output: map[string]any{"activityArn": arn, "creationDate": float64(now)}}, nil
 	case "DeleteActivity":
-		arn := first(req.Input, "activityArn", "ActivityArn")
+		arn := spi.First(req.Input, "activityArn", "ActivityArn")
 		name, valid := activityName(req, arn)
 		if !valid {
 			return nil, &spi.Fault{Code: "InvalidArn", HTTPStatus: 400, Fault: "client"}
@@ -1016,7 +980,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		_ = p.col(req, "tag").Delete(ctx, arn)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "DescribeActivity":
-		name, valid := activityName(req, first(req.Input, "activityArn", "ActivityArn"))
+		name, valid := activityName(req, spi.First(req.Input, "activityArn", "ActivityArn"))
 		if !valid {
 			return nil, &spi.Fault{Code: "InvalidArn", HTTPStatus: 400, Fault: "client"}
 		}
@@ -1024,8 +988,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ActivityDoesNotExist", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		if encryption := rec["_encryption"]; encryption != nil {
 			rec["encryptionConfiguration"] = encryption
 		}
@@ -1037,7 +1000,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		})
 		return pagedResponse(req.Input, items, "activities")
 	case "GetActivityTask":
-		want := first(req.Input, "activityArn", "ActivityArn")
+		want := spi.First(req.Input, "activityArn", "ActivityArn")
 		name, valid := activityName(req, want)
 		if !valid {
 			return nil, &spi.Fault{Code: "InvalidArn", HTTPStatus: 400, Fault: "client"}
@@ -1051,16 +1014,13 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 			}
 		}
-		kvs, _, _ := p.col(req, "pending").List(ctx, "", "", 0)
-		for _, kv := range kvs {
-			var pend pending
-			_ = json.Unmarshal(kv.Value, &pend)
+		for _, kv := range spi.Entries(ctx, p.col(req, "pending"), "", "", 0) {
+			pend := spi.Decode[pending](kv.Value)
 			if pend.Started || want != "" && pend.ActivityARN != want {
 				continue
 			}
 			startTaskTimers(&pend, p.deps.Clock.Now())
-			encoded, _ := json.Marshal(pend)
-			_ = p.col(req, "pending").Put(ctx, pend.Token, encoded)
+			_ = spi.PutJSON(ctx, p.col(req, "pending"), pend.Token, pend)
 			p.signalWaits()
 			inb, _ := json.Marshal(pend.Input)
 			return &spi.Response{Output: map[string]any{"taskToken": pend.Token, "input": string(inb)}}, nil
@@ -1071,7 +1031,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	case "SendTaskFailure":
 		return p.finishTask(ctx, req, now, false)
 	case "SendTaskHeartbeat":
-		token := first(req.Input, "taskToken", "TaskToken")
+		token := spi.First(req.Input, "taskToken", "TaskToken")
 		if len(token) < 1 || len(token) > 2048 {
 			return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
 		}
@@ -1079,8 +1039,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !found {
 			return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
 		}
-		var pend pending
-		_ = json.Unmarshal(body, &pend)
+		pend := spi.Decode[pending](body)
 		if !pend.Started {
 			return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
 		}
@@ -1092,7 +1051,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "ValidateStateMachineDefinition":
-		diagnostics := validateDefinition(first(req.Input, "definition", "Definition"), first(req.Input, "type", "Type"))
+		diagnostics := validateDefinition(spi.First(req.Input, "definition", "Definition"), spi.First(req.Input, "type", "Type"))
 		maxResults := int(toFloat(req.Input["maxResults"]))
 		if maxResults == 0 {
 			maxResults = 100
@@ -1160,7 +1119,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if !valid {
 				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 			}
-			mode := first(mock, "fieldValidationMode", "FieldValidationMode")
+			mode := spi.First(mock, "fieldValidationMode", "FieldValidationMode")
 			if mode == "" {
 				mode = "STRICT"
 			}
@@ -1278,36 +1237,35 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		copy.Input["_testStateName"] = selection.name
 		copy.Input["_testStateRevealSecrets"] = revealSecrets
 		walkRequest := &copy
-		var testMachine map[string]any
-		_ = json.Unmarshal([]byte(wrapped), &testMachine)
+		testMachine := spi.Decode[map[string]any]([]byte(wrapped))
 		testedState, _ := testMachine["States"].(map[string]any)["TestState"].(map[string]any)
 		if _, configured := inputValue(configuration, "mapItemReaderData", "MapItemReaderData"); configured {
 			_, hasReader := testedState["ItemReader"].(map[string]any)
 			processor, _ := testedState["ItemProcessor"].(map[string]any)
 			processorConfig, _ := processor["ProcessorConfig"].(map[string]any)
-			if first(testedState, "Type") != "Map" || !hasReader || first(processorConfig, "Mode") != "DISTRIBUTED" {
+			if spi.First(testedState, "Type") != "Map" || !hasReader || spi.First(processorConfig, "Mode") != "DISTRIBUTED" {
 				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 			}
 		}
-		if result, mockedResult := mock["Result"]; mockedResult && !validTestStateMock(testedState, result, first(mock, "FieldValidationMode")) {
+		if result, mockedResult := mock["Result"]; mockedResult && !validTestStateMock(testedState, result, spi.First(mock, "FieldValidationMode")) {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
-		if _, mockedError := mock["ErrorOutput"]; mockedError && slices.Contains([]string{"Map", "Parallel"}, first(testedState, "Type")) && first(configuration, "errorCausedByState", "ErrorCausedByState") == "" {
+		if _, mockedError := mock["ErrorOutput"]; mockedError && slices.Contains([]string{"Map", "Parallel"}, spi.First(testedState, "Type")) && spi.First(configuration, "errorCausedByState", "ErrorCausedByState") == "" {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
 		if rawCount, configured := inputValue(configuration, "mapIterationFailureCount", "MapIterationFailureCount"); configured {
 			processor, _ := testedState["ItemProcessor"].(map[string]any)
 			processorConfig, _ := processor["ProcessorConfig"].(map[string]any)
-			if first(testedState, "Type") != "Map" || first(processorConfig, "Mode") != "DISTRIBUTED" {
+			if spi.First(testedState, "Type") != "Map" || spi.First(processorConfig, "Mode") != "DISTRIBUTED" {
 				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 			}
-			mapInspection := inspectTestState(testedState, cloneJSON(data), jsonataContext(walkRequest, "TestState", nil), variables, mock, configuration, walkResult{}, p.deps.Rand)
+			mapInspection := inspectTestState(testedState, cloneJSON(data), jsonataContext(walkRequest, "TestState"), variables, mock, configuration, walkResult{}, p.deps.Rand)
 			itemCount, countValid := testStateMapItemCount(mapInspection)
 			failureCount := int(toFloat(rawCount))
 			if !countValid || failureCount > itemCount || selection.insideMap && failureCount == itemCount {
 				return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 			}
-			if testStateMapFailuresExceeded(testedState, data, jsonataContext(walkRequest, "TestState", nil), variables, p.deps.Rand, failureCount, itemCount) {
+			if testStateMapFailuresExceeded(testedState, data, jsonataContext(walkRequest, "TestState"), variables, p.deps.Rand, failureCount, itemCount) {
 				failure := map[string]any{"error": "States.ExceedToleratedFailureThreshold", "cause": "States.ExceedToleratedFailureThreshold"}
 				delete(testedState, "_TestStateMockResult")
 				testedState["_TestStateMockError"] = failure
@@ -1318,7 +1276,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				wrapped = string(wrappedBytes)
 			}
 		}
-		if inspectionLevel == "TRACE" && (first(testedState, "Type") != "Task" || !strings.Contains(first(testedState, "Resource"), "states:::http:invoke")) {
+		if inspectionLevel == "TRACE" && (spi.First(testedState, "Type") != "Task" || !strings.Contains(spi.First(testedState, "Resource"), "states:::http:invoke")) {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
 		if _, revealSpecified := inputValue(req.Input, "revealSecrets", "RevealSecrets"); revealSpecified && mock != nil {
@@ -1340,11 +1298,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			response["cause"] = wr.cause
 		}
 		if inspectionLevel != "INFO" {
-			response["inspectionData"] = inspectTestState(testedState, inspectionInput, jsonataContext(walkRequest, "TestState", nil), variables, mock, configuration, wr, p.deps.Rand)
+			response["inspectionData"] = inspectTestState(testedState, inspectionInput, jsonataContext(walkRequest, "TestState"), variables, mock, configuration, wr, p.deps.Rand)
 		}
 		return &spi.Response{Output: response}, nil
 	case "TagResource":
-		arn := first(req.Input, "resourceArn", "ResourceArn")
+		arn := spi.First(req.Input, "resourceArn", "ResourceArn")
 		if !p.tagResourceExists(ctx, req, arn) {
 			return nil, &spi.Fault{Code: resourceARNFault(arn), HTTPStatus: 400, Fault: "client"}
 		}
@@ -1359,18 +1317,16 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if tagFault != "" {
 			return nil, &spi.Fault{Code: tagFault, HTTPStatus: 400, Fault: "client"}
 		}
-		var tags []any
-		if b, ok, _ := p.col(req, "tag").Get(ctx, arn); ok {
-			_ = json.Unmarshal(b, &tags)
-		}
+		b, _, _ := p.col(req, "tag").Get(ctx, arn)
+		tags := spi.Decode[[]any](b)
 		indexes := map[string]int{}
 		for i, tag := range tags {
 			m, _ := tag.(map[string]any)
-			indexes[first(m, "key", "Key")] = i
+			indexes[spi.First(m, "key", "Key")] = i
 		}
 		for _, tag := range incoming {
 			m, _ := tag.(map[string]any)
-			key := first(m, "key", "Key")
+			key := spi.First(m, "key", "Key")
 			if i, ok := indexes[key]; ok {
 				tags[i] = tag
 			} else {
@@ -1381,11 +1337,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(tags) > 50 {
 			return nil, &spi.Fault{Code: "TooManyTags", HTTPStatus: 400, Fault: "client"}
 		}
-		b, _ := json.Marshal(tags)
-		_ = p.col(req, "tag").Put(ctx, arn, b)
+		_ = spi.PutJSON(ctx, p.col(req, "tag"), arn, tags)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "UntagResource":
-		arn := first(req.Input, "resourceArn", "ResourceArn")
+		arn := spi.First(req.Input, "resourceArn", "ResourceArn")
 		if !p.tagResourceExists(ctx, req, arn) {
 			return nil, &spi.Fault{Code: resourceARNFault(arn), HTTPStatus: 400, Fault: "client"}
 		}
@@ -1393,10 +1348,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !validKeys || len(keys) == 0 {
 			return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 		}
-		var tags []any
-		if b, ok, _ := p.col(req, "tag").Get(ctx, arn); ok {
-			_ = json.Unmarshal(b, &tags)
-		}
+		b, _, _ := p.col(req, "tag").Get(ctx, arn)
+		tags := spi.Decode[[]any](b)
 		drop := map[string]bool{}
 		for _, key := range keys {
 			value := fmt.Sprint(key)
@@ -1408,23 +1361,19 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		kept := tags[:0]
 		for _, tag := range tags {
 			m, _ := tag.(map[string]any)
-			if !drop[first(m, "key", "Key")] {
+			if !drop[spi.First(m, "key", "Key")] {
 				kept = append(kept, tag)
 			}
 		}
-		b, _ := json.Marshal(kept)
-		_ = p.col(req, "tag").Put(ctx, arn, b)
+		_ = spi.PutJSON(ctx, p.col(req, "tag"), arn, kept)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "ListTagsForResource":
-		arn := first(req.Input, "resourceArn", "ResourceArn")
+		arn := spi.First(req.Input, "resourceArn", "ResourceArn")
 		if !p.tagResourceExists(ctx, req, arn) {
 			return nil, &spi.Fault{Code: resourceARNFault(arn), HTTPStatus: 400, Fault: "client"}
 		}
-		b, ok, _ := p.col(req, "tag").Get(ctx, arn)
 		var tags any = []any{}
-		if ok {
-			_ = json.Unmarshal(b, &tags)
-		}
+		spi.ReadJSON(ctx, p.col(req, "tag"), arn, &tags)
 		return &spi.Response{Output: map[string]any{"tags": tags}}, nil
 	default:
 		return nil, spi.NotImplemented("aws.states", req.Operation, "emulate")
@@ -1460,13 +1409,13 @@ func (p *Pack) resolveStateMachine(ctx context.Context, req *spi.Request, arn st
 	if !ok {
 		return nil, false
 	}
-	routes := asSlice(alias["routingConfiguration"])
+	routes := spi.Slice(alias["routingConfiguration"])
 	pick, total := p.deps.Rand.Intn(100), 0
 	for _, raw := range routes {
 		route, _ := raw.(map[string]any)
 		total += int(inputNumber(route, "weight", "Weight"))
 		if pick < total {
-			versionARN := first(route, "stateMachineVersionArn", "StateMachineVersionArn")
+			versionARN := spi.First(route, "stateMachineVersionArn", "StateMachineVersionArn")
 			machine, ok := getRecord(ctx, p.col(req, "ver"), baseSMName(versionARN)+":"+strconv.Itoa(versionNumber(versionARN)))
 			if ok {
 				machine["_resolvedVersionArn"], machine["_resolvedAliasArn"] = versionARN, arn
@@ -1484,7 +1433,7 @@ func (p *Pack) validateAliasRoutes(ctx context.Context, req *spi.Request, routes
 	baseARN, total := "", 0
 	for _, raw := range routes {
 		route, ok := raw.(map[string]any)
-		arn := first(route, "stateMachineVersionArn", "StateMachineVersionArn")
+		arn := spi.First(route, "stateMachineVersionArn", "StateMachineVersionArn")
 		weight := inputNumber(route, "weight", "Weight")
 		if !ok || versionNumber(arn) < 1 || weight < 0 || weight > 100 || weight != math.Trunc(weight) {
 			return "", false
@@ -1543,12 +1492,12 @@ type mapItemResult struct {
 }
 
 func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64) (*spi.Response, error) {
-	arn := first(req.Input, "executionArn", "ExecutionArn")
+	arn := spi.First(req.Input, "executionArn", "ExecutionArn")
 	record, ok := getRecord(ctx, p.col(req, "ex"), arn)
 	if !ok {
 		return nil, &spi.Fault{Code: "ExecutionDoesNotExist", HTTPStatus: 400, Fault: "client"}
 	}
-	token := first(req.Input, "clientToken", "ClientToken")
+	token := spi.First(req.Input, "clientToken", "ClientToken")
 	if len(token) > 64 {
 		return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 	}
@@ -1556,15 +1505,14 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 	if redriveDate, exists := tokens[token]; token != "" && exists {
 		return &spi.Response{Output: map[string]any{"redriveDate": redriveDate}}, nil
 	}
-	if first(record, "type") == "EXPRESS" || first(record, "status") == "RUNNING" || first(record, "status") == "SUCCEEDED" {
+	if spi.First(record, "type") == "EXPRESS" || spi.First(record, "status") == "RUNNING" || spi.First(record, "status") == "SUCCEEDED" {
 		return nil, &spi.Fault{Code: "ExecutionNotRedrivable", HTTPStatus: 400, Fault: "client"}
 	}
-	state, input := first(record, "redriveState"), record["redriveInput"]
+	state, input := spi.First(record, "redriveState"), record["redriveInput"]
 	if state == "" {
-		if pendingToken := first(record, "pendingToken"); pendingToken != "" {
+		if pendingToken := spi.First(record, "pendingToken"); pendingToken != "" {
 			if pendingRecord, found, _ := p.col(req, "pending").Get(ctx, pendingToken); found {
-				var pending pending
-				_ = json.Unmarshal(pendingRecord, &pending)
+				pending := spi.Decode[pending](pendingRecord)
 				state, input = pending.StateName, pending.StateInput
 				_ = p.col(req, "pending").Delete(ctx, pendingToken)
 			}
@@ -1574,7 +1522,7 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 		return nil, &spi.Fault{Code: "ExecutionNotRedrivable", HTTPStatus: 400, Fault: "client"}
 	}
 	var machine map[string]any
-	if json.Unmarshal([]byte(first(record, "definition")), &machine) != nil {
+	if json.Unmarshal([]byte(spi.First(record, "definition")), &machine) != nil {
 		return nil, &spi.Fault{Code: "ExecutionNotRedrivable", HTTPStatus: 400, Fault: "client"}
 	}
 	machine["StartAt"] = state
@@ -1583,13 +1531,13 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 	walkRequest.Input = maps.Clone(req.Input)
 	walkRequest.Input["_stateMachineArn"] = record["stateMachineArn"]
 	walkRequest.Input["_executionArn"], walkRequest.Input["_executionName"] = arn, record["name"]
-	walkRequest.Input["_executionInput"] = parseJSON(first(record, "input"))
+	walkRequest.Input["_executionInput"] = parseJSON(spi.First(record, "input"))
 	walkRequest.Input["_executionStartTime"] = time.Unix(int64(toFloat(record["startDate"])), 0).UTC().Format(time.RFC3339)
 	walkRequest.Input["_executionRoleArn"] = record["roleArn"]
 	walkRequest.Input["_executionType"] = record["type"]
 	walkRequest.Input["_executionRedriveCount"] = toFloat(record["redriveCount"]) + 1
 	walkRequest.Input["_executionRedriveTime"] = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
-	walkRequest.Input["_executionDeadline"] = executionDeadline(string(redriveDefinition), first(record, "type"), p.deps.Clock.Now())
+	walkRequest.Input["_executionDeadline"] = executionDeadline(string(redriveDefinition), spi.First(record, "type"), p.deps.Clock.Now())
 	result := p.walk(ctx, &walkRequest, string(redriveDefinition), "", input, nil)
 	output, _ := json.Marshal(result.out)
 	record["status"], record["output"], record["cause"] = result.status, string(output), result.cause
@@ -1605,7 +1553,7 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 	}
 	record["redriveCount"] = toFloat(record["redriveCount"]) + 1
 	record["redriveDate"] = float64(now)
-	history := asSlice(record["history"])
+	history := spi.Slice(record["history"])
 	history = append(history, map[string]any{"type": "ExecutionRedriven", "id": len(history) + 1, "redriveCount": record["redriveCount"]})
 	record["history"] = append(history, result.hist...)
 	if result.status == "RUNNING" {
@@ -1615,8 +1563,7 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 	}
 	if result.pending != nil {
 		result.pending.ExecARN, result.pending.Definition = arn, string(redriveDefinition)
-		encoded, _ := json.Marshal(result.pending)
-		_ = p.col(req, "pending").Put(ctx, result.pending.Token, encoded)
+		_ = spi.PutJSON(ctx, p.col(req, "pending"), result.pending.Token, result.pending)
 		record["pendingToken"] = result.pending.Token
 	}
 	if token != "" {
@@ -1626,8 +1573,7 @@ func (p *Pack) redriveExecution(ctx context.Context, req *spi.Request, now int64
 		tokens[token] = float64(now)
 		record["redriveTokens"] = tokens
 	}
-	encoded, _ := json.Marshal(record)
-	_ = p.col(req, "ex").Put(ctx, arn, encoded)
+	_ = spi.PutJSON(ctx, p.col(req, "ex"), arn, record)
 	if result.pending != nil {
 		p.signalWaits()
 	}
@@ -1650,7 +1596,7 @@ func validErrorCause(input map[string]any) bool {
 }
 
 func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok bool) (*spi.Response, error) {
-	tok := first(req.Input, "taskToken", "TaskToken")
+	tok := spi.First(req.Input, "taskToken", "TaskToken")
 	if len(tok) < 1 || len(tok) > 2048 {
 		return nil, &spi.Fault{Code: "InvalidToken", HTTPStatus: 400, Fault: "client"}
 	}
@@ -1681,33 +1627,37 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	_ = p.col(req, "pending").Delete(ctx, tok)
 	data := parseJSON(output)
 	from, definition := pend.StateName, pend.Definition
-	var sm map[string]any
-	_ = json.Unmarshal([]byte(pend.Definition), &sm)
+	sm := spi.Decode[map[string]any]([]byte(pend.Definition))
 	states, _ := sm["States"].(map[string]any)
 	st, _ := states[pend.StateName].(map[string]any)
-	queryLanguage := first(st, "QueryLanguage")
+	queryLanguage := spi.First(st, "QueryLanguage")
 	if queryLanguage == "" {
-		queryLanguage = first(sm, "QueryLanguage")
+		queryLanguage = spi.First(sm, "QueryLanguage")
 	}
 	isJSONata := queryLanguage == "JSONata"
 	walkRequest := *req
 	walkRequest.Input = maps.Clone(req.Input)
 	walkRequest.Input["_stateMachineArn"] = rec["stateMachineArn"]
-	walkRequest.Input["_executionArn"], walkRequest.Input["_executionName"] = pend.ExecARN, first(rec, "name")
-	walkRequest.Input["_executionInput"] = parseJSON(first(rec, "input"))
+	walkRequest.Input["_executionArn"], walkRequest.Input["_executionName"] = pend.ExecARN, spi.First(rec, "name")
+	walkRequest.Input["_executionInput"] = parseJSON(spi.First(rec, "input"))
 	walkRequest.Input["_executionStartTime"] = time.Unix(int64(toFloat(rec["startDate"])), 0).UTC().Format(time.RFC3339)
 	walkRequest.Input["_executionRoleArn"] = rec["roleArn"]
 	walkRequest.Input["_executionType"] = rec["type"]
 	walkRequest.Input["_executionRedriveCount"] = rec["redriveCount"]
 	walkRequest.Input["_executionDeadline"] = pend.Deadline
+	failExecution := func(name, cause string) (*spi.Response, error) { // the execution ends FAILED, with why
+		rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", name, cause, float64(now)
+		nb, _ := json.Marshal(rec)
+		_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
+		return &spi.Response{Output: map[string]any{}}, nil
+	}
 	persistRetry := func(delay time.Duration) bool {
 		scheduled := p.scheduleRetry(ctx, &walkRequest, pend.StateName, pend.StateInput, pend.Retries, pend.Variables, delay, nil)
 		if scheduled == nil {
 			return false
 		}
 		scheduled.pending.ExecARN, scheduled.pending.Definition = pend.ExecARN, pend.Definition
-		pb, _ := json.Marshal(scheduled.pending)
-		_ = p.col(req, "pending").Put(ctx, scheduled.pending.Token, pb)
+		_ = spi.PutJSON(ctx, p.col(req, "pending"), scheduled.pending.Token, scheduled.pending)
 		rec["pendingToken"] = scheduled.pending.Token
 		nb, _ := json.Marshal(rec)
 		_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
@@ -1716,7 +1666,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	}
 	retrying := false
 	if !ok {
-		failure := stateFailure{name: first(req.Input, "error", "Error"), cause: first(req.Input, "cause", "Cause")}
+		failure := stateFailure{name: spi.First(req.Input, "error", "Error"), cause: spi.First(req.Input, "cause", "Cause")}
 		if failure.name == "" {
 			failure.name = "States.TaskFailed"
 		}
@@ -1733,8 +1683,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 			if !pend.Callback {
 				pend.Token = p.deps.Rand.Hex(16)
 				pend.Started, pend.TaskDeadline, pend.HeartbeatDeadline = false, "", ""
-				pb, _ := json.Marshal(pend)
-				_ = p.col(req, "pending").Put(ctx, pend.Token, pb)
+				_ = spi.PutJSON(ctx, p.col(req, "pending"), pend.Token, pend)
 				rec["pendingToken"] = pend.Token
 				nb, _ := json.Marshal(rec)
 				_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
@@ -1749,14 +1698,14 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 			var out any
 			var caught, valid bool
 			if isJSONata {
-				next, out, caught, valid = catchJSONata(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName, nil), pend.Variables, p.deps.Rand)
+				next, out, caught, valid = catchJSONata(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName), pend.Variables, p.deps.Rand)
 				if !valid {
 					failure = stateFailure{name: "States.QueryEvaluationError", cause: "States.QueryEvaluationError"}
 					caught = false
 				}
 			} else {
 				next, out, caught = catchTask(st, failure, pend.StateInput)
-				if caught && !applyCatchAssignments(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName, nil), pend.Variables, p.deps.Rand) {
+				if caught && !applyCatchAssignments(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName), pend.Variables, p.deps.Rand) {
 					failure = stateFailure{name: "States.Runtime", cause: "States.Runtime"}
 					caught = false
 				}
@@ -1765,10 +1714,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 				failure = stateFailure{name: "States.Runtime", cause: "States.Runtime"}
 			}
 			if !caught || next == "" {
-				rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", failure.name, failure.cause, float64(now)
-				nb, _ := json.Marshal(rec)
-				_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
-				return &spi.Response{Output: map[string]any{}}, nil
+				return failExecution(failure.name, failure.cause)
 			}
 			sm["StartAt"] = next
 			def, _ := json.Marshal(sm)
@@ -1776,7 +1722,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		}
 	} else if isJSONata {
 		var valid bool
-		data, valid = applyJSONataState(st, pend.StateInput, data, jsonataContext(&walkRequest, pend.StateName, nil), pend.Variables, p.deps.Rand)
+		data, valid = applyJSONataState(st, pend.StateInput, data, jsonataContext(&walkRequest, pend.StateName), pend.Variables, p.deps.Rand)
 		if !valid {
 			failure := stateFailure{name: "States.QueryEvaluationError", cause: "States.QueryEvaluationError"}
 			if pend.Retries == nil {
@@ -1789,30 +1735,24 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 				sm["StartAt"] = pend.StateName
 				def, _ := json.Marshal(sm)
 				definition, from, data, retrying = string(def), "", pend.StateInput, true
-			} else if next, out, caught, catchValid := catchJSONata(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName, nil), pend.Variables, p.deps.Rand); caught && catchValid && next != "" {
+			} else if next, out, caught, catchValid := catchJSONata(st, failure, pend.StateInput, jsonataContext(&walkRequest, pend.StateName), pend.Variables, p.deps.Rand); caught && catchValid && next != "" {
 				sm["StartAt"] = next
 				def, _ := json.Marshal(sm)
 				definition, from, data = string(def), "", out
 			} else {
-				rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", failure.name, failure.cause, float64(now)
-				nb, _ := json.Marshal(rec)
-				_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
-				return &spi.Response{Output: map[string]any{}}, nil
+				return failExecution(failure.name, failure.cause)
 			}
 		}
 	} else {
 		result := data
-		stateContext := jsonataContext(&walkRequest, pend.StateName, nil)
+		stateContext := jsonataContext(&walkRequest, pend.StateName)
 		out, valid := applyStateResult(st, pend.StateInput, result, stateContext, p.deps.Rand, pend.Variables)
 		failure := "States.Runtime"
 		if valid {
 			valid = applyJSONPathAssignments(result, stateContext, pend.Variables, pend.Variables, p.deps.Rand, st)
 		}
 		if !valid {
-			rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", failure, failure, float64(now)
-			nb, _ := json.Marshal(rec)
-			_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
-			return &spi.Response{Output: map[string]any{}}, nil
+			return failExecution(failure, failure)
 		}
 		data = out
 	}
@@ -1820,10 +1760,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 		if output, valid := applyDataPath(st, "OutputPath", data, pend.Variables); valid {
 			data = output
 		} else {
-			rec["status"], rec["error"], rec["cause"], rec["stopDate"] = "FAILED", "States.Runtime", "States.Runtime", float64(now)
-			nb, _ := json.Marshal(rec)
-			_ = p.col(req, "ex").Put(ctx, pend.ExecARN, nb)
-			return &spi.Response{Output: map[string]any{}}, nil
+			return failExecution("States.Runtime", "States.Runtime")
 		}
 	}
 	var retries map[string]map[int]int
@@ -1835,7 +1772,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	rec["status"] = wr.status
 	rec["output"] = string(ob)
 	rec["cause"] = wr.cause
-	rec["history"] = append(asSlice(rec["history"]), wr.hist...)
+	rec["history"] = append(spi.Slice(rec["history"]), wr.hist...)
 	if wr.errorName != "" {
 		rec["error"] = wr.errorName
 	} else {
@@ -1847,8 +1784,7 @@ func (p *Pack) finishTask(ctx context.Context, req *spi.Request, now int64, ok b
 	if wr.pending != nil {
 		wr.pending.ExecARN = pend.ExecARN
 		wr.pending.Definition = pend.Definition
-		pb, _ := json.Marshal(wr.pending)
-		_ = p.col(req, "pending").Put(ctx, wr.pending.Token, pb)
+		_ = spi.PutJSON(ctx, p.col(req, "pending"), wr.pending.Token, wr.pending)
 		rec["pendingToken"] = wr.pending.Token
 	} else {
 		delete(rec, "pendingToken")
@@ -1892,7 +1828,7 @@ func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, inp
 		return walkResult{out: input, status: "FAILED", cause: "InvalidDefinition"}
 	}
 	start, _ := sm["StartAt"].(string)
-	machineQueryLanguage := first(sm, "QueryLanguage")
+	machineQueryLanguage := spi.First(sm, "QueryLanguage")
 	if machineQueryLanguage == "" {
 		machineQueryLanguage = "JSONPath"
 	}
@@ -1915,12 +1851,12 @@ func (p *Pack) walk(ctx context.Context, req *spi.Request, def, from string, inp
 		retries = map[string]map[int]int{}
 	}
 	maxTransitions := 25000
-	if first(req.Input, "_executionType") == "EXPRESS" {
+	if spi.First(req.Input, "_executionType") == "EXPRESS" {
 		maxTransitions = math.MaxInt
 	}
 walkLoop:
 	for hop := 0; hop < maxTransitions; hop++ {
-		if deadline, err := time.Parse(time.RFC3339Nano, first(req.Input, "_executionDeadline")); err == nil && !p.deps.Clock.Now().Before(deadline) {
+		if deadline, err := time.Parse(time.RFC3339Nano, spi.First(req.Input, "_executionDeadline")); err == nil && !p.deps.Clock.Now().Before(deadline) {
 			return walkResult{out: data, status: "TIMED_OUT", cause: "States.Timeout", errorName: "States.Timeout", hist: hist}
 		}
 		st, ok := states[cur].(map[string]any)
@@ -1929,12 +1865,12 @@ walkLoop:
 		}
 		rawInput := data
 		currentState, currentInput = cur, rawInput
-		queryLanguage := first(st, "QueryLanguage")
+		queryLanguage := spi.First(st, "QueryLanguage")
 		if queryLanguage == "" {
 			queryLanguage = machineQueryLanguage
 		}
 		isJSONata := queryLanguage == "JSONata"
-		stateContext := jsonataContext(req, cur, nil)
+		stateContext := jsonataContext(req, cur)
 		if _, supplied := stateContext["State"].(map[string]any)["EnteredTime"]; !supplied {
 			stateContext["State"].(map[string]any)["EnteredTime"] = p.deps.Clock.Now().UTC().Format(time.RFC3339Nano)
 		}
@@ -1962,12 +1898,12 @@ walkLoop:
 			if !exists {
 				return walkResult{}, false
 			}
-			failure := stateFailure{name: first(mocked, "error", "Error"), cause: first(mocked, "cause", "Cause")}
+			failure := stateFailure{name: spi.First(mocked, "error", "Error"), cause: spi.First(mocked, "cause", "Cause")}
 			if retries[cur] == nil {
 				retries[cur] = map[int]int{}
 			}
 			retryIndex := -1
-			for index, raw := range asSlice(st["Retry"]) {
+			for index, raw := range spi.Slice(st["Retry"]) {
 				retrier, _ := raw.(map[string]any)
 				if matchesError(retrier["ErrorEquals"], failure.name) {
 					retryIndex = index
@@ -2003,7 +1939,7 @@ walkLoop:
 					return walkResult{out: rawInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}, true
 				}
 			}
-			catchIndex := slices.IndexFunc(asSlice(st["Catch"]), func(raw any) bool {
+			catchIndex := slices.IndexFunc(spi.Slice(st["Catch"]), func(raw any) bool {
 				catcher, _ := raw.(map[string]any)
 				return matchesError(catcher["ErrorEquals"], failure.name)
 			})
@@ -2057,7 +1993,7 @@ walkLoop:
 					if !valid {
 						return "", false
 					}
-				} else if path := first(st, key+"Path"); path != "" {
+				} else if path := spi.First(st, key+"Path"); path != "" {
 					if strings.HasPrefix(path, "States.") {
 						value, _ = evalIntrinsic(path, rawInput, stateContext, p.deps.Rand, variables)
 					} else {
@@ -2111,14 +2047,14 @@ walkLoop:
 					return walkResult{out: data, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
 				}
 				waitUntil = parsed
-			} else if path := first(st, "SecondsPath"); path != "" {
+			} else if path := spi.First(st, "SecondsPath"); path != "" {
 				resolved, found := jsonPathLookup(data, path, variables)
 				seconds, numeric := exactNumber(resolved)
 				if !found || !numeric || seconds != math.Trunc(seconds) || seconds < 0 || seconds > 99999999 {
 					return walkResult{out: data, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
 				}
 				waitUntil = now.Add(time.Duration(seconds) * time.Second)
-			} else if path := first(st, "TimestampPath"); path != "" {
+			} else if path := spi.First(st, "TimestampPath"); path != "" {
 				resolved, found := jsonPathLookup(data, path, variables)
 				timestamp, stringValue := resolved.(string)
 				parsed, parseErr := time.Parse(time.RFC3339, timestamp)
@@ -2128,7 +2064,7 @@ walkLoop:
 				waitUntil = parsed
 			}
 		case "Task":
-			res := first(st, "Resource")
+			res := spi.First(st, "Resource")
 			callback := strings.HasSuffix(res, ".waitForTaskToken")
 			token := ""
 			var taskContext map[string]any
@@ -2199,7 +2135,7 @@ walkLoop:
 				if failure.name == "" && !mocked && strings.Contains(res, ":activity:") {
 					tok := p.deps.Rand.Hex(16)
 					return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
-						Token: tok, ActivityARN: res, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables, Deadline: first(req.Input, "_executionDeadline"),
+						Token: tok, ActivityARN: res, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables, Deadline: spi.First(req.Input, "_executionDeadline"),
 						TimeoutSeconds: int(timeout), HeartbeatSeconds: int(heartbeat),
 					}}
 				}
@@ -2220,7 +2156,7 @@ walkLoop:
 						return walkResult{out: rawInput, status: "FAILED", cause: "States.DataLimitExceeded", errorName: "States.DataLimitExceeded", hist: hist}
 					} else if callback && !mocked {
 						pendingTask := &pending{
-							Token: token, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables, Callback: true, Deadline: first(req.Input, "_executionDeadline"),
+							Token: token, StateName: cur, Input: payload, StateInput: rawInput, Retries: retries[cur], Variables: variables, Callback: true, Deadline: spi.First(req.Input, "_executionDeadline"),
 							TimeoutSeconds: int(timeout), HeartbeatSeconds: int(heartbeat),
 						}
 						startTaskTimers(pendingTask, p.deps.Clock.Now())
@@ -2350,7 +2286,7 @@ walkLoop:
 					branchWG.Add(1)
 					go func() {
 						defer branchWG.Done()
-						child := p.derived(fmt.Sprintf("%s/parallel/%s/%d", first(req.Input, "_executionArn"), cur, index))
+						child := p.derived(fmt.Sprintf("%s/parallel/%s/%d", spi.First(req.Input, "_executionArn"), cur, index))
 						branchWalks[index] = child.walk(branchCtx, req, branchDefs[index], "", cloneJSON(branchInput), nil, maps.Clone(variables))
 						if branchWalks[index].status != "SUCCEEDED" {
 							cancelBranches()
@@ -2391,47 +2327,14 @@ walkLoop:
 						failed = &walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime"}
 					}
 				}
-				var next string
-				var out any
-				var delay time.Duration
-				var retry, caught, valid bool
-				if isJSONata {
-					next, out, delay, retry, caught, valid = recoverJSONata(st, *failed, stateInput, stateContext, variables, p.deps.Rand, retries[cur])
-					if !valid {
-						return walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
-					}
-				} else {
-					next, out, delay, retry, caught = recoverState(st, *failed, stateInput, retries[cur], p.deps.Rand)
-				}
-				if retry {
-					if scheduled := p.scheduleRetry(ctx, req, cur, stateInput, retries[cur], variables, delay, hist); scheduled != nil {
-						return *scheduled
-					}
+				done, next, out, again := p.recovered(ctx, req, st, failed, cur, stateInput, data, stateContext, variables, retries, hist, isJSONata)
+				if done != nil {
+					return *done
+				} else if again {
 					continue
 				}
-				if caught {
-					if next == "" {
-						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
-					}
-					failureName := failed.errorName
-					if failureName == "" {
-						failureName = "States.TaskFailed"
-					}
-					if !isJSONata && !applyCatchAssignments(st, stateFailure{name: failureName, cause: failed.cause}, stateInput, stateContext, variables, p.deps.Rand) {
-						return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
-					}
-					data = out
-					if !isJSONata {
-						data, ok = applyDataPath(st, "OutputPath", out, variables)
-						if !ok {
-							return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
-						}
-					}
-					cur = next
-					continue walkLoop
-				}
-				failed.hist, failed.failedState, failed.failedInput = hist, cur, stateInput
-				return *failed
+				data, cur = out, next
+				continue walkLoop
 			}
 		case "Map":
 			stateInput := rawInput
@@ -2461,7 +2364,7 @@ walkLoop:
 			}
 			idef, _ := json.Marshal(iter)
 			processorConfig, _ := iter["ProcessorConfig"].(map[string]any)
-			distributed := first(processorConfig, "Mode") == "DISTRIBUTED"
+			distributed := spi.First(processorConfig, "Mode") == "DISTRIBUTED"
 			mapVariables := variables
 			if distributed {
 				mapVariables = map[string]any{}
@@ -2469,7 +2372,7 @@ walkLoop:
 			if distributed && mapScope != nil {
 				mapScope.variables = mapVariables
 			}
-			executionType := first(processorConfig, "ExecutionType")
+			executionType := spi.First(processorConfig, "ExecutionType")
 			if executionType == "" {
 				executionType = "STANDARD"
 			}
@@ -2488,7 +2391,7 @@ walkLoop:
 				setJSONataRetryCount(stateContext, retries[cur])
 				dataset, source, itemsOK := p.mapItems(ctx, req, st, data, mapScope, mapVariables)
 				if _, hasReader := st["ItemReader"]; !isJSONata && hasReader {
-					if path := first(st, "ItemsPath"); path != "" {
+					if path := spi.First(st, "ItemsPath"); path != "" {
 						dataset = jsonPath(dataset, path, mapVariables)
 					}
 				}
@@ -2544,8 +2447,8 @@ walkLoop:
 				if failed == nil {
 					reader, hasReader := st["ItemReader"].(map[string]any)
 					readerConfig, _ := reader["ReaderConfig"].(map[string]any)
-					inputType := first(readerConfig, "InputType")
-					textReader := hasReader && (first(reader, "Resource") == "arn:aws:states:::s3:getObject" || first(readerConfig, "Transformation") == "LOAD_AND_FLATTEN") && (inputType == "" || slices.Contains([]string{"CSV", "JSON", "JSONL"}, inputType))
+					inputType := spi.First(readerConfig, "InputType")
+					textReader := hasReader && (spi.First(reader, "Resource") == "arn:aws:states:::s3:getObject" || spi.First(readerConfig, "Transformation") == "LOAD_AND_FLATTEN") && (inputType == "" || slices.Contains([]string{"CSV", "JSON", "JSONL"}, inputType))
 					for index, item := range arr {
 						if textReader {
 							encoded, err := json.Marshal(item)
@@ -2606,7 +2509,7 @@ walkLoop:
 				var results []any
 				var itemResults []mapItemResult
 				failedCount := 0
-				label, mapRunARN := first(st, "Label"), ""
+				label, mapRunARN := spi.First(st, "Label"), ""
 				if label == "" {
 					label = cur
 				}
@@ -2641,7 +2544,7 @@ walkLoop:
 										return
 									}
 									iterationInput := cloneJSON(arr[index])
-									child := p.derived(fmt.Sprintf("%s/map/%s/%d", first(req.Input, "_executionArn"), cur, index))
+									child := p.derived(fmt.Sprintf("%s/map/%s/%d", spi.First(req.Input, "_executionArn"), cur, index))
 									walkRequest := req
 									childName, childStartTime := "", ""
 									if distributed {
@@ -2768,47 +2671,14 @@ walkLoop:
 						failed = &walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime"}
 					}
 				}
-				var next string
-				var out any
-				var delay time.Duration
-				var retry, caught, valid bool
-				if isJSONata {
-					next, out, delay, retry, caught, valid = recoverJSONata(st, *failed, stateInput, stateContext, variables, p.deps.Rand, retries[cur])
-					if !valid {
-						return walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}
-					}
-				} else {
-					next, out, delay, retry, caught = recoverState(st, *failed, stateInput, retries[cur], p.deps.Rand)
-				}
-				if retry {
-					if scheduled := p.scheduleRetry(ctx, req, cur, stateInput, retries[cur], variables, delay, hist); scheduled != nil {
-						return *scheduled
-					}
+				done, next, out, again := p.recovered(ctx, req, st, failed, cur, stateInput, data, stateContext, variables, retries, hist, isJSONata)
+				if done != nil {
+					return *done
+				} else if again {
 					continue
 				}
-				if caught {
-					if next == "" {
-						return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
-					}
-					failureName := failed.errorName
-					if failureName == "" {
-						failureName = "States.TaskFailed"
-					}
-					if !isJSONata && !applyCatchAssignments(st, stateFailure{name: failureName, cause: failed.cause}, stateInput, stateContext, variables, p.deps.Rand) {
-						return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}
-					}
-					data = out
-					if !isJSONata {
-						data, ok = applyDataPath(st, "OutputPath", out, variables)
-						if !ok {
-							return walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}
-						}
-					}
-					cur = next
-					continue walkLoop
-				}
-				failed.hist, failed.failedState, failed.failedInput = hist, cur, stateInput
-				return *failed
+				data, cur = out, next
+				continue walkLoop
 			}
 		default:
 			return walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}
@@ -2834,7 +2704,7 @@ walkLoop:
 			return walkResult{out: rawInput, status: "FAILED", cause: "States.DataLimitExceeded", errorName: "States.DataLimitExceeded", hist: hist}
 		}
 		if waitUntil.After(p.deps.Clock.Now()) {
-			if first(req.Input, "_executionType") == "EXPRESS" {
+			if spi.First(req.Input, "_executionType") == "EXPRESS" {
 				wake, timeout := p.executionWake(req, waitUntil)
 				select {
 				case <-p.deps.Clock.AfterTime(wake):
@@ -2846,7 +2716,7 @@ walkLoop:
 				}
 			} else {
 				return walkResult{out: data, status: "RUNNING", hist: hist, pending: &pending{
-					Token: p.deps.Rand.Hex(16), StateName: cur, StateInput: data, Variables: variables, WaitUntil: waitUntil.UTC().Format(time.RFC3339Nano), Deadline: first(req.Input, "_executionDeadline"),
+					Token: p.deps.Rand.Hex(16), StateName: cur, StateInput: data, Variables: variables, WaitUntil: waitUntil.UTC().Format(time.RFC3339Nano), Deadline: spi.First(req.Input, "_executionDeadline"),
 				}}
 			}
 		}
@@ -2890,7 +2760,7 @@ func taskFailure(prefix string, sdk bool, err error) stateFailure {
 }
 
 func retryTask(st map[string]any, name string, attempts map[int]int, random spi.Rand) (time.Duration, bool) {
-	for i, raw := range asSlice(st["Retry"]) {
+	for i, raw := range spi.Slice(st["Retry"]) {
 		retrier, _ := raw.(map[string]any)
 		if !matchesError(retrier["ErrorEquals"], name) {
 			continue
@@ -2916,7 +2786,7 @@ func retryTask(st map[string]any, name string, attempts map[int]int, random spi.
 		delay = min(delay, float64(math.MaxInt64)/float64(time.Second))
 		attempts[i]++
 		duration := time.Duration(delay * float64(time.Second))
-		if first(retrier, "JitterStrategy") == "FULL" && duration > 0 {
+		if spi.First(retrier, "JitterStrategy") == "FULL" && duration > 0 {
 			// ponytail: millisecond jitter is deterministic and sufficient for workflow scheduling; use finer entropy if sub-ms ASL retry fields are introduced.
 			duration = time.Duration(random.Intn(int(duration/time.Millisecond)+1)) * time.Millisecond
 		}
@@ -2944,7 +2814,7 @@ func executionDeadline(definition, executionType string, start time.Time) string
 // which case the second result says the execution has timed out. An instant
 // rather than a delay, because the caller parks on it -- see spi.Clock.AfterTime.
 func (p *Pack) executionWake(req *spi.Request, wake time.Time) (time.Time, bool) {
-	deadline, err := time.Parse(time.RFC3339Nano, first(req.Input, "_executionDeadline"))
+	deadline, err := time.Parse(time.RFC3339Nano, spi.First(req.Input, "_executionDeadline"))
 	if err != nil {
 		return wake, false
 	}
@@ -2954,11 +2824,44 @@ func (p *Pack) executionWake(req *spi.Request, wake time.Time) (time.Time, bool)
 	return wake, false
 }
 
+// recovered is what a failed Parallel or Map state does next, by its Retry and Catch: done, the result the
+// execution ends with (a retry scheduled for later included); again, retry it now; or else go to next with
+// out, its Catch's.
+func (p *Pack) recovered(ctx context.Context, req *spi.Request, st map[string]any, failed *walkResult, cur string, stateInput, data any, stateContext, variables map[string]any, retries map[string]map[int]int, hist []any, isJSONata bool) (done *walkResult, next string, out any, again bool) {
+	var delay time.Duration
+	var retry, caught, valid, ok bool
+	if isJSONata {
+		next, out, delay, retry, caught, valid = recoverJSONata(st, *failed, stateInput, stateContext, variables, p.deps.Rand, retries[cur])
+		if !valid {
+			return &walkResult{out: stateInput, status: "FAILED", cause: "States.QueryEvaluationError", errorName: "States.QueryEvaluationError", hist: hist}, "", nil, false
+		}
+	} else {
+		next, out, delay, retry, caught = recoverState(st, *failed, stateInput, retries[cur], p.deps.Rand)
+	}
+	switch {
+	case retry:
+		return p.scheduleRetry(ctx, req, cur, stateInput, retries[cur], variables, delay, hist), "", nil, true
+	case !caught:
+		failed.hist, failed.failedState, failed.failedInput = hist, cur, stateInput
+		return failed, "", nil, false
+	case next == "":
+		return &walkResult{out: data, status: "FAILED", cause: "States.Runtime", hist: hist}, "", nil, false
+	case !isJSONata && !applyCatchAssignments(st, stateFailure{name: cmp.Or(failed.errorName, "States.TaskFailed"), cause: failed.cause}, stateInput, stateContext, variables, p.deps.Rand):
+		return &walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", errorName: "States.Runtime", hist: hist}, "", nil, false
+	}
+	if !isJSONata {
+		if out, ok = applyDataPath(st, "OutputPath", out, variables); !ok {
+			return &walkResult{out: stateInput, status: "FAILED", cause: "States.Runtime", hist: hist}, "", nil, false
+		}
+	}
+	return nil, next, out, false
+}
+
 func (p *Pack) scheduleRetry(ctx context.Context, req *spi.Request, state string, input any, attempts map[int]int, variables map[string]any, delay time.Duration, hist []any) *walkResult {
 	if delay <= 0 {
 		return nil
 	}
-	switch first(req.Input, "_executionType") {
+	switch spi.First(req.Input, "_executionType") {
 	case "EXPRESS":
 		wake, timeout := p.executionWake(req, p.deps.Clock.Now().Add(delay))
 		select {
@@ -2973,7 +2876,7 @@ func (p *Pack) scheduleRetry(ctx context.Context, req *spi.Request, state string
 	case "STANDARD":
 		return &walkResult{out: input, status: "RUNNING", hist: hist, pending: &pending{
 			Token: p.deps.Rand.Hex(16), StateName: state, StateInput: input, Retries: attempts, Variables: variables, Retry: true,
-			WaitUntil: p.deps.Clock.Now().Add(delay).UTC().Format(time.RFC3339Nano), Deadline: first(req.Input, "_executionDeadline"),
+			WaitUntil: p.deps.Clock.Now().Add(delay).UTC().Format(time.RFC3339Nano), Deadline: spi.First(req.Input, "_executionDeadline"),
 		}}
 	default:
 		return nil
@@ -2981,7 +2884,7 @@ func (p *Pack) scheduleRetry(ctx context.Context, req *spi.Request, state string
 }
 
 func catchTask(st map[string]any, failure stateFailure, input any) (string, any, bool) {
-	for _, raw := range asSlice(st["Catch"]) {
+	for _, raw := range spi.Slice(st["Catch"]) {
 		catcher, _ := raw.(map[string]any)
 		if !matchesError(catcher["ErrorEquals"], failure.name) {
 			continue
@@ -2990,14 +2893,14 @@ func catchTask(st map[string]any, failure stateFailure, input any) (string, any,
 		if !valid {
 			return "", input, true
 		}
-		return first(catcher, "Next"), out, true
+		return spi.First(catcher, "Next"), out, true
 	}
 	return "", input, false
 }
 
 func catchJSONata(state map[string]any, failure stateFailure, input any, context map[string]any, variables map[string]any, random spi.Rand) (string, any, bool, bool) {
 	errorOutput := map[string]any{"Error": failure.name, "Cause": failure.cause}
-	for _, raw := range asSlice(state["Catch"]) {
+	for _, raw := range spi.Slice(state["Catch"]) {
 		catcher, _ := raw.(map[string]any)
 		if !matchesError(catcher["ErrorEquals"], failure.name) {
 			continue
@@ -3017,13 +2920,13 @@ func catchJSONata(state map[string]any, failure stateFailure, input any, context
 		if !applyJSONataAssignments(scope, variables, catcher) {
 			return "", input, true, false
 		}
-		return first(catcher, "Next"), output, true, true
+		return spi.First(catcher, "Next"), output, true, true
 	}
 	return "", input, false, true
 }
 
 func applyCatchAssignments(state map[string]any, failure stateFailure, _ any, context map[string]any, variables map[string]any, random spi.Rand) bool {
-	for _, raw := range asSlice(state["Catch"]) {
+	for _, raw := range spi.Slice(state["Catch"]) {
 		catcher, _ := raw.(map[string]any)
 		if matchesError(catcher["ErrorEquals"], failure.name) {
 			return applyJSONPathAssignments(map[string]any{"Error": failure.name, "Cause": failure.cause}, context, variables, variables, random, catcher)
@@ -3059,7 +2962,7 @@ func recoverJSONata(state map[string]any, failed walkResult, input any, context 
 }
 
 func matchesError(raw any, name string) bool {
-	for _, candidate := range asSlice(raw) {
+	for _, candidate := range spi.Slice(raw) {
 		switch fmt.Sprint(candidate) {
 		case name:
 			return true
@@ -3186,9 +3089,9 @@ type jsonataScope struct {
 	random                     spi.Rand
 }
 
-func jsonataContext(req *spi.Request, state string, extra map[string]any) map[string]any {
-	machineARN := first(req.Input, "_stateMachineArn", "stateMachineArn", "StateMachineArn")
-	stateName := first(req.Input, "_testStateName")
+func jsonataContext(req *spi.Request, state string) map[string]any {
+	machineARN := spi.First(req.Input, "_stateMachineArn", "stateMachineArn", "StateMachineArn")
+	stateName := spi.First(req.Input, "_testStateName")
 	if stateName == "" {
 		stateName = state
 	}
@@ -3199,23 +3102,23 @@ func jsonataContext(req *spi.Request, state string, extra map[string]any) map[st
 		},
 	}
 	execution := map[string]any{}
-	if arn := first(req.Input, "_executionArn"); arn != "" {
+	if arn := spi.First(req.Input, "_executionArn"); arn != "" {
 		execution["Id"] = arn
 	}
-	if name := first(req.Input, "_executionName", "name", "Name"); name != "" {
+	if name := spi.First(req.Input, "_executionName", "name", "Name"); name != "" {
 		execution["Name"] = name
 	}
 	if input, exists := req.Input["_executionInput"]; exists {
 		execution["Input"] = input
 	}
-	if start := first(req.Input, "_executionStartTime"); start != "" {
+	if start := spi.First(req.Input, "_executionStartTime"); start != "" {
 		execution["StartTime"] = start
 	}
-	if role := first(req.Input, "_executionRoleArn"); role != "" {
+	if role := spi.First(req.Input, "_executionRoleArn"); role != "" {
 		execution["RoleArn"] = role
 	}
 	execution["RedriveCount"] = toFloat(req.Input["_executionRedriveCount"])
-	if redrive := first(req.Input, "_executionRedriveTime"); redrive != "" {
+	if redrive := spi.First(req.Input, "_executionRedriveTime"); redrive != "" {
 		execution["RedriveTime"] = redrive
 	}
 	if len(execution) != 0 {
@@ -3234,9 +3137,6 @@ func jsonataContext(req *spi.Request, state string, extra map[string]any) map[st
 			}
 		}
 	}
-	for key, value := range extra {
-		context[key] = value
-	}
 	return context
 }
 
@@ -3250,9 +3150,7 @@ func setJSONataRetryCount(context map[string]any, attempts map[int]int) {
 
 func mergeJSONataContext(context, extra map[string]any) map[string]any {
 	merged := maps.Clone(context)
-	for key, value := range extra {
-		merged[key] = value
-	}
+	maps.Copy(merged, extra)
 	return merged
 }
 
@@ -3328,7 +3226,7 @@ func evalJSONataValue(value any, scope jsonataScope) (any, bool) {
 					items[index] = array.Get(index)
 				}
 			}
-			size, numeric := intrinsicNumber(args[1])
+			size, numeric := choiceNumber(args[1])
 			width := int(math.Floor(size))
 			if !ok || !numeric || width < 1 {
 				return nil, errors.New("invalid partition arguments")
@@ -3344,9 +3242,9 @@ func evalJSONataValue(value any, scope jsonataScope) (any, bool) {
 			if len(args) != 3 {
 				return nil, errors.New("range takes three arguments")
 			}
-			startValue, startOK := intrinsicNumber(args[0])
-			endValue, endOK := intrinsicNumber(args[1])
-			stepValue, stepOK := intrinsicNumber(args[2])
+			startValue, startOK := choiceNumber(args[0])
+			endValue, endOK := choiceNumber(args[1])
+			stepValue, stepOK := choiceNumber(args[2])
 			start, end, step := int(math.Floor(startValue)), int(math.Floor(endValue)), int(math.Floor(stepValue))
 			if !startOK || !endOK || !stepOK || step == 0 {
 				return nil, errors.New("invalid range arguments")
@@ -3509,7 +3407,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 	reader, hasReader := state["ItemReader"].(map[string]any)
 	if !hasReader {
 		items := data
-		if path := first(state, "ItemsPath"); path != "" {
+		if path := spi.First(state, "ItemsPath"); path != "" {
 			items = jsonPath(data, path, variables...)
 		}
 		switch items.(type) {
@@ -3519,7 +3417,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			return nil, "", false
 		}
 	}
-	resource := first(reader, "Resource")
+	resource := spi.First(reader, "Resource")
 	if resource != "arn:aws:states:::s3:getObject" && resource != "arn:aws:states:::s3:listObjectsV2" {
 		return nil, "", false
 	}
@@ -3554,7 +3452,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			return nil, "", false
 		}
 	}
-	if resource == "arn:aws:states:::s3:getObject" && first(config, "InputType") == "PARQUET" {
+	if resource == "arn:aws:states:::s3:getObject" && spi.First(config, "InputType") == "PARQUET" {
 		if _, exists := input["VersionId"]; exists {
 			return nil, "", false
 		}
@@ -3566,20 +3464,20 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			if err != nil || response == nil {
 				return nil, "", false
 			}
-			items = append(items, asSlice(response.Output["Contents"])...)
+			items = append(items, spi.Slice(response.Output["Contents"])...)
 			truncated, _ := response.Output["IsTruncated"].(bool)
 			if !truncated {
 				break
 			}
-			token := first(response.Output, "NextContinuationToken")
+			token := spi.First(response.Output, "NextContinuationToken")
 			if token == "" {
 				return nil, "", false
 			}
 			request = maps.Clone(request)
 			request["ContinuationToken"] = token
 		}
-		if first(config, "Transformation") != "LOAD_AND_FLATTEN" {
-			return limitReaderItems(items, "S3://"+first(input, "Bucket"), config, data, scope, variables...)
+		if spi.First(config, "Transformation") != "LOAD_AND_FLATTEN" {
+			return limitReaderItems(items, "S3://"+spi.First(input, "Bucket"), config, data, scope, variables...)
 		}
 		flattened := mapDataset{}
 		for _, rawItem := range items {
@@ -3627,7 +3525,7 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 	if readErr != nil || closeErr != nil {
 		return nil, "", false
 	}
-	switch key := strings.ToLower(first(input, "Key")); {
+	switch key := strings.ToLower(spi.First(input, "Key")); {
 	case strings.HasSuffix(key, ".gz"):
 		reader, err := gzip.NewReader(bytes.NewReader(body))
 		if err != nil {
@@ -3649,8 +3547,8 @@ func (p *Pack) mapItems(ctx context.Context, req *spi.Request, state map[string]
 			return nil, "", false
 		}
 	}
-	inputType := first(config, "InputType")
-	manifestType := first(config, "ManifestType")
+	inputType := spi.First(config, "InputType")
+	manifestType := spi.First(config, "ManifestType")
 	if manifestType == "S3_INVENTORY" || inputType == "MANIFEST" {
 		var manifest struct {
 			SourceBucket      string `json:"sourceBucket"`
@@ -3826,7 +3724,7 @@ func decodeTextMapReaderData(body []byte, inputType string, config map[string]an
 		parser.FieldsPerRecord = -1
 		parser.LazyQuotes = true
 		delimiters := map[string]rune{"COMMA": ',', "PIPE": '|', "SEMICOLON": ';', "SPACE": ' ', "TAB": '\t'}
-		if delimiter := first(config, "CSVDelimiter"); delimiter != "" {
+		if delimiter := spi.First(config, "CSVDelimiter"); delimiter != "" {
 			parser.Comma = delimiters[delimiter]
 			if parser.Comma == 0 {
 				return nil, false
@@ -3837,9 +3735,9 @@ func decodeTextMapReaderData(body []byte, inputType string, config map[string]an
 			return nil, false
 		}
 		headers := records[0]
-		if first(config, "CSVHeaderLocation") == "GIVEN" {
+		if spi.First(config, "CSVHeaderLocation") == "GIVEN" {
 			headers = nil
-			for _, header := range asSlice(config["CSVHeaders"]) {
+			for _, header := range spi.Slice(config["CSVHeaders"]) {
 				headers = append(headers, fmt.Sprint(header))
 			}
 		} else {
@@ -3904,8 +3802,8 @@ func s3URI(value string) (string, string, bool) {
 }
 
 func s3Source(input map[string]any) string {
-	source := "S3://" + first(input, "Bucket")
-	if key := first(input, "Key"); key != "" {
+	source := "S3://" + spi.First(input, "Bucket")
+	if key := spi.First(input, "Key"); key != "" {
 		source += "/" + key
 	}
 	return source
@@ -4139,10 +4037,10 @@ func batchMapItems(state map[string]any, data any, items []any, random spi.Rand,
 }
 
 func mapStateMachineName(req *spi.Request) string {
-	if arn := first(req.Input, "_stateMachineArn", "stateMachineArn", "StateMachineArn"); arn != "" {
+	if arn := spi.First(req.Input, "_stateMachineArn", "stateMachineArn", "StateMachineArn"); arn != "" {
 		return baseSMName(arn)
 	}
-	parts := strings.Split(first(req.Input, "_executionArn", "executionArn", "ExecutionArn"), ":")
+	parts := strings.Split(spi.First(req.Input, "_executionArn", "executionArn", "ExecutionArn"), ":")
 	if len(parts) > 6 {
 		return strings.Split(parts[6], "/")[0]
 	}
@@ -4180,9 +4078,9 @@ func (p *Pack) storeMapItemExecution(ctx context.Context, req *spi.Request, mapR
 		"executionArn": metadata["ExecutionArn"], "stateMachineArn": metadata["StateMachineArn"], "name": metadata["Name"],
 		"status": metadata["Status"], "startDate": now, "stopDate": now, "input": metadata["Input"], "mapRunArn": mapRunARN,
 		"itemCount": float64(item.itemCount), "type": executionType, "definition": definition, "history": item.history,
-		"stateMachineName": lastSeg(first(metadata, "StateMachineArn"), ":"),
+		"stateMachineName": lastSeg(spi.First(metadata, "StateMachineArn"), ":"),
 	}
-	if machine, found := p.resolveStateMachine(ctx, req, first(req.Input, "stateMachineArn", "StateMachineArn")); found {
+	if machine, found := p.resolveStateMachine(ctx, req, spi.First(req.Input, "stateMachineArn", "StateMachineArn")); found {
 		record["roleArn"], record["revisionId"] = machine["roleArn"], machine["revisionId"]
 	}
 	for _, field := range []string{"Output", "Error", "Cause"} {
@@ -4190,8 +4088,7 @@ func (p *Pack) storeMapItemExecution(ctx context.Context, req *spi.Request, mapR
 			record[strings.ToLower(field)] = value
 		}
 	}
-	encoded, _ := json.Marshal(record)
-	_ = p.col(req, "ex").Put(ctx, first(metadata, "ExecutionArn"), encoded)
+	_ = spi.PutJSON(ctx, p.col(req, "ex"), spi.First(metadata, "ExecutionArn"), record)
 }
 
 func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[string]any, data any, items []mapItemResult, mapRunARN string, scope *jsonataScope, variables ...map[string]any) (any, int, bool, bool) {
@@ -4200,7 +4097,7 @@ func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[
 		return nil, 0, false, false
 	}
 	config, hasConfig := writer["WriterConfig"].(map[string]any)
-	resource := first(writer, "Resource")
+	resource := spi.First(writer, "Resource")
 	parameters, hasParameters := writer["Parameters"].(map[string]any)
 	if !hasParameters {
 		parameters, hasParameters = writer["Arguments"].(map[string]any)
@@ -4208,14 +4105,14 @@ func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[
 	if resource == "" && !hasConfig || resource != "" && (resource != "arn:aws:states:::s3:putObject" || !hasParameters) {
 		return nil, 0, false, false
 	}
-	transformation := first(config, "Transformation")
+	transformation := spi.First(config, "Transformation")
 	if transformation == "" {
 		transformation = "COMPACT"
 		if resource != "" {
 			transformation = "NONE"
 		}
 	}
-	outputType := first(config, "OutputType")
+	outputType := spi.First(config, "OutputType")
 	if outputType == "" {
 		outputType = "JSON"
 	}
@@ -4271,7 +4168,7 @@ func (p *Pack) writeMapResults(ctx context.Context, req *spi.Request, state map[
 			return nil, 0, false, true
 		}
 	}
-	bucket, prefix := first(resolved, "Bucket"), strings.Trim(first(resolved, "Prefix"), "/")
+	bucket, prefix := spi.First(resolved, "Bucket"), strings.Trim(spi.First(resolved, "Prefix"), "/")
 	if bucket == "" {
 		return nil, 0, false, false
 	}
@@ -4329,18 +4226,13 @@ func taskIdentity(st map[string]any, data any, context map[string]any, variables
 			return identity, false
 		}
 	}
-	roleARN := first(resolved, "RoleArn")
+	roleARN := spi.First(resolved, "RoleArn")
 	parts := strings.Split(roleARN, ":")
 	if !validRoleARN(roleARN) || len(parts) < 6 || parts[4] == "" {
 		return identity, false
 	}
 	identity.Account, identity.ARN, identity.AccessKeyID = parts[4], roleARN, ""
 	return identity, true
-}
-
-func applyParams(params map[string]any, data any, context map[string]any, random spi.Rand, variables ...map[string]any) map[string]any {
-	out, _ := applyParamsValidated(params, data, context, random, variables...)
-	return out
 }
 
 func applyParamsValidated(params map[string]any, data any, context map[string]any, random spi.Rand, variables ...map[string]any) (map[string]any, bool) {
@@ -4418,7 +4310,7 @@ func evalIntrinsic(expression string, data any, context map[string]any, random s
 			break
 		}
 		array, ok := args[0].([]any)
-		number, numeric := intrinsicNumber(args[1])
+		number, numeric := choiceNumber(args[1])
 		size := int(math.Round(number))
 		if !ok || !numeric || size <= 0 {
 			break
@@ -4448,9 +4340,9 @@ func evalIntrinsic(expression string, data any, context map[string]any, random s
 		if len(args) != 3 {
 			break
 		}
-		startValue, startOK := intrinsicNumber(args[0])
-		endValue, endOK := intrinsicNumber(args[1])
-		stepValue, stepOK := intrinsicNumber(args[2])
+		startValue, startOK := choiceNumber(args[0])
+		endValue, endOK := choiceNumber(args[1])
+		stepValue, stepOK := choiceNumber(args[2])
 		start, end, step := int(math.Round(startValue)), int(math.Round(endValue)), int(math.Round(stepValue))
 		if !startOK || !endOK || !stepOK || step == 0 {
 			break
@@ -4471,7 +4363,7 @@ func evalIntrinsic(expression string, data any, context map[string]any, random s
 			break
 		}
 		array, ok := args[0].([]any)
-		number, numeric := intrinsicNumber(args[1])
+		number, numeric := choiceNumber(args[1])
 		index := int(math.Round(number))
 		if !ok || !numeric || index < 0 || index >= len(array) {
 			break
@@ -4545,22 +4437,22 @@ func evalIntrinsic(expression string, data any, context map[string]any, random s
 		}
 	case "MathAdd":
 		if len(args) == 2 {
-			left, lok := intrinsicNumber(args[0])
-			right, rok := intrinsicNumber(args[1])
+			left, lok := choiceNumber(args[0])
+			right, rok := choiceNumber(args[1])
 			if lok && rok {
 				return math.Round(left) + math.Round(right), true
 			}
 		}
 	case "MathRandom":
 		if len(args) == 2 || len(args) == 3 {
-			startValue, startOK := intrinsicNumber(args[0])
-			endValue, endOK := intrinsicNumber(args[1])
+			startValue, startOK := choiceNumber(args[0])
+			endValue, endOK := choiceNumber(args[1])
 			start, end := int(math.Round(startValue)), int(math.Round(endValue))
 			if !startOK || !endOK || start >= end {
 				break
 			}
 			if len(args) == 3 {
-				seed, ok := intrinsicNumber(args[2])
+				seed, ok := choiceNumber(args[2])
 				if !ok {
 					break
 				}
@@ -4729,24 +4621,6 @@ func intrinsicHash(data, algorithm string) (any, bool) {
 	return hex.EncodeToString(sum), true
 }
 
-func intrinsicNumber(value any) (float64, bool) {
-	switch number := value.(type) {
-	case float64:
-		return number, true
-	case float32:
-		return float64(number), true
-	case int:
-		return float64(number), true
-	case int64:
-		return float64(number), true
-	case json.Number:
-		parsed, err := number.Float64()
-		return parsed, err == nil
-	default:
-		return 0, false
-	}
-}
-
 type inspectedTaskResult struct {
 	value      any
 	inspection map[string]any
@@ -4757,7 +4631,7 @@ func (p *Pack) invokeHTTPTask(ctx context.Context, req *spi.Request, payload any
 	if !valid {
 		return inspectedTaskResult{}, &spi.Fault{Code: "States.Runtime", Message: "HTTP Task parameters must be an object.", HTTPStatus: 400, Fault: "client"}
 	}
-	endpoint, method := first(input, "ApiEndpoint"), first(input, "Method")
+	endpoint, method := spi.First(input, "ApiEndpoint"), spi.First(input, "Method")
 	parsed, parseErr := url.Parse(endpoint)
 	if parseErr != nil || parsed.Host == "" || !slices.Contains([]string{"http", "https"}, parsed.Scheme) || !slices.Contains([]string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"}, method) {
 		return inspectedTaskResult{}, &spi.Fault{Code: "States.Runtime", Message: "HTTP Task endpoint or method is invalid.", HTTPStatus: 400, Fault: "client"}
@@ -4766,7 +4640,7 @@ func (p *Pack) invokeHTTPTask(ctx context.Context, req *spi.Request, payload any
 	if authentication == nil {
 		authentication, _ = input["InvocationConfig"].(map[string]any)
 	}
-	connectionARN := first(authentication, "ConnectionArn")
+	connectionARN := spi.First(authentication, "ConnectionArn")
 	connection, found := eventhttp.Connection(ctx, p.deps, req.Identity, connectionARN)
 	if !found {
 		return inspectedTaskResult{}, &spi.Fault{Code: "Events.ConnectionResource.ResourceNotFound", Message: "Connection does not exist.", HTTPStatus: 400, Fault: "client"}
@@ -4782,12 +4656,12 @@ func (p *Pack) invokeHTTPTask(ctx context.Context, req *spi.Request, payload any
 		}
 	}
 	transform, transformValid := optionalObject(input, "Transform")
-	encoding := first(transform, "RequestBodyEncoding")
+	encoding := spi.First(transform, "RequestBodyEncoding")
 	if encoding == "" {
 		encoding = "NONE"
 	}
 	options, optionsValid := optionalObject(transform, "RequestEncodingOptions")
-	arrayFormat := first(options, "ArrayFormat")
+	arrayFormat := spi.First(options, "ArrayFormat")
 	if arrayFormat == "" {
 		arrayFormat = "INDICES"
 	}
@@ -4926,8 +4800,8 @@ func (p *Pack) invokeTask(ctx context.Context, req *spi.Request, resource string
 			if described == nil {
 				return nil, errors.New("nested execution returned no result"), prefix, sdk, true
 			}
-			if first(described.Output, "status") != "SUCCEEDED" {
-				return nil, errors.New(first(described.Output, "cause", "error", "status")), prefix, sdk, true
+			if spi.First(described.Output, "status") != "SUCCEEDED" {
+				return nil, errors.New(spi.First(described.Output, "cause", "error", "status")), prefix, sdk, true
 			}
 			return nestedExecutionOutput(described.Output, syncJSON), nil, prefix, sdk, true
 		}
@@ -4935,7 +4809,7 @@ func (p *Pack) invokeTask(ctx context.Context, req *spi.Request, resource string
 	}
 	if service == "ecs" {
 		input = maps.Clone(input)
-		input["cluster"], input["taskDefinition"] = first(input, "cluster", "Cluster"), first(input, "taskDefinition", "TaskDefinition")
+		input["cluster"], input["taskDefinition"] = spi.First(input, "cluster", "Cluster"), spi.First(input, "taskDefinition", "TaskDefinition")
 	}
 	// An optimized integration names its parameters in PascalCase while the
 	// target API declares them camelCase, so the request has to be translated
@@ -4970,13 +4844,13 @@ func (p *Pack) invokeTask(ctx context.Context, req *spi.Request, resource string
 		}
 		response, invokeErr := handler.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: operation, Input: input})
 		if invokeErr == nil && response != nil && service == "ecs" && syncJob {
-			if len(asSlice(response.Output["failures"])) != 0 {
+			if len(spi.Slice(response.Output["failures"])) != 0 {
 				invokeErr = &spi.Fault{Code: "Unknown", HTTPStatus: 400, Fault: "server"}
 			} else {
 				stopped := []any{}
-				for _, task := range asSlice(response.Output["tasks"]) {
+				for _, task := range spi.Slice(response.Output["tasks"]) {
 					taskRecord, _ := task.(map[string]any)
-					stop, err := handler.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "StopTask", Input: map[string]any{"cluster": input["cluster"], "task": first(taskRecord, "taskArn")}})
+					stop, err := handler.Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "StopTask", Input: map[string]any{"cluster": input["cluster"], "task": spi.First(taskRecord, "taskArn")}})
 					if err != nil {
 						invokeErr = errors.Join(invokeErr, err)
 						break
@@ -5040,7 +4914,7 @@ func nestedExecutionOutput(execution map[string]any, jsonOutput bool) map[string
 		"StartDate": execution["startDate"], "StateMachineArn": execution["stateMachineArn"], "Status": execution["status"], "StopDate": execution["stopDate"],
 	}
 	if jsonOutput {
-		output["Output"] = parseJSON(first(execution, "output"))
+		output["Output"] = parseJSON(spi.First(execution, "output"))
 	}
 	return output
 }
@@ -5123,9 +4997,7 @@ func (p *Pack) invokeLambda(ctx context.Context, req *spi.Request, resource stri
 	in := map[string]any{"FunctionName": name}
 	switch m := payload.(type) {
 	case map[string]any:
-		for k, v := range m {
-			in[k] = v
-		}
+		maps.Copy(in, m)
 	default:
 		in["input"] = m
 	}
@@ -5173,7 +5045,7 @@ func selectedChoice(st map[string]any, data any, variables ...map[string]any) (s
 func jsonataChoiceNext(state map[string]any, input any, context map[string]any, variables map[string]any, random spi.Rand) (string, bool) {
 	scope := jsonataScope{input: input, result: input, context: context, variables: variables, random: random}
 	var matched map[string]any
-	for _, raw := range asSlice(state["Choices"]) {
+	for _, raw := range spi.Slice(state["Choices"]) {
 		choice, _ := raw.(map[string]any)
 		condition, ok := evalJSONataValue(choice["Condition"], scope)
 		if !ok {
@@ -5196,13 +5068,13 @@ func jsonataChoiceNext(state map[string]any, input any, context map[string]any, 
 		return "", false
 	}
 	if matched != nil {
-		return first(matched, "Next"), true
+		return spi.First(matched, "Next"), true
 	}
-	return first(state, "Default"), true
+	return spi.First(state, "Default"), true
 }
 
 func matchChoice(cm map[string]any, data any, variables ...map[string]any) bool {
-	if rules := asSlice(cm["And"]); rules != nil {
+	if rules := spi.Slice(cm["And"]); rules != nil {
 		for _, raw := range rules {
 			rule, _ := raw.(map[string]any)
 			if !matchChoice(rule, data, variables...) {
@@ -5211,7 +5083,7 @@ func matchChoice(cm map[string]any, data any, variables ...map[string]any) bool 
 		}
 		return len(rules) > 0
 	}
-	if rules := asSlice(cm["Or"]); rules != nil {
+	if rules := spi.Slice(cm["Or"]); rules != nil {
 		for _, raw := range rules {
 			rule, _ := raw.(map[string]any)
 			if matchChoice(rule, data, variables...) {
@@ -5223,7 +5095,7 @@ func matchChoice(cm map[string]any, data any, variables ...map[string]any) bool 
 	if raw, ok := cm["Not"].(map[string]any); ok {
 		return !matchChoice(raw, data, variables...)
 	}
-	got, present := jsonPathLookup(data, first(cm, "Variable"), variables...)
+	got, present := jsonPathLookup(data, spi.First(cm, "Variable"), variables...)
 	if expected, ok := cm["IsPresent"]; ok {
 		return present == toBool(expected)
 	}
@@ -5372,6 +5244,26 @@ func choiceNumber(value any) (float64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// selected is what a field ('f') or index ('i', negative from the end) token picks out of node: nothing
+// when node has no such member.
+func selected(token pathToken, node any) []any {
+	switch node := node.(type) {
+	case map[string]any:
+		if value, exists := node[token.key]; token.kind == 'f' && exists {
+			return []any{value}
+		}
+	case []any:
+		index := token.start
+		if index < 0 {
+			index += len(node)
+		}
+		if token.kind == 'i' && index >= 0 && index < len(node) {
+			return []any{node[index]}
+		}
+	}
+	return nil
 }
 
 func isString(value any) bool { _, ok := value.(string); return ok }
@@ -5612,22 +5504,8 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 		var next []any
 		for _, node := range nodes {
 			switch token.kind {
-			case 'f':
-				if object, ok := node.(map[string]any); ok {
-					if value, exists := object[token.key]; exists {
-						next = append(next, value)
-					}
-				}
-			case 'i':
-				if array, ok := node.([]any); ok {
-					index := token.start
-					if index < 0 {
-						index += len(array)
-					}
-					if index >= 0 && index < len(array) {
-						next = append(next, array[index])
-					}
-				}
+			case 'f', 'i':
+				next = append(next, selected(token, node)...)
 			case '*':
 				switch node := node.(type) {
 				case []any:
@@ -5659,24 +5537,7 @@ func jsonPathLookup(data any, path string, variables ...map[string]any) (any, bo
 				}
 			case 'u':
 				for _, selector := range token.selectors {
-					switch selector.kind {
-					case 'f':
-						if object, ok := node.(map[string]any); ok {
-							if value, exists := object[selector.key]; exists {
-								next = append(next, value)
-							}
-						}
-					case 'i':
-						if array, ok := node.([]any); ok {
-							index := selector.start
-							if index < 0 {
-								index += len(array)
-							}
-							if index >= 0 && index < len(array) {
-								next = append(next, array[index])
-							}
-						}
-					}
+					next = append(next, selected(selector, node)...)
 				}
 			case 'r':
 				var descend func(any)
@@ -6476,18 +6337,13 @@ func validResultPath(path string) bool {
 	return validJSONPath(path, true) && (len(path) == 1 || path[1] == '.' || path[1] == '[')
 }
 
-func asSlice(v any) []any {
-	s, _ := v.([]any)
-	return s
-}
-
 func aliasRoutes(input map[string]any) []any {
 	return inputSlice(input, "routingConfiguration", "RoutingConfiguration")
 }
 
 func inputSlice(input map[string]any, keys ...string) []any {
 	value, _ := inputValue(input, keys...)
-	return asSlice(value)
+	return spi.Slice(value)
 }
 
 func optionalSlice(input map[string]any, keys ...string) ([]any, bool) {
@@ -6519,23 +6375,15 @@ func inputNumber(input map[string]any, keys ...string) float64 {
 }
 
 func getRecord(ctx context.Context, collection spi.Collection, key string) (map[string]any, bool) {
-	encoded, ok, _ := collection.Get(ctx, key)
-	if !ok {
-		return nil, false
-	}
-	var record map[string]any
-	if json.Unmarshal(encoded, &record) != nil {
-		return nil, false
-	}
-	return record, true
+	record, ok, _ := spi.GetJSON(ctx, collection, key)
+	return record, ok
 }
 
 func listRecords(ctx context.Context, collection spi.Collection, selectRecord func(map[string]any) (map[string]any, bool)) []any {
 	kvs, _, _ := collection.List(ctx, "", "", 0)
 	items := make([]any, 0, len(kvs))
 	for _, kv := range kvs {
-		var record map[string]any
-		_ = json.Unmarshal(kv.Value, &record)
+		record := spi.JSONObject(kv.Value)
 		if selected, keep := selectRecord(record); keep {
 			items = append(items, selected)
 		}
@@ -6553,7 +6401,7 @@ func pagedResponse(input map[string]any, items []any, key string) (*spi.Response
 		return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 	}
 	offset := 0
-	if token := first(input, "nextToken", "NextToken"); token != "" {
+	if token := spi.First(input, "nextToken", "NextToken"); token != "" {
 		var err error
 		offset, err = strconv.Atoi(token)
 		if err != nil || offset < 0 || offset >= len(items) {
@@ -6570,18 +6418,18 @@ func pagedResponse(input map[string]any, items []any, key string) (*spi.Response
 
 func executionMatchesMachine(record map[string]any, arn string) bool {
 	if versionNumber(arn) > 0 {
-		return first(record, "stateMachineVersionArn") == arn
+		return spi.First(record, "stateMachineVersionArn") == arn
 	}
 	if smName(arn) != baseSMName(arn) {
-		return first(record, "stateMachineAliasArn") == arn
+		return spi.First(record, "stateMachineAliasArn") == arn
 	}
-	return first(record, "stateMachineArn") == arn
+	return spi.First(record, "stateMachineArn") == arn
 }
 
 func aliasReferences(record map[string]any, versionARN string) bool {
-	for _, raw := range asSlice(record["routingConfiguration"]) {
+	for _, raw := range spi.Slice(record["routingConfiguration"]) {
 		route, _ := raw.(map[string]any)
-		if first(route, "stateMachineVersionArn", "StateMachineVersionArn") == versionARN {
+		if spi.First(route, "stateMachineVersionArn", "StateMachineVersionArn") == versionARN {
 			return true
 		}
 	}
@@ -6634,7 +6482,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			add("SCHEMA_VALIDATION_FAILED", "Version must be 1.0.", "/Version")
 		}
 	}
-	queryLanguage := first(machine, "QueryLanguage")
+	queryLanguage := spi.First(machine, "QueryLanguage")
 	if queryLanguage == "" {
 		queryLanguage = "JSONPath"
 	} else if queryLanguage != "JSONPath" && queryLanguage != "JSONata" {
@@ -6660,13 +6508,13 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 	scopeVariables := map[string]struct{}{}
 	for stateName, raw := range states {
 		state, _ := raw.(map[string]any)
-		stateQueryLanguage := first(state, "QueryLanguage")
+		stateQueryLanguage := spi.First(state, "QueryLanguage")
 		if stateQueryLanguage == "" {
 			stateQueryLanguage = queryLanguage
 		}
 		owners := []any{state}
-		owners = append(owners, asSlice(state["Choices"])...)
-		owners = append(owners, asSlice(state["Catch"])...)
+		owners = append(owners, spi.Slice(state["Choices"])...)
+		owners = append(owners, spi.Slice(state["Catch"])...)
 		for _, rawOwner := range owners {
 			owner, _ := rawOwner.(map[string]any)
 			assign, _ := owner["Assign"].(map[string]any)
@@ -6704,7 +6552,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			}
 		}
 		typ, _ := state["Type"].(string)
-		stateQueryLanguage := first(state, "QueryLanguage")
+		stateQueryLanguage := spi.First(state, "QueryLanguage")
 		if stateQueryLanguage == "" {
 			stateQueryLanguage = queryLanguage
 		} else if stateQueryLanguage != "JSONPath" && stateQueryLanguage != "JSONata" || queryLanguage == "JSONata" && stateQueryLanguage != "JSONata" {
@@ -6983,7 +6831,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				add("SCHEMA_VALIDATION_FAILED", "End must be true.", "/States/"+name+"/End")
 			}
 		}
-		if typ == "Task" && first(state, "Resource") == "" {
+		if typ == "Task" && spi.First(state, "Resource") == "" {
 			add("MISSING_REQUIRED_FIELD", "Task must have Resource.", "/States/"+name+"/Resource")
 		}
 		if raw, exists := state["Credentials"]; exists {
@@ -6995,17 +6843,17 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				add("SCHEMA_VALIDATION_FAILED", "Credentials must contain one valid RoleArn or RoleArn.$.", "/States/"+name+"/Credentials")
 			}
 		}
-		if resource := first(state, "Resource"); typ == "Task" && strings.HasSuffix(resource, ".waitForTaskToken") &&
+		if resource := spi.First(state, "Resource"); typ == "Task" && strings.HasSuffix(resource, ".waitForTaskToken") &&
 			!callbackIntegration(strings.TrimSuffix(resource, ".waitForTaskToken")) {
 			add("SCHEMA_VALIDATION_FAILED", "Resource does not support the callback integration pattern.", "/States/"+name+"/Resource")
 		}
-		if resource := first(state, "Resource"); machineType == "EXPRESS" && strings.HasSuffix(resource, ".waitForTaskToken") {
+		if resource := spi.First(state, "Resource"); machineType == "EXPRESS" && strings.HasSuffix(resource, ".waitForTaskToken") {
 			add("SCHEMA_VALIDATION_FAILED", "Express workflows do not support the callback integration pattern.", "/States/"+name+"/Resource")
 		}
-		if resource, _, syncJob := syncTaskResource(first(state, "Resource")); typ == "Task" && syncJob && !syncIntegration(resource) {
+		if resource, _, syncJob := syncTaskResource(spi.First(state, "Resource")); typ == "Task" && syncJob && !syncIntegration(resource) {
 			add("SCHEMA_VALIDATION_FAILED", "Resource does not support the Run a Job integration pattern.", "/States/"+name+"/Resource")
 		}
-		if _, _, syncJob := syncTaskResource(first(state, "Resource")); machineType == "EXPRESS" && syncJob {
+		if _, _, syncJob := syncTaskResource(spi.First(state, "Resource")); machineType == "EXPRESS" && syncJob {
 			add("SCHEMA_VALIDATION_FAILED", "Express workflows do not support the Run a Job integration pattern.", "/States/"+name+"/Resource")
 		}
 		checkTarget := func(raw any, path string) {
@@ -7066,7 +6914,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			}
 		}
 		if typ == "Choice" {
-			choices := asSlice(state["Choices"])
+			choices := spi.Slice(state["Choices"])
 			if len(choices) == 0 {
 				add("MISSING_REQUIRED_FIELD", "Choice must have Choices.", "/States/"+name+"/Choices")
 			}
@@ -7155,7 +7003,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 			}
 		}
 		if typ == "Parallel" {
-			branches := asSlice(state["Branches"])
+			branches := spi.Slice(state["Branches"])
 			if len(branches) == 0 {
 				add("MISSING_REQUIRED_FIELD", "Parallel must have Branches.", "/States/"+name+"/Branches")
 			}
@@ -7261,7 +7109,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 					add("SCHEMA_VALIDATION_FAILED", "ReaderConfig must be an object.", "/States/"+name+"/ItemReader/ReaderConfig")
 				}
 				readerPath := "/States/" + name + "/ItemReader/ReaderConfig"
-				inputType := first(config, "InputType")
+				inputType := spi.First(config, "InputType")
 				if value, exists := config["InputType"]; exists {
 					configured, valid := value.(string)
 					if !valid || !slices.Contains([]string{"CSV", "JSON", "JSONL", "PARQUET", "MANIFEST"}, configured) {
@@ -7283,14 +7131,14 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				}
 				if value, exists := config["ManifestType"]; exists {
 					manifestType, valid := value.(string)
-					resource := first(reader, "Resource")
+					resource := spi.First(reader, "Resource")
 					if !valid || resource != "arn:aws:states:::s3:getObject" || manifestType == "ATHENA_DATA" && !slices.Contains([]string{"CSV", "JSONL", "PARQUET"}, inputType) || manifestType == "S3_INVENTORY" && inputType != "" || manifestType != "ATHENA_DATA" && manifestType != "S3_INVENTORY" {
 						add("SCHEMA_VALIDATION_FAILED", "ManifestType is invalid for this ItemReader.", readerPath+"/ManifestType")
 					}
 				}
 				if value, exists := config["Transformation"]; exists {
 					transformation, valid := value.(string)
-					resource := first(reader, "Resource")
+					resource := spi.First(reader, "Resource")
 					if !valid || transformation != "NONE" && transformation != "LOAD_AND_FLATTEN" || resource != "arn:aws:states:::s3:listObjectsV2" || transformation == "LOAD_AND_FLATTEN" && !slices.Contains([]string{"CSV", "JSON", "JSONL", "PARQUET"}, inputType) {
 						add("SCHEMA_VALIDATION_FAILED", "Transformation is invalid for this ItemReader.", readerPath+"/Transformation")
 					}
@@ -7314,10 +7162,10 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 						valid = valid && stringHeader
 						size += len(header)
 					}
-					if !valid || len(headers) == 0 || size > 10*1024 || first(config, "CSVHeaderLocation") != "GIVEN" {
+					if !valid || len(headers) == 0 || size > 10*1024 || spi.First(config, "CSVHeaderLocation") != "GIVEN" {
 						add("SCHEMA_VALIDATION_FAILED", "CSVHeaders requires non-empty string headers up to 10 KiB and CSVHeaderLocation GIVEN.", readerPath+"/CSVHeaders")
 					}
-				} else if first(config, "CSVHeaderLocation") == "GIVEN" {
+				} else if spi.First(config, "CSVHeaderLocation") == "GIVEN" {
 					add("MISSING_REQUIRED_FIELD", "CSVHeaderLocation GIVEN requires CSVHeaders.", readerPath+"/CSVHeaders")
 				}
 				if csvConfigured && inputType != "CSV" && inputType != "MANIFEST" {
@@ -7326,7 +7174,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				validateInteger(config, "/States/"+name+"/ItemReader/ReaderConfig", "MaxItems", 1, 100000000)
 				if value, exists := config["ItemsPointer"]; exists {
 					pointer, valid := value.(string)
-					inputType := first(config, "InputType")
+					inputType := spi.First(config, "InputType")
 					_, validPointer := jsonPointerTokens(pointer)
 					if !valid || !validPointer || utf8.RuneCountInString(pointer) >= 2000 || inputType != "" && inputType != "JSON" {
 						add("SCHEMA_VALIDATION_FAILED", "ItemsPointer must be a JSON Pointer for JSON input.", "/States/"+name+"/ItemReader/ReaderConfig/ItemsPointer")
@@ -7369,7 +7217,7 @@ func validateMachine(machine map[string]any, location, machineType string, diagn
 				if _, exists := processor["ProcessorConfig"]; exists && !configValid {
 					add("SCHEMA_VALIDATION_FAILED", "ProcessorConfig must be an object.", "/States/"+name+"/ItemProcessor/ProcessorConfig")
 				}
-				mode, executionType := first(processorConfig, "Mode"), first(processorConfig, "ExecutionType")
+				mode, executionType := spi.First(processorConfig, "Mode"), spi.First(processorConfig, "ExecutionType")
 				if value, exists := processorConfig["Mode"]; exists {
 					if _, valid := value.(string); !valid {
 						add("SCHEMA_VALIDATION_FAILED", "ProcessorConfig Mode must be a string.", "/States/"+name+"/ItemProcessor/ProcessorConfig/Mode")
@@ -7506,22 +7354,22 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 		}
 	}
 	readerData, hasReaderData, validReaderData, hasItemsPointer, itemSource := any(nil), false, true, false, "STATE_DATA"
-	if raw := first(configuration, "mapItemReaderData", "MapItemReaderData"); raw != "" {
+	if raw := spi.First(configuration, "mapItemReaderData", "MapItemReaderData"); raw != "" {
 		reader, _ := state["ItemReader"].(map[string]any)
 		readerConfig, _ := reader["ReaderConfig"].(map[string]any)
-		inputType := first(readerConfig, "InputType")
+		inputType := spi.First(readerConfig, "InputType")
 		if inputType == "" {
 			inputType = "JSON"
 		}
 		if slices.Contains([]string{"CSV", "JSON", "JSONL"}, inputType) {
 			hasReaderData = true
-			hasItemsPointer = first(readerConfig, "ItemsPointer") != ""
+			hasItemsPointer = spi.First(readerConfig, "ItemsPointer") != ""
 			itemSource = inputType
 			readerData, validReaderData = decodeTextMapReaderData([]byte(raw), inputType, readerConfig)
 		}
 	}
 	encode("input", input)
-	if first(state, "QueryLanguage") == "JSONata" {
+	if spi.First(state, "QueryLanguage") == "JSONata" {
 		if arguments, exists := state["Arguments"]; exists {
 			if value, valid := evalJSONataValue(arguments, jsonataScope{input: input, context: context, variables: variables, random: random}); valid {
 				encode("afterArguments", value)
@@ -7530,7 +7378,7 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 		if result, exists := mock["Result"]; exists {
 			encode("result", result)
 		}
-		if first(state, "Type") == "Map" {
+		if spi.First(state, "Type") == "Map" {
 			scope := jsonataScope{input: input, context: context, variables: variables, random: random}
 			items, valid := input, true
 			if hasReaderData {
@@ -7570,7 +7418,7 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 	} else if afterInputPath, valid := applyDataPath(state, "InputPath", input, variables); valid {
 		encode("afterInputPath", afterInputPath)
 		effectiveInput := afterInputPath
-		switch first(state, "Type") {
+		switch spi.First(state, "Type") {
 		case "Pass", "Parallel":
 			if parameters, exists := state["Parameters"].(map[string]any); exists {
 				effectiveInput, valid = applyParamsValidated(parameters, afterInputPath, context, random, variables)
@@ -7590,7 +7438,7 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 					encode("afterItemsPointer", dataset)
 				}
 			}
-			if path := first(state, "ItemsPath"); valid && path != "" {
+			if path := spi.First(state, "ItemsPath"); valid && path != "" {
 				dataset, valid = jsonPathLookup(dataset, path, variables)
 			}
 			if valid {
@@ -7632,7 +7480,7 @@ func inspectTestState(state map[string]any, input any, context, variables, mock,
 		if !hasResult && wr.hasTaskResult {
 			result, hasResult = wr.taskResult, true
 		}
-		if first(state, "Type") == "Pass" {
+		if spi.First(state, "Type") == "Pass" {
 			result, hasResult = effectiveInput, valid
 			if configured, exists := state["Result"]; exists {
 				result, hasResult = configured, true
@@ -7674,7 +7522,7 @@ func testStateMapItemCount(inspection map[string]any) (int, bool) {
 
 func testStateMapFailuresExceeded(state map[string]any, input any, context, variables map[string]any, random spi.Rand, failures, items int) bool {
 	var scope *jsonataScope
-	if first(state, "QueryLanguage") == "JSONata" {
+	if spi.First(state, "QueryLanguage") == "JSONata" {
 		scope = &jsonataScope{input: input, context: context, variables: variables, random: random}
 	}
 	count, hasCount, countValid := stateInteger(state, "ToleratedFailureCount", input, scope, 0, math.MaxInt32, variables)
@@ -7689,9 +7537,9 @@ func testStateMapFailuresExceeded(state map[string]any, input any, context, vari
 }
 
 func validTestStateMock(state map[string]any, result any, mode string) bool {
-	switch first(state, "Type") {
+	switch spi.First(state, "Type") {
 	case "Parallel":
-		branches := asSlice(state["Branches"])
+		branches := spi.Slice(state["Branches"])
 		values, valid := result.([]any)
 		return valid && len(values) == len(branches)
 	case "Map":
@@ -7705,7 +7553,7 @@ func validTestStateMock(state map[string]any, result any, mode string) bool {
 		if mode == "NONE" {
 			return true
 		}
-		resource := first(state, "Resource")
+		resource := spi.First(state, "Resource")
 		if strings.Contains(resource, "states:::http:invoke") || strings.Contains(resource, "apigateway:invoke") || strings.Contains(resource, "eks:call") || strings.Contains(resource, "eks:runJob") {
 			return true
 		}
@@ -7833,21 +7681,21 @@ type testStateSelection struct {
 }
 
 func nestedTestState(machine map[string]any, stateName, inheritedQuery string, insideMap bool, matches *[]testStateSelection) {
-	queryLanguage := first(machine, "QueryLanguage")
+	queryLanguage := spi.First(machine, "QueryLanguage")
 	if queryLanguage == "" {
 		queryLanguage = inheritedQuery
 	}
 	states, _ := machine["States"].(map[string]any)
 	for _, name := range slices.Sorted(maps.Keys(states)) {
 		state, _ := states[name].(map[string]any)
-		stateQuery := first(state, "QueryLanguage")
+		stateQuery := spi.First(state, "QueryLanguage")
 		if stateQuery == "" {
 			stateQuery = queryLanguage
 		}
 		if name == stateName {
 			*matches = append(*matches, testStateSelection{state: state, name: name, query: stateQuery, insideMap: insideMap})
 		}
-		for _, raw := range asSlice(state["Branches"]) {
+		for _, raw := range spi.Slice(state["Branches"]) {
 			branch, _ := raw.(map[string]any)
 			nestedTestState(branch, stateName, stateQuery, insideMap, matches)
 		}
@@ -7864,7 +7712,7 @@ func testDefinition(definition, stateName string, input any, mock, configuration
 	if json.Unmarshal([]byte(definition), &parsed) != nil {
 		return "", "", testStateSelection{}, fmt.Errorf("definition is not valid JSON")
 	}
-	selection := testStateSelection{state: parsed, query: first(parsed, "QueryLanguage")}
+	selection := testStateSelection{state: parsed, query: spi.First(parsed, "QueryLanguage")}
 	_, fullMachine := parsed["States"].(map[string]any)
 	if fullMachine {
 		if stateName == "" {
@@ -7874,8 +7722,8 @@ func testDefinition(definition, stateName string, input any, mock, configuration
 			if !found {
 				return "", "", testStateSelection{}, fmt.Errorf("stateName does not identify a state")
 			}
-			selection = testStateSelection{state: state, name: stateName, query: first(parsed, "QueryLanguage")}
-			if stateQuery := first(state, "QueryLanguage"); stateQuery != "" {
+			selection = testStateSelection{state: state, name: stateName, query: spi.First(parsed, "QueryLanguage")}
+			if stateQuery := spi.First(state, "QueryLanguage"); stateQuery != "" {
 				selection.query = stateQuery
 			}
 		} else {
@@ -7890,20 +7738,18 @@ func testDefinition(definition, stateName string, input any, mock, configuration
 		return "", "", testStateSelection{}, fmt.Errorf("stateName requires a state machine definition")
 	}
 	state := selection.state
-	if !supportedStateType(first(state, "Type")) {
+	if !supportedStateType(spi.First(state, "Type")) {
 		return "", "", testStateSelection{}, fmt.Errorf("state does not have a supported Type")
 	}
-	if typ, resource := first(state, "Type"), first(state, "Resource"); mock == nil && (typ == "Parallel" || typ == "Map" || typ == "Task" && (strings.Contains(resource, ":activity:") || strings.HasSuffix(resource, ".sync") || strings.HasSuffix(resource, ".sync:2") || strings.HasSuffix(resource, ".waitForTaskToken"))) {
+	if typ, resource := spi.First(state, "Type"), spi.First(state, "Resource"); mock == nil && (typ == "Parallel" || typ == "Map" || typ == "Task" && (strings.Contains(resource, ":activity:") || strings.HasSuffix(resource, ".sync") || strings.HasSuffix(resource, ".sync:2") || strings.HasSuffix(resource, ".waitForTaskToken"))) {
 		return "", "", testStateSelection{}, fmt.Errorf("state requires a mock")
 	}
-	if mock != nil && !slices.Contains([]string{"Task", "Map", "Parallel"}, first(state, "Type")) {
+	if mock != nil && !slices.Contains([]string{"Task", "Map", "Parallel"}, spi.First(state, "Type")) {
 		return "", "", testStateSelection{}, fmt.Errorf("mock requires a Task, Map, or Parallel state")
 	}
-	next := first(state, "Next")
+	next := spi.First(state, "Next")
 	copy := map[string]any{}
-	for key, value := range state {
-		copy[key] = value
-	}
+	maps.Copy(copy, state)
 	if result, exists := mock["Result"]; exists {
 		copy["_TestStateMockResult"] = result
 	} else if failure, exists := mock["ErrorOutput"]; exists {
@@ -7912,14 +7758,14 @@ func testDefinition(definition, stateName string, input any, mock, configuration
 	if count, exists := inputValue(configuration, "retrierRetryCount", "RetrierRetryCount"); exists {
 		copy["_TestStateRetrierRetryCount"] = count
 	}
-	if first(copy, "Type") == "Choice" {
+	if spi.First(copy, "Type") == "Choice" {
 		next = choiceNext(copy, input)
 		copy["Type"] = "Pass"
 		delete(copy, "Choices")
 		delete(copy, "Default")
 	}
 	delete(copy, "Next")
-	if typ := first(copy, "Type"); typ != "Succeed" && typ != "Fail" {
+	if typ := spi.First(copy, "Type"); typ != "Succeed" && typ != "Fail" {
 		copy["End"] = true
 	}
 	if copy["QueryLanguage"] == nil && selection.query != "" {
@@ -7995,7 +7841,7 @@ func validEncryptionConfiguration(value any) bool {
 	if !ok {
 		return false
 	}
-	typeName := first(configuration, "type", "Type")
+	typeName := spi.First(configuration, "type", "Type")
 	keyValue, keySet := inputValue(configuration, "kmsKeyId", "KmsKeyId")
 	keyID, keyValid := keyValue.(string)
 	period, periodSet := inputValue(configuration, "kmsDataKeyReusePeriodSeconds", "KmsDataKeyReusePeriodSeconds")
@@ -8017,7 +7863,7 @@ func validLoggingConfiguration(value any) bool {
 	if !ok {
 		return false
 	}
-	level := first(configuration, "level", "Level")
+	level := spi.First(configuration, "level", "Level")
 	if level == "" {
 		level = "OFF"
 	}
@@ -8040,7 +7886,7 @@ func validLoggingConfiguration(value any) bool {
 		}
 		groupValue, exists := inputValue(destination, "cloudWatchLogsLogGroup", "CloudWatchLogsLogGroup")
 		group, ok := groupValue.(map[string]any)
-		arn := first(group, "logGroupArn", "LogGroupArn")
+		arn := spi.First(group, "logGroupArn", "LogGroupArn")
 		if !exists || !ok || len(arn) < 1 || len(arn) > 256 {
 			return false
 		}
@@ -8113,7 +7959,7 @@ func validatedTags(raw []any) ([]any, string) {
 		if !ok {
 			return nil, "ValidationException"
 		}
-		key, tagValue := first(tag, "key", "Key"), first(tag, "value", "Value")
+		key, tagValue := spi.First(tag, "key", "Key"), spi.First(tag, "value", "Value")
 		if !validTagText(key, 1, 128) || !validTagText(tagValue, 0, 256) || seen[key] || strings.HasPrefix(strings.ToLower(key), "aws:") || strings.HasPrefix(strings.ToLower(tagValue), "aws:") {
 			return nil, "ValidationException"
 		}
@@ -8170,18 +8016,6 @@ func lastSeg(s, sep string) string {
 		return s[i+1:]
 	}
 	return s
-}
-
-func first(in map[string]any, keys ...string) string {
-	for _, k := range keys {
-		switch v := in[k].(type) {
-		case string:
-			if v != "" {
-				return v
-			}
-		}
-	}
-	return ""
 }
 
 func toFloat(v any) float64 {

@@ -4,6 +4,7 @@ package firehose
 import (
 	"archive/zip"
 	"bytes"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"crypto/md5"
@@ -18,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -207,11 +209,11 @@ func (p *Pack) consumeMSK(ctx context.Context, payload []byte) {
 	}
 	for _, stream := range streams {
 		var configuration map[string]any
-		if json.Unmarshal(stream.Value, &configuration) != nil || first(configuration, "DeliveryStreamType") != "MSKAsSource" {
+		if json.Unmarshal(stream.Value, &configuration) != nil || spi.First(configuration, "DeliveryStreamType") != "MSKAsSource" {
 			continue
 		}
 		source, _ := configuration["MSKSourceConfiguration"].(map[string]any)
-		if first(source, "MSKClusterARN") != event.ClusterARN || first(source, "TopicName") != event.Topic || event.Message.Timestamp.Before(mskStart(source, configuration["CreateTimestamp"])) {
+		if spi.First(source, "MSKClusterARN") != event.ClusterARN || spi.First(source, "TopicName") != event.Topic || event.Message.Timestamp.Before(mskStart(source, configuration["CreateTimestamp"])) {
 			continue
 		}
 		_, _ = p.putOne(ctx, req, stream.Key, map[string]any{"Data": base64.StdEncoding.EncodeToString(event.Message.Data)}, event.Message.Data, "")
@@ -219,7 +221,7 @@ func (p *Pack) consumeMSK(ctx context.Context, payload []byte) {
 }
 
 func (p *Pack) replayMSK(ctx context.Context, req *spi.Request, stream string, source map[string]any, created any) {
-	messages, err := kafkaservice.New(p.deps).Messages(ctx, req.Identity, first(source, "MSKClusterARN"), first(source, "TopicName"), mskStart(source, created))
+	messages, err := kafkaservice.New(p.deps).Messages(ctx, req.Identity, spi.First(source, "MSKClusterARN"), spi.First(source, "TopicName"), mskStart(source, created))
 	if err != nil {
 		return
 	}
@@ -257,11 +259,11 @@ func (p *Pack) consumeKinesis(ctx context.Context, payload []byte) {
 	records := deaggregateKPL(data)
 	for _, stream := range streams {
 		var configuration map[string]any
-		if json.Unmarshal(stream.Value, &configuration) != nil || first(configuration, "DeliveryStreamType") != "KinesisStreamAsSource" {
+		if json.Unmarshal(stream.Value, &configuration) != nil || spi.First(configuration, "DeliveryStreamType") != "KinesisStreamAsSource" {
 			continue
 		}
 		source, _ := configuration["KinesisStreamSourceConfiguration"].(map[string]any)
-		parts := strings.SplitN(first(source, "KinesisStreamARN"), ":", 6)
+		parts := strings.SplitN(spi.First(source, "KinesisStreamARN"), ":", 6)
 		if len(parts) != 6 || parts[3] != event.Region || parts[4] != event.Account || parts[5] != "stream/"+event.StreamName {
 			continue
 		}
@@ -383,13 +385,13 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 }
 
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := first(req.Input, "DeliveryStreamName", "deliveryStreamName")
+	name := spi.First(req.Input, "DeliveryStreamName", "deliveryStreamName")
 	if len(name) > 64 || !firehoseStreamName.MatchString(name) {
 		return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	switch req.Operation {
 	case "CreateDeliveryStream":
-		streamType := first(req.Input, "DeliveryStreamType")
+		streamType := spi.First(req.Input, "DeliveryStreamType")
 		if streamType == "" {
 			streamType = "DirectPut"
 		}
@@ -415,7 +417,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			var ok bool
 			source, ok = req.Input["KinesisStreamSourceConfiguration"].(map[string]any)
-			if !ok || len(first(source, "KinesisStreamARN")) > 512 || !firehoseKinesisStreamARN.MatchString(first(source, "KinesisStreamARN")) || !validRoleARN(first(source, "RoleARN")) {
+			if !ok || len(spi.First(source, "KinesisStreamARN")) > 512 || !firehoseKinesisStreamARN.MatchString(spi.First(source, "KinesisStreamARN")) || !validRoleARN(spi.First(source, "RoleARN")) {
 				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 		case "MSKAsSource":
@@ -425,9 +427,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			var ok bool
 			mskSource, ok = req.Input["MSKSourceConfiguration"].(map[string]any)
 			authentication, authOK := mskSource["AuthenticationConfiguration"].(map[string]any)
-			cluster, topic := first(mskSource, "MSKClusterARN"), first(mskSource, "TopicName")
-			connectivity := first(authentication, "Connectivity")
-			if !ok || !authOK || len(cluster) > 512 || !firehoseMSKClusterARN.MatchString(cluster) || len(topic) > 255 || !firehoseMSKTopic.MatchString(topic) || (connectivity != "PUBLIC" && connectivity != "PRIVATE") || !validRoleARN(first(authentication, "RoleARN")) {
+			cluster, topic := spi.First(mskSource, "MSKClusterARN"), spi.First(mskSource, "TopicName")
+			connectivity := spi.First(authentication, "Connectivity")
+			if !ok || !authOK || len(cluster) > 512 || !firehoseMSKClusterARN.MatchString(cluster) || len(topic) > 255 || !firehoseMSKTopic.MatchString(topic) || (connectivity != "PUBLIC" && connectivity != "PRIVATE") || !validRoleARN(spi.First(authentication, "RoleARN")) {
 				return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			if readFrom, exists := mskSource["ReadFromTimestamp"]; exists {
@@ -513,8 +515,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		p.deleteHTTPStreamWork(ctx, req, name)
 		_ = p.col(req, "fh").Delete(ctx, name)
 		_ = p.col(req, "fhtag").Delete(ctx, name)
-		kvs, _, _ := p.col(req, "fhrec:"+name).List(ctx, "", "", 0)
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, p.col(req, "fhrec:"+name), "", "", 0) {
 			_ = p.col(req, "fhrec:"+name).Delete(ctx, kv.Key)
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
@@ -534,8 +535,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		return &spi.Response{Output: map[string]any{"DeliveryStreamDescription": describeRecord(rec, after)}}, nil
 	case "PutRecord":
 		stream, ok, _ := p.col(req, "fh").Get(ctx, name)
@@ -610,36 +610,35 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if !ok {
 				return &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 			}
-			var rec map[string]any
-			_ = json.Unmarshal(b, &rec)
-			current := first(req.Input, "CurrentDeliveryStreamVersionId")
-			if current == "" || first(req.Input, "DestinationId") != destinationID {
+			rec := spi.JSONObject(b)
+			current := spi.First(req.Input, "CurrentDeliveryStreamVersionId")
+			if current == "" || spi.First(req.Input, "DestinationId") != destinationID {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
-			if current != first(rec, "VersionId") {
+			if current != spi.First(rec, "VersionId") {
 				return &spi.Fault{Code: "ConcurrentModificationException", HTTPStatus: 400, Fault: "client"}
 			}
 			extended, _ := rec["ExtendedS3DestinationConfiguration"].(map[string]any)
-			backupEnabled := first(extended, "S3BackupMode") == "Enabled"
+			backupEnabled := spi.First(extended, "S3BackupMode") == "Enabled"
 			dynamicEnabled := dynamicPartitioningEnabled(extended)
 			redshift, _ := rec["RedshiftDestinationConfiguration"].(map[string]any)
-			redshiftBackupEnabled := first(redshift, "S3BackupMode") == "Enabled"
+			redshiftBackupEnabled := spi.First(redshift, "S3BackupMode") == "Enabled"
 			splunk, _ := rec["SplunkDestinationConfiguration"].(map[string]any)
-			splunkAllEvents := first(splunk, "S3BackupMode") == "AllEvents"
+			splunkAllEvents := spi.First(splunk, "S3BackupMode") == "AllEvents"
 			copyDest(rec, req.Input, "Update")
 			extended, _ = rec["ExtendedS3DestinationConfiguration"].(map[string]any)
-			if backupEnabled && first(extended, "S3BackupMode") != "Enabled" {
+			if backupEnabled && spi.First(extended, "S3BackupMode") != "Enabled" {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			if dynamicEnabled != dynamicPartitioningEnabled(extended) {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			redshift, _ = rec["RedshiftDestinationConfiguration"].(map[string]any)
-			if redshiftBackupEnabled && first(redshift, "S3BackupMode") != "Enabled" {
+			if redshiftBackupEnabled && spi.First(redshift, "S3BackupMode") != "Enabled" {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			splunk, _ = rec["SplunkDestinationConfiguration"].(map[string]any)
-			if splunkAllEvents && first(splunk, "S3BackupMode") != "AllEvents" {
+			if splunkAllEvents && spi.First(splunk, "S3BackupMode") != "AllEvents" {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			if err := validateDestination(rec, req.Identity.Region); err != nil {
@@ -705,7 +704,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
 		limit, valid := inputLimit(req.Input["Limit"], 50, 50)
-		after := first(req.Input, "ExclusiveStartTagKey")
+		after := spi.First(req.Input, "ExclusiveStartTagKey")
 		if !valid || (after != "" && !validTagKey(after)) {
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -740,9 +739,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
-		var current map[string]any
-		_ = json.Unmarshal(stored, &current)
-		if first(current, "DeliveryStreamType") != "DirectPut" {
+		current := spi.JSONObject(stored)
+		if spi.First(current, "DeliveryStreamType") != "DirectPut" {
 			return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 		if req.Operation == "StartDeliveryStreamEncryption" {
@@ -758,8 +756,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			if !ok {
 				return &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 			}
-			var rec map[string]any
-			_ = json.Unmarshal(b, &rec)
+			rec := spi.JSONObject(b)
 			rec["DeliveryStreamEncryptionConfiguration"] = encryption
 			rec["LastUpdateTimestamp"] = float64(p.deps.Clock.Now().UnixNano()) / float64(time.Second)
 			nb, _ := json.Marshal(rec)
@@ -800,7 +797,7 @@ func encryptionDescription(value any, defaultAWS bool) (map[string]any, bool) {
 	if !ok {
 		return nil, false
 	}
-	keyType, keyARN := first(input, "KeyType"), first(input, "KeyARN")
+	keyType, keyARN := spi.First(input, "KeyType"), spi.First(input, "KeyARN")
 	switch keyType {
 	case "AWS_OWNED_CMK":
 		if keyARN != "" {
@@ -818,11 +815,11 @@ func encryptionDescription(value any, defaultAWS bool) (map[string]any, bool) {
 }
 
 func (p *Pack) ensureEncryptionKey(ctx context.Context, req *spi.Request, encryption map[string]any) (string, error) {
-	if first(encryption, "Status") != "ENABLED" {
+	if spi.First(encryption, "Status") != "ENABLED" {
 		return "", nil
 	}
-	keyID := first(encryption, "KeyARN")
-	if first(encryption, "KeyType") == "AWS_OWNED_CMK" {
+	keyID := spi.First(encryption, "KeyARN")
+	if spi.First(encryption, "KeyType") == "AWS_OWNED_CMK" {
 		if stored, ok, _ := p.col(req, "fhkms").Get(ctx, "aws-owned"); ok {
 			keyID = string(stored)
 		} else {
@@ -830,7 +827,7 @@ func (p *Pack) ensureEncryptionKey(ctx context.Context, req *spi.Request, encryp
 			if err != nil {
 				return "", invalidKMSResource(err)
 			}
-			keyID = first(created.Output["KeyMetadata"].(map[string]any), "KeyId")
+			keyID = spi.First(created.Output["KeyMetadata"].(map[string]any), "KeyId")
 			if err := p.col(req, "fhkms").Put(ctx, "aws-owned", []byte(keyID)); err != nil {
 				return "", err
 			}
@@ -840,15 +837,14 @@ func (p *Pack) ensureEncryptionKey(ctx context.Context, req *spi.Request, encryp
 	if err != nil {
 		return "", invalidKMSResource(err)
 	}
-	if first(described.Output["KeyMetadata"].(map[string]any), "KeyState") != "Enabled" {
+	if spi.First(described.Output["KeyMetadata"].(map[string]any), "KeyState") != "Enabled" {
 		return "", invalidKMSResource(errors.New("KMS key is not enabled"))
 	}
 	return keyID, nil
 }
 
 func (p *Pack) recordEncryptionKey(ctx context.Context, req *spi.Request, stream []byte) (string, error) {
-	var rec map[string]any
-	_ = json.Unmarshal(stream, &rec)
+	rec := spi.JSONObject(stream)
 	encryption, _ := rec["DeliveryStreamEncryptionConfiguration"].(map[string]any)
 	return p.ensureEncryptionKey(ctx, req, encryption)
 }
@@ -901,21 +897,18 @@ func invalidKMSResource(err error) *spi.Fault {
 }
 
 func streamEncrypted(b []byte) bool {
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	encryption, _ := rec["DeliveryStreamEncryptionConfiguration"].(map[string]any)
-	return first(encryption, "Status") == "ENABLED"
+	return spi.First(encryption, "Status") == "ENABLED"
 }
 
 func directPutStream(b []byte) bool {
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
-	return first(rec, "DeliveryStreamType") == "DirectPut"
+	rec := spi.JSONObject(b)
+	return spi.First(rec, "DeliveryStreamType") == "DirectPut"
 }
 
 func requiresCloudWatchLogsSource(b []byte) bool {
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration", "HttpEndpointDestinationConfiguration"} {
 		if destination, ok := rec[key].(map[string]any); ok && hasProcessor(destination, "Decompression") {
 			return true
@@ -1026,7 +1019,7 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		if configuration, ok := description[base+"Configuration"].(map[string]any); ok {
 			describeS3Configuration(configuration)
 			if base == "ExtendedS3Destination" {
-				if first(configuration, "S3BackupMode") == "" {
+				if spi.First(configuration, "S3BackupMode") == "" {
 					configuration["S3BackupMode"] = "Disabled"
 				}
 				if backup, ok := configuration["S3BackupConfiguration"].(map[string]any); ok {
@@ -1045,20 +1038,8 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 			delete(endpoint, "AccessKey")
 			configuration["EndpointConfiguration"] = endpoint
 		}
-		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
-			describeS3Configuration(s3)
-			configuration["S3DestinationDescription"] = s3
-			delete(configuration, "S3Configuration")
-		}
-		if configuration["BufferingHints"] == nil {
-			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
-		}
-		if configuration["RetryOptions"] == nil {
-			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
-		}
-		if first(configuration, "S3BackupMode") == "" {
-			configuration["S3BackupMode"] = "FailedDataOnly"
-		}
+		describeDestination(configuration, map[string]any{"BufferingHints": map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5},
+			"RetryOptions": map[string]any{"DurationInSeconds": 300}, "S3BackupMode": "FailedDataOnly"})
 		destination["HttpEndpointDestinationDescription"] = configuration
 		delete(description, "HttpEndpointDestinationConfiguration")
 	}
@@ -1070,97 +1051,43 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		if !ok {
 			continue
 		}
-		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
-			describeS3Configuration(s3)
-			configuration["S3DestinationDescription"] = s3
-			delete(configuration, "S3Configuration")
-		}
 		if vpc, ok := configuration["VpcConfiguration"].(map[string]any); ok {
 			configuration["VpcConfigurationDescription"] = vpc
 			delete(configuration, "VpcConfiguration")
 		}
-		if configuration["BufferingHints"] == nil {
-			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
-		}
-		if configuration["RetryOptions"] == nil {
-			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
-		}
-		if first(configuration, "IndexRotationPeriod") == "" {
-			configuration["IndexRotationPeriod"] = "OneDay"
-		}
-		if first(configuration, "S3BackupMode") == "" {
-			configuration["S3BackupMode"] = "FailedDocumentsOnly"
-		}
-		if configuration["DocumentIdOptions"] == nil {
-			configuration["DocumentIdOptions"] = map[string]any{"DefaultDocumentIdFormat": "FIREHOSE_DEFAULT"}
-		}
+		describeDestination(configuration, map[string]any{"BufferingHints": map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5},
+			"RetryOptions": map[string]any{"DurationInSeconds": 300}, "IndexRotationPeriod": "OneDay", "S3BackupMode": "FailedDocumentsOnly",
+			"DocumentIdOptions": map[string]any{"DefaultDocumentIdFormat": "FIREHOSE_DEFAULT"}})
 		destination[search.described] = configuration
 		delete(description, search.configuration)
 	}
 	if configuration, ok := description["AmazonOpenSearchServerlessDestinationConfiguration"].(map[string]any); ok {
-		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
-			describeS3Configuration(s3)
-			configuration["S3DestinationDescription"] = s3
-			delete(configuration, "S3Configuration")
-		}
 		if vpc, ok := configuration["VpcConfiguration"].(map[string]any); ok {
 			configuration["VpcConfigurationDescription"] = vpc
 			delete(configuration, "VpcConfiguration")
 		}
-		if configuration["BufferingHints"] == nil {
-			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
-		}
-		if configuration["RetryOptions"] == nil {
-			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
-		}
-		if first(configuration, "S3BackupMode") == "" {
-			configuration["S3BackupMode"] = "FailedDocumentsOnly"
-		}
+		describeDestination(configuration, map[string]any{"BufferingHints": map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5},
+			"RetryOptions": map[string]any{"DurationInSeconds": 300}, "S3BackupMode": "FailedDocumentsOnly"})
 		destination["AmazonOpenSearchServerlessDestinationDescription"] = configuration
 		delete(description, "AmazonOpenSearchServerlessDestinationConfiguration")
 	}
 	if configuration, ok := description["RedshiftDestinationConfiguration"].(map[string]any); ok {
 		configuration = maps.Clone(configuration)
 		delete(configuration, "Password")
-		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
-			describeS3Configuration(s3)
-			configuration["S3DestinationDescription"] = s3
-			delete(configuration, "S3Configuration")
-		}
 		if backup, ok := configuration["S3BackupConfiguration"].(map[string]any); ok {
 			describeS3Configuration(backup)
 			configuration["S3BackupDescription"] = backup
 			delete(configuration, "S3BackupConfiguration")
 		}
-		if configuration["RetryOptions"] == nil {
-			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 3600}
-		}
-		if first(configuration, "S3BackupMode") == "" {
-			configuration["S3BackupMode"] = "Disabled"
-		}
+		describeDestination(configuration, map[string]any{"RetryOptions": map[string]any{"DurationInSeconds": 3600}, "S3BackupMode": "Disabled"})
 		destination["RedshiftDestinationDescription"] = configuration
 		delete(description, "RedshiftDestinationConfiguration")
 	}
 	if configuration, ok := description["SplunkDestinationConfiguration"].(map[string]any); ok {
 		configuration = maps.Clone(configuration)
 		delete(configuration, "HECToken")
-		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
-			describeS3Configuration(s3)
-			configuration["S3DestinationDescription"] = s3
-			delete(configuration, "S3Configuration")
-		}
-		if configuration["BufferingHints"] == nil {
-			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 60, "SizeInMBs": 5}
-		}
-		if configuration["RetryOptions"] == nil {
-			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
-		}
-		if configuration["HECAcknowledgmentTimeoutInSeconds"] == nil {
-			configuration["HECAcknowledgmentTimeoutInSeconds"] = 300
-		}
-		if first(configuration, "S3BackupMode") == "" {
-			configuration["S3BackupMode"] = "FailedEventsOnly"
-		}
+		describeDestination(configuration, map[string]any{"BufferingHints": map[string]any{"IntervalInSeconds": 60, "SizeInMBs": 5},
+			"RetryOptions": map[string]any{"DurationInSeconds": 300}, "HECAcknowledgmentTimeoutInSeconds": 300, "S3BackupMode": "FailedEventsOnly"})
 		destination["SplunkDestinationDescription"] = configuration
 		delete(description, "SplunkDestinationConfiguration")
 	}
@@ -1168,42 +1095,15 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 		configuration = maps.Clone(configuration)
 		delete(configuration, "PrivateKey")
 		delete(configuration, "KeyPassphrase")
-		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
-			describeS3Configuration(s3)
-			configuration["S3DestinationDescription"] = s3
-			delete(configuration, "S3Configuration")
-		}
-		if configuration["BufferingHints"] == nil {
-			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 128}
-		}
-		if configuration["RetryOptions"] == nil {
-			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 60}
-		}
-		if first(configuration, "DataLoadingOption") == "" {
-			configuration["DataLoadingOption"] = "JSON_MAPPING"
-		}
-		if first(configuration, "S3BackupMode") == "" {
-			configuration["S3BackupMode"] = "FailedDataOnly"
-		}
+		describeDestination(configuration, map[string]any{"BufferingHints": map[string]any{"IntervalInSeconds": 0, "SizeInMBs": 128},
+			"RetryOptions": map[string]any{"DurationInSeconds": 60}, "DataLoadingOption": "JSON_MAPPING", "S3BackupMode": "FailedDataOnly"})
 		destination["SnowflakeDestinationDescription"] = configuration
 		delete(description, "SnowflakeDestinationConfiguration")
 	}
 	if configuration, ok := description["IcebergDestinationConfiguration"].(map[string]any); ok {
 		configuration = maps.Clone(configuration)
-		if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
-			describeS3Configuration(s3)
-			configuration["S3DestinationDescription"] = s3
-			delete(configuration, "S3Configuration")
-		}
-		if configuration["BufferingHints"] == nil {
-			configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
-		}
-		if configuration["RetryOptions"] == nil {
-			configuration["RetryOptions"] = map[string]any{"DurationInSeconds": 300}
-		}
-		if first(configuration, "S3BackupMode") == "" {
-			configuration["S3BackupMode"] = "FailedDataOnly"
-		}
+		describeDestination(configuration, map[string]any{"BufferingHints": map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5},
+			"RetryOptions": map[string]any{"DurationInSeconds": 300}, "S3BackupMode": "FailedDataOnly"})
 		destination["IcebergDestinationDescription"] = configuration
 		delete(description, "IcebergDestinationConfiguration")
 	}
@@ -1216,11 +1116,26 @@ func describeRecord(rec map[string]any, after string) map[string]any {
 	return description
 }
 
+// describeDestination describes configuration's S3Configuration as its S3DestinationDescription, and gives it
+// each of defaults it leaves out: a string where it has none, anything else where it has nothing.
+func describeDestination(configuration, defaults map[string]any) {
+	if s3, ok := configuration["S3Configuration"].(map[string]any); ok {
+		describeS3Configuration(s3)
+		configuration["S3DestinationDescription"] = s3
+		delete(configuration, "S3Configuration")
+	}
+	for k, v := range defaults {
+		if _, text := v.(string); configuration[k] == nil || text && spi.First(configuration, k) == "" {
+			configuration[k] = v
+		}
+	}
+}
+
 func describeS3Configuration(configuration map[string]any) {
 	if configuration["BufferingHints"] == nil {
 		configuration["BufferingHints"] = map[string]any{"IntervalInSeconds": 300, "SizeInMBs": 5}
 	}
-	if first(configuration, "CompressionFormat") == "" {
+	if spi.First(configuration, "CompressionFormat") == "" {
 		configuration["CompressionFormat"] = "UNCOMPRESSED"
 	}
 	if configuration["EncryptionConfiguration"] == nil {
@@ -1244,10 +1159,10 @@ func validDatabaseSource(value any) (map[string]any, bool) {
 	secrets, secretsOK := authentication["SecretsManagerConfiguration"].(map[string]any)
 	vpc, vpcOK := configuration["DatabaseSourceVPCConfiguration"].(map[string]any)
 	enabled, enabledOK := secrets["Enabled"].(bool)
-	engine, endpoint := first(configuration, "Type"), first(configuration, "Endpoint")
+	engine, endpoint := spi.First(configuration, "Type"), spi.First(configuration, "Endpoint")
 	port, portOK := inputInteger(configuration["Port"], 0, 65535)
-	watermark, sslMode := first(configuration, "SnapshotWatermarkTable"), first(configuration, "SSLMode")
-	service, role, secret := first(vpc, "VpcEndpointServiceName"), first(secrets, "RoleARN"), first(secrets, "SecretARN")
+	watermark, sslMode := spi.First(configuration, "SnapshotWatermarkTable"), spi.First(configuration, "SSLMode")
+	service, role, secret := spi.First(vpc, "VpcEndpointServiceName"), spi.First(secrets, "RoleARN"), spi.First(secrets, "SecretARN")
 	if !ok || !authOK || !secretsOK || !vpcOK || !enabledOK || strings.TrimSpace(endpoint) == "" || utf8.RuneCountInString(endpoint) > 255 || !validDatabaseString(watermark, 129, false) || !portOK || (engine == "MySQL" && port != 3306) || (engine == "PostgreSQL" && port != 5432) || (engine != "MySQL" && engine != "PostgreSQL") || (sslMode != "" && sslMode != "Disabled" && sslMode != "Enabled") {
 		return nil, false
 	}
@@ -1381,8 +1296,7 @@ func validTagKey(key string) bool {
 }
 
 func loadTags(b []byte) map[string]string {
-	var stored []map[string]any
-	_ = json.Unmarshal(b, &stored)
+	stored := spi.Decode[[]map[string]any](b)
 	tags := make(map[string]string, len(stored))
 	for _, tag := range stored {
 		key, _ := tag["Key"].(string)
@@ -1411,8 +1325,7 @@ func putTags(ctx context.Context, collection spi.Collection, key string, tags ma
 	if len(tags) == 0 {
 		return collection.Delete(ctx, key)
 	}
-	b, _ := json.Marshal(tagList(tags))
-	return collection.Put(ctx, key, b)
+	return spi.PutJSON(ctx, collection, key, tagList(tags))
 }
 
 func putTagsTx(tx spi.Tx, key string, tags map[string]string) error {
@@ -1424,12 +1337,12 @@ func putTagsTx(tx spi.Tx, key string, tags map[string]string) error {
 }
 
 func s3Configuration(configuration map[string]any) (bucket, prefix, errorPrefix, timezone, extension, compression, kmsARN string) {
-	bucket = bucketFromARN(first(configuration, "BucketARN"))
-	prefix, errorPrefix = first(configuration, "Prefix"), first(configuration, "ErrorOutputPrefix")
-	timezone, extension, compression = first(configuration, "CustomTimeZone"), first(configuration, "FileExtension"), first(configuration, "CompressionFormat")
+	bucket = bucketFromARN(spi.First(configuration, "BucketARN"))
+	prefix, errorPrefix = spi.First(configuration, "Prefix"), spi.First(configuration, "ErrorOutputPrefix")
+	timezone, extension, compression = spi.First(configuration, "CustomTimeZone"), spi.First(configuration, "FileExtension"), spi.First(configuration, "CompressionFormat")
 	encryption, _ := configuration["EncryptionConfiguration"].(map[string]any)
 	kms, _ := encryption["KMSEncryptionConfig"].(map[string]any)
-	kmsARN = first(kms, "AWSKMSKeyARN")
+	kmsARN = spi.First(kms, "AWSKMSKeyARN")
 	return
 }
 
@@ -1500,19 +1413,16 @@ func validateDestination(rec map[string]any, region string) error {
 func validateIcebergDestination(destination map[string]any, region string) error {
 	catalog, catalogOK := destination["CatalogConfiguration"].(map[string]any)
 	s3, s3OK := destination["S3Configuration"].(map[string]any)
-	if !catalogOK || !s3OK || !validRoleARN(first(destination, "RoleARN")) || !firehoseGlueCatalogARN.MatchString(first(catalog, "CatalogARN")) {
+	if !catalogOK || !s3OK || !validRoleARN(spi.First(destination, "RoleARN")) || !firehoseGlueCatalogARN.MatchString(spi.First(catalog, "CatalogARN")) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if err := validateS3Configuration(s3, region, false); err != nil {
 		return err
 	}
-	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 900) || !optionalInteger(hints, "SizeInMBs", 1, 128)) {
+	if !validOptions(destination, 900, 128) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if mode := first(destination, "S3BackupMode"); mode != "" && mode != "FailedDataOnly" && mode != "AllData" {
+	if mode := spi.First(destination, "S3BackupMode"); mode != "" && mode != "FailedDataOnly" && mode != "AllData" {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if appendOnly, exists := destination["AppendOnly"]; exists {
@@ -1527,9 +1437,9 @@ func validateIcebergDestination(destination map[string]any, region string) error
 	seen := map[string]bool{}
 	for _, raw := range tables {
 		table, ok := raw.(map[string]any)
-		database, name := first(table, "DestinationDatabaseName"), first(table, "DestinationTableName")
+		database, name := spi.First(table, "DestinationDatabaseName"), spi.First(table, "DestinationTableName")
 		key := database + "." + name
-		if !ok || !firehoseIcebergName.MatchString(database) || !firehoseIcebergName.MatchString(name) || len(database) > 255 || len(name) > 255 || seen[key] || len(first(table, "S3ErrorOutputPrefix")) > 1024 {
+		if !ok || !firehoseIcebergName.MatchString(database) || !firehoseIcebergName.MatchString(name) || len(database) > 255 || len(name) > 255 || seen[key] || len(spi.First(table, "S3ErrorOutputPrefix")) > 1024 {
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 		seen[key] = true
@@ -1558,8 +1468,8 @@ func validIcebergKeys(value any) bool {
 }
 
 func validateElasticsearchDestination(destination map[string]any, region string) error {
-	index, domainARN, endpoint := first(destination, "IndexName"), first(destination, "DomainARN"), first(destination, "ClusterEndpoint")
-	if len(index) < 1 || len(index) > 80 || !validRoleARN(first(destination, "RoleARN")) || (domainARN == "") == (endpoint == "") {
+	index, domainARN, endpoint := spi.First(destination, "IndexName"), spi.First(destination, "DomainARN"), spi.First(destination, "ClusterEndpoint")
+	if len(index) < 1 || len(index) > 80 || !validRoleARN(spi.First(destination, "RoleARN")) || (domainARN == "") == (endpoint == "") {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if domainARN != "" && (len(domainARN) > 512 || !firehoseDomainARN.MatchString(domainARN)) {
@@ -1571,34 +1481,24 @@ func validateElasticsearchDestination(destination map[string]any, region string)
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 	}
-	if typeName := first(destination, "TypeName"); len(typeName) > 100 {
+	if typeName := spi.First(destination, "TypeName"); len(typeName) > 100 {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	switch first(destination, "IndexRotationPeriod") {
+	switch spi.First(destination, "IndexRotationPeriod") {
 	case "", "NoRotation", "OneHour", "OneDay", "OneWeek", "OneMonth":
 	default:
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 900) || !optionalInteger(hints, "SizeInMBs", 1, 100)) {
+	if !validOptions(destination, 900, 100) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
+	if mode := spi.First(destination, "S3BackupMode"); mode != "" && mode != "FailedDocumentsOnly" && mode != "AllDocuments" {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if mode := first(destination, "S3BackupMode"); mode != "" && mode != "FailedDocumentsOnly" && mode != "AllDocuments" {
+	if options, ok := destination["DocumentIdOptions"].(map[string]any); destination["DocumentIdOptions"] != nil && (!ok || (spi.First(options, "DefaultDocumentIdFormat") != "FIREHOSE_DEFAULT" && spi.First(options, "DefaultDocumentIdFormat") != "NO_DOCUMENT_ID")) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if options, ok := destination["DocumentIdOptions"].(map[string]any); destination["DocumentIdOptions"] != nil && (!ok || (first(options, "DefaultDocumentIdFormat") != "FIREHOSE_DEFAULT" && first(options, "DefaultDocumentIdFormat") != "NO_DOCUMENT_ID")) {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	s3, ok := destination["S3Configuration"].(map[string]any)
-	if !ok {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if err := validateS3Configuration(s3, region, false); err != nil {
-		return err
-	}
-	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+	if err := loggedS3(destination, region); err != nil {
 		return err
 	}
 	if err := validateVPCConfiguration(destination["VpcConfiguration"]); err != nil {
@@ -1611,8 +1511,8 @@ func validateElasticsearchDestination(destination map[string]any, region string)
 }
 
 func validateOpenSearchServerlessDestination(destination map[string]any, region string) error {
-	index, endpoint := first(destination, "IndexName"), first(destination, "CollectionEndpoint")
-	if len(index) < 1 || len(index) > 80 || !validRoleARN(first(destination, "RoleARN")) {
+	index, endpoint := spi.First(destination, "IndexName"), spi.First(destination, "CollectionEndpoint")
+	if len(index) < 1 || len(index) > 80 || !validRoleARN(spi.First(destination, "RoleARN")) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if endpoint != "" {
@@ -1621,20 +1521,13 @@ func validateOpenSearchServerlessDestination(destination map[string]any, region 
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 	}
-	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 900) || !optionalInteger(hints, "SizeInMBs", 1, 100)) {
+	if !validOptions(destination, 900, 100) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
+	if mode := spi.First(destination, "S3BackupMode"); mode != "" && mode != "FailedDocumentsOnly" && mode != "AllDocuments" {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if mode := first(destination, "S3BackupMode"); mode != "" && mode != "FailedDocumentsOnly" && mode != "AllDocuments" {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	s3, ok := destination["S3Configuration"].(map[string]any)
-	if !ok {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if err := validateS3Configuration(s3, region, false); err != nil {
+	if _, err := requiredS3(destination, region); err != nil {
 		return err
 	}
 	if err := validateVPCConfiguration(destination["VpcConfiguration"]); err != nil {
@@ -1651,7 +1544,7 @@ func validateVPCConfiguration(raw any) error {
 		return nil
 	}
 	vpc, ok := raw.(map[string]any)
-	if !ok || !validRoleARN(first(vpc, "RoleARN")) || !validVPCList(vpc["SecurityGroupIds"], 5) || !validVPCList(vpc["SubnetIds"], 16) {
+	if !ok || !validRoleARN(spi.First(vpc, "RoleARN")) || !validVPCList(vpc["SecurityGroupIds"], 5) || !validVPCList(vpc["SubnetIds"], 16) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	return nil
@@ -1672,12 +1565,12 @@ func validVPCList(raw any, maximum int) bool {
 }
 
 func validateRedshiftDestination(destination map[string]any, region string) error {
-	jdbc := first(destination, "ClusterJDBCURL")
-	if len(jdbc) < 1 || len(jdbc) > 512 || !firehoseRedshiftJDBC.MatchString(jdbc) || !validRoleARN(first(destination, "RoleARN")) {
+	jdbc := spi.First(destination, "ClusterJDBCURL")
+	if len(jdbc) < 1 || len(jdbc) > 512 || !firehoseRedshiftJDBC.MatchString(jdbc) || !validRoleARN(spi.First(destination, "RoleARN")) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	copyCommand, ok := destination["CopyCommand"].(map[string]any)
-	table := first(copyCommand, "DataTableName")
+	table := spi.First(copyCommand, "DataTableName")
 	if !ok || len(table) < 1 || len(table) > 512 {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
@@ -1696,7 +1589,7 @@ func validateRedshiftDestination(destination map[string]any, region string) erro
 	}
 	secrets, hasSecrets := destination["SecretsManagerConfiguration"].(map[string]any)
 	enabled, enabledOK := secrets["Enabled"].(bool)
-	if destination["SecretsManagerConfiguration"] != nil && (!hasSecrets || !enabledOK || (first(secrets, "RoleARN") != "" && !validRoleARN(first(secrets, "RoleARN"))) || (enabled && (!validRoleARN(first(secrets, "RoleARN")) || !firehoseSecretARN.MatchString(first(secrets, "SecretARN"))))) {
+	if destination["SecretsManagerConfiguration"] != nil && (!hasSecrets || !enabledOK || (spi.First(secrets, "RoleARN") != "" && !validRoleARN(spi.First(secrets, "RoleARN"))) || (enabled && (!validRoleARN(spi.First(secrets, "RoleARN")) || !firehoseSecretARN.MatchString(spi.First(secrets, "SecretARN"))))) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if !enabled && (!usernameOK || !passwordOK) {
@@ -1705,18 +1598,15 @@ func validateRedshiftDestination(destination map[string]any, region string) erro
 	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	mode := first(destination, "S3BackupMode")
+	mode := spi.First(destination, "S3BackupMode")
 	if mode != "" && mode != "Disabled" && mode != "Enabled" {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	s3, ok := destination["S3Configuration"].(map[string]any)
-	if !ok {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if err := validateS3Configuration(s3, region, false); err != nil {
+	s3, err := requiredS3(destination, region)
+	if err != nil {
 		return err
 	}
-	if compression := first(s3, "CompressionFormat"); compression != "" && compression != "UNCOMPRESSED" && compression != "GZIP" {
+	if compression := spi.First(s3, "CompressionFormat"); compression != "" && compression != "UNCOMPRESSED" && compression != "GZIP" {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	backupRaw, backupExists := destination["S3BackupConfiguration"]
@@ -1742,19 +1632,16 @@ func validateRedshiftDestination(destination map[string]any, region string) erro
 }
 
 func validateSplunkDestination(destination map[string]any, region string) error {
-	endpoint := first(destination, "HECEndpoint")
+	endpoint := spi.First(destination, "HECEndpoint")
 	parsed, err := url.Parse(endpoint)
-	if len(endpoint) > 2048 || err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || (first(destination, "HECEndpointType") != "Raw" && first(destination, "HECEndpointType") != "Event") {
+	if len(endpoint) > 2048 || err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || (spi.First(destination, "HECEndpointType") != "Raw" && spi.First(destination, "HECEndpointType") != "Event") {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	token, hasToken := destination["HECToken"].(string)
 	if (destination["HECToken"] != nil && !hasToken) || len(token) > 2048 || strings.ContainsAny(token, "\r\n") {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 60) || !optionalInteger(hints, "SizeInMBs", 1, 5)) {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
+	if !validOptions(destination, 60, 5) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if timeout, exists := destination["HECAcknowledgmentTimeoutInSeconds"]; exists {
@@ -1762,25 +1649,18 @@ func validateSplunkDestination(destination map[string]any, region string) error 
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 	}
-	if mode := first(destination, "S3BackupMode"); mode != "" && mode != "FailedEventsOnly" && mode != "AllEvents" {
+	if mode := spi.First(destination, "S3BackupMode"); mode != "" && mode != "FailedEventsOnly" && mode != "AllEvents" {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	secrets, hasSecrets := destination["SecretsManagerConfiguration"].(map[string]any)
 	enabled, enabledOK := secrets["Enabled"].(bool)
-	if destination["SecretsManagerConfiguration"] != nil && (!hasSecrets || !enabledOK || (first(secrets, "RoleARN") != "" && !validRoleARN(first(secrets, "RoleARN"))) || (enabled && (!validRoleARN(first(secrets, "RoleARN")) || !firehoseSecretARN.MatchString(first(secrets, "SecretARN"))))) {
+	if destination["SecretsManagerConfiguration"] != nil && (!hasSecrets || !enabledOK || (spi.First(secrets, "RoleARN") != "" && !validRoleARN(spi.First(secrets, "RoleARN"))) || (enabled && (!validRoleARN(spi.First(secrets, "RoleARN")) || !firehoseSecretARN.MatchString(spi.First(secrets, "SecretARN"))))) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if !enabled && token == "" {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	s3, ok := destination["S3Configuration"].(map[string]any)
-	if !ok {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if err := validateS3Configuration(s3, region, false); err != nil {
-		return err
-	}
-	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+	if err := loggedS3(destination, region); err != nil {
 		return err
 	}
 	if raw := destination["ProcessingConfiguration"]; raw != nil {
@@ -1790,13 +1670,13 @@ func validateSplunkDestination(destination map[string]any, region string) error 
 }
 
 func validateSnowflakeDestination(destination map[string]any, region string) error {
-	accountURL := first(destination, "AccountUrl")
+	accountURL := spi.First(destination, "AccountUrl")
 	parsed, err := url.Parse(accountURL)
 	if parsed.Scheme == "" {
 		parsed, err = url.Parse("https://" + accountURL)
 	}
 	host := parsed.Hostname()
-	if len(accountURL) < 24 || len(accountURL) > 2048 || err != nil || parsed.Scheme != "https" || host == "" || !strings.HasSuffix(host, ".snowflakecomputing.com") || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || !validRoleARN(first(destination, "RoleARN")) {
+	if len(accountURL) < 24 || len(accountURL) > 2048 || err != nil || parsed.Scheme != "https" || host == "" || !strings.HasSuffix(host, ".snowflakecomputing.com") || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || !validRoleARN(spi.First(destination, "RoleARN")) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	for _, key := range []string{"Database", "Schema", "Table"} {
@@ -1805,7 +1685,7 @@ func validateSnowflakeDestination(destination map[string]any, region string) err
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 	}
-	mode := first(destination, "DataLoadingOption")
+	mode := spi.First(destination, "DataLoadingOption")
 	switch mode {
 	case "", "JSON_MAPPING":
 	case "VARIANT_CONTENT_MAPPING":
@@ -1837,39 +1717,29 @@ func validateSnowflakeDestination(destination map[string]any, region string) err
 	}
 	secrets, hasSecrets := destination["SecretsManagerConfiguration"].(map[string]any)
 	enabled, enabledOK := secrets["Enabled"].(bool)
-	if destination["SecretsManagerConfiguration"] != nil && (!hasSecrets || !enabledOK || (first(secrets, "RoleARN") != "" && !validRoleARN(first(secrets, "RoleARN"))) || (enabled && !firehoseSecretARN.MatchString(first(secrets, "SecretARN")))) {
+	if destination["SecretsManagerConfiguration"] != nil && (!hasSecrets || !enabledOK || (spi.First(secrets, "RoleARN") != "" && !validRoleARN(spi.First(secrets, "RoleARN"))) || (enabled && !firehoseSecretARN.MatchString(spi.First(secrets, "SecretARN")))) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if !enabled && (!userOK || !privateKeyOK) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if hints, ok := destination["BufferingHints"].(map[string]any); destination["BufferingHints"] != nil && (!ok || !optionalInteger(hints, "IntervalInSeconds", 0, 900) || !optionalInteger(hints, "SizeInMBs", 1, 128)) {
+	if !validOptions(destination, 900, 128) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	if retry, ok := destination["RetryOptions"].(map[string]any); destination["RetryOptions"] != nil && (!ok || !optionalInteger(retry, "DurationInSeconds", 0, 7200)) {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if mode := first(destination, "S3BackupMode"); mode != "" && mode != "FailedDataOnly" && mode != "AllData" {
+	if mode := spi.First(destination, "S3BackupMode"); mode != "" && mode != "FailedDataOnly" && mode != "AllData" {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if role, ok := destination["SnowflakeRoleConfiguration"].(map[string]any); destination["SnowflakeRoleConfiguration"] != nil {
 		enabled, enabledOK := role["Enabled"].(bool)
-		name := first(role, "SnowflakeRole")
+		name := spi.First(role, "SnowflakeRole")
 		if !ok || !enabledOK || len(name) > 255 || (enabled && name == "") {
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 	}
-	if vpc, ok := destination["SnowflakeVpcConfiguration"].(map[string]any); destination["SnowflakeVpcConfiguration"] != nil && (!ok || len(first(vpc, "PrivateLinkVpceId")) < 47 || len(first(vpc, "PrivateLinkVpceId")) > 255 || !firehoseVPCEndpointService.MatchString(first(vpc, "PrivateLinkVpceId"))) {
+	if vpc, ok := destination["SnowflakeVpcConfiguration"].(map[string]any); destination["SnowflakeVpcConfiguration"] != nil && (!ok || len(spi.First(vpc, "PrivateLinkVpceId")) < 47 || len(spi.First(vpc, "PrivateLinkVpceId")) > 255 || !firehoseVPCEndpointService.MatchString(spi.First(vpc, "PrivateLinkVpceId"))) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	s3, ok := destination["S3Configuration"].(map[string]any)
-	if !ok {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if err := validateS3Configuration(s3, region, false); err != nil {
-		return err
-	}
-	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+	if err := loggedS3(destination, region); err != nil {
 		return err
 	}
 	return validateProcessingConfiguration(destination["ProcessingConfiguration"])
@@ -1912,17 +1782,10 @@ func validateHTTPEndpointDestination(destination map[string]any, region string) 
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 	}
-	if role := first(destination, "RoleARN"); role != "" && !validRoleARN(role) {
+	if role := spi.First(destination, "RoleARN"); role != "" && !validRoleARN(role) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	s3, ok := destination["S3Configuration"].(map[string]any)
-	if !ok {
-		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	}
-	if err := validateS3Configuration(s3, region, false); err != nil {
-		return err
-	}
-	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
+	if err := loggedS3(destination, region); err != nil {
 		return err
 	}
 	if raw, exists := destination["ProcessingConfiguration"]; exists {
@@ -1931,19 +1794,8 @@ func validateHTTPEndpointDestination(destination map[string]any, region string) 
 		}
 	}
 	if raw, exists := destination["BufferingHints"]; exists {
-		hints, ok := raw.(map[string]any)
-		_, hasInterval := hints["IntervalInSeconds"]
-		_, hasSize := hints["SizeInMBs"]
-		if !ok || hasInterval != hasSize {
-			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-		}
-		if hasInterval {
-			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
-				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-			}
-			if _, valid := inputInteger(hints["SizeInMBs"], 1, 64); !valid {
-				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-			}
+		if err := validHints(raw, 64); err != nil {
+			return err
 		}
 	}
 	if raw, exists := destination["RetryOptions"]; exists {
@@ -1957,12 +1809,12 @@ func validateHTTPEndpointDestination(destination map[string]any, region string) 
 			}
 		}
 	}
-	if mode := first(destination, "S3BackupMode"); mode != "" && mode != "FailedDataOnly" && mode != "AllData" {
+	if mode := spi.First(destination, "S3BackupMode"); mode != "" && mode != "FailedDataOnly" && mode != "AllData" {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if raw, exists := destination["RequestConfiguration"]; exists {
 		request, ok := raw.(map[string]any)
-		encoding := first(request, "ContentEncoding")
+		encoding := spi.First(request, "ContentEncoding")
 		if !ok || (encoding != "" && encoding != "NONE" && encoding != "GZIP") || !validHTTPCommonAttributes(request["CommonAttributes"]) {
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -1970,7 +1822,7 @@ func validateHTTPEndpointDestination(destination map[string]any, region string) 
 	if raw, exists := destination["SecretsManagerConfiguration"]; exists {
 		secrets, ok := raw.(map[string]any)
 		enabled, enabledOK := secrets["Enabled"].(bool)
-		role, secret := first(secrets, "RoleARN"), first(secrets, "SecretARN")
+		role, secret := spi.First(secrets, "RoleARN"), spi.First(secrets, "SecretARN")
 		if !ok || !enabledOK || (role != "" && !validRoleARN(role)) || (secret != "" && (len(secret) > 2048 || !firehoseSecretARN.MatchString(secret))) || (enabled && secret == "") {
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -2002,7 +1854,7 @@ func validHTTPCommonAttributes(value any) bool {
 }
 
 func validateS3Configuration(destination map[string]any, region string, processingAllowed bool) error {
-	if len(first(destination, "BucketARN")) > 2048 || !firehoseBucketARN.MatchString(first(destination, "BucketARN")) || !validRoleARN(first(destination, "RoleARN")) {
+	if len(spi.First(destination, "BucketARN")) > 2048 || !firehoseBucketARN.MatchString(spi.First(destination, "BucketARN")) || !validRoleARN(spi.First(destination, "RoleARN")) {
 		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if err := validateCloudWatchLogging(destination["CloudWatchLoggingOptions"]); err != nil {
@@ -2030,19 +1882,8 @@ func validateS3Configuration(destination map[string]any, region string, processi
 		}
 	}
 	if raw, exists := destination["BufferingHints"]; exists {
-		hints, ok := raw.(map[string]any)
-		_, hasInterval := hints["IntervalInSeconds"]
-		_, hasSize := hints["SizeInMBs"]
-		if !ok || hasInterval != hasSize {
-			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-		}
-		if hasInterval {
-			if _, valid := inputInteger(hints["IntervalInSeconds"], 0, 900); !valid {
-				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-			}
-			if _, valid := inputInteger(hints["SizeInMBs"], 1, 128); !valid {
-				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-			}
+		if err := validHints(raw, 128); err != nil {
+			return err
 		}
 	}
 	if raw, exists := destination["EncryptionConfiguration"]; exists {
@@ -2054,14 +1895,14 @@ func validateS3Configuration(destination map[string]any, region string, processi
 		}
 		if kmsOK {
 			kms, ok := kmsRaw.(map[string]any)
-			arn := first(kms, "AWSKMSKeyARN")
+			arn := spi.First(kms, "AWSKMSKeyARN")
 			if !ok || len(arn) > 512 || !firehoseDestinationKMSARN.MatchString(arn) || !strings.Contains(arn, ":kms:"+region+":") {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 		}
 	}
-	prefix, errorPrefix := first(destination, "Prefix"), first(destination, "ErrorOutputPrefix")
-	timezone, extension, compression := first(destination, "CustomTimeZone"), first(destination, "FileExtension"), first(destination, "CompressionFormat")
+	prefix, errorPrefix := spi.First(destination, "Prefix"), spi.First(destination, "ErrorOutputPrefix")
+	timezone, extension, compression := spi.First(destination, "CustomTimeZone"), spi.First(destination, "FileExtension"), spi.First(destination, "CompressionFormat")
 	dynamic, err := validateDynamicPartitioning(destination, processingAllowed)
 	if err != nil {
 		return err
@@ -2116,8 +1957,8 @@ func validateDynamicPartitioning(destination map[string]any, allowed bool) (bool
 			}
 		}
 	}
-	prefix := first(destination, "Prefix")
-	if enabled && (first(destination, "ErrorOutputPrefix") == "" || !strings.Contains(prefix, "!{partitionKeyFrom")) {
+	prefix := spi.First(destination, "Prefix")
+	if enabled && (spi.First(destination, "ErrorOutputPrefix") == "" || !strings.Contains(prefix, "!{partitionKeyFrom")) {
 		return false, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
 	if strings.Contains(prefix, "!{partitionKeyFromLambda:") && !hasProcessor(destination, "Lambda") {
@@ -2139,7 +1980,7 @@ func hasProcessor(destination map[string]any, typeName string) bool {
 	processors, _ := processing["Processors"].([]any)
 	for _, raw := range processors {
 		processor, _ := raw.(map[string]any)
-		if first(processor, "Type") == typeName {
+		if spi.First(processor, "Type") == typeName {
 			return processing["Enabled"] == true
 		}
 	}
@@ -2160,7 +2001,7 @@ func validateCloudWatchLogging(raw any) error {
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
 	}
-	group, stream := first(options, "LogGroupName"), first(options, "LogStreamName")
+	group, stream := spi.First(options, "LogGroupName"), spi.First(options, "LogStreamName")
 	if value, exists := options["LogGroupName"]; exists {
 		if _, ok := value.(string); !ok {
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -2205,7 +2046,7 @@ func validateProcessingConfiguration(raw any) error {
 	decompressed := false
 	for _, rawProcessor := range processors {
 		processor, ok := rawProcessor.(map[string]any)
-		typeName := first(processor, "Type")
+		typeName := spi.First(processor, "Type")
 		if !ok || typeName == "" {
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 		}
@@ -2216,7 +2057,7 @@ func validateProcessingConfiguration(raw any) error {
 			}
 			for _, rawParameter := range parameters {
 				parameter, ok := rawParameter.(map[string]any)
-				name, value := first(parameter, "ParameterName"), first(parameter, "ParameterValue")
+				name, value := spi.First(parameter, "ParameterName"), spi.First(parameter, "ParameterValue")
 				if !ok || !validProcessorParameter(name) || len(value) > 5120 || strings.TrimSpace(value) == "" {
 					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 				}
@@ -2234,37 +2075,24 @@ func validateProcessingConfiguration(raw any) error {
 			} else if subRecordType == "JSON" && delimiter != "" {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
-			parameters, _ := processor["Parameters"].([]any)
-			for _, rawParameter := range parameters {
-				parameter, _ := rawParameter.(map[string]any)
-				name := first(parameter, "ParameterName")
-				if name != "SubRecordType" && name != "Delimiter" {
-					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-				}
+			if !onlyParameters(processor, "SubRecordType", "Delimiter") {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 		case "Decompression":
 			format := processorParameter(processor, "CompressionFormat")
 			if format != "" && format != "GZIP" {
 				return spi.NotImplemented("aws.firehose", "Decompression="+format, "emulate")
 			}
-			parameters, _ := processor["Parameters"].([]any)
-			for _, rawParameter := range parameters {
-				parameter, _ := rawParameter.(map[string]any)
-				if first(parameter, "ParameterName") != "CompressionFormat" {
-					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-				}
+			if !onlyParameters(processor, "CompressionFormat") {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 			decompressed = true
 		case "CloudWatchLogProcessing":
 			if !decompressed || processorParameter(processor, "DataMessageExtraction") != "true" {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
-			parameters, _ := processor["Parameters"].([]any)
-			for _, rawParameter := range parameters {
-				parameter, _ := rawParameter.(map[string]any)
-				if first(parameter, "ParameterName") != "DataMessageExtraction" {
-					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-				}
+			if !onlyParameters(processor, "DataMessageExtraction") {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 		case "Lambda":
 			arn := processorParameter(processor, "LambdaArn")
@@ -2292,14 +2120,8 @@ func validateProcessingConfiguration(raw any) error {
 					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 				}
 			}
-			parameters, _ := processor["Parameters"].([]any)
-			for _, rawParameter := range parameters {
-				parameter, _ := rawParameter.(map[string]any)
-				switch first(parameter, "ParameterName") {
-				case "LambdaArn", "NumberOfRetries", "RoleArn", "BufferSizeInMBs", "BufferIntervalInSeconds":
-				default:
-					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-				}
+			if !onlyParameters(processor, "LambdaArn", "NumberOfRetries", "RoleArn", "BufferSizeInMBs", "BufferIntervalInSeconds") {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 		case "MetadataExtraction":
 			query, engine := processorParameter(processor, "MetadataExtractionQuery"), processorParameter(processor, "JsonParsingEngine")
@@ -2310,13 +2132,8 @@ func validateProcessingConfiguration(raw any) error {
 			if _, err := gojq.Compile(parsed); err != nil {
 				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
-			parameters, _ := processor["Parameters"].([]any)
-			for _, rawParameter := range parameters {
-				parameter, _ := rawParameter.(map[string]any)
-				name := first(parameter, "ParameterName")
-				if name != "MetadataExtractionQuery" && name != "JsonParsingEngine" {
-					return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-				}
+			if !onlyParameters(processor, "MetadataExtractionQuery", "JsonParsingEngine") {
+				return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 			}
 		default:
 			return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
@@ -2329,11 +2146,31 @@ func processorParameter(processor map[string]any, name string) string {
 	parameters, _ := processor["Parameters"].([]any)
 	for _, raw := range parameters {
 		parameter, _ := raw.(map[string]any)
-		if first(parameter, "ParameterName") == name {
-			return first(parameter, "ParameterValue")
+		if spi.First(parameter, "ParameterName") == name {
+			return spi.First(parameter, "ParameterValue")
 		}
 	}
 	return ""
+}
+
+// validOptions is whether a destination's BufferingHints, where given, are an object with IntervalInSeconds
+// from 0 to maxInterval and SizeInMBs from 1 to maxSize where given, and its RetryOptions, where given, an
+// object with DurationInSeconds from 0 to 7200 where given.
+func validOptions(destination map[string]any, maxInterval, maxSize int) bool {
+	hints, hintsOK := destination["BufferingHints"].(map[string]any)
+	retry, retryOK := destination["RetryOptions"].(map[string]any)
+	return (destination["BufferingHints"] == nil || hintsOK && optionalInteger(hints, "IntervalInSeconds", 0, maxInterval) && optionalInteger(hints, "SizeInMBs", 1, maxSize)) &&
+		(destination["RetryOptions"] == nil || retryOK && optionalInteger(retry, "DurationInSeconds", 0, 7200))
+}
+
+// onlyParameters is whether every Parameters entry of a processor is one of names.
+func onlyParameters(processor map[string]any, names ...string) bool {
+	for _, parameter := range spi.Slice(processor["Parameters"]) {
+		if !slices.Contains(names, spi.First(spi.Object(parameter), "ParameterName")) {
+			return false
+		}
+	}
+	return true
 }
 
 func validProcessorParameter(name string) bool {
@@ -2423,8 +2260,7 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 	if !ok {
 		return
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(raw, &rec)
+	rec := spi.JSONObject(raw)
 	var destination map[string]any
 	for _, key := range []string{"S3DestinationConfiguration", "ExtendedS3DestinationConfiguration"} {
 		if configuration, ok := rec[key].(map[string]any); ok {
@@ -2432,7 +2268,7 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 			break
 		}
 	}
-	version := first(rec, "VersionId")
+	version := spi.First(rec, "VersionId")
 	if version == "" {
 		version = "1"
 	}
@@ -2464,7 +2300,7 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 		bucket, _, errorPrefix, _, _, _, kmsARN := s3Configuration(backup)
 		payload := searchPayload{}
 		for i := range data {
-			if first(destination, "S3BackupMode") == "AllDocuments" {
+			if spi.First(destination, "S3BackupMode") == "AllDocuments" {
 				p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
 			}
 			records, failures := p.processData(ctx, req, destination, stream, recIDs[i], data[i], now)
@@ -2492,7 +2328,7 @@ func (p *Pack) deliver(ctx context.Context, req *spi.Request, stream string, rec
 	for i := range data {
 		p.deliverS3Configuration(ctx, req, destination, stream, version, recIDs[i], data[i], now)
 		extended, _ := rec["ExtendedS3DestinationConfiguration"].(map[string]any)
-		if first(extended, "S3BackupMode") == "Enabled" {
+		if spi.First(extended, "S3BackupMode") == "Enabled" {
 			backup, _ := extended["S3BackupConfiguration"].(map[string]any)
 			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[i], data[i], now)
 		}
@@ -2515,7 +2351,7 @@ func (p *Pack) deliverSnowflakeRecords(ctx context.Context, req *spi.Request, st
 	var validIDs []string
 	var validRaw, rows [][]byte
 	for index := range data {
-		if first(destination, "S3BackupMode") == "AllData" {
+		if spi.First(destination, "S3BackupMode") == "AllData" {
 			p.deliverS3Configuration(ctx, req, s3, stream, version, recIDs[index], data[index], now)
 		}
 		processed, failures := p.processData(ctx, req, destination, stream, recIDs[index], data[index], now)
@@ -2538,7 +2374,7 @@ func (p *Pack) deliverSnowflakeRecords(ctx context.Context, req *spi.Request, st
 	if len(rows) == 0 {
 		return
 	}
-	backupFailures := first(destination, "S3BackupMode") != "AllData"
+	backupFailures := spi.First(destination, "S3BackupMode") != "AllData"
 	if p.bufferEndpoint(ctx, req, stream, "SnowflakeDestinationConfiguration", validIDs[0], validIDs, validRaw, rows, backupFailures, destination, now) {
 		return
 	}
@@ -2559,13 +2395,13 @@ func snowflakeRow(destination map[string]any, stream string, now time.Time, data
 	if json.Unmarshal(data, &content) != nil || content == nil {
 		return nil, false
 	}
-	switch first(destination, "DataLoadingOption") {
+	switch spi.First(destination, "DataLoadingOption") {
 	case "VARIANT_CONTENT_MAPPING":
-		return map[string]any{first(destination, "ContentColumnName"): content}, true
+		return map[string]any{spi.First(destination, "ContentColumnName"): content}, true
 	case "VARIANT_CONTENT_AND_METADATA_MAPPING":
 		return map[string]any{
-			first(destination, "ContentColumnName"):  content,
-			first(destination, "MetaDataColumnName"): map[string]any{"firehoseDeliveryStreamName": stream, "IngestionTime": now.UTC().Format(time.RFC3339Nano)},
+			spi.First(destination, "ContentColumnName"):  content,
+			spi.First(destination, "MetaDataColumnName"): map[string]any{"firehoseDeliveryStreamName": stream, "IngestionTime": now.UTC().Format(time.RFC3339Nano)},
 		}, true
 	default:
 		return content, true
@@ -2581,9 +2417,9 @@ func (p *Pack) deliverIcebergRecords(ctx context.Context, req *spi.Request, dest
 	bucket, _, errorPrefix, _, _, _, kmsARN := s3Configuration(s3)
 	tables, _ := destination["DestinationTableConfigurationList"].([]any)
 	catalog, _ := destination["CatalogConfiguration"].(map[string]any)
-	tableBucket := icebergTableBucket(first(catalog, "CatalogARN"))
+	tableBucket := icebergTableBucket(spi.First(catalog, "CatalogARN"))
 	for index := range data {
-		if first(destination, "S3BackupMode") == "AllData" {
+		if spi.First(destination, "S3BackupMode") == "AllData" {
 			p.deliverS3Configuration(ctx, req, s3, stream, version, recIDs[index], data[index], now)
 		}
 		records, failures := p.processData(ctx, req, destination, stream, recIDs[index], data[index], now)
@@ -2611,7 +2447,7 @@ func (p *Pack) deliverIcebergRecords(ctx context.Context, req *spi.Request, dest
 				p.deliverIcebergFailure(ctx, req, icebergFailureS3(s3, table), stream, version, now, record, "Iceberg append-only stream rejected a mutation")
 				continue
 			}
-			err := s3tablesservice.New(p.deps).ApplyRows(ctx, req.Identity, tableBucket, first(table, "DestinationDatabaseName"), first(table, "DestinationTableName"), []s3tablesservice.RowMutation{{
+			err := s3tablesservice.New(p.deps).ApplyRows(ctx, req.Identity, tableBucket, spi.First(table, "DestinationDatabaseName"), spi.First(table, "DestinationTableName"), []s3tablesservice.RowMutation{{
 				Operation: operation, Values: values, UniqueKeys: icebergUniqueKeys(table["UniqueKeys"]),
 			}})
 			if err != nil {
@@ -2629,7 +2465,7 @@ func (p *Pack) deliverIcebergFailure(ctx context.Context, req *spi.Request, s3 m
 }
 
 func icebergFailureS3(s3, table map[string]any) map[string]any {
-	if prefix := first(table, "S3ErrorOutputPrefix"); prefix != "" {
+	if prefix := spi.First(table, "S3ErrorOutputPrefix"); prefix != "" {
 		s3 = maps.Clone(s3)
 		s3["ErrorOutputPrefix"] = prefix
 	}
@@ -2652,7 +2488,7 @@ func icebergTable(tables []any, metadata map[string]string) map[string]any {
 	}
 	for _, raw := range tables {
 		table, _ := raw.(map[string]any)
-		if first(table, "DestinationDatabaseName") == database && first(table, "DestinationTableName") == tableName {
+		if spi.First(table, "DestinationDatabaseName") == database && spi.First(table, "DestinationTableName") == tableName {
 			return table
 		}
 	}
@@ -2674,7 +2510,7 @@ func (p *Pack) deliverRedshiftRecords(ctx context.Context, req *spi.Request, des
 	staging, _ := destination["S3Configuration"].(map[string]any)
 	failureConfiguration := staging
 	backup, _ := destination["S3BackupConfiguration"].(map[string]any)
-	backupEnabled := first(destination, "S3BackupMode") == "Enabled"
+	backupEnabled := spi.First(destination, "S3BackupMode") == "Enabled"
 	if backupEnabled {
 		failureConfiguration = backup
 	}
@@ -2702,29 +2538,22 @@ func (p *Pack) deliverRedshiftRecords(ctx context.Context, req *spi.Request, des
 		p.logDeliveryError(ctx, req, destination, stream, err.Error(), now)
 		return
 	}
-	cluster, database := redshiftTarget(first(destination, "ClusterJDBCURL"))
+	cluster, database := redshiftTarget(spi.First(destination, "ClusterJDBCURL"))
 	command, _ := destination["CopyCommand"].(map[string]any)
 	err = redshiftservice.New(p.deps).Copy(ctx, req.Identity, redshiftservice.CopyInput{
-		Cluster: cluster, Database: database, Table: first(command, "DataTableName"), Username: username, Password: password,
-		Columns: first(command, "DataTableColumns"), Options: first(command, "CopyOptions"), Data: copied,
+		Cluster: cluster, Database: database, Table: spi.First(command, "DataTableName"), Username: username, Password: password,
+		Columns: spi.First(command, "DataTableColumns"), Options: spi.First(command, "CopyOptions"), Data: copied,
 	})
 	if err != nil {
 		p.logDeliveryError(ctx, req, destination, stream, err.Error(), now)
-		p.scheduleRedshiftRetry(ctx, req, stream, copied, err.Error(), now, redshiftRetryDuration(destination))
+		p.scheduleRedshiftRetry(ctx, req, stream, copied, err.Error(), now, retryDuration(destination, 3600))
 	}
 }
 
 func (p *Pack) redshiftCredentials(ctx context.Context, req *spi.Request, destination map[string]any) (string, string, error) {
-	username, password := first(destination, "Username"), first(destination, "Password")
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
-		response, err := bundled.Handler("aws.secretsmanager", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
-		var secret string
-		var ok bool
-		if response != nil {
-			secret, ok = response.Output["SecretString"].(string)
-		}
-		value := map[string]any{}
-		if err != nil || !ok || json.Unmarshal([]byte(secret), &value) != nil {
+	username, password := spi.First(destination, "Username"), spi.First(destination, "Password")
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled {
+		if !ok {
 			return "", "", errors.New("unable to retrieve Redshift credentials")
 		}
 		username, ok = value["username"].(string)
@@ -2780,15 +2609,7 @@ func minTime(left, right time.Time) time.Time {
 }
 
 func (p *Pack) runRedshiftRetries(ctx context.Context) time.Time {
-	if p.deps.Store == nil || p.deps.Clock == nil {
-		return time.Time{}
-	}
-	now := p.deps.Clock.Now().UTC()
-	var earliest time.Time
-	scopes, _ := p.deps.Store.Scopes(ctx)
-	for _, identity := range scopes {
-		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-redshift-work")
-		items, _, _ := collection.List(ctx, "", "", 0)
+	return p.scan(ctx, "fh-redshift-work", func(identity spi.Identity, collection spi.Collection, items []spi.KV, now time.Time) (earliest time.Time) {
 		for _, item := range items {
 			var work redshiftWork
 			if json.Unmarshal(item.Value, &work) != nil {
@@ -2798,15 +2619,39 @@ func (p *Pack) runRedshiftRetries(ctx context.Context) time.Time {
 			if !next.After(now) {
 				next = p.runRedshiftRetry(ctx, identity, collection, item.Key, &work, now)
 			}
-			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
-				earliest = next
-			}
+			earliest = sooner(earliest, next)
 		}
+		return earliest
+	})
+}
+
+// scan lists the collection name in every scope, and answers the soonest of the times due answers for
+// each scope's entries (zero for none), given the time now.
+func (p *Pack) scan(ctx context.Context, name string, due func(spi.Identity, spi.Collection, []spi.KV, time.Time) time.Time) time.Time {
+	if p.deps.Store == nil || p.deps.Clock == nil {
+		return time.Time{}
+	}
+	now := p.deps.Clock.Now().UTC()
+	var earliest time.Time
+	scopes, _ := p.deps.Store.Scopes(ctx)
+	for _, identity := range scopes {
+		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection(name)
+		items, _, _ := collection.List(ctx, "", "", 0)
+		earliest = sooner(earliest, due(identity, collection, items, now))
 	}
 	return earliest
 }
 
-func (p *Pack) deleteRedshiftWork(ctx context.Context, collection spi.Collection, key, dataKey string) {
+// sooner is the earlier of a and b, a zero time being no time at all.
+func sooner(a, b time.Time) time.Time {
+	if a.IsZero() || !b.IsZero() && b.Before(a) {
+		return b
+	}
+	return a
+}
+
+// deleteWork deletes the work entry key and the blob dataKey that holds its records.
+func (p *Pack) deleteWork(ctx context.Context, collection spi.Collection, key, dataKey string) {
 	_ = collection.Delete(ctx, key)
 	if p.deps.Blobs != nil {
 		_ = p.deps.Blobs.Delete(ctx, dataKey)
@@ -2817,14 +2662,13 @@ func (p *Pack) runRedshiftRetry(ctx context.Context, identity spi.Identity, coll
 	req := &spi.Request{Identity: identity}
 	raw, ok, _ := p.col(req, "fh").Get(ctx, work.Stream)
 	if !ok {
-		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
-	var stream map[string]any
-	_ = json.Unmarshal(raw, &stream)
+	stream := spi.JSONObject(raw)
 	destination, ok := stream["RedshiftDestinationConfiguration"].(map[string]any)
 	if !ok {
-		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
 	var data [][]byte
@@ -2841,33 +2685,31 @@ func (p *Pack) runRedshiftRetry(ctx context.Context, identity spi.Identity, coll
 	}
 	if !payloadOK {
 		work.Next = now.Add(time.Second)
-		stored, _ := json.Marshal(work)
-		_ = collection.Put(ctx, key, stored)
+		_ = spi.PutJSON(ctx, collection, key, work)
 		return work.Next
 	}
 	if !now.Before(work.Expires) {
-		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
 	username, password, err := p.redshiftCredentials(ctx, req, destination)
-	cluster, database := redshiftTarget(first(destination, "ClusterJDBCURL"))
+	cluster, database := redshiftTarget(spi.First(destination, "ClusterJDBCURL"))
 	command, _ := destination["CopyCommand"].(map[string]any)
 	if err == nil {
 		err = redshiftservice.New(p.deps).Copy(ctx, identity, redshiftservice.CopyInput{
-			Cluster: cluster, Database: database, Table: first(command, "DataTableName"), Username: username, Password: password,
-			Columns: first(command, "DataTableColumns"), Options: first(command, "CopyOptions"), Data: data,
+			Cluster: cluster, Database: database, Table: spi.First(command, "DataTableName"), Username: username, Password: password,
+			Columns: spi.First(command, "DataTableColumns"), Options: spi.First(command, "CopyOptions"), Data: data,
 		})
 	}
 	if err == nil {
-		p.deleteRedshiftWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
 	p.logDeliveryError(ctx, req, destination, work.Stream, err.Error(), now)
 	work.Retries++
 	work.ErrorMessage = err.Error()
 	work.Next = minTime(now.Add(5*time.Minute), work.Expires)
-	stored, _ := json.Marshal(work)
-	_ = collection.Put(ctx, key, stored)
+	_ = spi.PutJSON(ctx, collection, key, work)
 	return work.Next
 }
 
@@ -2887,7 +2729,7 @@ func (p *Pack) deliverEndpointRecords(ctx context.Context, req *spi.Request, str
 			processedData = append(processedData, record.data)
 		}
 	}
-	backupMode := first(destination, "S3BackupMode")
+	backupMode := spi.First(destination, "S3BackupMode")
 	if backupMode == allMode {
 		for index := range data {
 			p.deliverS3Configuration(ctx, req, backup, stream, version, recIDs[index], data[index], now)
@@ -2924,16 +2766,16 @@ func repeatTime(value time.Time, count int) []time.Time {
 }
 
 func elasticsearchDomain(destination map[string]any) string {
-	if arn := first(destination, "DomainARN"); arn != "" {
+	if arn := spi.First(destination, "DomainARN"); arn != "" {
 		return arn[strings.LastIndex(arn, "/")+1:]
 	}
-	parsed, _ := url.Parse(first(destination, "ClusterEndpoint"))
+	parsed, _ := url.Parse(spi.First(destination, "ClusterEndpoint"))
 	return strings.SplitN(parsed.Hostname(), ".", 2)[0]
 }
 
 func elasticsearchIndex(destination map[string]any, now time.Time) string {
-	index := first(destination, "IndexName")
-	switch first(destination, "IndexRotationPeriod") {
+	index := spi.First(destination, "IndexName")
+	switch spi.First(destination, "IndexRotationPeriod") {
 	case "", "OneDay":
 		return index + "-" + now.Format("2006-01-02")
 	case "OneHour":
@@ -2950,101 +2792,86 @@ func elasticsearchIndex(destination map[string]any, now time.Time) string {
 
 func localSearchIndex(destinationKey string, destination map[string]any, now time.Time) string {
 	if destinationKey == "AmazonOpenSearchServerlessDestinationConfiguration" {
-		endpoint := first(destination, "CollectionEndpoint")
+		endpoint := spi.First(destination, "CollectionEndpoint")
 		parsed, _ := url.Parse(endpoint)
 		collection := strings.SplitN(parsed.Hostname(), ".", 2)[0]
 		if collection == "" {
 			collection = "serverless"
 		}
-		return collection + "/" + first(destination, "IndexName")
+		return collection + "/" + spi.First(destination, "IndexName")
 	}
 	return elasticsearchIndex(destination, now)
 }
 
 func searchFailureIndex(destination map[string]any, now time.Time) string {
-	if first(destination, "DomainARN") == "" && first(destination, "ClusterEndpoint") == "" {
-		return first(destination, "IndexName")
+	if spi.First(destination, "DomainARN") == "" && spi.First(destination, "ClusterEndpoint") == "" {
+		return spi.First(destination, "IndexName")
 	}
 	return elasticsearchIndex(destination, now)
 }
 
 func persistedSearchDestinationKey(value string) string {
-	if value == "" {
-		return "ElasticsearchDestinationConfiguration"
-	}
-	return value
+	return cmp.Or(value, "ElasticsearchDestinationConfiguration")
 }
 
-func httpRetryDuration(destination map[string]any) time.Duration {
+// retryDuration is a destination's RetryOptions.DurationInSeconds, 0 to 7200, or else fallback seconds.
+func retryDuration(destination map[string]any, fallback int) time.Duration {
 	retry, _ := destination["RetryOptions"].(map[string]any)
 	seconds, ok := inputInteger(retry["DurationInSeconds"], 0, 7200)
 	if !ok {
-		seconds = 300
+		seconds = fallback
 	}
 	return time.Duration(seconds) * time.Second
 }
 
-func redshiftRetryDuration(destination map[string]any) time.Duration {
-	retry, _ := destination["RetryOptions"].(map[string]any)
-	seconds, ok := inputInteger(retry["DurationInSeconds"], 0, 7200)
-	if !ok {
-		seconds = 3600
-	}
-	return time.Duration(seconds) * time.Second
-}
-
-func httpBufferingHints(destination map[string]any) (time.Duration, int) {
+// bufferingHints are a destination's BufferingHints, IntervalInSeconds from 0 to maxInterval and SizeInMBs
+// from 1 to maxSize, as a duration and bytes; or, unless both are given, interval and size.
+func bufferingHints(destination map[string]any, maxInterval, maxSize int, interval time.Duration, size int) (time.Duration, int) {
 	hints, _ := destination["BufferingHints"].(map[string]any)
-	interval, intervalOK := inputInteger(hints["IntervalInSeconds"], 0, 900)
-	size, sizeOK := inputInteger(hints["SizeInMBs"], 1, 64)
+	seconds, intervalOK := inputInteger(hints["IntervalInSeconds"], 0, maxInterval)
+	mb, sizeOK := inputInteger(hints["SizeInMBs"], 1, maxSize)
 	if !intervalOK || !sizeOK {
-		return 300 * time.Second, 5 * 1024 * 1024
+		return interval, size
 	}
-	return time.Duration(interval) * time.Second, size * 1024 * 1024
+	return time.Duration(seconds) * time.Second, mb * 1024 * 1024
 }
 
 func endpointBufferingHints(destinationKey string, destination map[string]any) (time.Duration, int) {
-	if destinationKey == "SnowflakeDestinationConfiguration" {
-		hints, _ := destination["BufferingHints"].(map[string]any)
-		interval, intervalOK := inputInteger(hints["IntervalInSeconds"], 0, 900)
-		size, sizeOK := inputInteger(hints["SizeInMBs"], 1, 128)
-		if !intervalOK || !sizeOK {
-			return 0, 128 * 1024 * 1024
-		}
-		return time.Duration(interval) * time.Second, size * 1024 * 1024
+	switch destinationKey {
+	case "SnowflakeDestinationConfiguration":
+		return bufferingHints(destination, 900, 128, 0, 128*1024*1024)
+	case "SplunkDestinationConfiguration":
+		return bufferingHints(destination, 60, 5, 60*time.Second, 5*1024*1024)
 	}
-	if destinationKey != "SplunkDestinationConfiguration" {
-		return httpBufferingHints(destination)
-	}
-	hints, _ := destination["BufferingHints"].(map[string]any)
-	interval, intervalOK := inputInteger(hints["IntervalInSeconds"], 0, 60)
-	size, sizeOK := inputInteger(hints["SizeInMBs"], 1, 5)
-	if !intervalOK || !sizeOK {
-		return 60 * time.Second, 5 * 1024 * 1024
-	}
-	return time.Duration(interval) * time.Second, size * 1024 * 1024
+	return bufferingHints(destination, 900, 64, 300*time.Second, 5*1024*1024)
 }
 
-func endpointRetryDuration(destinationKey string, destination map[string]any) time.Duration {
-	if destinationKey != "SnowflakeDestinationConfiguration" {
-		return httpRetryDuration(destination)
+// validHints is InvalidArgumentException for BufferingHints that are no object, that give one of
+// IntervalInSeconds and SizeInMBs without the other, or an interval outside 0 to 900 or a size outside 1 to
+// maxSize; nil for any other.
+func validHints(raw any, maxSize int) error {
+	hints, ok := raw.(map[string]any)
+	_, hasInterval := hints["IntervalInSeconds"]
+	_, hasSize := hints["SizeInMBs"]
+	if !ok || hasInterval != hasSize {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	} else if _, interval := inputInteger(hints["IntervalInSeconds"], 0, 900); hasInterval && !interval {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	} else if _, size := inputInteger(hints["SizeInMBs"], 1, maxSize); hasInterval && !size {
+		return &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
 	}
-	retry, _ := destination["RetryOptions"].(map[string]any)
-	seconds, ok := inputInteger(retry["DurationInSeconds"], 0, 7200)
-	if !ok {
-		seconds = 60
-	}
-	return time.Duration(seconds) * time.Second
+	return nil
 }
 
 func searchBufferingHints(destination map[string]any) (time.Duration, int) {
-	hints, _ := destination["BufferingHints"].(map[string]any)
-	interval, intervalOK := inputInteger(hints["IntervalInSeconds"], 0, 900)
-	size, sizeOK := inputInteger(hints["SizeInMBs"], 1, 100)
-	if !intervalOK || !sizeOK {
-		return 300 * time.Second, 5 * 1024 * 1024
+	return bufferingHints(destination, 900, 100, 300*time.Second, 5*1024*1024)
+}
+
+func endpointRetryDuration(destinationKey string, destination map[string]any) time.Duration {
+	if destinationKey == "SnowflakeDestinationConfiguration" {
+		return retryDuration(destination, 60)
 	}
-	return time.Duration(interval) * time.Second, size * 1024 * 1024
+	return retryDuration(destination, 300)
 }
 
 func validSearchPayload(payload searchPayload) bool {
@@ -3111,8 +2938,7 @@ func (p *Pack) bufferSearch(ctx context.Context, req *spi.Request, stream, desti
 			next = now
 		}
 		for _, item := range items {
-			var work searchWork
-			_ = json.Unmarshal(item.Value, &work)
+			work := spi.Decode[searchWork](item.Value)
 			work.Next = next
 			stored, _ := json.Marshal(work)
 			if err := tx.Put(item.Key, stored); err != nil {
@@ -3166,15 +2992,7 @@ func (p *Pack) writeSearchPayload(ctx context.Context, req *spi.Request, stream,
 func (p *Pack) runSearchWork(ctx context.Context) time.Time {
 	searchMu.Lock()
 	defer searchMu.Unlock()
-	if p.deps.Store == nil || p.deps.Clock == nil {
-		return time.Time{}
-	}
-	now := p.deps.Clock.Now().UTC()
-	var earliest time.Time
-	scopes, _ := p.deps.Store.Scopes(ctx)
-	for _, identity := range scopes {
-		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-search-work")
-		stored, _, _ := collection.List(ctx, "", "", 0)
+	return p.scan(ctx, "fh-search-work", func(identity spi.Identity, collection spi.Collection, stored []spi.KV, now time.Time) (earliest time.Time) {
 		buffers := map[string][]searchWorkItem{}
 		var retries []searchWorkItem
 		for _, item := range stored {
@@ -3191,42 +3009,26 @@ func (p *Pack) runSearchWork(ctx context.Context) time.Time {
 		}
 		for stream, items := range buffers {
 			sort.Slice(items, func(i, j int) bool { return items[i].Work.Order < items[j].Work.Order })
-			next := items[0].Work.Next
-			for _, item := range items[1:] {
-				if item.Work.Next.Before(next) {
-					next = item.Work.Next
-				}
-			}
+			next := slices.MinFunc(items, func(a, b searchWorkItem) int { return a.Work.Next.Compare(b.Work.Next) }).Work.Next
 			if !next.After(now) {
 				next = p.flushSearchBuffer(ctx, identity, collection, stream, items, now)
 			}
-			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
-				earliest = next
-			}
+			earliest = sooner(earliest, next)
 		}
 		for _, item := range retries {
 			next := item.Work.Next
 			if !next.After(now) {
 				next = p.runSearchRetry(ctx, identity, collection, item.Key, &item.Work, now)
 			}
-			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
-				earliest = next
-			}
+			earliest = sooner(earliest, next)
 		}
-	}
-	return earliest
-}
-
-func (p *Pack) deleteSearchWork(ctx context.Context, collection spi.Collection, key, dataKey string) {
-	_ = collection.Delete(ctx, key)
-	if p.deps.Blobs != nil {
-		_ = p.deps.Blobs.Delete(ctx, dataKey)
-	}
+		return earliest
+	})
 }
 
 func (p *Pack) deleteSearchItems(ctx context.Context, collection spi.Collection, items []searchWorkItem) {
 	for _, item := range items {
-		p.deleteSearchWork(ctx, collection, item.Key, item.Work.DataKey)
+		p.deleteWork(ctx, collection, item.Key, item.Work.DataKey)
 	}
 }
 
@@ -3237,8 +3039,7 @@ func (p *Pack) flushSearchBuffer(ctx context.Context, identity spi.Identity, col
 		p.deleteSearchItems(ctx, collection, items)
 		return time.Time{}
 	}
-	var stream map[string]any
-	_ = json.Unmarshal(raw, &stream)
+	stream := spi.JSONObject(raw)
 	destination, ok := stream[persistedSearchDestinationKey(items[0].Work.Destination)].(map[string]any)
 	if !ok {
 		p.deleteSearchItems(ctx, collection, items)
@@ -3251,8 +3052,7 @@ func (p *Pack) flushSearchBuffer(ctx context.Context, identity spi.Identity, col
 			next := now.Add(time.Second)
 			for _, item := range items {
 				item.Work.Next = next
-				stored, _ := json.Marshal(item.Work)
-				_ = collection.Put(ctx, item.Key, stored)
+				_ = spi.PutJSON(ctx, collection, item.Key, item.Work)
 			}
 			return next
 		}
@@ -3272,7 +3072,7 @@ func (p *Pack) deliverSearch(ctx context.Context, req *spi.Request, destinationK
 	var retryable, permanent searchPayload
 	code, message := "", ""
 	options, _ := destination["DocumentIdOptions"].(map[string]any)
-	useID := first(options, "DefaultDocumentIdFormat") != "NO_DOCUMENT_ID"
+	useID := spi.First(options, "DefaultDocumentIdFormat") != "NO_DOCUMENT_ID"
 	for index, data := range payload.Data {
 		var document map[string]any
 		if json.Unmarshal(data, &document) != nil || document == nil {
@@ -3302,7 +3102,7 @@ func (p *Pack) retryOrBackupSearch(ctx context.Context, req *spi.Request, stream
 	if !validSearchPayload(payload) {
 		return
 	}
-	duration := httpRetryDuration(destination)
+	duration := retryDuration(destination, 300)
 	if duration > 0 {
 		key, dataKey, ok := p.putSearchBlob(ctx, req, name, payload)
 		if !ok {
@@ -3329,33 +3129,31 @@ func (p *Pack) runSearchRetry(ctx context.Context, identity spi.Identity, collec
 	req := &spi.Request{Identity: identity}
 	raw, ok, _ := p.col(req, "fh").Get(ctx, work.Stream)
 	if !ok {
-		p.deleteSearchWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
-	var stream map[string]any
-	_ = json.Unmarshal(raw, &stream)
+	stream := spi.JSONObject(raw)
 	destination, ok := stream[persistedSearchDestinationKey(work.Destination)].(map[string]any)
 	if !ok {
-		p.deleteSearchWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
 	payload, ok := p.loadSearchPayload(ctx, req, work.DataKey)
 	if !ok {
 		work.Next = now.Add(time.Second)
-		stored, _ := json.Marshal(work)
-		_ = collection.Put(ctx, key, stored)
+		_ = spi.PutJSON(ctx, collection, key, work)
 		return work.Next
 	}
 	if !now.Before(work.Expires) {
 		p.backupSearchFailures(ctx, req, stream, destination, work.Stream, payload, work.Retries+1, work.ErrorCode, work.ErrorMessage, now)
-		p.deleteSearchWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
 	destinationKey := persistedSearchDestinationKey(work.Destination)
 	retryable, permanent, code, message := p.deliverSearch(ctx, req, destinationKey, destination, payload)
 	p.backupSearchFailures(ctx, req, stream, destination, work.Stream, permanent, work.Retries+2, "400", "record is not a JSON object", now)
 	if !validSearchPayload(retryable) {
-		p.deleteSearchWork(ctx, collection, key, work.DataKey)
+		p.deleteWork(ctx, collection, key, work.DataKey)
 		return time.Time{}
 	}
 	work.Retries++
@@ -3367,8 +3165,7 @@ func (p *Pack) runSearchRetry(ctx context.Context, identity spi.Identity, collec
 	if !p.writeSearchPayload(ctx, req, work.Stream, work.DataKey, retryable) {
 		work.Next = now.Add(time.Second)
 	}
-	stored, _ := json.Marshal(work)
-	_ = collection.Put(ctx, key, stored)
+	_ = spi.PutJSON(ctx, collection, key, work)
 	return work.Next
 }
 
@@ -3379,16 +3176,16 @@ func (p *Pack) backupSearchFailures(ctx context.Context, req *spi.Request, strea
 	backup, _ := destination["S3Configuration"].(map[string]any)
 	bucket, prefix, _, _, _, _, kmsARN := s3Configuration(backup)
 	prefix += "AmazonOpenSearchService-failed/"
-	version := first(stream, "VersionId")
+	version := spi.First(stream, "VersionId")
 	if version == "" {
 		version = "1"
 	}
 	options, _ := destination["DocumentIdOptions"].(map[string]any)
-	useID := first(options, "DefaultDocumentIdFormat") != "NO_DOCUMENT_ID"
+	useID := spi.First(options, "DefaultDocumentIdFormat") != "NO_DOCUMENT_ID"
 	for index := range payload.Data {
 		failure := &processingFailure{
 			typeName: "AmazonOpenSearchService-failed", code: code, message: message, attempts: attempts, recID: payload.RecordIDs[index], data: payload.RawData[index],
-			arrival: payload.Arrivals[index], searchIndex: searchFailureIndex(destination, payload.Arrivals[index]), searchType: first(destination, "TypeName"),
+			arrival: payload.Arrivals[index], searchIndex: searchFailureIndex(destination, payload.Arrivals[index]), searchType: spi.First(destination, "TypeName"),
 		}
 		if useID {
 			failure.documentID = payload.RecordIDs[index]
@@ -3445,8 +3242,7 @@ func (p *Pack) bufferEndpoint(ctx context.Context, req *spi.Request, stream, des
 		if total >= sizeLimit {
 			next = now
 			for _, item := range items {
-				var buffer httpBuffer
-				_ = json.Unmarshal(item.Value, &buffer)
+				buffer := spi.Decode[httpBuffer](item.Value)
 				buffer.Next = now
 				stored, _ := json.Marshal(buffer)
 				if err := tx.Put(item.Key, stored); err != nil {
@@ -3536,42 +3332,17 @@ func (p *Pack) httpRetryLoop() {
 	defer close(p.done)
 	for {
 		next := p.runHTTPBuffers(context.Background())
-		if retryNext := p.runHTTPRetries(context.Background()); !retryNext.IsZero() && (next.IsZero() || retryNext.Before(next)) {
-			next = retryNext
-		}
-		if searchNext := p.runSearchWork(context.Background()); !searchNext.IsZero() && (next.IsZero() || searchNext.Before(next)) {
-			next = searchNext
-		}
-		if redshiftNext := p.runRedshiftRetries(context.Background()); !redshiftNext.IsZero() && (next.IsZero() || redshiftNext.Before(next)) {
-			next = redshiftNext
-		}
-		if next.IsZero() {
-			select {
-			case <-p.wake:
-			case <-p.stop:
-				return
-			}
-			continue
-		}
-		select {
-		case <-p.deps.Clock.AfterTime(next):
-		case <-p.wake:
-		case <-p.stop:
+		next = sooner(next, p.runHTTPRetries(context.Background()))
+		next = sooner(next, p.runSearchWork(context.Background()))
+		next = sooner(next, p.runRedshiftRetries(context.Background()))
+		if !spi.Await(p.deps.Clock, next, p.wake, p.stop) {
 			return
 		}
 	}
 }
 
 func (p *Pack) runHTTPBuffers(ctx context.Context) time.Time {
-	if p.deps.Store == nil || p.deps.Clock == nil {
-		return time.Time{}
-	}
-	now := p.deps.Clock.Now().UTC()
-	var earliest time.Time
-	scopes, _ := p.deps.Store.Scopes(ctx)
-	for _, identity := range scopes {
-		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-http-buffers")
-		buffers, _, _ := collection.List(ctx, "", "", 0)
+	return p.scan(ctx, "fh-http-buffers", func(identity spi.Identity, collection spi.Collection, buffers []spi.KV, now time.Time) (earliest time.Time) {
 		streams := map[string][]httpBufferItem{}
 		for _, item := range buffers {
 			var buffer httpBuffer
@@ -3582,21 +3353,14 @@ func (p *Pack) runHTTPBuffers(ctx context.Context) time.Time {
 		}
 		for stream, items := range streams {
 			sort.Slice(items, func(i, j int) bool { return items[i].Buffer.Order < items[j].Buffer.Order })
-			next := items[0].Buffer.Next
-			for _, item := range items[1:] {
-				if item.Buffer.Next.Before(next) {
-					next = item.Buffer.Next
-				}
-			}
+			next := slices.MinFunc(items, func(a, b httpBufferItem) int { return a.Buffer.Next.Compare(b.Buffer.Next) }).Buffer.Next
 			if !next.After(now) {
 				next = p.flushHTTPBuffer(ctx, identity, collection, stream, items, now)
 			}
-			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
-				earliest = next
-			}
+			earliest = sooner(earliest, next)
 		}
-	}
-	return earliest
+		return earliest
+	})
 }
 
 func (p *Pack) deleteHTTPBuffer(ctx context.Context, collection spi.Collection, items []httpBufferItem) {
@@ -3614,8 +3378,7 @@ func (p *Pack) deleteHTTPStreamWork(ctx context.Context, req *spi.Request, strea
 	buffers := p.col(req, "fh-http-buffers")
 	items, _, _ := buffers.List(ctx, stream+"/", "", 0)
 	for _, item := range items {
-		var buffer httpBuffer
-		_ = json.Unmarshal(item.Value, &buffer)
+		buffer := spi.Decode[httpBuffer](item.Value)
 		p.deleteHTTPBuffer(ctx, buffers, []httpBufferItem{{Key: item.Key, Buffer: buffer}})
 	}
 	retries := p.col(req, "fh-http-retries")
@@ -3623,28 +3386,26 @@ func (p *Pack) deleteHTTPStreamWork(ctx context.Context, req *spi.Request, strea
 	for _, item := range items {
 		var retry httpRetry
 		if json.Unmarshal(item.Value, &retry) == nil && retry.Stream == stream {
-			p.deleteHTTPRetry(ctx, retries, item.Key, retry.DataKey)
+			p.deleteWork(ctx, retries, item.Key, retry.DataKey)
 		}
 	}
 	search := p.col(req, "fh-search-work")
 	items, _, _ = search.List(ctx, stream+"/", "", 0)
 	for _, item := range items {
-		var work searchWork
-		_ = json.Unmarshal(item.Value, &work)
-		p.deleteSearchWork(ctx, search, item.Key, work.DataKey)
+		work := spi.Decode[searchWork](item.Value)
+		p.deleteWork(ctx, search, item.Key, work.DataKey)
 	}
 	redshift := p.col(req, "fh-redshift-work")
 	items, _, _ = redshift.List(ctx, stream+"/", "", 0)
 	for _, item := range items {
-		var work redshiftWork
-		_ = json.Unmarshal(item.Value, &work)
-		p.deleteRedshiftWork(ctx, redshift, item.Key, work.DataKey)
+		work := spi.Decode[redshiftWork](item.Value)
+		p.deleteWork(ctx, redshift, item.Key, work.DataKey)
 	}
 }
 
 func (p *Pack) backupHTTPPayload(ctx context.Context, req *spi.Request, stream map[string]any, destination map[string]any, name string, payload httpRetryPayload, now time.Time) {
 	backup, _ := destination["S3Configuration"].(map[string]any)
-	version := first(stream, "VersionId")
+	version := spi.First(stream, "VersionId")
 	if version == "" {
 		version = "1"
 	}
@@ -3661,7 +3422,7 @@ func (p *Pack) backupEndpointPayload(ctx context.Context, req *spi.Request, stre
 			if len(payload.Arrivals) == len(payload.BackupData) {
 				arrival = payload.Arrivals[index]
 			}
-			p.deliverSnowflakeFailure(ctx, req, s3, name, first(stream, "VersionId"), payload.BackupRecordIDs[index], payload.BackupData[index], attempts, code, message, arrival, now)
+			p.deliverSnowflakeFailure(ctx, req, s3, name, spi.First(stream, "VersionId"), payload.BackupRecordIDs[index], payload.BackupData[index], attempts, code, message, arrival, now)
 		}
 		return
 	}
@@ -3674,7 +3435,7 @@ func (p *Pack) backupEndpointPayload(ctx context.Context, req *spi.Request, stre
 	if errorPrefix == "" {
 		errorPrefix = prefix + "splunk-failed/"
 	}
-	version := first(stream, "VersionId")
+	version := spi.First(stream, "VersionId")
 	if version == "" {
 		version = "1"
 	}
@@ -3701,8 +3462,7 @@ func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, colle
 		p.deleteHTTPBuffer(ctx, collection, items)
 		return time.Time{}
 	}
-	var stream map[string]any
-	_ = json.Unmarshal(raw, &stream)
+	stream := spi.JSONObject(raw)
 	destinationKey := endpointDestinationKey(items[0].Buffer.Destination)
 	destination, ok := stream[destinationKey].(map[string]any)
 	if !ok {
@@ -3739,8 +3499,7 @@ func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, colle
 		next := now.Add(time.Second)
 		for _, item := range items {
 			item.Buffer.Next = next
-			body, _ := json.Marshal(item.Buffer)
-			_ = collection.Put(ctx, item.Key, body)
+			_ = spi.PutJSON(ctx, collection, item.Key, item.Buffer)
 		}
 		return next
 	}
@@ -3762,15 +3521,7 @@ func (p *Pack) flushHTTPBuffer(ctx context.Context, identity spi.Identity, colle
 }
 
 func (p *Pack) runHTTPRetries(ctx context.Context) time.Time {
-	if p.deps.Store == nil || p.deps.Clock == nil {
-		return time.Time{}
-	}
-	now := p.deps.Clock.Now().UTC()
-	var earliest time.Time
-	scopes, _ := p.deps.Store.Scopes(ctx)
-	for _, identity := range scopes {
-		collection := p.deps.Store.Scope(identity.Account, identity.Region).Collection("fh-http-retries")
-		retries, _, _ := collection.List(ctx, "", "", 0)
+	return p.scan(ctx, "fh-http-retries", func(identity spi.Identity, collection spi.Collection, retries []spi.KV, now time.Time) (earliest time.Time) {
 		for _, item := range retries {
 			var retry httpRetry
 			if json.Unmarshal(item.Value, &retry) != nil {
@@ -3780,34 +3531,24 @@ func (p *Pack) runHTTPRetries(ctx context.Context) time.Time {
 			if !next.After(now) {
 				next = p.runHTTPRetry(ctx, identity, collection, item.Key, &retry, now)
 			}
-			if !next.IsZero() && (earliest.IsZero() || next.Before(earliest)) {
-				earliest = next
-			}
+			earliest = sooner(earliest, next)
 		}
-	}
-	return earliest
-}
-
-func (p *Pack) deleteHTTPRetry(ctx context.Context, collection spi.Collection, key, dataKey string) {
-	_ = collection.Delete(ctx, key)
-	if p.deps.Blobs != nil {
-		_ = p.deps.Blobs.Delete(ctx, dataKey)
-	}
+		return earliest
+	})
 }
 
 func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collection spi.Collection, key string, retry *httpRetry, now time.Time) time.Time {
 	req := &spi.Request{Identity: identity}
 	raw, ok, _ := p.col(req, "fh").Get(ctx, retry.Stream)
 	if !ok {
-		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
+		p.deleteWork(ctx, collection, key, retry.DataKey)
 		return time.Time{}
 	}
-	var stream map[string]any
-	_ = json.Unmarshal(raw, &stream)
+	stream := spi.JSONObject(raw)
 	destinationKey := endpointDestinationKey(retry.Destination)
 	destination, ok := stream[destinationKey].(map[string]any)
 	if !ok {
-		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
+		p.deleteWork(ctx, collection, key, retry.DataKey)
 		return time.Time{}
 	}
 	var payload httpRetryPayload
@@ -3824,13 +3565,12 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 	}
 	if !payloadOK {
 		retry.Next = now.Add(time.Second)
-		body, _ := json.Marshal(retry)
-		_ = collection.Put(ctx, key, body)
+		_ = spi.PutJSON(ctx, collection, key, retry)
 		return retry.Next
 	}
 	if !now.Before(retry.Expires) {
 		p.backupEndpointPayload(ctx, req, stream, destination, destinationKey, retry.Stream, payload, retry.Retries, retry.ErrorCode, retry.ErrorMessage, now)
-		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
+		p.deleteWork(ctx, collection, key, retry.DataKey)
 		return time.Time{}
 	}
 	delivered, permanent, code, message := p.deliverEndpoint(ctx, req, stream, destination, destinationKey, retry.RequestID, payload.ProcessedData, now)
@@ -3840,7 +3580,7 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 		retry.Expires = retry.Expires.Add(attemptEnded.Sub(now))
 	}
 	if delivered || permanent {
-		p.deleteHTTPRetry(ctx, collection, key, retry.DataKey)
+		p.deleteWork(ctx, collection, key, retry.DataKey)
 		return time.Time{}
 	}
 	p.logDeliveryError(ctx, req, destination, retry.Stream, message, attemptEnded)
@@ -3850,16 +3590,12 @@ func (p *Pack) runHTTPRetry(ctx context.Context, identity spi.Identity, collecti
 	if retry.Next.After(retry.Expires) {
 		retry.Next = retry.Expires
 	}
-	body, _ := json.Marshal(retry)
-	_ = collection.Put(ctx, key, body)
+	_ = spi.PutJSON(ctx, collection, key, retry)
 	return retry.Next
 }
 
 func endpointDestinationKey(key string) string {
-	if key == "" {
-		return "HttpEndpointDestinationConfiguration"
-	}
-	return key
+	return cmp.Or(key, "HttpEndpointDestinationConfiguration")
 }
 
 func (p *Pack) deliverEndpoint(ctx context.Context, req *spi.Request, stream, destination map[string]any, destinationKey, requestID string, data [][]byte, now time.Time) (bool, bool, string, string) {
@@ -3883,14 +3619,13 @@ func (p *Pack) deliverSnowflake(ctx context.Context, req *spi.Request, destinati
 			return false, true, "Snowflake.InvalidInput", "Snowflake record is not a JSON object"
 		}
 	}
-	key := snowflakeTableKey(first(destination, "AccountUrl"), first(destination, "Database"), first(destination, "Schema"), first(destination, "Table"))
+	key := snowflakeTableKey(spi.First(destination, "AccountUrl"), spi.First(destination, "Database"), spi.First(destination, "Schema"), spi.First(destination, "Table"))
 	err := p.col(req, "fhsnow").Txn(ctx, func(tx spi.Tx) error {
 		stored, _, err := tx.Get(key)
 		if err != nil {
 			return err
 		}
-		var existing []map[string]any
-		_ = json.Unmarshal(stored, &existing)
+		existing := spi.Decode[[]map[string]any](stored)
 		existing = append(existing, rows...)
 		encoded, _ := json.Marshal(existing)
 		return tx.Put(key, encoded)
@@ -3901,16 +3636,42 @@ func (p *Pack) deliverSnowflake(ctx context.Context, req *spi.Request, destinati
 	return true, false, "", ""
 }
 
+// requiredS3 is a destination's S3Configuration, which it must have, once validated.
+func requiredS3(destination map[string]any, region string) (map[string]any, error) {
+	s3, ok := destination["S3Configuration"].(map[string]any)
+	if !ok {
+		return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
+	}
+	return s3, validateS3Configuration(s3, region, false)
+}
+
+// loggedS3 checks a destination's required S3Configuration, and then its CloudWatchLoggingOptions.
+func loggedS3(destination map[string]any, region string) error {
+	if _, err := requiredS3(destination, region); err != nil {
+		return err
+	}
+	return validateCloudWatchLogging(destination["CloudWatchLoggingOptions"])
+}
+
+// secretValue reads the JSON object in the secret a destination's SecretsManagerConfiguration names: whether
+// the configuration is enabled, and whether the secret was read as one.
+func (p *Pack) secretValue(ctx context.Context, req *spi.Request, destination map[string]any) (value map[string]any, enabled, ok bool) {
+	secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any)
+	if secrets["Enabled"] != true {
+		return nil, false, false
+	}
+	response, err := bundled.Handler("aws.secretsmanager", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": spi.First(secrets, "SecretARN")}})
+	var secret string
+	if response != nil {
+		secret, ok = response.Output["SecretString"].(string)
+	}
+	value = map[string]any{}
+	return value, true, err == nil && ok && json.Unmarshal([]byte(secret), &value) == nil
+}
+
 func (p *Pack) validateSnowflakeCredentials(ctx context.Context, req *spi.Request, destination map[string]any) error {
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
-		response, err := bundled.Handler("aws.secretsmanager", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
-		var secret string
-		var ok bool
-		if response != nil {
-			secret, ok = response.Output["SecretString"].(string)
-		}
-		value := map[string]any{}
-		if err != nil || !ok || json.Unmarshal([]byte(secret), &value) != nil {
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled {
+		if !ok {
 			return errors.New("unable to retrieve Snowflake credentials")
 		}
 		user, userOK := value["user"].(string)
@@ -3942,16 +3703,9 @@ func (p *Pack) deliverSnowflakeFailure(ctx context.Context, req *spi.Request, s3
 }
 
 func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination map[string]any, requestID string, data [][]byte) (bool, bool, string, string) {
-	token := first(destination, "HECToken")
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
-		response, err := bundled.Handler("aws.secretsmanager", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
-		var secret string
-		var ok bool
-		if response != nil {
-			secret, ok = response.Output["SecretString"].(string)
-		}
-		value := map[string]any{}
-		if err != nil || !ok || json.Unmarshal([]byte(secret), &value) != nil {
+	token := spi.First(destination, "HECToken")
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled {
+		if !ok {
 			return false, false, "Splunk.InvalidToken", "unable to retrieve Splunk HEC token"
 		}
 		token, ok = value["hec_token"].(string)
@@ -3961,10 +3715,10 @@ func (p *Pack) deliverSplunk(ctx context.Context, req *spi.Request, destination 
 	}
 
 	path := "/services/collector/event"
-	if first(destination, "HECEndpointType") == "Raw" {
+	if spi.First(destination, "HECEndpointType") == "Raw" {
 		path = "/services/collector/raw"
 	}
-	endpoint := strings.TrimRight(first(destination, "HECEndpoint"), "/")
+	endpoint := strings.TrimRight(spi.First(destination, "HECEndpoint"), "/")
 	body := bytes.Join(data, nil)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+path, bytes.NewReader(body))
 	if err != nil {
@@ -4083,7 +3837,7 @@ func (p *Pack) deliverHTTP(ctx context.Context, req *spi.Request, stream, destin
 		"records":   records,
 	})
 	requestConfiguration, _ := destination["RequestConfiguration"].(map[string]any)
-	encoding := first(requestConfiguration, "ContentEncoding")
+	encoding := spi.First(requestConfiguration, "ContentEncoding")
 	if encoding == "GZIP" {
 		var compressed bytes.Buffer
 		writer := gzip.NewWriter(&compressed)
@@ -4093,15 +3847,8 @@ func (p *Pack) deliverHTTP(ctx context.Context, req *spi.Request, stream, destin
 	}
 	endpoint, _ := destination["EndpointConfiguration"].(map[string]any)
 	accessKey, hasAccessKey := endpoint["AccessKey"].(string)
-	if secrets, _ := destination["SecretsManagerConfiguration"].(map[string]any); secrets["Enabled"] == true {
-		response, err := bundled.Handler("aws.secretsmanager", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "GetSecretValue", Input: map[string]any{"SecretId": first(secrets, "SecretARN")}})
-		var secret string
-		var ok bool
-		if response != nil {
-			secret, ok = response.Output["SecretString"].(string)
-		}
-		value := map[string]any{}
-		if err != nil || !ok || json.Unmarshal([]byte(secret), &value) != nil {
+	if value, enabled, ok := p.secretValue(ctx, req, destination); enabled {
+		if !ok {
 			return false, false, "unable to retrieve HTTP endpoint access key"
 		}
 		accessKey, hasAccessKey = value["api_key"].(string)
@@ -4109,14 +3856,14 @@ func (p *Pack) deliverHTTP(ctx context.Context, req *spi.Request, stream, destin
 			return false, false, "HTTP endpoint secret must contain a valid api_key"
 		}
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, first(endpoint, "Url"), bytes.NewReader(payload))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, spi.First(endpoint, "Url"), bytes.NewReader(payload))
 	if err != nil {
 		return false, false, err.Error()
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("X-Amz-Firehose-Protocol-Version", "1.0")
 	request.Header.Set("X-Amz-Firehose-Request-Id", requestID)
-	request.Header.Set("X-Amz-Firehose-Source-Arn", first(stream, "DeliveryStreamARN"))
+	request.Header.Set("X-Amz-Firehose-Source-Arn", spi.First(stream, "DeliveryStreamARN"))
 	if encoding == "GZIP" {
 		request.Header.Set("Content-Encoding", "gzip")
 	}
@@ -4127,7 +3874,7 @@ func (p *Pack) deliverHTTP(ctx context.Context, req *spi.Request, stream, destin
 		common := map[string]string{}
 		for _, rawAttribute := range raw.([]any) {
 			attribute := rawAttribute.(map[string]any)
-			common[first(attribute, "AttributeName")] = first(attribute, "AttributeValue")
+			common[spi.First(attribute, "AttributeName")] = spi.First(attribute, "AttributeValue")
 		}
 		encoded, _ := json.Marshal(map[string]any{"commonAttributes": common})
 		request.Header.Set("X-Amz-Firehose-Common-Attributes", string(encoded))
@@ -4151,7 +3898,7 @@ func (p *Pack) deliverHTTP(ctx context.Context, req *spi.Request, stream, destin
 		return false, false, "invalid HTTP endpoint acknowledgment body"
 	}
 	var acknowledgment map[string]any
-	if json.Unmarshal(body, &acknowledgment) != nil || first(acknowledgment, "requestId") != requestID {
+	if json.Unmarshal(body, &acknowledgment) != nil || spi.First(acknowledgment, "requestId") != requestID {
 		return false, false, "invalid HTTP endpoint acknowledgment request ID"
 	}
 	timestamp, ok := acknowledgment["timestamp"].(float64)
@@ -4252,7 +3999,7 @@ func (p *Pack) logDeliveryError(ctx context.Context, req *spi.Request, configura
 	}
 	payload, _ := json.Marshal(map[string]any{"deliveryStreamName": stream, "errorMessage": message})
 	_, _ = bundled.Handler("aws.logs", p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "PutLogEvents", Input: map[string]any{
-		"logGroupName": first(options, "LogGroupName"), "logStreamName": first(options, "LogStreamName"),
+		"logGroupName": spi.First(options, "LogGroupName"), "logStreamName": spi.First(options, "LogStreamName"),
 		"logEvents": []any{map[string]any{"message": string(payload), "timestamp": now.UnixMilli()}},
 	}})
 }
@@ -4283,7 +4030,7 @@ func (p *Pack) processData(ctx context.Context, req *spi.Request, configuration 
 	var failures []*processingFailure
 	for _, raw := range processing["Processors"].([]any) {
 		processor, _ := raw.(map[string]any)
-		switch first(processor, "Type") {
+		switch spi.First(processor, "Type") {
 		case "RecordDeAggregation":
 			var next []processingRecord
 			for _, record := range records {
@@ -4494,8 +4241,8 @@ func (p *Pack) invokeProcessingLambda(ctx context.Context, req *spi.Request, pro
 		return nil, nil, false, "Lambda returned an invalid record count.", attempts
 	}
 	record, ok := records[0].(map[string]any)
-	decoded, decodeErr := base64.StdEncoding.DecodeString(first(record, "data"))
-	if !ok || first(record, "recordId") != recID || decodeErr != nil {
+	decoded, decodeErr := base64.StdEncoding.DecodeString(spi.First(record, "data"))
+	if !ok || spi.First(record, "recordId") != recID || decodeErr != nil {
 		return nil, nil, false, "Lambda returned an invalid record.", attempts
 	}
 	partitionKeys := map[string]string{}
@@ -4514,7 +4261,7 @@ func (p *Pack) invokeProcessingLambda(ctx context.Context, req *spi.Request, pro
 			partitionKeys[key] = value
 		}
 	}
-	switch first(record, "result") {
+	switch spi.First(record, "result") {
 	case "Ok":
 		return decoded, partitionKeys, true, "", attempts
 	case "Dropped":
@@ -4567,8 +4314,7 @@ func (p *Pack) deliverS3Object(ctx context.Context, req *spi.Request, bucket, ke
 		metadata["serverSideEncryption"] = "aws:kms"
 		metadata["ssekmsKeyId"] = kmsARN
 	}
-	meta, _ := json.Marshal(metadata)
-	_ = p.col(req, "objects").Put(ctx, bucket+"/"+key, meta)
+	_ = spi.PutJSON(ctx, p.col(req, "objects"), bucket+"/"+key, metadata)
 }
 
 var (
@@ -4634,13 +4380,4 @@ func (p *Pack) evaluatedDynamicS3Prefix(prefix string, now time.Time, partitionK
 		return "", errors.New("missing partition key: " + missing)
 	}
 	return p.evaluatedS3Prefix(prefix, now), nil
-}
-
-func first(in map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if s, ok := in[k].(string); ok && s != "" {
-			return s
-		}
-	}
-	return ""
 }

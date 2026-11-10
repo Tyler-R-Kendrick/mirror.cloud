@@ -3,10 +3,12 @@ package events
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -121,18 +123,18 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	switch req.Operation {
 	case "PutRule":
-		name := str(req.Input["Name"])
+		name := spi.Str(req.Input["Name"])
 		if !validEventName(name) {
 			return nil, validationFault("Name must be 1-64 characters containing only letters, numbers, period, hyphen, or underscore.")
 		}
-		if len(str(req.Input["Description"])) > 512 {
+		if len(spi.Str(req.Input["Description"])) > 512 {
 			return nil, validationFault("Description exceeds 512 characters.")
 		}
-		state := str(req.Input["State"])
+		state := spi.Str(req.Input["State"])
 		if state != "" && state != "ENABLED" && state != "DISABLED" && state != "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS" {
 			return nil, validationFault("State is invalid.")
 		}
-		pattern, schedule := str(req.Input["EventPattern"]), str(req.Input["ScheduleExpression"])
+		pattern, schedule := spi.Str(req.Input["EventPattern"]), spi.Str(req.Input["ScheduleExpression"])
 		if pattern == "" && schedule == "" {
 			return nil, &spi.Fault{Code: "InvalidEventPatternException", Message: "EventPattern or ScheduleExpression is required.", HTTPStatus: 400, Fault: "client"}
 		}
@@ -146,7 +148,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if schedule != "" && bus != "default" {
 			return nil, validationFault("Scheduled rules are supported only on the default event bus.")
 		}
-		rec := clone(req.Input)
+		rec := spi.Clone(req.Input)
 		if schedule != "" {
 			next, err := nextScheduledRule(schedule, p.deps.Clock.Now())
 			if err != nil {
@@ -154,7 +156,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			}
 			rec[eventRuleNext] = next.UTC().Format(time.RFC3339Nano)
 		}
-		if str(rec["State"]) == "" {
+		if spi.Str(rec["State"]) == "" {
 			rec["State"] = "ENABLED"
 		}
 		b, _ := json.Marshal(rec)
@@ -167,11 +169,11 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		arn := "arn:aws:events:" + req.Identity.Region + ":" + req.Identity.Account + ":rule/" + path
 		return &spi.Response{Output: map[string]any{"RuleArn": arn}}, nil
 	case "PutTargets":
-		requested := asSlice(req.Input["Targets"])
+		requested := spi.Slice(req.Input["Targets"])
 		if len(requested) < 1 || len(requested) > 10 {
 			return nil, validationFault("Targets must contain between 1 and 10 entries.")
 		}
-		key := eventKey(eventBus(req.Input), str(req.Input["Rule"]))
+		key := eventKey(eventBus(req.Input), spi.Str(req.Input["Rule"]))
 		if _, ok := p.load(ctx, req, "rules", key); !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Rule does not exist.", HTTPStatus: 400, Fault: "client"}
 		}
@@ -179,12 +181,12 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		byID := map[string]int{}
 		for i, target := range targets {
 			m, _ := target.(map[string]any)
-			byID[str(m["Id"])] = i
+			byID[spi.Str(m["Id"])] = i
 		}
 		var failed []any
 		for _, raw := range requested {
 			target, _ := raw.(map[string]any)
-			id := str(target["Id"])
+			id := spi.Str(target["Id"])
 			if message := validateTarget(target); message != "" {
 				failed = append(failed, map[string]any{"TargetId": id, "ErrorCode": "ValidationException", "ErrorMessage": message})
 				continue
@@ -199,8 +201,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if len(targets) > 5 {
 			return nil, &spi.Fault{Code: "LimitExceededException", Message: "A rule cannot have more than five targets.", HTTPStatus: 400, Fault: "client"}
 		}
-		b, _ := json.Marshal(map[string]any{"Bus": eventBus(req.Input), "Rule": str(req.Input["Rule"]), "Targets": targets})
-		_ = p.col(req, "targets").Put(ctx, key, b)
+		_ = spi.PutJSON(ctx, p.col(req, "targets"), key, map[string]any{"Bus": eventBus(req.Input), "Rule": spi.Str(req.Input["Rule"]), "Targets": targets})
 		return &spi.Response{Output: map[string]any{"FailedEntryCount": len(failed), "FailedEntries": failed}}, nil
 	case "PutEvents":
 		entries, _ := req.Input["Entries"].([]any)
@@ -232,15 +233,15 @@ func validatePutEvents(entries []any) error {
 	total := 0
 	for _, raw := range entries {
 		entry, _ := raw.(map[string]any)
-		if len(str(entry["DetailType"])) > 128 || len(str(entry["TraceHeader"])) > 500 {
+		if len(spi.Str(entry["DetailType"])) > 128 || len(spi.Str(entry["TraceHeader"])) > 500 {
 			return validationFault("Event entry field exceeds its maximum length.")
 		}
-		total += len([]byte(str(entry["Source"]))) + len([]byte(str(entry["DetailType"]))) + len([]byte(str(entry["Detail"])))
+		total += len([]byte(spi.Str(entry["Source"]))) + len([]byte(spi.Str(entry["DetailType"]))) + len([]byte(spi.Str(entry["Detail"])))
 		if entry["Time"] != nil {
 			total += 14
 		}
-		for _, resource := range asSlice(entry["Resources"]) {
-			value := str(resource)
+		for _, resource := range spi.Slice(entry["Resources"]) {
+			value := spi.Str(resource)
 			if len(value) > 2048 {
 				return validationFault("Resource exceeds 2048 characters.")
 			}
@@ -254,7 +255,7 @@ func validatePutEvents(entries []any) error {
 }
 
 func validateTarget(target map[string]any) string {
-	id, arn := str(target["Id"]), str(target["Arn"])
+	id, arn := spi.Str(target["Id"]), spi.Str(target["Arn"])
 	if !validEventName(id) || len(arn) < 1 || len(arn) > 1600 {
 		return "Id or Arn is invalid."
 	}
@@ -268,12 +269,12 @@ func validateTarget(target map[string]any) string {
 		return "Input, InputPath, and InputTransformer are mutually exclusive."
 	}
 	if input, specified := target["Input"]; specified {
-		value := str(input)
+		value := spi.Str(input)
 		if len(value) > 8192 || !json.Valid([]byte(value)) {
 			return "Input must be valid JSON and no longer than 8192 characters."
 		}
 	}
-	if len(str(target["InputPath"])) > 256 {
+	if len(spi.Str(target["InputPath"])) > 256 {
 		return "InputPath exceeds 256 characters."
 	}
 	return validateTargetReliability(target)
@@ -288,8 +289,7 @@ func (p *Pack) targetsFor(ctx context.Context, identity spi.Identity, key string
 	if !ok {
 		return []any{}
 	}
-	var rec struct{ Targets []any }
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.Decode[struct{ Targets []any }](b)
 	if rec.Targets == nil {
 		return []any{}
 	}
@@ -297,48 +297,30 @@ func (p *Pack) targetsFor(ctx context.Context, identity spi.Identity, key string
 }
 
 func eventBus(in map[string]any) string {
-	return eventBusName(str(in["EventBusName"]))
+	return eventBusName(spi.Str(in["EventBusName"]))
 }
 
 func eventBusName(bus string) string {
 	if _, name, ok := strings.Cut(bus, ":event-bus/"); ok {
 		return name
 	}
-	if bus == "" {
-		return "default"
-	}
-	return bus
+	return cmp.Or(bus, "default")
 }
 
 func eventKey(bus, name string) string { return bus + "\x00" + name }
-
-func eventName(key string) string {
-	if _, name, ok := strings.Cut(key, "\x00"); ok {
-		return name
-	}
-	return key
-}
-
-func clone(in map[string]any) map[string]any {
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
 
 func (p *Pack) putEvents(ctx context.Context, req *spi.Request, entries []any) *spi.Response {
 	results := make([]any, 0, len(entries))
 	failed := 0
 	for _, raw := range entries {
 		entry, _ := raw.(map[string]any)
-		if str(entry["Source"]) == "" || str(entry["DetailType"]) == "" || str(entry["Detail"]) == "" {
+		if spi.Str(entry["Source"]) == "" || spi.Str(entry["DetailType"]) == "" || spi.Str(entry["Detail"]) == "" {
 			failed++
 			results = append(results, map[string]any{"ErrorCode": "ValidationException", "ErrorMessage": "Source, DetailType and Detail are required."})
 			continue
 		}
 		var detail any
-		if json.Unmarshal([]byte(str(entry["Detail"])), &detail) != nil {
+		if json.Unmarshal([]byte(spi.Str(entry["Detail"])), &detail) != nil {
 			failed++
 			results = append(results, map[string]any{"ErrorCode": "MalformedDetail", "ErrorMessage": "Detail is not valid JSON."})
 			continue
@@ -352,7 +334,7 @@ func (p *Pack) putEvents(ctx context.Context, req *spi.Request, entries []any) *
 		if event["resources"] == nil {
 			event["resources"] = []any{}
 		}
-		p.fanout(ctx, req, event, str(entry["EventBusName"]))
+		p.fanout(ctx, req, event, spi.Str(entry["EventBusName"]))
 		results = append(results, map[string]any{"EventId": id})
 	}
 	return &spi.Response{Output: map[string]any{"FailedEntryCount": failed, "Entries": results}}
@@ -373,8 +355,7 @@ func eventTime(v any, fallback time.Time) string {
 func (p *Pack) fanout(ctx context.Context, req *spi.Request, event map[string]any, bus string) {
 	raw, _ := json.Marshal(event)
 	_ = p.deps.Bus.Publish(ctx, "events", raw)
-	kvs, _, _ := p.col(req, "targets").List(ctx, "", "", 0)
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, p.col(req, "targets"), "", "", 0) {
 		rule, ok := p.load(ctx, req, "rules", kv.Key)
 		if !ok || !ruleMatches(rule, bus, event) {
 			continue
@@ -386,7 +367,7 @@ func (p *Pack) fanout(ctx context.Context, req *spi.Request, event map[string]an
 func (p *Pack) deliverRule(ctx context.Context, identity spi.Identity, ruleKey string, event map[string]any, raw []byte) {
 	for _, target := range p.targetsFor(ctx, identity, ruleKey) {
 		m, _ := target.(map[string]any)
-		arn := str(m["Arn"])
+		arn := spi.Str(m["Arn"])
 		if arn == "" {
 			continue
 		}
@@ -417,18 +398,7 @@ func (p *Pack) retryLoop() {
 	defer close(p.done)
 	for {
 		next := earlierTime(p.runRetries(context.Background()), p.runScheduledRules(context.Background()))
-		if next.IsZero() {
-			select {
-			case <-p.wake:
-			case <-p.stop:
-				return
-			}
-			continue
-		}
-		select {
-		case <-p.deps.Clock.AfterTime(next):
-		case <-p.wake:
-		case <-p.stop:
+		if !spi.Await(p.deps.Clock, next, p.wake, p.stop) {
 			return
 		}
 	}
@@ -449,18 +419,17 @@ func (p *Pack) runScheduledRules(ctx context.Context) time.Time {
 		}
 		for _, kv := range kvs {
 			var rule map[string]any
-			if json.Unmarshal(kv.Value, &rule) != nil || str(rule["State"]) == "DISABLED" || str(rule["ScheduleExpression"]) == "" {
+			if json.Unmarshal(kv.Value, &rule) != nil || spi.Str(rule["State"]) == "DISABLED" || spi.Str(rule["ScheduleExpression"]) == "" {
 				continue
 			}
 			next := parsedTime(rule[eventRuleNext])
 			if next.IsZero() {
-				next, err = nextScheduledRule(str(rule["ScheduleExpression"]), now)
+				next, err = nextScheduledRule(spi.Str(rule["ScheduleExpression"]), now)
 				if err != nil {
 					continue
 				}
 				rule[eventRuleNext] = next.UTC().Format(time.RFC3339Nano)
-				body, _ := json.Marshal(rule)
-				_ = collection.Put(ctx, kv.Key, body)
+				_ = spi.PutJSON(ctx, collection, kv.Key, rule)
 			}
 			if next.After(now) {
 				earliest = earlierTime(earliest, next)
@@ -474,13 +443,12 @@ func (p *Pack) runScheduledRules(ctx context.Context) time.Time {
 			raw, _ := json.Marshal(event)
 			_ = p.deps.Bus.Publish(ctx, "events", raw)
 			p.deliverRule(ctx, identity, kv.Key, event, raw)
-			next, err = nextScheduledRule(str(rule["ScheduleExpression"]), next)
+			next, err = nextScheduledRule(spi.Str(rule["ScheduleExpression"]), next)
 			if err != nil {
 				continue
 			}
 			rule[eventRuleNext] = next.UTC().Format(time.RFC3339Nano)
-			body, _ := json.Marshal(rule)
-			_ = collection.Put(ctx, kv.Key, body)
+			_ = spi.PutJSON(ctx, collection, kv.Key, rule)
 			earliest = earlierTime(earliest, next)
 		}
 	}
@@ -522,7 +490,7 @@ func (p *Pack) runRetries(ctx context.Context) time.Time {
 				continue
 			}
 			target, _ := rec["Target"].(map[string]any)
-			payload := []byte(str(rec["Payload"]))
+			payload := []byte(spi.Str(rec["Payload"]))
 			policy, _ := target["RetryPolicy"].(map[string]any)
 			maxAge, ok := integerValue(policy["MaximumEventAgeInSeconds"])
 			if !ok {
@@ -533,7 +501,7 @@ func (p *Pack) runRetries(ctx context.Context) time.Time {
 				_ = collection.Delete(ctx, kv.Key)
 				continue
 			}
-			deliveryErr := DeliverTarget(ctx, p.deps, identity, str(target["Arn"]), target, payload)
+			deliveryErr := DeliverTarget(ctx, p.deps, identity, spi.Str(target["Arn"]), target, payload)
 			if deliveryErr == nil {
 				_ = collection.Delete(ctx, kv.Key)
 				continue
@@ -608,13 +576,13 @@ func (p *Pack) retryTarget(ctx context.Context, identity spi.Identity, key strin
 
 func (p *Pack) deadLetter(ctx context.Context, identity spi.Identity, rec, target map[string]any, payload []byte, attempts int, exhausted string, deliveryErr error) {
 	config, _ := target["DeadLetterConfig"].(map[string]any)
-	arn := str(config["Arn"])
+	arn := spi.Str(config["Arn"])
 	if arn == "" {
 		return
 	}
 	code, message := targetError(deliveryErr)
 	values := map[string]string{
-		"RULE_ARN": str(rec["RuleArn"]), "TARGET_ARN": str(target["Arn"]), "ERROR_CODE": code,
+		"RULE_ARN": spi.Str(rec["RuleArn"]), "TARGET_ARN": spi.Str(target["Arn"]), "ERROR_CODE": code,
 		"ERROR_MESSAGE": message, "RETRY_ATTEMPTS": strconv.Itoa(attempts),
 	}
 	if exhausted != "" {
@@ -658,7 +626,7 @@ func ruleARN(identity spi.Identity, key string) string {
 }
 
 func parsedTime(value any) time.Time {
-	parsed, _ := time.Parse(time.RFC3339Nano, str(value))
+	parsed, _ := time.Parse(time.RFC3339Nano, spi.Str(value))
 	return parsed
 }
 
@@ -692,7 +660,7 @@ func targetRetryAfter(deliveryErr error, now time.Time) (time.Time, bool) {
 	if !ok {
 		return time.Time{}, false
 	}
-	raw := str(fault.Fields["RetryAfter"])
+	raw := spi.Str(fault.Fields["RetryAfter"])
 	if raw == "" {
 		return time.Time{}, false
 	}
@@ -753,11 +721,11 @@ func storeTargetError(rec map[string]any, deliveryErr error) {
 
 func storedTargetError(rec map[string]any) error {
 	stored, _ := rec["_mirrorLastError"].(map[string]any)
-	if code := str(stored["Code"]); code != "" {
+	if code := spi.Str(stored["Code"]); code != "" {
 		fields, _ := stored["Fields"].(map[string]any)
-		return &spi.Fault{Code: code, Message: str(stored["Message"]), HTTPStatus: intValue(stored["HTTPStatus"]), Fault: str(stored["Fault"]), Fields: fields}
+		return &spi.Fault{Code: code, Message: spi.Str(stored["Message"]), HTTPStatus: intValue(stored["HTTPStatus"]), Fault: spi.Str(stored["Fault"]), Fields: fields}
 	}
-	return &spi.Fault{Code: "InternalError", Message: str(stored["Message"]), HTTPStatus: 500, Fault: "server"}
+	return &spi.Fault{Code: "InternalError", Message: spi.Str(stored["Message"]), HTTPStatus: 500, Fault: "server"}
 }
 
 func validateTargetReliability(target map[string]any) string {
@@ -781,7 +749,7 @@ func validateTargetReliability(target map[string]any) string {
 	}
 	if raw, exists := target["DeadLetterConfig"]; exists {
 		config, ok := raw.(map[string]any)
-		arn := str(config["Arn"])
+		arn := spi.Str(config["Arn"])
 		if !ok || (arn != "" && (!strings.Contains(arn, ":sqs:") || strings.HasSuffix(arn, ".fifo"))) {
 			return "DeadLetterConfig Arn must identify a standard SQS queue."
 		}
@@ -790,20 +758,20 @@ func validateTargetReliability(target map[string]any) string {
 }
 
 func targetPayload(target, event map[string]any, fallback []byte) []byte {
-	if input := str(target["Input"]); input != "" {
+	if input := spi.Str(target["Input"]); input != "" {
 		return []byte(input)
 	}
-	if path := str(target["InputPath"]); path != "" {
+	if path := spi.Str(target["InputPath"]); path != "" {
 		if raw, err := json.Marshal(eventPath(event, path)); err == nil {
 			return raw
 		}
 	}
 	transformer, _ := target["InputTransformer"].(map[string]any)
-	template := str(transformer["InputTemplate"])
+	template := spi.Str(transformer["InputTemplate"])
 	paths, _ := transformer["InputPathsMap"].(map[string]any)
 	if template != "" {
 		for key, path := range paths {
-			raw, _ := json.Marshal(eventPath(event, str(path)))
+			raw, _ := json.Marshal(eventPath(event, spi.Str(path)))
 			template = strings.ReplaceAll(template, "<"+key+">", string(raw))
 		}
 		return []byte(template)
@@ -849,12 +817,12 @@ func eventPathTokens(value any, tokens []string) any {
 }
 
 func ruleMatches(rule map[string]any, bus string, event map[string]any) bool {
-	if str(rule["State"]) == "DISABLED" {
+	if spi.Str(rule["State"]) == "DISABLED" {
 		return false
 	}
-	ruleBus := eventBusName(str(rule["EventBusName"]))
+	ruleBus := eventBusName(spi.Str(rule["EventBusName"]))
 	bus = eventBusName(bus)
-	pattern := str(rule["EventPattern"])
+	pattern := spi.Str(rule["EventPattern"])
 	return ruleBus == bus && pattern != "" && matchEventPattern(pattern, event)
 }
 
@@ -890,7 +858,7 @@ func DeliverTarget(ctx context.Context, deps spi.Deps, identity spi.Identity, ar
 		return err
 	case strings.Contains(arn, ":states:"):
 		parameters, _ := target["StateMachineParameters"].(map[string]any)
-		invocation := str(parameters["InvocationType"])
+		invocation := spi.Str(parameters["InvocationType"])
 		operation := "StartExecution"
 		if invocation == "REQUEST_RESPONSE" {
 			operation = "StartSyncExecution"
@@ -901,8 +869,8 @@ func DeliverTarget(ctx context.Context, deps spi.Deps, identity spi.Identity, ar
 		if err != nil {
 			return err
 		}
-		if operation == "StartSyncExecution" && str(response.Output["status"]) != "SUCCEEDED" {
-			return &spi.Fault{Code: "TargetInvocationFailed", Message: str(response.Output["cause"]), HTTPStatus: 500, Fault: "server"}
+		if operation == "StartSyncExecution" && spi.Str(response.Output["status"]) != "SUCCEEDED" {
+			return &spi.Fault{Code: "TargetInvocationFailed", Message: spi.Str(response.Output["cause"]), HTTPStatus: 500, Fault: "server"}
 		}
 		return nil
 	case strings.Contains(arn, ":api-destination/"):
@@ -919,23 +887,21 @@ func InvokeAPIDestination(ctx context.Context, deps spi.Deps, identity spi.Ident
 	if !ok {
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "API destination does not exist.", HTTPStatus: 404, Fault: "client"}
 	}
-	connection, ok := eventRecord(ctx, deps, identity, "connections", arnResourceName(str(destination["ConnectionArn"]), "connection/"))
+	connection, ok := eventRecord(ctx, deps, identity, "connections", arnResourceName(spi.Str(destination["ConnectionArn"]), "connection/"))
 	if !ok {
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Connection does not exist.", HTTPStatus: 404, Fault: "client"}
 	}
 	if err := waitAPIDestinationRate(ctx, deps, identity, arnResourceName(arn, "api-destination/"), destination); err != nil {
 		return nil, err
 	}
-	endpoint := str(destination["InvocationEndpoint"])
-	for _, value := range anySlice(parameters["PathParameterValues"]) {
-		endpoint = strings.Replace(endpoint, "*", url.PathEscape(str(value)), 1)
+	endpoint := spi.Str(destination["InvocationEndpoint"])
+	for _, value := range spi.Slice(parameters["PathParameterValues"]) {
+		endpoint = strings.Replace(endpoint, "*", url.PathEscape(spi.Str(value)), 1)
 	}
 	headers := map[string]any{"Content-Type": "application/json; charset=utf-8"}
-	for key, value := range mapValue(parameters["HeaderParameters"]) {
-		headers[key] = value
-	}
+	maps.Copy(headers, mapValue(parameters["HeaderParameters"]))
 	result, err := eventhttp.Invoke(ctx, connection, eventhttp.Call{
-		Endpoint: endpoint, Method: str(destination["HttpMethod"]), Body: payload,
+		Endpoint: endpoint, Method: spi.Str(destination["HttpMethod"]), Body: payload,
 		Headers: headers, Query: mapValue(parameters["QueryStringParameters"]),
 		Timeout: 5 * time.Second, MaxRequestBytes: 64 << 10, MaxResponseBytes: 6 << 20,
 		UserAgent: "Amazon/EventBridge/ApiDestinations", Range: "bytes=0-1048575", RevealSecrets: true,
@@ -963,7 +929,7 @@ type apiDestinationRateState struct {
 }
 
 func waitAPIDestinationRate(ctx context.Context, deps spi.Deps, identity spi.Identity, name string, destination map[string]any) error {
-	rate, err := strconv.Atoi(toString(destination["InvocationRateLimitPerSecond"]))
+	rate, err := strconv.Atoi(spi.JSONText(destination["InvocationRateLimitPerSecond"]))
 	if err != nil || rate < 1 {
 		rate = 300
 	}
@@ -1000,12 +966,8 @@ func waitAPIDestinationRate(ctx context.Context, deps spi.Deps, identity spi.Ide
 }
 
 func eventRecord(ctx context.Context, deps spi.Deps, identity spi.Identity, collection, name string) (map[string]any, bool) {
-	body, ok, _ := deps.Store.Scope(identity.Account, identity.Region).Collection(collection).Get(ctx, name)
-	var record map[string]any
-	if !ok || json.Unmarshal(body, &record) != nil {
-		return nil, false
-	}
-	return record, true
+	record, ok, _ := spi.GetJSON(ctx, deps.Store.Scope(identity.Account, identity.Region).Collection(collection), name)
+	return record, ok
 }
 
 func arnResourceName(arn, marker string) string {
@@ -1014,18 +976,7 @@ func arnResourceName(arn, marker string) string {
 	return name
 }
 
-func mergeConnectionBody(payload []byte, raw any) ([]byte, error) {
-	return eventhttp.MergeBody(payload, raw, 64<<10)
-}
-
-func anySlice(value any) []any {
-	values, _ := value.([]any)
-	return values
-}
-
 func mapValue(value any) map[string]any { values, _ := value.(map[string]any); return values }
-
-func str(v any) string { s, _ := v.(string); return s }
 
 func lastColon(s string) int {
 	for i := len(s) - 1; i >= 0; i-- {

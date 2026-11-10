@@ -54,8 +54,7 @@ func (p *runner) runS3TablesQuery(ctx context.Context, req *spi.Request, sql, da
 			return nil, nil, fmt.Errorf("table %s.%s not found", db, table)
 		}
 		raw, _, _ := p.col(req, "s3trows").Get(ctx, key)
-		var doc s3Rows
-		_ = json.Unmarshal(raw, &doc)
+		doc := spi.Decode[s3Rows](raw)
 		doc.Rows = append(doc.Rows, parseValues(query[at+len(" VALUES "):])...)
 		raw, _ = json.Marshal(doc)
 		_ = p.col(req, "s3trows").Put(ctx, key, raw)
@@ -79,8 +78,7 @@ func (p *runner) putS3Table(ctx context.Context, req *spi.Request, bucket, datab
 		"format": "ICEBERG", "columns": cols, "metadataLocation": "",
 	})
 	_ = p.col(req, "s3tt").Put(ctx, key, rec)
-	raw, _ := json.Marshal(s3Rows{Rows: rows})
-	return p.col(req, "s3trows").Put(ctx, key, raw)
+	return spi.PutJSON(ctx, p.col(req, "s3trows"), key, s3Rows{Rows: rows})
 }
 
 // s3Rows is a table's stored rows, in the shape the s3tables row plane and
@@ -100,12 +98,10 @@ func (p *runner) scanS3Table(ctx context.Context, req *spi.Request, bucket strin
 	if !ok {
 		return nil, nil, fmt.Errorf("table %s.%s not found", selection.db, selection.table)
 	}
-	var table map[string]any
-	_ = json.Unmarshal(raw, &table)
+	table := spi.JSONObject(raw)
 	columns := stringValues(table["columns"])
 	raw, _, _ = p.col(req, "s3trows").Get(ctx, key)
-	var doc s3Rows
-	_ = json.Unmarshal(raw, &doc)
+	doc := spi.Decode[s3Rows](raw)
 	stored := doc.Rows
 	projection := columns
 	if len(selection.cols) > 0 {

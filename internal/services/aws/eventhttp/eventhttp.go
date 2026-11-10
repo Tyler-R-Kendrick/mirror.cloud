@@ -45,12 +45,8 @@ func Connection(ctx context.Context, deps spi.Deps, identity spi.Identity, arn s
 	if !found || name == "" {
 		return nil, false
 	}
-	body, ok, _ := deps.Store.Scope(identity.Account, identity.Region).Collection("connections").Get(ctx, name)
-	var connection map[string]any
-	if !ok || json.Unmarshal(body, &connection) != nil {
-		return nil, false
-	}
-	return connection, true
+	connection, ok, _ := spi.GetJSON(ctx, deps.Store.Scope(identity.Account, identity.Region).Collection("connections"), name)
+	return connection, ok
 }
 
 // Invoke performs a call using an EventBridge connection.
@@ -95,7 +91,7 @@ func Invoke(ctx context.Context, connection map[string]any, call Call) (Result, 
 		request.Header.Set("Range", call.Range)
 	}
 	client := &http.Client{Timeout: call.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	authorizationType := stringValue(connection["AuthorizationType"])
+	authorizationType := spi.Str(connection["AuthorizationType"])
 	if err := authorize(ctx, client, request, authorizationType, auth); err != nil {
 		return Result{}, err
 	}
@@ -204,10 +200,10 @@ func authorize(ctx context.Context, client *http.Client, request *http.Request, 
 	switch authorizationType {
 	case "API_KEY":
 		apiKey, _ := auth["ApiKeyAuthParameters"].(map[string]any)
-		request.Header.Set(stringValue(apiKey["ApiKeyName"]), stringValue(apiKey["ApiKeyValue"]))
+		request.Header.Set(spi.Str(apiKey["ApiKeyName"]), spi.Str(apiKey["ApiKeyValue"]))
 	case "BASIC":
 		basic, _ := auth["BasicAuthParameters"].(map[string]any)
-		request.SetBasicAuth(stringValue(basic["Username"]), stringValue(basic["Password"]))
+		request.SetBasicAuth(spi.Str(basic["Username"]), spi.Str(basic["Password"]))
 	case "OAUTH_CLIENT_CREDENTIALS":
 		token, err := oauthToken(ctx, client, auth)
 		if err != nil {
@@ -225,7 +221,7 @@ func oauthToken(ctx context.Context, client *http.Client, auth map[string]any) (
 	parameters, _ := oauth["OAuthHttpParameters"].(map[string]any)
 	form := url.Values{}
 	applyParameters(form.Set, parameters["BodyParameters"])
-	request, err := http.NewRequestWithContext(ctx, stringValue(oauth["HttpMethod"]), stringValue(oauth["AuthorizationEndpoint"]), strings.NewReader(form.Encode()))
+	request, err := http.NewRequestWithContext(ctx, spi.Str(oauth["HttpMethod"]), spi.Str(oauth["AuthorizationEndpoint"]), strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", err
 	}
@@ -235,22 +231,22 @@ func oauthToken(ctx context.Context, client *http.Client, auth map[string]any) (
 	applyParameters(query.Set, parameters["QueryStringParameters"])
 	request.URL.RawQuery = query.Encode()
 	credentials, _ := oauth["ClientParameters"].(map[string]any)
-	request.SetBasicAuth(stringValue(credentials["ClientID"]), stringValue(credentials["ClientSecret"]))
+	request.SetBasicAuth(spi.Str(credentials["ClientID"]), spi.Str(credentials["ClientSecret"]))
 	response, err := client.Do(request)
 	if err != nil {
 		return "", err
 	}
 	defer response.Body.Close()
 	var token map[string]any
-	if response.StatusCode < 200 || response.StatusCode >= 300 || json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&token) != nil || stringValue(token["access_token"]) == "" {
+	if response.StatusCode < 200 || response.StatusCode >= 300 || json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&token) != nil || spi.Str(token["access_token"]) == "" {
 		return "", &spi.Fault{Code: "ConnectionFailure", Message: "OAuth token request failed.", HTTPStatus: 502, Fault: "server"}
 	}
-	tokenType := stringValue(token["token_type"])
+	tokenType := spi.Str(token["token_type"])
 	if tokenType == "" {
 		tokenType = "Bearer"
 	}
 	// ponytail: fetch per invocation; cache by connection when throughput makes token calls material.
-	return tokenType + " " + stringValue(token["access_token"]), nil
+	return tokenType + " " + spi.Str(token["access_token"]), nil
 }
 
 type values interface {
@@ -263,10 +259,10 @@ func applyMap(target values, raw map[string]any) {
 		switch value := rawValue.(type) {
 		case []any:
 			for _, item := range value {
-				target.Add(key, stringValue(item))
+				target.Add(key, spi.Str(item))
 			}
 		default:
-			target.Set(key, stringValue(value))
+			target.Set(key, spi.Str(value))
 		}
 	}
 }
@@ -274,7 +270,7 @@ func applyMap(target values, raw map[string]any) {
 func applyParameters(set func(string, string), raw any) {
 	for _, value := range sliceValue(raw) {
 		parameter, _ := value.(map[string]any)
-		set(stringValue(parameter["Key"]), stringValue(parameter["Value"]))
+		set(spi.Str(parameter["Key"]), spi.Str(parameter["Value"]))
 	}
 }
 
@@ -285,12 +281,12 @@ func traceRequest(request *http.Request, body []byte, invocation, auth map[strin
 	if !reveal {
 		for _, raw := range sliceValue(invocation["HeaderParameters"]) {
 			parameter, _ := raw.(map[string]any)
-			headers.Del(stringValue(parameter["Key"]))
+			headers.Del(spi.Str(parameter["Key"]))
 		}
 		query := request.URL.Query()
 		for _, raw := range sliceValue(invocation["QueryStringParameters"]) {
 			parameter, _ := raw.(map[string]any)
-			query.Del(stringValue(parameter["Key"]))
+			query.Del(spi.Str(parameter["Key"]))
 		}
 		if len(query) != len(request.URL.Query()) {
 			copy := *request.URL
@@ -299,7 +295,7 @@ func traceRequest(request *http.Request, body []byte, invocation, auth map[strin
 		}
 		if authorizationType == "API_KEY" {
 			apiKey, _ := auth["ApiKeyAuthParameters"].(map[string]any)
-			headers.Del(stringValue(apiKey["ApiKeyName"]))
+			headers.Del(spi.Str(apiKey["ApiKeyName"]))
 		} else {
 			headers.Del("Authorization")
 		}
@@ -318,8 +314,3 @@ func traceResponse(response *http.Response, body []byte) map[string]any {
 }
 
 func sliceValue(value any) []any { values, _ := value.([]any); return values }
-
-func stringValue(value any) string {
-	text, _ := value.(string)
-	return text
-}

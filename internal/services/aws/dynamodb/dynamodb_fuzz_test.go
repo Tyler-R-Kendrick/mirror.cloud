@@ -49,8 +49,8 @@ func FuzzTableLifecycle(f *testing.F) {
 		_, missingTransaction := call("TransactWriteItems", map[string]any{"TransactItems": []any{map[string]any{"Put": map[string]any{"TableName": name, "Item": map[string]any{}}}}})
 		_, ttlDescribe := call("DescribeTimeToLive", table)
 		_, ttlUpdate := call("UpdateTimeToLive", table)
-		tags := asSlice(listed.Output["Tags"])
-		if created != nil || duplicate == nil || tagsErr != nil || len(tags) != 1 || str(asMap(tags[0])["Value"]) != name || firstPut != nil || firstReturn.Output["Attributes"] != nil || putErr != nil || secondReturn.Output["Attributes"] == nil || getErr != nil || str(asMap(asMap(got.Output["Item"])["data"])["S"]) != value || invalidProjection == nil || ttlEnable != nil || expiredPut != nil || expirationErr != nil || expired != 1 || expiredGet != nil || expiredItem.Output["Item"] != nil || deleted != nil || missing == nil || missingQuery == nil || missingTransaction == nil || ttlDescribe == nil || ttlUpdate == nil {
+		tags := spi.Slice(listed.Output["Tags"])
+		if created != nil || duplicate == nil || tagsErr != nil || len(tags) != 1 || spi.Str(spi.Object(tags[0])["Value"]) != name || firstPut != nil || firstReturn.Output["Attributes"] != nil || putErr != nil || secondReturn.Output["Attributes"] == nil || getErr != nil || spi.Str(spi.Object(spi.Object(got.Output["Item"])["data"])["S"]) != value || invalidProjection == nil || ttlEnable != nil || expiredPut != nil || expirationErr != nil || expired != 1 || expiredGet != nil || expiredItem.Output["Item"] != nil || deleted != nil || missing == nil || missingQuery == nil || missingTransaction == nil || ttlDescribe == nil || ttlUpdate == nil {
 			t.Fatal("table lifecycle was not create/tag/conflict/delete/missing")
 		}
 	})
@@ -84,7 +84,7 @@ func FuzzDynamoDBBinaryValues(f *testing.F) {
 		}}})
 		deleted, deletedErr := call("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "one"}}})
 		three, threeErr := call("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "three"}}})
-		if putErr != nil || batchErr != nil || oneErr != nil || twoErr != nil || getBatchErr != nil || changeErr != nil || deletedErr != nil || threeErr != nil || len(asMap(batch.Output["UnprocessedItems"])) != 0 || len(asMap(changed.Output["UnprocessedItems"])) != 0 || len(asSlice(asMap(gotBatch.Output["Responses"])["T"])) != 2 || len(asMap(gotBatch.Output["UnprocessedKeys"])) != 0 || deleted.Output["Item"] != nil || str(asMap(asMap(one.Output["Item"])["data"])["B"]) != encoded || str(asMap(asMap(two.Output["Item"])["data"])["B"]) != encoded || str(asMap(asMap(three.Output["Item"])["data"])["B"]) != encoded {
+		if putErr != nil || batchErr != nil || oneErr != nil || twoErr != nil || getBatchErr != nil || changeErr != nil || deletedErr != nil || threeErr != nil || len(spi.Object(batch.Output["UnprocessedItems"])) != 0 || len(spi.Object(changed.Output["UnprocessedItems"])) != 0 || len(spi.Slice(spi.Object(gotBatch.Output["Responses"])["T"])) != 2 || len(spi.Object(gotBatch.Output["UnprocessedKeys"])) != 0 || deleted.Output["Item"] != nil || spi.Str(spi.Object(spi.Object(one.Output["Item"])["data"])["B"]) != encoded || spi.Str(spi.Object(spi.Object(two.Output["Item"])["data"])["B"]) != encoded || spi.Str(spi.Object(spi.Object(three.Output["Item"])["data"])["B"]) != encoded {
 			t.Fatal("binary values did not round trip")
 		}
 	})
@@ -106,7 +106,7 @@ func FuzzDynamoDBTableClass(f *testing.F) {
 		}
 		updated, updateErr := call("UpdateTable", map[string]any{"TableName": "T", "TableClass": class})
 		described, describeErr := call("DescribeTable", map[string]any{"TableName": "T"})
-		if createErr != nil || updateErr != nil || describeErr != nil || str(asMap(asMap(updated.Output["TableDescription"])["TableClassSummary"])["TableClass"]) != class || str(asMap(asMap(described.Output["Table"])["TableClassSummary"])["TableClass"]) != class {
+		if createErr != nil || updateErr != nil || describeErr != nil || spi.Str(spi.Object(spi.Object(updated.Output["TableDescription"])["TableClassSummary"])["TableClass"]) != class || spi.Str(spi.Object(spi.Object(described.Output["Table"])["TableClassSummary"])["TableClass"]) != class {
 			t.Fatal("table class did not persist")
 		}
 	})
@@ -135,7 +135,7 @@ func FuzzDynamoDBTableMetadata(f *testing.F) {
 		}
 		if onDemand {
 			input["BillingMode"] = "PAY_PER_REQUEST"
-			delete(asMap(asSlice(input["GlobalSecondaryIndexes"])[0]), "ProvisionedThroughput")
+			delete(spi.Object(spi.Slice(input["GlobalSecondaryIndexes"])[0]), "ProvisionedThroughput")
 		} else {
 			input["ProvisionedThroughput"] = map[string]any{"ReadCapacityUnits": 5, "WriteCapacityUnits": 5}
 		}
@@ -145,13 +145,13 @@ func FuzzDynamoDBTableMetadata(f *testing.F) {
 		if createErr != nil || describeErr != nil || invalidErr == nil {
 			t.Fatalf("metadata calls: create=%v describe=%v invalid=%v", createErr, describeErr, invalidErr)
 		}
-		createdTable := asMap(created.Output["TableDescription"])
-		describedTable := asMap(described.Output["Table"])
-		if createdTable["TableStatus"] != "CREATING" || describedTable["TableStatus"] != "ACTIVE" || asInt(asMap(describedTable["WarmThroughput"])["ReadUnitsPerSecond"]) != int(reads) || asInt(asMap(describedTable["WarmThroughput"])["WriteUnitsPerSecond"]) != int(writes) || asMap(describedTable["WarmThroughput"])["Status"] != "ACTIVE" || str(asMap(describedTable["SSEDescription"])["KMSMasterKeyArn"]) != "arn:aws:kms:us-east-1:000000000000:key/"+key || len(asSlice(describedTable["GlobalSecondaryIndexes"])) != 1 {
+		createdTable := spi.Object(created.Output["TableDescription"])
+		describedTable := spi.Object(described.Output["Table"])
+		if createdTable["TableStatus"] != "CREATING" || describedTable["TableStatus"] != "ACTIVE" || spi.Integer(spi.Object(describedTable["WarmThroughput"])["ReadUnitsPerSecond"]) != int(reads) || spi.Integer(spi.Object(describedTable["WarmThroughput"])["WriteUnitsPerSecond"]) != int(writes) || spi.Object(describedTable["WarmThroughput"])["Status"] != "ACTIVE" || spi.Str(spi.Object(describedTable["SSEDescription"])["KMSMasterKeyArn"]) != "arn:aws:kms:us-east-1:000000000000:key/"+key || len(spi.Slice(describedTable["GlobalSecondaryIndexes"])) != 1 {
 			t.Fatalf("table metadata did not round trip: %#v %#v", createdTable, describedTable)
 		}
-		throughput := asMap(describedTable["ProvisionedThroughput"])
-		if onDemand && (str(asMap(describedTable["BillingModeSummary"])["BillingMode"]) != "PAY_PER_REQUEST" || asInt(throughput["ReadCapacityUnits"]) != 0) || !onDemand && asInt(throughput["ReadCapacityUnits"]) != 5 {
+		throughput := spi.Object(describedTable["ProvisionedThroughput"])
+		if onDemand && (spi.Str(spi.Object(describedTable["BillingModeSummary"])["BillingMode"]) != "PAY_PER_REQUEST" || spi.Integer(throughput["ReadCapacityUnits"]) != 0) || !onDemand && spi.Integer(throughput["ReadCapacityUnits"]) != 5 {
 			t.Fatalf("billing metadata did not round trip: %#v", describedTable)
 		}
 	})
@@ -176,14 +176,14 @@ func FuzzDynamoDBDefaultSSE(f *testing.F) {
 		if firstErr != nil || secondErr != nil {
 			t.Fatalf("default SSE create: %v %v", firstErr, secondErr)
 		}
-		firstARN := str(asMap(asMap(first.Output["TableDescription"])["SSEDescription"])["KMSMasterKeyArn"])
-		secondARN := str(asMap(asMap(second.Output["TableDescription"])["SSEDescription"])["KMSMasterKeyArn"])
+		firstARN := spi.Str(spi.Object(spi.Object(first.Output["TableDescription"])["SSEDescription"])["KMSMasterKeyArn"])
+		secondARN := spi.Str(spi.Object(spi.Object(second.Output["TableDescription"])["SSEDescription"])["KMSMasterKeyArn"])
 		if disable {
 			disabled, err := call("UpdateTable", map[string]any{"TableName": "A" + name, "SSESpecification": map[string]any{"Enabled": false}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if asMap(asMap(disabled.Output["TableDescription"])["SSEDescription"])["Status"] != "UPDATING" {
+			if spi.Object(spi.Object(disabled.Output["TableDescription"])["SSEDescription"])["Status"] != "UPDATING" {
 				t.Fatalf("default SSE disable: %#v", disabled)
 			}
 		}
@@ -192,7 +192,7 @@ func FuzzDynamoDBDefaultSSE(f *testing.F) {
 		if updateErr != nil || keyErr != nil {
 			t.Fatalf("default SSE did not persist: first=%q second=%q update=%#v key=%#v errors=%v/%v", firstARN, secondARN, updated, key, updateErr, keyErr)
 		}
-		if firstARN == "" || firstARN != secondARN || str(asMap(asMap(updated.Output["TableDescription"])["SSEDescription"])["KMSMasterKeyArn"]) != firstARN || asMap(key.Output["KeyMetadata"])["KeyManager"] != "AWS" {
+		if firstARN == "" || firstARN != secondARN || spi.Str(spi.Object(spi.Object(updated.Output["TableDescription"])["SSEDescription"])["KMSMasterKeyArn"]) != firstARN || spi.Object(key.Output["KeyMetadata"])["KeyManager"] != "AWS" {
 			t.Fatalf("default SSE did not persist: first=%q second=%q update=%#v key=%#v", firstARN, secondARN, updated, key)
 		}
 	})
@@ -220,12 +220,12 @@ func FuzzDynamoDBBackupInsights(f *testing.F) {
 		if updateErr != nil || describeErr != nil || insightsErr != nil {
 			t.Fatalf("backup calls: update=%v describe=%v insights=%v", updateErr, describeErr, insightsErr)
 		}
-		updatedRecovery := asMap(asMap(updated.Output["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
-		describedRecovery := asMap(asMap(described.Output["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
+		updatedRecovery := spi.Object(spi.Object(updated.Output["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
+		describedRecovery := spi.Object(spi.Object(described.Output["ContinuousBackupsDescription"])["PointInTimeRecoveryDescription"])
 		wantStatus := "DISABLED"
 		if enabled {
 			wantStatus = "ENABLED"
-			if asInt(updatedRecovery["RecoveryPeriodInDays"]) != 35 || asInt(describedRecovery["EarliestRestorableDateTime"]) != 0 || asInt(describedRecovery["LatestRestorableDateTime"]) != int(seconds) {
+			if spi.Integer(updatedRecovery["RecoveryPeriodInDays"]) != 35 || spi.Integer(describedRecovery["EarliestRestorableDateTime"]) != 0 || spi.Integer(describedRecovery["LatestRestorableDateTime"]) != int(seconds) {
 				t.Fatalf("recovery window %#v %#v", updatedRecovery, describedRecovery)
 			}
 		} else if describedRecovery["EarliestRestorableDateTime"] != nil || describedRecovery["LatestRestorableDateTime"] != nil {
@@ -261,18 +261,18 @@ func FuzzDynamoDBPartiQL(f *testing.F) {
 		var responses, presentItems, missingItems []any
 		ageValue := ""
 		if batch != nil {
-			responses = asSlice(batch.Output["Responses"])
+			responses = spi.Slice(batch.Output["Responses"])
 		}
 		if got != nil {
-			ageValue = str(asMap(asMap(got.Output["Item"])["Age"])["N"])
+			ageValue = spi.Str(spi.Object(spi.Object(got.Output["Item"])["Age"])["N"])
 		}
 		if present != nil {
-			presentItems = asSlice(present.Output["Items"])
+			presentItems = spi.Slice(present.Output["Items"])
 		}
 		if missing != nil {
-			missingItems = asSlice(missing.Output["Items"])
+			missingItems = spi.Slice(missing.Output["Items"])
 		}
-		if batchErr != nil || getErr != nil || presentErr != nil || missingErr != nil || emptyErr == nil || len(responses) != 1 || str(asMap(responses[0])["TableName"]) != "T" || ageValue != value || (len(presentItems) == 1) != hasName || (len(missingItems) == 1) == hasName {
+		if batchErr != nil || getErr != nil || presentErr != nil || missingErr != nil || emptyErr == nil || len(responses) != 1 || spi.Str(spi.Object(responses[0])["TableName"]) != "T" || ageValue != value || (len(presentItems) == 1) != hasName || (len(missingItems) == 1) == hasName {
 			t.Fatal("PartiQL update, missing predicate, or validation changed")
 		}
 	})
@@ -301,7 +301,7 @@ func FuzzDynamoDBStreamRecords(f *testing.F) {
 		item := map[string]any{"id": map[string]any{"S": "one"}, "data": map[string]any{"B": base64.StdEncoding.EncodeToString(raw)}}
 		_, firstErr := call("PutItem", map[string]any{"TableName": "T", "Item": item})
 		_, duplicateErr := call("PutItem", map[string]any{"TableName": "T", "Item": item})
-		arn := str(asMap(created.Output["TableDescription"])["LatestStreamArn"])
+		arn := spi.Str(spi.Object(created.Output["TableDescription"])["LatestStreamArn"])
 		iterator, iteratorErr := call("GetShardIterator", map[string]any{"StreamArn": arn, "ShardId": "shardId-000000000000", "ShardIteratorType": "TRIM_HORIZON"})
 		if iteratorErr != nil {
 			t.Fatal(iteratorErr)
@@ -310,19 +310,19 @@ func FuzzDynamoDBStreamRecords(f *testing.F) {
 		if recordsErr != nil {
 			t.Fatal(recordsErr)
 		}
-		records := asSlice(stream.Output["Records"])
+		records := spi.Slice(stream.Output["Records"])
 		if firstErr != nil || duplicateErr != nil || len(records) != 1 {
 			t.Fatalf("stream writes: %#v %v %v", stream, firstErr, duplicateErr)
 		}
-		dynamodb := asMap(asMap(records[0])["dynamodb"])
+		dynamodb := spi.Object(spi.Object(records[0])["dynamodb"])
 		wantSize := 5
 		if !keysOnly {
 			wantSize += 9 + len(raw)
-			if str(asMap(asMap(dynamodb["NewImage"])["data"])["B"]) != base64.StdEncoding.EncodeToString(raw) {
+			if spi.Str(spi.Object(spi.Object(dynamodb["NewImage"])["data"])["B"]) != base64.StdEncoding.EncodeToString(raw) {
 				t.Fatal("binary stream value changed")
 			}
 		}
-		if asInt(dynamodb["SizeBytes"]) != wantSize || dynamodb["StreamViewType"] != view || !strings.HasPrefix(str(stream.Output["NextShardIterator"]), arn+"|") {
+		if spi.Integer(dynamodb["SizeBytes"]) != wantSize || dynamodb["StreamViewType"] != view || !strings.HasPrefix(spi.Str(stream.Output["NextShardIterator"]), arn+"|") {
 			t.Fatalf("stream record metadata: %#v", dynamodb)
 		}
 	})
@@ -365,13 +365,13 @@ func FuzzDynamoDBKinesisDestination(f *testing.F) {
 		if disable {
 			want = 1
 		}
-		records := asSlice(response.Output["Records"])
+		records := spi.Slice(response.Output["Records"])
 		if err != nil || len(records) != want {
 			t.Fatalf("destination record count: %d want %d: %v", len(records), want, err)
 		}
-		payload, _ := base64.StdEncoding.DecodeString(str(asMap(records[0])["Data"]))
+		payload, _ := base64.StdEncoding.DecodeString(spi.Str(spi.Object(records[0])["Data"]))
 		var event map[string]any
-		if json.Unmarshal(payload, &event) != nil || event["eventName"] != "INSERT" || str(asMap(asMap(asMap(event["dynamodb"])["NewImage"])["data"])["B"]) != encoded {
+		if json.Unmarshal(payload, &event) != nil || event["eventName"] != "INSERT" || spi.Str(spi.Object(spi.Object(spi.Object(event["dynamodb"])["NewImage"])["data"])["B"]) != encoded {
 			t.Fatalf("destination binary payload: %s", payload)
 		}
 	})
@@ -402,7 +402,7 @@ func FuzzDynamoDBGlobalTable(f *testing.F) {
 			t.Fatal(err)
 		}
 		response, err := call(reader, "GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "one"}}})
-		if err != nil || str(asMap(asMap(response.Output["Item"])["data"])["B"]) != encoded {
+		if err != nil || spi.Str(spi.Object(spi.Object(response.Output["Item"])["data"])["B"]) != encoded {
 			t.Fatal("replica changed binary item")
 		}
 		if deleteReplica {
@@ -448,12 +448,12 @@ func FuzzDynamoDBTransactions(f *testing.F) {
 		_, firstErr := call("TransactWriteItems", input)
 		_, replayErr := call("TransactWriteItems", input)
 		got, getErr := call("GetItem", map[string]any{"TableName": "T", "Key": map[string]any{"id": map[string]any{"S": "item"}}})
-		item := asMap(got.Output["Item"])
+		item := spi.Object(got.Output["Item"])
 		if cancel {
 			if firstErr == nil || replayErr == nil || getErr != nil || got.Output["Item"] != nil {
 				t.Fatal("canceled transaction committed")
 			}
-		} else if firstErr != nil || replayErr != nil || getErr != nil || str(asMap(item["data"])["B"]) != encoded {
+		} else if firstErr != nil || replayErr != nil || getErr != nil || spi.Str(spi.Object(item["data"])["B"]) != encoded {
 			t.Fatal("transaction or idempotent replay changed binary data")
 		}
 	})

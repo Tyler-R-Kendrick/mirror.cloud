@@ -2,7 +2,6 @@ package iam
 
 import (
 	"context"
-	"encoding/json"
 	"net/url"
 	"strconv"
 	"strings"
@@ -55,11 +54,11 @@ func (a *authorizer) authorize(ctx context.Context, id spi.Identity, serviceID, 
 func requestConditionValues(req *spi.Request) map[string]string {
 	values := map[string]string{"aws:RequestedRegion": req.Identity.Region}
 	if options, ok := req.Input["MetadataOptions"].(map[string]any); ok {
-		if token := str(options["HttpTokens"]); token != "" {
+		if token := spi.Str(options["HttpTokens"]); token != "" {
 			values["ec2:MetadataHttpTokens"] = token
 		}
 	}
-	if arn := str(req.Input["PolicyArn"]); arn != "" {
+	if arn := spi.Str(req.Input["PolicyArn"]); arn != "" {
 		values["iam:PolicyArn"] = arn
 	}
 	addRequestTags(values, req.Input["Tags"])
@@ -80,7 +79,7 @@ func addRequestTags(values map[string]string, raw any) {
 	switch tags := raw.(type) {
 	case map[string]any:
 		for key, value := range tags {
-			addRequestTag(values, key, str(value))
+			addRequestTag(values, key, spi.Str(value))
 		}
 	case map[string]string:
 		for key, value := range tags {
@@ -89,9 +88,9 @@ func addRequestTags(values map[string]string, raw any) {
 	case []any:
 		for _, rawTag := range tags {
 			tag, _ := rawTag.(map[string]any)
-			key, value := str(tag["Key"]), str(tag["Value"])
+			key, value := spi.Str(tag["Key"]), spi.Str(tag["Value"])
 			if key == "" {
-				key, value = str(tag["key"]), str(tag["value"])
+				key, value = spi.Str(tag["key"]), spi.Str(tag["value"])
 			}
 			addRequestTag(values, key, value)
 		}
@@ -119,20 +118,14 @@ func principal(ctx context.Context, scope spi.Scope, id spi.Identity) (kind, nam
 		return "role", role, true
 	}
 	if id.AccessKeyID != "" {
-		kvs, _, _ := scope.Collection("iamak").List(ctx, "", "", 0)
-		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
-			if str(rec["AccessKeyId"]) == id.AccessKeyID {
-				return "user", str(rec["UserName"]), !strings.EqualFold(str(rec["Status"]), "Inactive")
+		for _, kv := range spi.Entries(ctx, scope.Collection("iamak"), "", "", 0) {
+			rec := spi.JSONObject(kv.Value)
+			if spi.Str(rec["AccessKeyId"]) == id.AccessKeyID {
+				return "user", spi.Str(rec["UserName"]), !strings.EqualFold(spi.Str(rec["Status"]), "Inactive")
 			}
 		}
 	}
 	return "user", userFromARN(id.ARN), true
-}
-
-func decide(docs []map[string]any, action, resource string) string {
-	return decideWithContext(docs, action, resource, nil)
 }
 
 func decideWithContext(docs []map[string]any, action, resource string, values map[string]string) string {
@@ -195,8 +188,7 @@ func loadPrincipalDocs(ctx context.Context, scope spi.Scope, kind, name string) 
 	docs := loadInlineDocs(ctx, scope.Collection(inline), name+":")
 	docs = append(docs, loadAttachedDocs(ctx, scope, attached, name+":")...)
 	if kind == "user" {
-		groups, _, _ := scope.Collection("iamug:"+name).List(ctx, "", "", 0)
-		for _, kv := range groups {
+		for _, kv := range spi.Entries(ctx, scope.Collection("iamug:"+name), "", "", 0) {
 			docs = append(docs, loadInlineDocs(ctx, scope.Collection("iamgp"), kv.Key+":")...)
 			docs = append(docs, loadAttachedDocs(ctx, scope, "iamgable", kv.Key+":")...)
 		}
@@ -206,10 +198,8 @@ func loadPrincipalDocs(ctx context.Context, scope spi.Scope, kind, name string) 
 
 func loadInlineDocs(ctx context.Context, col spi.Collection, prefix string) []map[string]any {
 	var docs []map[string]any
-	kvs, _, _ := col.List(ctx, prefix, "", 0)
-	for _, kv := range kvs {
-		var rec map[string]any
-		_ = json.Unmarshal(kv.Value, &rec)
+	for _, kv := range spi.Entries(ctx, col, prefix, "", 0) {
+		rec := spi.JSONObject(kv.Value)
 		if d := parseDoc(rec["PolicyDocument"]); len(statements(d)) > 0 {
 			docs = append(docs, d)
 		}
@@ -219,10 +209,8 @@ func loadInlineDocs(ctx context.Context, col spi.Collection, prefix string) []ma
 
 func loadAttachedDocs(ctx context.Context, scope spi.Scope, attachments, prefix string) []map[string]any {
 	var docs []map[string]any
-	atts, _, _ := scope.Collection(attachments).List(ctx, prefix, "", 0)
-	for _, kv := range atts {
-		var rec map[string]any
-		_ = json.Unmarshal(kv.Value, &rec)
+	for _, kv := range spi.Entries(ctx, scope.Collection(attachments), prefix, "", 0) {
+		rec := spi.JSONObject(kv.Value)
 		arn, _ := rec["PolicyArn"].(string)
 		name := arn
 		if i := strings.LastIndex(arn, "/"); i >= 0 {
@@ -232,13 +220,11 @@ func loadAttachedDocs(ctx context.Context, scope spi.Scope, attachments, prefix 
 		if !ok {
 			continue
 		}
-		var pol map[string]any
-		_ = json.Unmarshal(b, &pol)
+		pol := spi.JSONObject(b)
 		doc := pol["PolicyDocument"]
-		if version := str(pol["DefaultVersionId"]); version != "" && version != "v1" {
+		if version := spi.Str(pol["DefaultVersionId"]); version != "" && version != "v1" {
 			if vb, found, _ := scope.Collection("iampolver:"+name).Get(ctx, name+":"+version); found {
-				var rec map[string]any
-				_ = json.Unmarshal(vb, &rec)
+				rec := spi.JSONObject(vb)
 				doc = rec["Document"]
 			}
 		}
@@ -254,36 +240,31 @@ func loadSCPDocs(ctx context.Context, st spi.Store, id spi.Identity) []map[strin
 	if !ok {
 		return nil
 	}
-	var member map[string]any
-	_ = json.Unmarshal(b, &member)
-	scope := st.Scope(str(member["ManagementAccount"]), str(member["Region"]))
+	member := spi.JSONObject(b)
+	scope := st.Scope(spi.Str(member["ManagementAccount"]), spi.Str(member["Region"]))
 	col := scope.Collection("oattach")
 	policies := scope.Collection("opolicy")
-	targets := []string{str(member["RootId"])}
-	for parent, seen := str(member["ParentId"]), map[string]bool{}; parent != "" && parent != str(member["RootId"]) && !seen[parent]; {
+	targets := []string{spi.Str(member["RootId"])}
+	for parent, seen := spi.Str(member["ParentId"]), map[string]bool{}; parent != "" && parent != spi.Str(member["RootId"]) && !seen[parent]; {
 		seen[parent] = true
 		targets = append(targets, parent)
 		ou, found, _ := scope.Collection("oou").Get(ctx, parent)
 		if !found {
 			break
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(ou, &rec)
-		parent = str(rec["ParentId"])
+		rec := spi.JSONObject(ou)
+		parent = spi.Str(rec["ParentId"])
 	}
 	targets = append(targets, id.Account)
 	var docs []map[string]any
 	for _, target := range targets {
-		attachments, _, _ := col.List(ctx, target+"/", "", 0)
-		for _, attachment := range attachments {
-			var link map[string]any
-			_ = json.Unmarshal(attachment.Value, &link)
-			policy, found, _ := policies.Get(ctx, str(link["PolicyId"]))
+		for _, attachment := range spi.Entries(ctx, col, target+"/", "", 0) {
+			link := spi.JSONObject(attachment.Value)
+			policy, found, _ := policies.Get(ctx, spi.Str(link["PolicyId"]))
 			if !found {
 				continue
 			}
-			var rec map[string]any
-			_ = json.Unmarshal(policy, &rec)
+			rec := spi.JSONObject(policy)
 			if doc := parseDoc(rec["Content"]); len(statements(doc)) > 0 {
 				docs = append(docs, doc)
 			}
@@ -297,25 +278,16 @@ func parseDoc(v any) map[string]any {
 	case map[string]any:
 		return t
 	case string:
-		var m map[string]any
-		_ = json.Unmarshal([]byte(t), &m)
+		m := spi.Decode[map[string]any]([]byte(t))
 		return m
 	}
 	return map[string]any{}
 }
 
-func denyMatch(docs []map[string]any, action, resource string) bool {
-	return effectMatch(docs, "Deny", action, resource, nil)
-}
-
-func allowMatch(docs []map[string]any, action, resource string) bool {
-	return effectMatch(docs, "Allow", action, resource, nil)
-}
-
 func effectMatch(docs []map[string]any, effect, action, resource string, values map[string]string) bool {
 	for _, doc := range docs {
 		for _, st := range statements(doc) {
-			if strings.EqualFold(str(st["Effect"]), effect) && statementActionMatches(st, action) && statementResourceMatches(st, resource) && conditionsMatch(st["Condition"], values) {
+			if strings.EqualFold(spi.Str(st["Effect"]), effect) && statementActionMatches(st, action) && statementResourceMatches(st, resource) && conditionsMatch(st["Condition"], values) {
 				return true
 			}
 		}
@@ -376,7 +348,7 @@ func conditionsMatch(spec any, values map[string]string) bool {
 					return false
 				}
 			case "Null":
-				wantNull := strings.EqualFold(str(expected), "true")
+				wantNull := strings.EqualFold(spi.Str(expected), "true")
 				if wantNull == present {
 					return false
 				}
@@ -527,5 +499,3 @@ func asStrings(v any) []string {
 	}
 	return nil
 }
-
-func str(v any) string { s, _ := v.(string); return s }

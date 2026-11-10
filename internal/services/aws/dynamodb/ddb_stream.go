@@ -29,11 +29,11 @@ func tableFromStreamARN(arn string) string {
 }
 
 func (p *Pack) ensureStream(req *spi.Request, rec map[string]any, table string) {
-	spec := asMap(rec["StreamSpecification"])
+	spec := spi.Object(rec["StreamSpecification"])
 	if !truthy(spec["StreamEnabled"]) {
 		return
 	}
-	if str(rec["LatestStreamArn"]) != "" {
+	if spi.Str(rec["LatestStreamArn"]) != "" {
 		return
 	}
 	label := p.deps.Rand.Hex(8)
@@ -55,8 +55,7 @@ func (p *Pack) emitStream(ctx context.Context, req *spi.Request, table, event st
 			if event == "REMOVE" {
 				_ = p.col(regionalReq, "items:"+table).Delete(ctx, key)
 			} else {
-				encoded, _ := json.Marshal(item)
-				_ = p.col(regionalReq, "items:"+table).Put(ctx, key, encoded)
+				_ = spi.PutJSON(ctx, p.col(regionalReq, "items:"+table), key, item)
 			}
 		}
 		p.emitRegionalStream(ctx, regionalReq, table, event, item, old)
@@ -66,14 +65,14 @@ func (p *Pack) emitStream(ctx context.Context, req *spi.Request, table, event st
 func (p *Pack) emitRegionalStream(ctx context.Context, req *spi.Request, table, event string, item, old map[string]any) {
 	td := p.tableDef(ctx, req, table)
 	destinations := p.activeKinesisDestinations(ctx, req, table)
-	streamEnabled := truthy(asMap(td["StreamSpecification"])["StreamEnabled"])
+	streamEnabled := truthy(spi.Object(td["StreamSpecification"])["StreamEnabled"])
 	if !streamEnabled && len(destinations) == 0 {
 		return
 	}
 	if event == "REMOVE" && old == nil || event == "MODIFY" && reflect.DeepEqual(item, old) {
 		return
 	}
-	view := str(asMap(td["StreamSpecification"])["StreamViewType"])
+	view := spi.Str(spi.Object(td["StreamSpecification"])["StreamViewType"])
 	if view == "" {
 		view = "NEW_AND_OLD_IMAGES"
 	}
@@ -107,10 +106,10 @@ func (p *Pack) emitRegionalStream(ctx context.Context, req *spi.Request, table, 
 		}
 	}
 	size := streamItemSize(keys)
-	if image := asMap(ddb["NewImage"]); image != nil {
+	if image := spi.Object(ddb["NewImage"]); image != nil {
 		size += streamItemSize(image)
 	}
-	if image := asMap(ddb["OldImage"]); image != nil {
+	if image := spi.Object(ddb["OldImage"]); image != nil {
 		size += streamItemSize(image)
 	}
 	ddb["SizeBytes"] = size
@@ -133,9 +132,9 @@ func (p *Pack) emitRegionalStream(ctx context.Context, req *spi.Request, table, 
 }
 
 func (p *Pack) kinesisDestination(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	table := str(req.Input["TableName"])
+	table := spi.Str(req.Input["TableName"])
 	tableDefinition := p.tableDef(ctx, req, table)
-	if str(tableDefinition["TableName"]) == "" {
+	if spi.Str(tableDefinition["TableName"]) == "" {
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Requested resource not found: Table: " + table + " not found", HTTPStatus: 400, Fault: "client"}
 	}
 	if req.Operation == "DescribeKinesisStreamingDestination" {
@@ -149,7 +148,7 @@ func (p *Pack) kinesisDestination(ctx context.Context, req *spi.Request) (*spi.R
 		}
 		return &spi.Response{Output: map[string]any{"TableName": table, "KinesisDataStreamDestinations": destinations}}, nil
 	}
-	streamARN := str(req.Input["StreamArn"])
+	streamARN := spi.Str(req.Input["StreamArn"])
 	streamName := kinesisStreamName(req, streamARN)
 	key := table + "/" + streamARN
 	destinations := p.col(req, "kinesisdest")
@@ -162,36 +161,32 @@ func (p *Pack) kinesisDestination(ctx context.Context, req *spi.Request) (*spi.R
 			return nil, &spi.Fault{Code: "ValidationException", Message: "Kinesis stream not found: " + streamARN, HTTPStatus: 400, Fault: "client"}
 		}
 		record := map[string]any{"StreamArn": streamARN, "DestinationStatus": "ACTIVE"}
-		b, _ := json.Marshal(record)
-		_ = destinations.Put(ctx, key, b)
+		_ = spi.PutJSON(ctx, destinations, key, record)
 		return &spi.Response{Output: map[string]any{"TableName": table, "StreamArn": streamARN, "DestinationStatus": "ENABLING", "EnableKinesisStreamingConfiguration": map[string]any{}}}, nil
 	}
 	if !exists {
 		return nil, &spi.Fault{Code: "ValidationException", Message: "Table is not in a valid state to enable Kinesis Streaming Destination: No streaming destination with streamArn: " + streamARN + " found for table with tableName: " + table, HTTPStatus: 400, Fault: "client"}
 	}
-	var record map[string]any
-	_ = json.Unmarshal(stored, &record)
+	record := spi.JSONObject(stored)
 	if req.Operation == "DisableKinesisStreamingDestination" {
 		record["DestinationStatus"] = "DISABLED"
-		b, _ := json.Marshal(record)
-		_ = destinations.Put(ctx, key, b)
+		_ = spi.PutJSON(ctx, destinations, key, record)
 		return &spi.Response{Output: map[string]any{"TableName": table, "StreamArn": streamARN, "DestinationStatus": "DISABLING"}}, nil
 	}
-	configuration := asMap(req.Input["UpdateKinesisStreamingConfiguration"])
+	configuration := spi.Object(req.Input["UpdateKinesisStreamingConfiguration"])
 	if len(configuration) == 0 {
 		return nil, &spi.Fault{Code: "ValidationException", Message: "Streaming destination cannot be updated with given parameters: UpdateKinesisStreamingConfiguration cannot be null or contain only null values", HTTPStatus: 400, Fault: "client"}
 	}
-	precision := str(configuration["ApproximateCreationDateTimePrecision"])
+	precision := spi.Str(configuration["ApproximateCreationDateTimePrecision"])
 	if precision != "MILLISECOND" && precision != "MICROSECOND" {
 		return nil, &spi.Fault{Code: "ValidationException", Message: "1 validation error detected: Value '" + precision + "' at 'updateKinesisStreamingConfiguration.approximateCreationDateTimePrecision' failed to satisfy constraint: Member must satisfy enum value set: [MILLISECOND, MICROSECOND]", HTTPStatus: 400, Fault: "client"}
 	}
 	if record["ApproximateCreationDateTimePrecision"] == precision {
-		return nil, &spi.Fault{Code: "ValidationException", Message: "Invalid Request: Precision is already set to the desired value of " + precision + " for tableId: " + str(tableDefinition["TableId"]) + ", kdsArn: " + streamARN, HTTPStatus: 400, Fault: "client"}
+		return nil, &spi.Fault{Code: "ValidationException", Message: "Invalid Request: Precision is already set to the desired value of " + precision + " for tableId: " + spi.Str(tableDefinition["TableId"]) + ", kdsArn: " + streamARN, HTTPStatus: 400, Fault: "client"}
 	}
 	record["DestinationStatus"] = "ACTIVE"
 	record["ApproximateCreationDateTimePrecision"] = precision
-	b, _ := json.Marshal(record)
-	_ = destinations.Put(ctx, key, b)
+	_ = spi.PutJSON(ctx, destinations, key, record)
 	return &spi.Response{Output: map[string]any{"TableName": table, "StreamArn": streamARN, "DestinationStatus": "UPDATING", "UpdateKinesisStreamingConfiguration": configuration}}, nil
 }
 
@@ -215,7 +210,7 @@ func (p *Pack) activeKinesisDestinations(ctx context.Context, req *spi.Request, 
 func (p *Pack) emitKinesisDestinations(ctx context.Context, req *spi.Request, destinations []map[string]any, table, event string, dynamodb map[string]any) {
 	payload, _ := json.Marshal(map[string]any{"tableName": table, "eventName": event, "dynamodb": dynamodb})
 	for _, destination := range destinations {
-		streamName := kinesisStreamName(req, str(destination["StreamArn"]))
+		streamName := kinesisStreamName(req, spi.Str(destination["StreamArn"]))
 		if streamName == "" {
 			continue
 		}
@@ -226,9 +221,8 @@ func (p *Pack) emitKinesisDestinations(ctx context.Context, req *spi.Request, de
 			if err != nil || !ok {
 				return err
 			}
-			var stream map[string]any
-			_ = json.Unmarshal(b, &stream)
-			sequence := asInt(stream["Seq"])
+			stream := spi.JSONObject(b)
+			sequence := spi.Integer(stream["Seq"])
 			stream["Seq"] = sequence + 1
 			b, _ = json.Marshal(stream)
 			if err := streams.Put(streamName, b); err != nil {
@@ -258,16 +252,14 @@ func (p *Pack) nextStreamSeq(ctx context.Context, req *spi.Request, table string
 }
 
 func (p *Pack) listStreams(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	want := first(req.Input, "TableName")
-	kvs, _, _ := p.col(req, "tables").List(ctx, "", "", 0)
+	want := spi.First(req.Input, "TableName")
 	streams := []any{}
-	for _, kv := range kvs {
+	for _, kv := range spi.Entries(ctx, p.col(req, "tables"), "", "", 0) {
 		if want != "" && kv.Key != want {
 			continue
 		}
-		var td map[string]any
-		_ = json.Unmarshal(kv.Value, &td)
-		if !truthy(asMap(td["StreamSpecification"])["StreamEnabled"]) {
+		td := spi.JSONObject(kv.Value)
+		if !truthy(spi.Object(td["StreamSpecification"])["StreamEnabled"]) {
 			continue
 		}
 		streams = append(streams, map[string]any{
@@ -280,14 +272,14 @@ func (p *Pack) listStreams(ctx context.Context, req *spi.Request) (*spi.Response
 }
 
 func (p *Pack) describeStream(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	arn := first(req.Input, "StreamArn")
+	arn := spi.First(req.Input, "StreamArn")
 	table := tableFromStreamARN(arn)
 	td := p.tableDef(ctx, req, table)
-	if str(td["TableName"]) == "" && table != "" {
+	if spi.Str(td["TableName"]) == "" && table != "" {
 		td["TableName"] = table
 	}
-	spec := asMap(td["StreamSpecification"])
-	view := str(spec["StreamViewType"])
+	spec := spi.Object(td["StreamSpecification"])
+	view := spi.Str(spec["StreamViewType"])
 	if view == "" {
 		view = "NEW_AND_OLD_IMAGES"
 	}
@@ -302,7 +294,7 @@ func (p *Pack) describeStream(ctx context.Context, req *spi.Request) (*spi.Respo
 			"StartingSequenceNumber": "000000000000001",
 		},
 	}}
-	if first(req.Input, "ExclusiveStartShardId") == shardID {
+	if spi.First(req.Input, "ExclusiveStartShardId") == shardID {
 		shards = []any{}
 	}
 	return &spi.Response{Output: map[string]any{"StreamDescription": map[string]any{
@@ -317,10 +309,10 @@ func (p *Pack) describeStream(ctx context.Context, req *spi.Request) (*spi.Respo
 }
 
 func (p *Pack) getShardIterator(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	arn := first(req.Input, "StreamArn")
+	arn := spi.First(req.Input, "StreamArn")
 	table := tableFromStreamARN(arn)
 	seq := 1
-	switch str(req.Input["ShardIteratorType"]) {
+	switch spi.Str(req.Input["ShardIteratorType"]) {
 	case "LATEST":
 		b, ok, _ := p.col(req, "ddbseq").Get(ctx, table)
 		n := 0
@@ -329,9 +321,9 @@ func (p *Pack) getShardIterator(ctx context.Context, req *spi.Request) (*spi.Res
 		}
 		seq = n + 1
 	case "AT_SEQUENCE_NUMBER":
-		seq, _ = strconv.Atoi(str(req.Input["SequenceNumber"]))
+		seq, _ = strconv.Atoi(spi.Str(req.Input["SequenceNumber"]))
 	case "AFTER_SEQUENCE_NUMBER":
-		seq, _ = strconv.Atoi(str(req.Input["SequenceNumber"]))
+		seq, _ = strconv.Atoi(spi.Str(req.Input["SequenceNumber"]))
 		seq++
 	default: // TRIM_HORIZON
 		seq = 1
@@ -341,14 +333,14 @@ func (p *Pack) getShardIterator(ctx context.Context, req *spi.Request) (*spi.Res
 }
 
 func (p *Pack) getStreamRecords(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	parts := strings.SplitN(str(req.Input["ShardIterator"]), "|", 3)
+	parts := strings.SplitN(spi.Str(req.Input["ShardIterator"]), "|", 3)
 	if len(parts) != 3 {
 		return nil, &spi.Fault{Code: "ValidationException", HTTPStatus: 400, Fault: "client"}
 	}
 	arn := parts[0]
 	table := tableFromStreamARN(arn)
 	start, _ := strconv.Atoi(parts[1])
-	limit := asInt(req.Input["Limit"])
+	limit := spi.Integer(req.Input["Limit"])
 	if limit <= 0 {
 		limit = 1000
 	}
@@ -360,8 +352,7 @@ func (p *Pack) getStreamRecords(ctx context.Context, req *spi.Request) (*spi.Res
 		if n < start {
 			continue
 		}
-		var m map[string]any
-		_ = json.Unmarshal(kv.Value, &m)
+		m := spi.JSONObject(kv.Value)
 		recs = append(recs, m)
 		next = n + 1
 		if len(recs) >= limit {
@@ -375,7 +366,7 @@ func (p *Pack) getStreamRecords(ctx context.Context, req *spi.Request) (*spi.Res
 func streamItemSize(item map[string]any) int {
 	size := 0
 	for name, raw := range item {
-		size += len(name) + streamAttributeSize(asMap(raw))
+		size += len(name) + streamAttributeSize(spi.Object(raw))
 	}
 	return size
 }
@@ -384,33 +375,33 @@ func streamAttributeSize(attribute map[string]any) int {
 	for kind, raw := range attribute {
 		switch kind {
 		case "S", "N":
-			return len(str(raw))
+			return len(spi.Str(raw))
 		case "B":
-			decoded, _ := base64.StdEncoding.DecodeString(str(raw))
+			decoded, _ := base64.StdEncoding.DecodeString(spi.Str(raw))
 			return len(decoded)
 		case "BOOL", "NULL":
 			return 1
 		case "SS", "NS":
 			size := 0
-			for _, value := range asSlice(raw) {
-				size += len(str(value))
+			for _, value := range spi.Slice(raw) {
+				size += len(spi.Str(value))
 			}
 			return size
 		case "BS":
 			size := 0
-			for _, value := range asSlice(raw) {
-				decoded, _ := base64.StdEncoding.DecodeString(str(value))
+			for _, value := range spi.Slice(raw) {
+				decoded, _ := base64.StdEncoding.DecodeString(spi.Str(value))
 				size += len(decoded)
 			}
 			return size
 		case "L":
 			size := 0
-			for _, value := range asSlice(raw) {
-				size += streamAttributeSize(asMap(value))
+			for _, value := range spi.Slice(raw) {
+				size += streamAttributeSize(spi.Object(value))
 			}
 			return size
 		case "M":
-			return streamItemSize(asMap(raw))
+			return streamItemSize(spi.Object(raw))
 		}
 	}
 	return 0

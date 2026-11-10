@@ -93,8 +93,7 @@ func (p records) invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 			if n < start {
 				continue
 			}
-			var m map[string]any
-			_ = json.Unmarshal(kv.Value, &m)
+			m := spi.JSONObject(kv.Value)
 			all = append(all, rec{n, m})
 		}
 		sort.Slice(all, func(i, j int) bool { return all[i].n < all[j].n })
@@ -149,23 +148,18 @@ func (p records) curSeq(ctx context.Context, req *spi.Request, name string) int 
 	if !ok {
 		return 0
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	return asInt(rec["Seq"])
 }
 
 func (p records) nextSeq(ctx context.Context, req *spi.Request, name string) int {
-	b, ok, _ := p.col(req, "kinesis").Get(ctx, name)
 	var rec map[string]any
-	if ok {
-		_ = json.Unmarshal(b, &rec)
-	} else {
+	if !spi.ReadJSON(ctx, p.col(req, "kinesis"), name, &rec) {
 		rec = map[string]any{"StreamName": name, "Status": "ACTIVE"}
 	}
 	n := asInt(rec["Seq"])
 	rec["Seq"] = n + 1
-	raw, _ := json.Marshal(rec)
-	_ = p.col(req, "kinesis").Put(ctx, name, raw)
+	_ = spi.PutJSON(ctx, p.col(req, "kinesis"), name, rec)
 	return n
 }
 

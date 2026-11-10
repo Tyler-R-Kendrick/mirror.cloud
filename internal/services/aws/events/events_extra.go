@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net"
 	"reflect"
 	"regexp"
@@ -25,7 +26,7 @@ func (p *Pack) extra(ctx context.Context, req *spi.Request) (*spi.Response, erro
 	case "ListConnections":
 		return p.listConnections(ctx, req)
 	case "DeleteConnection", "DeauthorizeConnection":
-		name := first(req.Input, "Name")
+		name := spi.First(req.Input, "Name")
 		if op == "DeauthorizeConnection" {
 			return p.deauthorizeConnection(ctx, req)
 		}
@@ -41,21 +42,22 @@ func (p *Pack) extra(ctx context.Context, req *spi.Request) (*spi.Response, erro
 			st = "DISABLED"
 		}
 		fields := map[string]any{"State": st}
-		key := eventKey(eventBus(req.Input), first(req.Input, "Name"))
+		key := eventKey(eventBus(req.Input), spi.First(req.Input, "Name"))
 		rule, ok := p.load(ctx, req, "rules", key)
 		if !ok {
 			return nil, resourceMissing("Rule")
 		}
-		if st == "ENABLED" && str(rule["ScheduleExpression"]) != "" {
-			if next, err := nextScheduledRule(str(rule["ScheduleExpression"]), p.deps.Clock.Now()); err == nil {
+		if st == "ENABLED" && spi.Str(rule["ScheduleExpression"]) != "" {
+			if next, err := nextScheduledRule(spi.Str(rule["ScheduleExpression"]), p.deps.Clock.Now()); err == nil {
 				fields[eventRuleNext] = next.UTC().Format(time.RFC3339Nano)
 			}
 		}
-		response, err := p.patch(ctx, req, "rules", key, fields)
+		maps.Copy(rule, fields)
+		p.saveEventRecord(ctx, req, "rules", key, rule)
 		p.notify()
-		return response, err
+		return &spi.Response{Output: rule}, nil
 	case "TestEventPattern":
-		ok := matchEventPattern(str(req.Input["EventPattern"]), req.Input["Event"])
+		ok := matchEventPattern(spi.Str(req.Input["EventPattern"]), req.Input["Event"])
 		return &spi.Response{Output: map[string]any{"Result": ok}}, nil
 	case "PutPartnerEvents":
 		entries, _ := req.Input["Entries"].([]any)
@@ -66,7 +68,7 @@ func (p *Pack) extra(ctx context.Context, req *spi.Request) (*spi.Response, erro
 }
 
 func (p *Pack) createConnection(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := first(req.Input, "Name")
+	name := spi.First(req.Input, "Name")
 	if err := validateConnection(req.Input); err != nil {
 		return nil, err
 	}
@@ -84,14 +86,14 @@ func (p *Pack) createConnection(ctx context.Context, req *spi.Request) (*spi.Res
 }
 
 func (p *Pack) updateConnection(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := first(req.Input, "Name")
+	name := spi.First(req.Input, "Name")
 	previous, exists := p.load(ctx, req, "connections", name)
 	if !exists {
 		return nil, resourceMissing("Connection")
 	}
 	record := map[string]any{}
 	mergeEventRecord(record, previous)
-	if authorizationType := str(req.Input["AuthorizationType"]); authorizationType != "" && authorizationType != str(previous["AuthorizationType"]) {
+	if authorizationType := spi.Str(req.Input["AuthorizationType"]); authorizationType != "" && authorizationType != spi.Str(previous["AuthorizationType"]) {
 		delete(record, "AuthParameters")
 	}
 	mergeEventRecord(record, req.Input)
@@ -111,7 +113,7 @@ func (p *Pack) updateConnection(ctx context.Context, req *spi.Request) (*spi.Res
 }
 
 func (p *Pack) describeConnection(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	record, exists := p.load(ctx, req, "connections", first(req.Input, "Name"))
+	record, exists := p.load(ctx, req, "connections", spi.First(req.Input, "Name"))
 	if !exists {
 		return nil, resourceMissing("Connection")
 	}
@@ -122,8 +124,7 @@ func (p *Pack) listConnections(ctx context.Context, req *spi.Request) (*spi.Resp
 	kvs, _, _ := p.col(req, "connections").List(ctx, "", "", 0)
 	connections := make([]any, 0, len(kvs))
 	for _, kv := range kvs {
-		var record map[string]any
-		_ = json.Unmarshal(kv.Value, &record)
+		record := spi.JSONObject(kv.Value)
 		public := publicConnection(record)
 		delete(public, "AuthParameters")
 		connections = append(connections, public)
@@ -132,7 +133,7 @@ func (p *Pack) listConnections(ctx context.Context, req *spi.Request) (*spi.Resp
 }
 
 func (p *Pack) deauthorizeConnection(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := first(req.Input, "Name")
+	name := spi.First(req.Input, "Name")
 	record, exists := p.load(ctx, req, "connections", name)
 	if !exists {
 		return nil, resourceMissing("Connection")
@@ -145,14 +146,14 @@ func (p *Pack) deauthorizeConnection(ctx context.Context, req *spi.Request) (*sp
 }
 
 func (p *Pack) createAPIDestination(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := first(req.Input, "Name")
+	name := spi.First(req.Input, "Name")
 	if err := validateAPIDestination(req.Input); err != nil {
 		return nil, err
 	}
 	if _, exists := p.load(ctx, req, "apidest", name); exists {
 		return nil, resourceExists("API destination")
 	}
-	if err := p.validateDestinationConnection(ctx, req, str(req.Input["ConnectionArn"])); err != nil {
+	if err := p.validateDestinationConnection(ctx, req, spi.Str(req.Input["ConnectionArn"])); err != nil {
 		return nil, err
 	}
 	now := eventTimestamp(p.deps.Clock.Now())
@@ -169,7 +170,7 @@ func (p *Pack) createAPIDestination(ctx context.Context, req *spi.Request) (*spi
 }
 
 func (p *Pack) updateAPIDestination(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := first(req.Input, "Name")
+	name := spi.First(req.Input, "Name")
 	previous, exists := p.load(ctx, req, "apidest", name)
 	if !exists {
 		return nil, resourceMissing("API destination")
@@ -182,21 +183,13 @@ func (p *Pack) updateAPIDestination(ctx context.Context, req *spi.Request) (*spi
 		return nil, err
 	}
 	if _, changed := req.Input["ConnectionArn"]; changed {
-		if err := p.validateDestinationConnection(ctx, req, str(record["ConnectionArn"])); err != nil {
+		if err := p.validateDestinationConnection(ctx, req, spi.Str(record["ConnectionArn"])); err != nil {
 			return nil, err
 		}
 	}
 	record["LastModifiedTime"] = eventTimestamp(p.deps.Clock.Now())
 	p.saveEventRecord(ctx, req, "apidest", name, record)
 	return &spi.Response{Output: apiDestinationResult(record)}, nil
-}
-
-func (p *Pack) describeAPIDestination(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	record, exists := p.load(ctx, req, "apidest", first(req.Input, "Name"))
-	if !exists {
-		return nil, resourceMissing("API destination")
-	}
-	return &spi.Response{Output: record}, nil
 }
 
 func (p *Pack) validateDestinationConnection(ctx context.Context, req *spi.Request, arn string) error {
@@ -211,10 +204,10 @@ func (p *Pack) validateDestinationConnection(ctx context.Context, req *spi.Reque
 }
 
 func validateConnection(record map[string]any) error {
-	if !validEventResourceName(first(record, "Name")) {
+	if !validEventResourceName(spi.First(record, "Name")) {
 		return validationFault("Name is required and must be a valid EventBridge resource name.")
 	}
-	authorizationType := str(record["AuthorizationType"])
+	authorizationType := spi.Str(record["AuthorizationType"])
 	auth, ok := record["AuthParameters"].(map[string]any)
 	key := map[string]string{"API_KEY": "ApiKeyAuthParameters", "BASIC": "BasicAuthParameters", "OAUTH_CLIENT_CREDENTIALS": "OAuthParameters"}[authorizationType]
 	if !ok || key == "" {
@@ -231,17 +224,17 @@ func validateConnection(record map[string]any) error {
 	}
 	switch authorizationType {
 	case "API_KEY":
-		if str(parameters["ApiKeyName"]) == "" || str(parameters["ApiKeyValue"]) == "" {
+		if spi.Str(parameters["ApiKeyName"]) == "" || spi.Str(parameters["ApiKeyValue"]) == "" {
 			return validationFault("ApiKeyName and ApiKeyValue are required.")
 		}
 	case "BASIC":
-		if str(parameters["Username"]) == "" || str(parameters["Password"]) == "" {
+		if spi.Str(parameters["Username"]) == "" || spi.Str(parameters["Password"]) == "" {
 			return validationFault("Username and Password are required.")
 		}
 	case "OAUTH_CLIENT_CREDENTIALS":
 		clients, _ := parameters["ClientParameters"].(map[string]any)
-		method := str(parameters["HttpMethod"])
-		if str(parameters["AuthorizationEndpoint"]) == "" || (method != "GET" && method != "POST" && method != "PUT") || str(clients["ClientID"]) == "" || str(clients["ClientSecret"]) == "" {
+		method := spi.Str(parameters["HttpMethod"])
+		if spi.Str(parameters["AuthorizationEndpoint"]) == "" || (method != "GET" && method != "POST" && method != "PUT") || spi.Str(clients["ClientID"]) == "" || spi.Str(clients["ClientSecret"]) == "" {
 			return validationFault("Complete OAuth client credentials are required.")
 		}
 	}
@@ -249,12 +242,12 @@ func validateConnection(record map[string]any) error {
 }
 
 func validateAPIDestination(record map[string]any) error {
-	method := str(record["HttpMethod"])
-	if !validEventResourceName(first(record, "Name")) || str(record["ConnectionArn"]) == "" || str(record["InvocationEndpoint"]) == "" || !oneOf(method, "POST", "GET", "HEAD", "OPTIONS", "PUT", "PATCH", "DELETE") {
+	method := spi.Str(record["HttpMethod"])
+	if !validEventResourceName(spi.First(record, "Name")) || spi.Str(record["ConnectionArn"]) == "" || spi.Str(record["InvocationEndpoint"]) == "" || !oneOf(method, "POST", "GET", "HEAD", "OPTIONS", "PUT", "PATCH", "DELETE") {
 		return validationFault("Name, ConnectionArn, InvocationEndpoint, and a supported HttpMethod are required.")
 	}
 	if value, exists := record["InvocationRateLimitPerSecond"]; exists {
-		rate, err := strconv.Atoi(toString(value))
+		rate, err := strconv.Atoi(spi.JSONText(value))
 		if err != nil || rate < 1 {
 			return validationFault("InvocationRateLimitPerSecond must be a positive integer.")
 		}
@@ -290,8 +283,7 @@ func mergeEventRecord(destination, source map[string]any) {
 
 func publicConnection(record map[string]any) map[string]any {
 	body, _ := json.Marshal(record)
-	var public map[string]any
-	_ = json.Unmarshal(body, &public)
+	public := spi.JSONObject(body)
 	redactConnectionSecrets(public)
 	return public
 }
@@ -348,21 +340,7 @@ func resourceExists(kind string) error {
 }
 
 func (p *Pack) saveEventRecord(ctx context.Context, req *spi.Request, collection, name string, record map[string]any) {
-	body, _ := json.Marshal(record)
-	_ = p.col(req, collection).Put(ctx, name, body)
-}
-
-func (p *Pack) patch(ctx context.Context, req *spi.Request, col, id string, fields map[string]any) (*spi.Response, error) {
-	rec, _ := p.load(ctx, req, col, id)
-	if rec == nil {
-		rec = map[string]any{"Name": id}
-	}
-	for k, v := range fields {
-		rec[k] = v
-	}
-	b, _ := json.Marshal(rec)
-	_ = p.col(req, col).Put(ctx, id, b)
-	return &spi.Response{Output: rec}, nil
+	_ = spi.PutJSON(ctx, p.col(req, collection), name, record)
 }
 
 func (p *Pack) load(ctx context.Context, req *spi.Request, col, id string) (map[string]any, bool) {
@@ -370,8 +348,7 @@ func (p *Pack) load(ctx context.Context, req *spi.Request, col, id string) (map[
 	if !ok {
 		return nil, false
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	return rec, true
 }
 
@@ -405,7 +382,7 @@ func matchFields(pattern, event map[string]any) bool {
 	for key, want := range pattern {
 		if key == "$or" {
 			matched := false
-			for _, alternative := range asSlice(want) {
+			for _, alternative := range spi.Slice(want) {
 				if fields, ok := alternative.(map[string]any); ok && matchFields(fields, event) {
 					matched = true
 					break
@@ -435,7 +412,7 @@ func matchNested(pattern map[string]any, value any) bool {
 	if event, ok := value.(map[string]any); ok {
 		return matchFields(pattern, event)
 	}
-	for _, item := range asSlice(value) {
+	for _, item := range spi.Slice(value) {
 		if event, ok := item.(map[string]any); ok && matchFields(pattern, event) {
 			return true
 		}
@@ -471,7 +448,7 @@ func matchClause(clause, value any, exists bool) bool {
 	if !exists {
 		return false
 	}
-	got := str(value)
+	got := spi.Str(value)
 	if prefix, ok := op["prefix"].(string); ok {
 		return strings.HasPrefix(got, prefix)
 	}
@@ -489,7 +466,7 @@ func matchClause(clause, value any, exists bool) bool {
 		return err == nil && ip != nil && block.Contains(net.ParseIP(got))
 	}
 	if reject, ok := op["anything-but"]; ok {
-		values := asSlice(reject)
+		values := spi.Slice(reject)
 		if values == nil {
 			values = []any{reject}
 		}
@@ -513,16 +490,16 @@ func matchWildcard(pattern, value string) bool {
 }
 
 func matchNumeric(conditions []any, value any) bool {
-	got, err := strconv.ParseFloat(strings.TrimSpace(toString(value)), 64)
+	got, err := strconv.ParseFloat(strings.TrimSpace(spi.JSONText(value)), 64)
 	if err != nil || len(conditions) < 2 || len(conditions)%2 != 0 {
 		return false
 	}
 	for i := 0; i < len(conditions); i += 2 {
-		want, err := strconv.ParseFloat(toString(conditions[i+1]), 64)
+		want, err := strconv.ParseFloat(spi.JSONText(conditions[i+1]), 64)
 		if err != nil {
 			return false
 		}
-		switch str(conditions[i]) {
+		switch spi.Str(conditions[i]) {
 		case "=":
 			if got != want {
 				return false
@@ -548,26 +525,4 @@ func matchNumeric(conditions []any, value any) bool {
 		}
 	}
 	return true
-}
-
-func toString(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	b, _ := json.Marshal(v)
-	return string(b)
-}
-
-func first(in map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if s := str(in[k]); s != "" {
-			return s
-		}
-	}
-	return ""
-}
-
-func asSlice(v any) []any {
-	a, _ := v.([]any)
-	return a
 }

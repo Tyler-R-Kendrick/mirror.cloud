@@ -2,8 +2,9 @@ schema: bir/1
 service: aws.cloudformation
 
 # Transcribed from the hand-written pack, not established against the real
-# service. Stacks are records keyed by name; nothing ever fails
-# asynchronously, every create is COMPLETE the moment it is written, and the
+# service. Stacks are records keyed by name; nothing runs asynchronously, so a
+# stack is CREATE_COMPLETE, or ROLLBACK_COMPLETE or ROLLBACK_FAILED when its
+# create failed, the moment CreateStack answers, and the
 # describe family over stack sets, types, templates, scans and refactors
 # answers an empty record instead of faulting on an absent one.
 provenance: authored
@@ -16,17 +17,18 @@ provenance: authored
 missing_input_error: Validation
 
 # The template engine is Go, in internal/services/aws/cloudformation:
-# CreateStack, UpdateStack and ExecuteChangeSet parse a JSON or YAML-subset
+# CreateStack, UpdateStack and ExecuteChangeSet parse a JSON or YAML
 # template, resolve Ref/GetAtt/Join/Sub against pseudo-parameters, and
 # provision each resource through the service that owns it; DeleteStack
-# deprovisions them in reverse; ValidateTemplate and GetTemplateSummary parse
+# deprovisions them in reverse, keeping any it cannot delete; ValidateTemplate and GetTemplateSummary parse
 # without provisioning; ListExports flattens every stack's outputs. The stack
 # record below is the one the engine writes.
-native: [CreateStack, UpdateStack, DeleteStack, ExecuteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports]
+native: [CreateStack, UpdateStack, DeleteStack, CreateChangeSet, ExecuteChangeSet, DeleteChangeSet, ValidateTemplate, GetTemplateSummary, ListExports, UpdateTerminationProtection]
 
 resources:
-  # The stack record, written by the native template engine and patched by
-  # the rollback family and UpdateTerminationProtection.
+  # The stack record, written only by the native template engine, in one
+  # store transaction per write: UpdateTerminationProtection is native so
+  # that its write cannot fall between another's read and write.
   stack:
     collection: cfn
     id:
@@ -118,6 +120,10 @@ errors:
     code: ChangeSetNotFound
     http: 404
     fault: client
+  AlreadyExists:
+    code: AlreadyExistsException
+    http: 400
+    fault: client
 
 operations:
   # --- stacks --------------------------------------------------------------
@@ -137,10 +143,15 @@ operations:
       member: Stacks
       paginate: model
       key: "'StackName' in input ? string(input.StackName) : ''"
+    # StackStatusReason ("Success/failure message associated with the stack
+    # status") is the error a failed rollback or delete kept.
     output:
       Stacks: >-
-        items.map(s, {'StackName': s.Name, 'StackId': s.ID,
-          'StackStatus': s.Status, 'Outputs': s.Outputs})
+        items.map(s, merge({'StackName': s.Name, 'StackId': s.ID,
+          'StackStatus': s.Status, 'Outputs': s.Outputs,
+          'NotificationARNs': 'NotificationARNs' in s && s.NotificationARNs != null ? s.NotificationARNs : [],
+          'Tags': 'Tags' in s && s.Tags != null ? s.Tags : []},
+          'Reason' in s ? {'StackStatusReason': s.Reason} : {}))
 
   ListStacks:
     list:
@@ -149,8 +160,8 @@ operations:
       paginate: model
     output:
       StackSummaries: >-
-        items.map(s, {'StackName': s.Name, 'StackId': s.ID,
-          'StackStatus': s.Status})
+        items.map(s, merge({'StackName': s.Name, 'StackId': s.ID,
+          'StackStatus': s.Status}, 'Reason' in s ? {'StackStatusReason': s.Reason} : {}))
 
   GetTemplate:
     reads:
@@ -168,9 +179,10 @@ operations:
       - { cond: s_found, error: Validation }
     output:
       StackResourceSummaries: >-
-        s.Resources.map(r, {'LogicalResourceId': r.Logical,
+        ('Resources' in s && s.Resources != null ? s.Resources : []).map(r, merge({'LogicalResourceId': r.Logical,
           'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
-          'ResourceStatus': 'CREATE_COMPLETE'})
+          'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'},
+          'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))
 
   DescribeStackEvents:
     reads:
@@ -179,10 +191,10 @@ operations:
       - { cond: s_found, error: Validation }
     output:
       StackEvents: >-
-        s.Resources.map(r, {'LogicalResourceId': r.Logical,
+        ('Resources' in s && s.Resources != null ? s.Resources : []).map(r, merge({'LogicalResourceId': r.Logical,
           'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
-          'ResourceStatus': 'CREATE_COMPLETE', 'StackName': s.Name,
-          'StackId': s.ID})
+          'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE', 'StackName': s.Name,
+          'StackId': s.ID}, 'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))
         + [{'LogicalResourceId': s.Name,
             'ResourceType': 'AWS::CloudFormation::Stack',
             'ResourceStatus': s.Status, 'StackName': s.Name, 'StackId': s.ID}]
@@ -190,33 +202,19 @@ operations:
   DescribeStackResource:
     reads:
       s: { resource: stack }
+    let:
+      rs: "s_found && 'Resources' in s && s.Resources != null ? s.Resources : []"
     require:
       - { cond: s_found, error: Validation }
-      - cond: "s.Resources.exists(r, r.Logical == string(input.LogicalResourceId))"
+      - cond: "rs.exists(r, r.Logical == string(input.LogicalResourceId))"
         error: Validation
     output:
       StackResourceDetail: >-
-        s.Resources.filter(r, r.Logical ==
-          string(input.LogicalResourceId)).map(r, {'LogicalResourceId':
+        rs.filter(r, r.Logical ==
+          string(input.LogicalResourceId)).map(r, merge({'LogicalResourceId':
           r.Logical, 'PhysicalResourceId': r.Physical, 'ResourceType': r.Type,
-          'ResourceStatus': 'CREATE_COMPLETE', 'StackName': s.Name,
-          'StackId': s.ID})[0]
-
-  UpdateTerminationProtection:
-    reads:
-      s: { resource: stack }
-    require:
-      - { cond: s_found, error: Validation }
-    effects:
-      - put:
-          resource: stack
-          record:
-            Protect: >-
-              input.EnableTerminationProtection == true
-              || input.EnableTerminationProtection == 'true'
-              || input.EnableTerminationProtection == 'True'
-    output:
-      StackId: s.ID
+          'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE',
+          'StackName': s.Name, 'StackId': s.ID}, 'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))[0]
 
   # The pack also deprovisions every stack resource into the sibling
   # services' collections before deleting the record; that loop is the shadow
@@ -228,61 +226,60 @@ operations:
     output:
       StackResources: >-
         s_found && 'Resources' in s && s.Resources != null
-          ? s.Resources.map(r, {'LogicalResourceId': r.Logical, 'PhysicalResourceId': r.Physical,
-              'ResourceType': r.Type, 'ResourceStatus': 'CREATE_COMPLETE'})
+          ? s.Resources.map(r, merge({'LogicalResourceId': r.Logical, 'PhysicalResourceId': r.Physical,
+              'ResourceType': r.Type, 'ResourceStatus': 'Status' in r ? r.Status : 'CREATE_COMPLETE'},
+              'Reason' in r ? {'ResourceStatusReason': r.Reason} : {}))
           : []
 
-  # The rollback family conjures a fresh record for an absent stack rather
-  # than faulting, keeps whatever an existing record held, and sets only the
-  # status. CancelUpdateStack and ContinueUpdateRollback answer StackId,
-  # which their output shapes do not declare, so their trace steps are
-  # superseded.
+  # The rollback family accepts only the states the API reference gives each
+  # operation: RollbackStack rolls back "from CREATE_FAILED or UPDATE_FAILED
+  # stack statuses", ContinueUpdateRollback "from UPDATE_ROLLBACK_FAILED to
+  # UPDATE_ROLLBACK_COMPLETE state", and CancelUpdateStack only "stacks that
+  # are in the UPDATE_IN_PROGRESS state". Nothing here runs asynchronously,
+  # no update is rolled back (so no stack is UPDATE_ROLLBACK_FAILED), and
+  # a failed create rolls back at once and an update reserves no record, so
+  # no stack rests in CREATE_FAILED, UPDATE_FAILED or UPDATE_IN_PROGRESS, and
+  # neither operation could carry out what it says: RollbackStack and
+  # CancelUpdateStack refuse every stack, a record in a state they accept
+  # included, rather than answer a success that changes nothing; a
+  # ROLLBACK_FAILED stack's way forward is
+  # DeleteStack. ContinueUpdateRollback refuses every stack too, and writes
+  # nothing, so the stack record has no writer but the engine. Every refusal is ValidationError, in the words
+  # CancelUpdateStack uses, and changes nothing; an absent stack does not
+  # exist.
   RollbackStack:
     reads:
       s: { resource: stack }
-    effects:
-      - put:
-          resource: stack
-          record:
-            Name: id
-            ID: "s_found ? s.ID : dyn('')"
-            Status: "'ROLLBACK_COMPLETE'"
-            Template: "s_found ? s.Template : dyn('')"
-            Resources: "s_found ? s.Resources : dyn([])"
-            Outputs: "s_found ? s.Outputs : dyn([])"
-            Protect: "s_found ? s.Protect : dyn(false)"
+    require:
+      - &stackExists
+        cond: s_found
+        error: Validation
+        message_expr: "'Stack [' + string(input.StackName) + '] does not exist'"
+      - cond: "false" # it accepts CREATE_FAILED and UPDATE_FAILED, which no stack here rests in
+        error: Validation
+        message: "RollbackStack cannot be called from current stack status"
     output:
-      StackId: rec.ID
+      StackId: s.ID
 
   CancelUpdateStack:
     reads:
       s: { resource: stack }
-    effects:
-      - put:
-          resource: stack
-          record:
-            Name: id
-            ID: "s_found ? s.ID : dyn('')"
-            Status: "'UPDATE_ROLLBACK_COMPLETE'"
-            Template: "s_found ? s.Template : dyn('')"
-            Resources: "s_found ? s.Resources : dyn([])"
-            Outputs: "s_found ? s.Outputs : dyn([])"
-            Protect: "s_found ? s.Protect : dyn(false)"
+    require:
+      - *stackExists
+      - cond: "false" # it accepts UPDATE_IN_PROGRESS, which no stack here rests in
+        error: Validation
+        message: "CancelUpdateStack cannot be called from current stack status"
+    output: {}
 
   ContinueUpdateRollback:
     reads:
       s: { resource: stack }
-    effects:
-      - put:
-          resource: stack
-          record:
-            Name: id
-            ID: "s_found ? s.ID : dyn('')"
-            Status: "'ROLLBACK_COMPLETE'"
-            Template: "s_found ? s.Template : dyn('')"
-            Resources: "s_found ? s.Resources : dyn([])"
-            Outputs: "s_found ? s.Outputs : dyn([])"
-            Protect: "s_found ? s.Protect : dyn(false)"
+    require:
+      - *stackExists
+      - cond: "false" # it accepts UPDATE_ROLLBACK_FAILED, which no stack here rests in: a failed update is not rolled back
+        error: Validation
+        message: "ContinueUpdateRollback cannot be called from current stack status"
+    output: {}
 
   # --- change sets -----------------------------------------------------------
   # ExecuteChangeSet is the shadow reason (it provisions the stored
@@ -290,28 +287,9 @@ operations:
   # equally shadowed; only the inline TemplateBody path is transcribed, and
   # the bundle faults ValidationError where the pack would have fetched.
 
-  CreateChangeSet:
-    require:
-      - cond: "'TemplateBody' in input && string(input.TemplateBody) != ''"
-        error: Validation
-    effects:
-      - generate: { bind: csid, kind: hex, bytes: 8 }
-      - create:
-          resource: changeset
-          record:
-            ChangeSetName: string(input.ChangeSetName)
-            ChangeSetId: >-
-              'arn:aws:cloudformation:' + identity.region + ':'
-              + identity.account + ':changeSet/' + string(input.ChangeSetName)
-              + '/' + fx.csid
-            StackName: string(input.StackName)
-            Status: "'CREATE_COMPLETE'"
-            TemplateBody: string(input.TemplateBody)
-    output:
-      Id: rec.ChangeSetId
-      StackId: >-
-        'arn:aws:cloudformation:' + identity.region + ':' + identity.account
-        + ':stack/' + string(input.StackName)
+  # CreateChangeSet, ExecuteChangeSet and DeleteChangeSet are native: each
+  # writes a change set, and CreateChangeSet a stack too, in one store
+  # transaction with what the engine writes of the stack (cfn.go).
 
   # The pack answers the whole stored record, TemplateBody included; the
   # response shape does not declare TemplateBody, so the bundle answers the
@@ -325,7 +303,14 @@ operations:
       ChangeSetId: cs.ChangeSetId
       ChangeSetName: cs.ChangeSetName
       StackName: cs.StackName
+      StackId: "'StackId' in cs ? cs.StackId : null"
       Status: cs.Status
+      StatusReason: "'StatusReason' in cs ? cs.StatusReason : null"
+      ExecutionStatus: "'ExecutionStatus' in cs ? cs.ExecutionStatus : 'AVAILABLE'"
+      Parameters: "'Parameters' in cs ? cs.Parameters : []"
+      NotificationARNs: "'NotificationARNs' in cs && cs.NotificationARNs != null ? cs.NotificationARNs : []"
+      Tags: "'Tags' in cs && cs.Tags != null ? cs.Tags : []"
+      Capabilities: "'Capabilities' in cs ? cs.Capabilities : []"
 
   ListChangeSets:
     list:
@@ -333,10 +318,15 @@ operations:
       member: Summaries
       paginate: model
       filter: "item.StackName == string(input.StackName)"
+    # ChangeSetSummary's members, and no others; a change set stored before
+    # it had an ExecutionStatus is AVAILABLE, as DescribeChangeSet reads it.
     output:
-      Summaries: items
+      Summaries: >-
+        items.map(c, merge({'ChangeSetId': c.ChangeSetId, 'ChangeSetName': c.ChangeSetName,
+          'StackName': c.StackName, 'Status': c.Status,
+          'ExecutionStatus': 'ExecutionStatus' in c ? c.ExecutionStatus : 'AVAILABLE'},
+          merge('StackId' in c ? {'StackId': c.StackId} : {}, 'StatusReason' in c ? {'StatusReason': c.StatusReason} : {})))
 
-  DeleteChangeSet: {delete: {resource: changeset, missing: ignore}}
   SignalResource:
 
   # --- stack sets ------------------------------------------------------------
@@ -953,8 +943,8 @@ operations:
 quirks:
   - operation: CreateStack
     note: >
-      Shadowed: parses the template (JSON, or a YAML subset with
-      !Ref/!GetAtt/!Sub), merges Parameters.member.N form fields with
+      Shadowed: parses the template (JSON, or YAML with the short-form
+      intrinsics), merges Parameters.member.N form fields with
       template defaults, resolves Ref/GetAtt/Join/Sub against
       pseudo-parameters, and provisions fourteen resource types into the
       sibling services' collections -- buckets with their versioning, tags
@@ -975,13 +965,9 @@ quirks:
       APIs), which no trace step can observe from this service's answers.
   - operation: CreateChangeSet
     note: >
-      Only the inline TemplateBody path is transcribed. With TemplateURL the
-      pack reads the template out of the blob store (s3:// and
-      *.s3 host forms), which the bundle cannot express; the bundle faults
-      ValidationError where the pack would have fetched. The pack faults
-      "TemplateBody or TemplateURL required" when neither is present. The
-      model requires StackName and ChangeSetName, so the pack's empty-name
-      key (":name") is dead.
+      Native (cfn.go): it reads TemplateBody or the TemplateURL object, and
+      writes the change set, and a CREATE change set's REVIEW_IN_PROGRESS
+      stack, in one store transaction with what it read.
   - operation: DescribeChangeSet
     note: >
       The pack answers the whole stored record, TemplateBody included, but
@@ -997,19 +983,6 @@ quirks:
       region. The pack's record carries the provisioned Resources, Outputs,
       Refs and Template, which only the shadowed CreateStack path can
       produce, so here they are always empty.
-  - operation: RollbackStack
-    note: >
-      Rolling back a stack that does not exist conjures a fresh
-      ROLLBACK_COMPLETE record under the name rather than faulting, with an
-      empty StackId. CancelUpdateStack starts from UPDATE_ROLLBACK_COMPLETE
-      the same way. CancelUpdateStack and ContinueUpdateRollback answer
-      StackId, which their output shapes do not declare; those steps are
-      superseded.
-  - operation: UpdateTerminationProtection
-    note: >
-      The pack's truthy() accepts a boolean true or the strings "true" and
-      "True"; anything else, including the model-required member arriving
-      empty, stores false.
   - operation: DescribeStackSet
     note: >
       Never faults: an absent stack set answers an empty StackSet record with
@@ -1108,5 +1081,5 @@ quirks:
     note: >
       Shadowed: parses the template body and answers its declared parameters.
       The engine's model check on absent required members does not apply --
-      none are declared -- and the pack's YAML subset parser is the shadow
+      none are declared -- and the pack's template parsing is the shadow
       reason.

@@ -1393,11 +1393,17 @@ func (ev *eval) runList(ctx context.Context, op bir.Operation, modelOp model.Ope
 	}
 
 	items := make([]any, 0, len(entries))
+	// scanned is the last record read, kept or not. A page that keeps nothing
+	// while the store has more must still move the cursor past what it read,
+	// or the caller is sent back to where it started.
+	var scanned map[string]any
+	scannedKey := ""
 	for _, kv := range entries {
 		rec := map[string]any{}
 		if err := unmarshal(kv.Value, &rec); err != nil {
 			return err
 		}
+		scanned, scannedKey = rec, kv.Key
 		// List is an observation point the same way select is: expired
 		// deadlines must advance before the caller sees the row, or a
 		// deployment listing would stay QUEUED after GetDeployment had
@@ -1457,6 +1463,18 @@ func (ev *eval) runList(ctx context.Context, op bir.Operation, modelOp model.Ope
 		last = kv.Key
 		if op.List.Token != "" {
 			ev.binds["item"] = rec
+			tok, tokErr := ev.eval(base + "token")
+			delete(ev.binds, "item")
+			if tokErr != nil {
+				return tokErr
+			}
+			last = fmt.Sprint(tok)
+		}
+	}
+	if len(items) == 0 && more && scanned != nil {
+		last = scannedKey
+		if op.List.Token != "" {
+			ev.binds["item"] = scanned
 			tok, tokErr := ev.eval(base + "token")
 			delete(ev.binds, "item")
 			if tokErr != nil {

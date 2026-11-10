@@ -48,8 +48,10 @@ func ApplyUpdate(expr string, item, names, values map[string]any) ([]string, err
 				delete(item, name)
 				touch(name)
 			}
-		case strings.HasPrefix(part, "ADD "):
-			for _, pair := range splitArgs(strings.TrimPrefix(part, "ADD ")) {
+		case strings.HasPrefix(part, "ADD "), strings.HasPrefix(part, "DELETE "): // ADD adds to a number or set, DELETE takes from a set
+			verb, pairs, _ := strings.Cut(part, " ")
+			apply := map[string]func(cur, delta any) any{"ADD": addAttr, "DELETE": deleteFromSet}[verb]
+			for _, pair := range splitArgs(pairs) {
 				fs := strings.Fields(strings.TrimSpace(pair))
 				if len(fs) < 2 {
 					continue
@@ -59,21 +61,7 @@ func ApplyUpdate(expr string, item, names, values map[string]any) ([]string, err
 				if err != nil {
 					return nil, err
 				}
-				item[name] = addAttr(item[name], delta)
-				touch(name)
-			}
-		case strings.HasPrefix(part, "DELETE "):
-			for _, pair := range splitArgs(strings.TrimPrefix(part, "DELETE ")) {
-				fs := strings.Fields(strings.TrimSpace(pair))
-				if len(fs) < 2 {
-					continue
-				}
-				name, rhs := fs[0], strings.Join(fs[1:], " ")
-				delta, err := eval(parse(rhs), item, values)
-				if err != nil {
-					return nil, err
-				}
-				item[name] = deleteFromSet(item[name], delta)
+				item[name] = apply(item[name], delta)
 				touch(name)
 			}
 		}
@@ -224,7 +212,7 @@ func eval(n node, item, values map[string]any) (any, error) {
 		if n.val == "false" {
 			return false, nil
 		}
-		if f, err := strconvParse(n.val); err == nil {
+		if f, err := strconv.ParseFloat(n.val, 64); err == nil {
 			return f, nil
 		}
 		return n.val, nil
@@ -324,18 +312,15 @@ func eval(n node, item, values map[string]any) (any, error) {
 			raw = item[n.kids[0].val]
 		}
 		return attrType(raw) == fmt.Sprint(want), nil
-	case "+":
+	case "+", "-":
 		a, _ := eval(kid(0), item, values)
 		b, _ := eval(kid(1), item, values)
-		af, _ := toFloat(a)
-		bf, _ := toFloat(b)
+		af := toFloat(a)
+		bf := toFloat(b)
+		if n.op == "-" {
+			return af - bf, nil
+		}
 		return af + bf, nil
-	case "-":
-		a, _ := eval(kid(0), item, values)
-		b, _ := eval(kid(1), item, values)
-		af, _ := toFloat(a)
-		bf, _ := toFloat(b)
-		return af - bf, nil
 	case "if_not_exists":
 		name := n.kids[0].val
 		if _, ok := item[name]; !ok {
@@ -359,7 +344,7 @@ func unwrap(v any) any {
 		return s
 	}
 	if n, ok := m["N"].(string); ok {
-		f, _ := strconvParse(n)
+		f, _ := strconv.ParseFloat(n, 64)
 		return f
 	}
 	if b, ok := m["BOOL"].(bool); ok {
@@ -421,18 +406,11 @@ func attrType(v any) string {
 func addAttr(cur, delta any) any {
 	if dm, ok := delta.(map[string]any); ok {
 		if ss, ok := dm["SS"].([]any); ok {
-			exist := map[string]bool{}
-			out := []any{}
+			exist, out, members := map[string]bool{}, []any{}, ss // the set's members, then the delta's, each once
 			if cm, ok := cur.(map[string]any); ok {
-				for _, x := range asList(cm) {
-					s := fmt.Sprint(unwrap(x))
-					if !exist[s] {
-						exist[s] = true
-						out = append(out, x)
-					}
-				}
+				members = append(asList(cm), ss...)
 			}
-			for _, x := range ss {
+			for _, x := range members {
 				s := fmt.Sprint(unwrap(x))
 				if !exist[s] {
 					exist[s] = true
@@ -442,8 +420,8 @@ func addAttr(cur, delta any) any {
 			return map[string]any{"SS": out}
 		}
 	}
-	cf, _ := toFloat(unwrap(cur))
-	df, _ := toFloat(unwrap(delta))
+	cf := toFloat(unwrap(cur))
+	df := toFloat(unwrap(delta))
 	return map[string]any{"N": strconv.FormatFloat(cf+df, 'f', -1, 64)}
 }
 
@@ -508,8 +486,8 @@ func compare(a, b any) int {
 	if aok && bok {
 		return strings.Compare(as, bs)
 	}
-	af, _ := toFloat(a)
-	bf, _ := toFloat(b)
+	af := toFloat(a)
+	bf := toFloat(b)
 	if af < bf {
 		return -1
 	}
@@ -519,20 +497,18 @@ func compare(a, b any) int {
 	return 0
 }
 
-func toFloat(v any) (float64, bool) {
+func toFloat(v any) float64 {
 	switch t := v.(type) {
 	case float64:
-		return t, true
+		return t
 	case int:
-		return float64(t), true
+		return float64(t)
 	case string:
-		f, err := strconvParse(t)
-		return f, err == nil
+		f, _ := strconv.ParseFloat(t, 64)
+		return f
 	}
-	return 0, false
+	return 0
 }
-
-func strconvParse(s string) (float64, error) { return strconv.ParseFloat(s, 64) }
 
 func splitTop(s string) []string {
 	var out []string

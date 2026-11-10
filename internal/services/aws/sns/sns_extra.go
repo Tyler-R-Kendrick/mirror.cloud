@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 
@@ -23,11 +24,8 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 	if _, ok, _ := p.col(req, "topics").Get(ctx, name); !ok {
 		return nil, topicNotFoundFault()
 	}
-	b, ok, _ := p.col(req, "topics").Get(ctx, name)
 	m := map[string]any{"arn": arn, "name": name}
-	if ok {
-		_ = json.Unmarshal(b, &m)
-	}
+	spi.ReadJSON(ctx, p.col(req, "topics"), name, &m)
 	attrs, _ := m["attrs"].(map[string]any)
 	if attrs == nil {
 		attrs = map[string]any{}
@@ -47,7 +45,7 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 		accts := stringList(req.Input, "AWSAccountIds", "AWSAccountId")
 		acts := stringList(req.Input, "ActionNames", "ActionName")
 		for _, statement := range stmts {
-			if str(asMap(statement)["Sid"]) == label {
+			if str(spi.Object(statement)["Sid"]) == label {
 				return nil, clientFault("InvalidParameter", "A policy statement with this label already exists", 400)
 			}
 		}
@@ -63,15 +61,14 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 		raw, _ := json.Marshal(pol)
 		attrs["Policy"] = string(raw)
 		m["attrs"] = attrs
-		nb, _ := json.Marshal(m)
-		_ = p.col(req, "topics").Put(ctx, name, nb)
+		_ = spi.PutJSON(ctx, p.col(req, "topics"), name, m)
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
 	label := str(req.Input["Label"])
 	var kept []any
 	found := false
 	for _, s := range stmts {
-		if str(asMap(s)["Sid"]) == label {
+		if str(spi.Object(s)["Sid"]) == label {
 			found = true
 			continue
 		}
@@ -84,8 +81,7 @@ func (p *Pack) topicPermission(ctx context.Context, req *spi.Request) (*spi.Resp
 	raw, _ := json.Marshal(pol)
 	attrs["Policy"] = string(raw)
 	m["attrs"] = attrs
-	nb, _ := json.Marshal(m)
-	_ = p.col(req, "topics").Put(ctx, name, nb)
+	_ = spi.PutJSON(ctx, p.col(req, "topics"), name, m)
 	return &spi.Response{Output: map[string]any{}}, nil
 }
 
@@ -131,8 +127,7 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 	if !ok {
 		return nil, clientFault("NotFound", "Subscription does not exist", 404)
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	if req.Operation == "SetSubscriptionAttributes" {
 		k := str(req.Input["AttributeName"])
 		value := str(req.Input["AttributeValue"])
@@ -202,11 +197,8 @@ func (p *Pack) subAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 
 func (p *Pack) listTags(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	arn := str(req.Input["ResourceArn"])
-	b, ok, _ := p.col(req, "tags").Get(ctx, arn)
 	var tags any = []any{}
-	if ok {
-		_ = json.Unmarshal(b, &tags)
-	}
+	spi.ReadJSON(ctx, p.col(req, "tags"), arn, &tags)
 	return &spi.Response{Output: map[string]any{"Tags": tags}}, nil
 }
 
@@ -232,14 +224,13 @@ func (p *Pack) dataProtection(ctx context.Context, req *spi.Request) (*spi.Respo
 		b, _, _ := p.col(req, "topics").Get(ctx, name)
 		m := map[string]any{"arn": arn, "name": name}
 		_ = json.Unmarshal(b, &m)
-		attrs := asMap(m["attrs"])
+		attrs := spi.Object(m["attrs"])
 		if attrs == nil {
 			attrs = map[string]any{}
 		}
 		attrs["DataProtectionPolicy"] = policy
 		m["attrs"] = attrs
-		nb, _ := json.Marshal(m)
-		_ = p.col(req, "topics").Put(ctx, name, nb)
+		_ = spi.PutJSON(ctx, p.col(req, "topics"), name, m)
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
 	b, ok, _ := p.col(req, "dpp").Get(ctx, arn)
@@ -451,8 +442,7 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		kvs, _, _ := col.List(ctx, "", "", 0)
 		var out []any
 		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
+			rec := spi.JSONObject(kv.Value)
 			out = append(out, map[string]any{"PlatformApplicationArn": rec["PlatformApplicationArn"], "Attributes": rec["Attributes"]})
 		}
 		return &spi.Response{Output: map[string]any{"PlatformApplications": out}}, nil
@@ -461,12 +451,10 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		_ = col.Delete(ctx, app)
 		endpoints := p.col(req, "platend")
 		subs := p.col(req, "subs")
-		kvs, _, _ := endpoints.List(ctx, "", "", 0)
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, endpoints, "", "", 0) {
 			var endpoint map[string]any
 			if json.Unmarshal(kv.Value, &endpoint) == nil && str(endpoint["PlatformApplicationArn"]) == app {
-				subKVs, _, _ := subs.List(ctx, "", "", 0)
-				for _, subKV := range subKVs {
+				for _, subKV := range spi.Entries(ctx, subs, "", "", 0) {
 					var sub map[string]any
 					if json.Unmarshal(subKV.Value, &sub) == nil && str(sub["Endpoint"]) == str(endpoint["EndpointArn"]) {
 						_ = subs.Delete(ctx, subKV.Key)
@@ -489,13 +477,9 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		_ = json.Unmarshal(b, &rec)
 		updated := map[string]any{"Enabled": "true"}
 		if existing, ok := rec["Attributes"].(map[string]any); ok {
-			for key, value := range existing {
-				updated[key] = value
-			}
+			maps.Copy(updated, existing)
 		}
-		for key, value := range flattenAttrEntries(req.Input, "Attributes") {
-			updated[key] = value
-		}
+		maps.Copy(updated, flattenAttrEntries(req.Input, "Attributes"))
 		rec["Attributes"] = updated
 		nb, _ := json.Marshal(rec)
 		_ = col.Put(ctx, arn, nb)
@@ -509,8 +493,7 @@ func (p *Pack) platformApp(ctx context.Context, req *spi.Request) (*spi.Response
 		if !ok {
 			return nil, clientFault("NotFound", "", 404)
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		return &spi.Response{Output: map[string]any{"Attributes": rec["Attributes"]}}, nil
 	}
 }
@@ -571,8 +554,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		if customUserData != nil {
 			requestedAttrs["CustomUserData"] = customUserData
 		}
-		kvs, _, _ := col.List(ctx, "", "", 0)
-		for _, kv := range kvs {
+		for _, kv := range spi.Entries(ctx, col, "", "", 0) {
 			var existing map[string]any
 			if json.Unmarshal(kv.Value, &existing) == nil && str(existing["PlatformApplicationArn"]) == app && str(existing["Token"]) == tok {
 				for key, value := range requestedAttrs {
@@ -597,13 +579,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 	case "DeleteEndpoint":
 		arn := str(req.Input["EndpointArn"])
 		_ = col.Delete(ctx, arn)
-		kvs, _, _ := p.col(req, "subs").List(ctx, "", "", 0)
-		for _, kv := range kvs {
-			var sub map[string]any
-			if json.Unmarshal(kv.Value, &sub) == nil && str(sub["Endpoint"]) == arn {
-				_ = p.col(req, "subs").Delete(ctx, kv.Key)
-			}
-		}
+		p.dropSubscriptions(ctx, req, "Endpoint", arn)
 		return &spi.Response{Output: map[string]any{}}, nil
 	case "SetEndpointAttributes":
 		arn := str(req.Input["EndpointArn"])
@@ -634,8 +610,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		kvs, _, _ := col.List(ctx, "", "", 0)
 		var out []any
 		for _, kv := range kvs {
-			var rec map[string]any
-			_ = json.Unmarshal(kv.Value, &rec)
+			rec := spi.JSONObject(kv.Value)
 			if str(rec["PlatformApplicationArn"]) != app {
 				continue
 			}
@@ -648,8 +623,7 @@ func (p *Pack) platformEndpoint(ctx context.Context, req *spi.Request) (*spi.Res
 		if !ok {
 			return nil, clientFault("NotFound", "", 404)
 		}
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
+		rec := spi.JSONObject(b)
 		return &spi.Response{Output: map[string]any{"Attributes": endpointAttributes(rec)}}, nil
 	}
 }
@@ -685,7 +659,7 @@ func validateEndpointAttributes(attrs map[string]any) *spi.Fault {
 }
 
 func flattenAttrEntries(in map[string]any, prefix string) map[string]any {
-	attrs := asMap(in[prefix])
+	attrs := spi.Object(in[prefix])
 	if len(attrs) > 0 && attrs["entry"] == nil {
 		return attrs
 	}
@@ -745,11 +719,8 @@ func (p *Pack) smsAttrs(ctx context.Context, req *spi.Request) (*spi.Response, e
 		_ = p.col(req, "smsattrs").Put(ctx, "default", b)
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
-	b, ok, _ := p.col(req, "smsattrs").Get(ctx, "default")
 	attrs := map[string]any{"MonthlySpendLimit": "1"}
-	if ok {
-		_ = json.Unmarshal(b, &attrs)
-	}
+	spi.ReadJSON(ctx, p.col(req, "smsattrs"), "default", &attrs)
 	requested := stringList(req.Input, "attributes", "Attributes")
 	if len(requested) > 0 {
 		filtered := map[string]any{}

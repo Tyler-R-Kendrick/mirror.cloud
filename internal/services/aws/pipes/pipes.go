@@ -78,8 +78,8 @@ func (p *worker) Close() error {
 // kept for it, which a pipe created again under the name must not inherit.
 func deletePipe(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Response, error) {
 	scope := deps.Store.Scope(req.Identity.Account, req.Identity.Region)
-	name := first(req.Input, "Name")
-	rec, ok, err := getRecord(ctx, scope.Collection("pipe"), name)
+	name := spi.First(req.Input, "Name")
+	rec, ok, err := spi.GetJSON(ctx, scope.Collection("pipe"), name)
 	if err != nil {
 		return nil, err
 	}
@@ -131,10 +131,10 @@ func (p *worker) drain(ctx context.Context) bool {
 		}
 		for _, kv := range kvs {
 			var pipe map[string]any
-			if json.Unmarshal(kv.Value, &pipe) != nil || stringValue(pipe["CurrentState"]) != "RUNNING" {
+			if json.Unmarshal(kv.Value, &pipe) != nil || spi.Str(pipe["CurrentState"]) != "RUNNING" {
 				continue
 			}
-			source, target := stringValue(pipe["Source"]), stringValue(pipe["Target"])
+			source, target := spi.Str(pipe["Source"]), spi.Str(pipe["Target"])
 			if target == "" {
 				continue
 			}
@@ -170,9 +170,9 @@ func (p *worker) drainKinesis(ctx context.Context, identity spi.Identity, pipe m
 	return p.drainStream(ctx, identity, pipe, bundled.Handler("aws.kinesis", p.deps), map[string]any{
 		"StreamName": stream, "ShardId": "shardId-000000000000",
 	}, "KinesisStreamParameters", "StartingSequenceNumber", func(record map[string]any) string {
-		return stringValue(record["SequenceNumber"])
+		return spi.Str(record["SequenceNumber"])
 	}, func(record map[string]any) map[string]any {
-		return kinesisRecord(record, source, identity.Region, stringValue(pipe["RoleArn"]))
+		return kinesisRecord(record, source, identity.Region, spi.Str(pipe["RoleArn"]))
 	})
 }
 
@@ -180,7 +180,7 @@ func (p *worker) drainDynamoDB(ctx context.Context, identity spi.Identity, pipe 
 	return p.drainStream(ctx, identity, pipe, dynamodb.New(p.deps), map[string]any{
 		"StreamArn": source, "ShardId": "shardId-000000000000",
 	}, "DynamoDBStreamParameters", "SequenceNumber", func(record map[string]any) string {
-		return stringValue(record["dynamodb"].(map[string]any)["SequenceNumber"])
+		return spi.Str(record["dynamodb"].(map[string]any)["SequenceNumber"])
 	}, func(record map[string]any) map[string]any {
 		return dynamodbRecord(record, source)
 	})
@@ -189,7 +189,7 @@ func (p *worker) drainDynamoDB(ctx context.Context, identity spi.Identity, pipe 
 func (p *worker) drainStream(ctx context.Context, identity spi.Identity, pipe map[string]any, client spi.BehaviorPack, iteratorInput map[string]any, parameterName, sequenceField string, sequence func(map[string]any) string, eventFor func(map[string]any) map[string]any) bool {
 	request := &spi.Request{Identity: identity, Input: iteratorInput}
 	scope := p.deps.Store.Scope(identity.Account, identity.Region)
-	name := stringValue(pipe["Name"])
+	name := spi.Str(pipe["Name"])
 	checkpoint := scope.Collection("pipecheckpoint")
 	attempts := scope.Collection("pipeattempt:" + name)
 	iterator, ok, err := checkpoint.Get(ctx, name)
@@ -199,13 +199,13 @@ func (p *worker) drainStream(ctx context.Context, identity spi.Identity, pipe ma
 	streamParameters := sourceParameters(pipe, parameterName)
 	if !ok {
 		request.Operation = "GetShardIterator"
-		request.Input["ShardIteratorType"] = stringValue(streamParameters["StartingPosition"])
+		request.Input["ShardIteratorType"] = spi.Str(streamParameters["StartingPosition"])
 		request.Input["Timestamp"] = streamParameters["StartingPositionTimestamp"]
 		response, invokeErr := client.Invoke(ctx, request)
 		if invokeErr != nil {
 			return false
 		}
-		iterator = []byte(stringValue(response.Output["ShardIterator"]))
+		iterator = []byte(spi.Str(response.Output["ShardIterator"]))
 		if checkpoint.Put(ctx, name, iterator) != nil {
 			return false
 		}
@@ -218,7 +218,7 @@ func (p *worker) drainStream(ctx context.Context, identity spi.Identity, pipe ma
 	}
 	records, _ := response.Output["Records"].([]any)
 	if len(records) == 0 {
-		_ = checkpoint.Put(ctx, name, []byte(stringValue(response.Output["NextShardIterator"])))
+		_ = checkpoint.Put(ctx, name, []byte(spi.Str(response.Output["NextShardIterator"])))
 		return false
 	}
 	events, ids := make([]any, len(records)), make([]string, len(records))
@@ -227,7 +227,7 @@ func (p *worker) drainStream(ctx context.Context, identity spi.Identity, pipe ma
 	for i, raw := range records {
 		record, _ := raw.(map[string]any)
 		event := eventFor(record)
-		events[i], ids[i] = event, stringValue(event["eventID"])
+		events[i], ids[i] = event, spi.Str(event["eventID"])
 		if streamRecordExpired(p.deps.Clock.Now(), event, streamParameters) {
 			expired[ids[i]] = true
 			if p.deadLetterStreamRecord(ctx, identity, streamParameters, event) {
@@ -242,10 +242,10 @@ func (p *worker) drainStream(ctx context.Context, identity spi.Identity, pipe ma
 	}
 	retryFrom := func(i int) {
 		request.Operation = "GetShardIterator"
-		request.Input = clone(iteratorInput)
+		request.Input = spi.Clone(iteratorInput)
 		request.Input["ShardIteratorType"], request.Input[sequenceField] = "AT_SEQUENCE_NUMBER", sequence(records[i].(map[string]any))
 		if retry, invokeErr := client.Invoke(ctx, request); invokeErr == nil {
-			_ = checkpoint.Put(ctx, name, []byte(stringValue(retry.Output["ShardIterator"])))
+			_ = checkpoint.Put(ctx, name, []byte(spi.Str(retry.Output["ShardIterator"])))
 		}
 	}
 	for i, id := range ids {
@@ -278,7 +278,7 @@ func (p *worker) drainStream(ctx context.Context, identity spi.Identity, pipe ma
 		}
 		_ = attempts.Delete(ctx, id)
 	}
-	if checkpoint.Put(ctx, name, []byte(stringValue(response.Output["NextShardIterator"]))) != nil {
+	if checkpoint.Put(ctx, name, []byte(spi.Str(response.Output["NextShardIterator"]))) != nil {
 		return false
 	}
 	return len(records) == streamBatchSize(pipe, parameterName)
@@ -286,7 +286,7 @@ func (p *worker) drainStream(ctx context.Context, identity spi.Identity, pipe ma
 
 func (p *worker) deadLetterStreamRecord(ctx context.Context, identity spi.Identity, parameters map[string]any, event map[string]any) bool {
 	config, _ := parameters["DeadLetterConfig"].(map[string]any)
-	arn := stringValue(config["Arn"])
+	arn := spi.Str(config["Arn"])
 	if arn == "" {
 		return true
 	}
@@ -307,19 +307,17 @@ func streamRecordExpired(now time.Time, event, parameters map[string]any) bool {
 	return ok && now.Sub(time.UnixMilli(int64(timestamp*1000))) > time.Duration(maximumAge)*time.Second
 }
 
-func (p *worker) processBatch(ctx context.Context, identity spi.Identity, pipe map[string]any, source, queue string, messages []any) map[string]bool {
+func (p *worker) processBatch(ctx context.Context, identity spi.Identity, pipe map[string]any, source, queue string, messages []any) {
 	records, ids := make([]any, 0, len(messages)), make([]string, 0, len(messages))
 	byID := map[string]map[string]any{}
 	for _, raw := range messages {
 		message, _ := raw.(map[string]any)
-		id := stringValue(message["MessageId"])
+		id := spi.Str(message["MessageId"])
 		records, ids, byID[id] = append(records, sqsRecord(message, source, identity.Region)), append(ids, id), message
 	}
-	succeeded := p.processRecords(ctx, identity, pipe, records, ids)
-	for id := range succeeded {
-		p.deleteMessage(ctx, identity, queue, stringValue(byID[id]["ReceiptHandle"]))
+	for id := range p.processRecords(ctx, identity, pipe, records, ids) {
+		p.deleteMessage(ctx, identity, queue, spi.Str(byID[id]["ReceiptHandle"]))
 	}
-	return succeeded
 }
 
 func (p *worker) processRecords(ctx context.Context, identity spi.Identity, pipe map[string]any, records []any, ids []string) map[string]bool {
@@ -335,7 +333,7 @@ func (p *worker) processRecords(ctx context.Context, identity spi.Identity, pipe
 	if len(matchedRecords) == 0 {
 		return succeeded
 	}
-	target := stringValue(pipe["Target"])
+	target := spi.Str(pipe["Target"])
 	config := map[string]any{"Arn": target}
 	if parameters, ok := pipe["TargetParameters"].(map[string]any); ok {
 		if sqsParameters, ok := parameters["SqsQueueParameters"].(map[string]any); ok {
@@ -347,7 +345,7 @@ func (p *worker) processRecords(ctx context.Context, identity spi.Identity, pipe
 	}
 	if strings.Contains(target, ":states:") {
 		parameters, _ := config["StateMachineParameters"].(map[string]any)
-		if stringValue(parameters["InvocationType"]) == "" {
+		if spi.Str(parameters["InvocationType"]) == "" {
 			config["StateMachineParameters"] = map[string]any{"InvocationType": "REQUEST_RESPONSE"}
 		}
 	}
@@ -403,7 +401,7 @@ func (p *worker) processRecords(ctx context.Context, identity spi.Identity, pipe
 }
 
 func (p *worker) enrich(ctx context.Context, identity spi.Identity, pipe map[string]any, inputs [][]byte, fallback []any) ([]any, bool, bool) {
-	arn := stringValue(pipe["Enrichment"])
+	arn := spi.Str(pipe["Enrichment"])
 	if arn == "" {
 		return fallback, false, true
 	}
@@ -418,10 +416,10 @@ func (p *worker) enrich(ctx context.Context, identity spi.Identity, pipe map[str
 		raw = response
 	case strings.Contains(arn, ":states:"):
 		response, err := bundled.Handler("aws.states", p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "StartSyncExecution", Input: map[string]any{"stateMachineArn": arn, "input": string(payload)}})
-		if err != nil || stringValue(response.Output["status"]) != "SUCCEEDED" {
+		if err != nil || spi.Str(response.Output["status"]) != "SUCCEEDED" {
 			return nil, true, false
 		}
-		raw = []byte(stringValue(response.Output["output"]))
+		raw = []byte(spi.Str(response.Output["output"]))
 	case strings.Contains(arn, ":execute-api:"):
 		parameterEvent := any(fallback)
 		if len(fallback) == 1 {
@@ -546,7 +544,7 @@ func httpParameter(value, event any) string {
 
 func (p *worker) inputPayload(pipe map[string]any, parameterName string, event any) []byte {
 	parameters, _ := pipe[parameterName].(map[string]any)
-	template := stringValue(parameters["InputTemplate"])
+	template := spi.Str(parameters["InputTemplate"])
 	if template == "" {
 		if payload, ok := event.([]byte); ok {
 			return payload
@@ -606,10 +604,9 @@ func decodedEvent(event any) any {
 	if !ok {
 		return event
 	}
-	decoded := clone(record)
-	if body := stringValue(record["body"]); json.Valid([]byte(body)) {
-		var value any
-		_ = json.Unmarshal([]byte(body), &value)
+	decoded := spi.Clone(record)
+	if body := spi.Str(record["body"]); json.Valid([]byte(body)) {
+		value := spi.Decode[any]([]byte(body))
 		decoded["body"] = value
 	}
 	return decoded
@@ -635,7 +632,7 @@ func (p *worker) invokeLambda(ctx context.Context, identity spi.Identity, arn st
 	failed := map[string]bool{}
 	for _, item := range items {
 		entry, _ := item.(map[string]any)
-		id := stringValue(entry["itemIdentifier"])
+		id := spi.Str(entry["itemIdentifier"])
 		if id == "" || !known[id] {
 			return nil, false
 		}
@@ -696,19 +693,19 @@ func (p *worker) deleteMessage(ctx context.Context, identity spi.Identity, queue
 }
 
 func sqsRecord(message map[string]any, source, region string) map[string]any {
-	body := stringValue(message["Body"])
+	body := spi.Str(message["Body"])
 	sum := md5.Sum([]byte(body))
 	attributes, _ := message["Attributes"].(map[string]any)
 	messageAttributes, _ := message["MessageAttributes"].(map[string]any)
 	return map[string]any{
-		"messageId": stringValue(message["MessageId"]), "receiptHandle": stringValue(message["ReceiptHandle"]),
+		"messageId": spi.Str(message["MessageId"]), "receiptHandle": spi.Str(message["ReceiptHandle"]),
 		"body": body, "attributes": attributes, "messageAttributes": messageAttributes,
 		"md5OfBody": hex.EncodeToString(sum[:]), "eventSource": "aws:sqs", "eventSourceARN": source, "awsRegion": region,
 	}
 }
 
 func kinesisRecord(record map[string]any, source, region, role string) map[string]any {
-	sequence := stringValue(record["SequenceNumber"])
+	sequence := spi.Str(record["SequenceNumber"])
 	return map[string]any{
 		"kinesisSchemaVersion": "1.0", "partitionKey": record["PartitionKey"], "sequenceNumber": sequence,
 		"data": record["Data"], "approximateArrivalTimestamp": record["ApproximateArrivalTimestamp"],
@@ -718,7 +715,7 @@ func kinesisRecord(record map[string]any, source, region, role string) map[strin
 }
 
 func dynamodbRecord(record map[string]any, source string) map[string]any {
-	event := clone(record)
+	event := spi.Clone(record)
 	event["eventVersion"] = "1.0"
 	event["eventSourceARN"] = strings.Split(source, "/stream/")[0]
 	return event
@@ -730,15 +727,14 @@ func matchesFilters(raw any, event map[string]any) bool {
 	if len(filters) == 0 {
 		return true
 	}
-	filterEvent := clone(event)
-	if body := stringValue(event["body"]); json.Valid([]byte(body)) {
-		var decoded any
-		_ = json.Unmarshal([]byte(body), &decoded)
+	filterEvent := spi.Clone(event)
+	if body := spi.Str(event["body"]); json.Valid([]byte(body)) {
+		decoded := spi.Decode[any]([]byte(body))
 		filterEvent["body"] = decoded
 	}
 	for _, rawFilter := range filters {
 		filter, _ := rawFilter.(map[string]any)
-		if events.MatchEventPattern(first(filter, "Pattern"), filterEvent) {
+		if events.MatchEventPattern(spi.First(filter, "Pattern"), filterEvent) {
 			return true
 		}
 	}
@@ -747,7 +743,7 @@ func matchesFilters(raw any, event map[string]any) bool {
 
 func sourceBatchSize(pipe map[string]any) int {
 	sqsParameters := sourceParameters(pipe, "SqsQueueParameters")
-	size := intValue(sqsParameters["BatchSize"])
+	size := spi.Int(sqsParameters["BatchSize"])
 	if size < 1 {
 		return 10
 	}
@@ -758,7 +754,7 @@ func sourceBatchSize(pipe map[string]any) int {
 }
 
 func streamBatchSize(pipe map[string]any, parameterName string) int {
-	size := intValue(sourceParameters(pipe, parameterName)["BatchSize"])
+	size := spi.Int(sourceParameters(pipe, parameterName)["BatchSize"])
 	if size < 1 {
 		return 100
 	}
@@ -781,52 +777,11 @@ func (p *worker) notify() {
 	}
 }
 
-func getRecord(ctx context.Context, collection spi.Collection, key string) (map[string]any, bool, error) {
-	b, ok, err := collection.Get(ctx, key)
-	if err != nil || !ok {
-		return nil, ok, err
-	}
-	var rec map[string]any
-	if err := json.Unmarshal(b, &rec); err != nil {
-		return nil, false, err
-	}
-	return rec, true, nil
-}
-
-func clone(input map[string]any) map[string]any {
-	out := make(map[string]any, len(input))
-	for key, value := range input {
-		out[key] = value
-	}
-	return out
-}
-
-func first(input map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if value, ok := input[key].(string); ok && value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func stringValue(value any) string { valueString, _ := value.(string); return valueString }
-
-func intValue(value any) int {
-	switch value := value.(type) {
-	case int:
-		return value
-	case float64:
-		return int(value)
-	}
-	return 0
-}
-
 func optionalInt(input map[string]any, key string, fallback int) int {
 	if _, ok := input[key]; !ok {
 		return fallback
 	}
-	return intValue(input[key])
+	return spi.Int(input[key])
 }
 
 func validation(message string) *spi.Fault {

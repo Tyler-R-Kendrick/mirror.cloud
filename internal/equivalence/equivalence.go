@@ -379,10 +379,23 @@ func (u *unifier) compare(step int, path string, want, got any) []Diff {
 		return []Diff{{Step: step, Path: path, Want: w, Got: g}}
 	}
 
+	if sameNumber(want, got) || sameNumber(got, want) {
+		return nil
+	}
 	if fmt.Sprint(want) != fmt.Sprint(got) {
 		return []Diff{{Step: step, Path: path, Want: want, Got: got}}
 	}
 	return nil
+}
+
+// sameNumber reports whether a float64 and an int64 are the same number. A
+// recording's numbers come back from JSON as float64 and a candidate answers an
+// integer as int64; both write the same JSON number, but fmt.Sprint spells the
+// float64 2592000 as "2.592e+06".
+func sameNumber(f, n any) bool {
+	fv, isFloat := f.(float64)
+	nv, isInt := n.(int64)
+	return isFloat && isInt && fv == float64(nv)
 }
 
 // unify records a token substitution, rejecting one that contradicts an

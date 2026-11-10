@@ -51,8 +51,7 @@ func (t *Tables) CreateTable(ctx context.Context, identity spi.Identity, bucket,
 		// RenameTable read a row-plane table the same as an API one.
 		"metadataLocation": "",
 	}
-	encoded, _ := json.Marshal(record)
-	return t.col(identity, "s3tt").Put(ctx, bucket+"/"+namespace+"/"+table, encoded)
+	return spi.PutJSON(ctx, t.col(identity, "s3tt"), bucket+"/"+namespace+"/"+table, record)
 }
 
 // ApplyRows commits insert, update, and delete mutations to a local table.
@@ -62,8 +61,7 @@ func (t *Tables) ApplyRows(ctx context.Context, identity spi.Identity, bucket, n
 	if !ok {
 		return errors.New("S3 table not found")
 	}
-	var description map[string]any
-	_ = json.Unmarshal(encoded, &description)
+	description := spi.JSONObject(encoded)
 	columns := stringsFrom(description["columns"])
 	if len(columns) == 0 {
 		return errors.New("S3 table schema is unavailable")
@@ -77,8 +75,7 @@ func (t *Tables) ApplyRows(ctx context.Context, identity spi.Identity, bucket, n
 		if err != nil {
 			return err
 		}
-		var doc rowsDoc
-		_ = json.Unmarshal(stored, &doc)
+		doc := spi.Decode[rowsDoc](stored)
 		rows := doc.Rows
 		for _, mutation := range mutations {
 			for column := range mutation.Values {
@@ -131,12 +128,10 @@ func (t *Tables) TableRows(ctx context.Context, identity spi.Identity, bucket, n
 	if !ok {
 		return nil, errors.New("S3 table not found")
 	}
-	var description map[string]any
-	_ = json.Unmarshal(descriptionBody, &description)
+	description := spi.JSONObject(descriptionBody)
 	columns := stringsFrom(description["columns"])
 	rowsBody, _, _ := t.col(identity, "s3trows").Get(ctx, key)
-	var doc rowsDoc
-	_ = json.Unmarshal(rowsBody, &doc)
+	doc := spi.Decode[rowsDoc](rowsBody)
 	rows := make([]map[string]any, 0, len(doc.Rows))
 	for _, storedRow := range doc.Rows {
 		row := map[string]any{}

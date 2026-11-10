@@ -44,7 +44,7 @@ func (p *crypto) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 	op := req.Operation
 	switch op {
 	case "Encrypt":
-		id := p.resolve(ctx, req, str(req.Input["KeyId"]))
+		id := p.resolve(ctx, req, spi.Str(req.Input["KeyId"]))
 		mat, err := p.material(ctx, req, id)
 		if err != nil {
 			return nil, err
@@ -60,7 +60,7 @@ func (p *crypto) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		raw := blob(req.Input["CiphertextBlob"])
 		id, ct, ok := splitID(raw)
 		if !ok {
-			id = p.resolve(ctx, req, str(req.Input["KeyId"]))
+			id = p.resolve(ctx, req, spi.Str(req.Input["KeyId"]))
 			ct = raw
 		} else {
 			id = p.resolve(ctx, req, id)
@@ -75,7 +75,7 @@ func (p *crypto) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		}
 		return &spi.Response{Output: map[string]any{"Plaintext": pt, "KeyId": id}}, nil
 	case "GenerateDataKey":
-		id := p.resolve(ctx, req, str(req.Input["KeyId"]))
+		id := p.resolve(ctx, req, spi.Str(req.Input["KeyId"]))
 		mat, err := p.material(ctx, req, id)
 		if err != nil {
 			return nil, err
@@ -111,7 +111,7 @@ func (p *crypto) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		delete(resp.Output, "Plaintext")
 		return resp, nil
 	case "GenerateDataKeyPair", "GenerateDataKeyPairWithoutPlaintext":
-		id := p.resolve(ctx, req, str(req.Input["KeyId"]))
+		id := p.resolve(ctx, req, spi.Str(req.Input["KeyId"]))
 		mat, err := p.material(ctx, req, id)
 		if err != nil {
 			return nil, err
@@ -128,43 +128,34 @@ func (p *crypto) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 			out["PrivateKeyPlaintext"] = priv
 		}
 		return &spi.Response{Output: out}, nil
-	case "GenerateMac":
+	case "GenerateMac", "VerifyMac", "Sign", "Verify":
+		// ponytail: Sign and Verify are HMAC-SHA256 over Message, not RSA/ECDSA. Upgrade if SigningAlgorithm is RSASSA_*.
 		mac, err := p.hmacMsg(ctx, req)
 		if err != nil {
 			return nil, err
 		}
-		return &spi.Response{Output: map[string]any{"Mac": mac, "KeyId": p.resolve(ctx, req, str(req.Input["KeyId"]))}}, nil
-	case "VerifyMac":
-		mac, err := p.hmacMsg(ctx, req)
-		if err != nil {
-			return nil, err
+		out := map[string]any{"KeyId": p.resolve(ctx, req, spi.Str(req.Input["KeyId"]))}
+		switch req.Operation {
+		case "GenerateMac":
+			out["Mac"] = mac
+		case "VerifyMac":
+			out["MacValid"] = hmac.Equal(mac, blob(req.Input["Mac"]))
+		case "Sign":
+			out["Signature"], out["SigningAlgorithm"] = mac, spi.First(req.Input, "SigningAlgorithm")
+		case "Verify":
+			out["SignatureValid"] = hmac.Equal(mac, blob(req.Input["Signature"]))
 		}
-		want := blob(req.Input["Mac"])
-		return &spi.Response{Output: map[string]any{"MacValid": hmac.Equal(mac, want), "KeyId": p.resolve(ctx, req, str(req.Input["KeyId"]))}}, nil
-	case "Sign":
-		// ponytail: HMAC-SHA256 over Message, not RSA/ECDSA. Upgrade if SigningAlgorithm is RSASSA_*.
-		mac, err := p.hmacMsg(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		return &spi.Response{Output: map[string]any{"Signature": mac, "KeyId": p.resolve(ctx, req, str(req.Input["KeyId"])), "SigningAlgorithm": first(req.Input, "SigningAlgorithm")}}, nil
-	case "Verify":
-		mac, err := p.hmacMsg(ctx, req)
-		if err != nil {
-			return nil, err
-		}
-		sig := blob(req.Input["Signature"])
-		return &spi.Response{Output: map[string]any{"SignatureValid": hmac.Equal(mac, sig), "KeyId": p.resolve(ctx, req, str(req.Input["KeyId"]))}}, nil
+		return &spi.Response{Output: out}, nil
 	case "GetParametersForImport":
 		return &spi.Response{Output: map[string]any{
-			"KeyId":             p.resolve(ctx, req, str(req.Input["KeyId"])),
+			"KeyId":             p.resolve(ctx, req, spi.Str(req.Input["KeyId"])),
 			"ImportToken":       p.deps.Rand.Bytes(16),
 			"PublicKey":         p.deps.Rand.Bytes(32),
 			"ParametersValidTo": "2020-01-08T00:00:00Z",
 		}}, nil
 	case "DeriveSharedSecret":
 		// ponytail: XOR of key material with PublicKey bytes, not ECDH.
-		id := p.resolve(ctx, req, str(req.Input["KeyId"]))
+		id := p.resolve(ctx, req, spi.Str(req.Input["KeyId"]))
 		mat, err := p.material(ctx, req, id)
 		if err != nil {
 			return nil, err
@@ -181,7 +172,7 @@ func (p *crypto) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		if err != nil {
 			return nil, err
 		}
-		dest := first(req.Input, "DestinationKeyId")
+		dest := spi.First(req.Input, "DestinationKeyId")
 		enc, err := p.Invoke(ctx, &spi.Request{Identity: req.Identity, HTTP: req.HTTP, Operation: "Encrypt", Input: map[string]any{"KeyId": dest, "Plaintext": dec.Output["Plaintext"]}})
 		if err != nil {
 			return nil, err
@@ -199,7 +190,7 @@ func (p *crypto) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		}
 		rec["Imported"] = true
 		b, _ := json.Marshal(rec)
-		_ = p.col(req).Put(ctx, str(rec["KeyId"]), b)
+		_ = p.col(req).Put(ctx, spi.Str(rec["KeyId"]), b)
 		return &spi.Response{Output: map[string]any{"KeyId": rec["KeyId"]}}, nil
 	default:
 		return nil, spi.NotImplemented("aws.kms", op, "emulate")
@@ -211,9 +202,8 @@ func (p *crypto) material(ctx context.Context, req *spi.Request, id string) ([]b
 	if !ok {
 		return nil, &spi.Fault{Code: "NotFoundException", HTTPStatus: 400, Fault: "client"}
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
-	if st := str(rec["KeyState"]); st == "Disabled" || st == "PendingDeletion" {
+	rec := spi.JSONObject(b)
+	if st := spi.Str(rec["KeyState"]); st == "Disabled" || st == "PendingDeletion" {
 		return nil, &spi.Fault{Code: "DisabledException", HTTPStatus: 400, Fault: "client"}
 	}
 	s, _ := rec["KeyMaterial"].(string)
@@ -303,7 +293,7 @@ func (p *crypto) resolve(ctx context.Context, req *spi.Request, id string) strin
 			name = id[i:]
 		}
 		if rec, ok := p.loadExtra(ctx, req, "kmsalias", name); ok {
-			if t := str(rec["TargetKeyId"]); t != "" {
+			if t := spi.Str(rec["TargetKeyId"]); t != "" {
 				return t
 			}
 		}
@@ -313,18 +303,17 @@ func (p *crypto) resolve(ctx context.Context, req *spi.Request, id string) strin
 }
 
 func (p *crypto) loadKey(ctx context.Context, req *spi.Request) (map[string]any, error) {
-	id := p.resolve(ctx, req, str(req.Input["KeyId"]))
+	id := p.resolve(ctx, req, spi.Str(req.Input["KeyId"]))
 	b, ok, _ := p.col(req).Get(ctx, id)
 	if !ok {
 		return nil, &spi.Fault{Code: "NotFoundException", HTTPStatus: 400, Fault: "client"}
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	return rec, nil
 }
 
 func (p *crypto) hmacMsg(ctx context.Context, req *spi.Request) ([]byte, error) {
-	id := p.resolve(ctx, req, str(req.Input["KeyId"]))
+	id := p.resolve(ctx, req, spi.Str(req.Input["KeyId"]))
 	mat, err := p.material(ctx, req, id)
 	if err != nil {
 		return nil, err
@@ -339,21 +328,6 @@ func (p *crypto) loadExtra(ctx context.Context, req *spi.Request, col, id string
 	if !ok {
 		return nil, false
 	}
-	var rec map[string]any
-	_ = json.Unmarshal(b, &rec)
+	rec := spi.JSONObject(b)
 	return rec, true
-}
-
-func str(v any) string {
-	s, _ := v.(string)
-	return s
-}
-
-func first(in map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if s := str(in[k]); s != "" {
-			return s
-		}
-	}
-	return ""
 }

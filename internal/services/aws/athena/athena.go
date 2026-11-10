@@ -36,12 +36,12 @@ func (p *runner) col(req *spi.Request, n string) spi.Collection {
 // bundle's GetQueryExecution and GetQueryResults read.
 func (p *runner) start(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	id := p.deps.Rand.Hex(16)
-	sql := first(req.Input, "QueryString")
+	sql := spi.First(req.Input, "QueryString")
 	defDB := ""
 	catalog := ""
 	if qec, ok := req.Input["QueryExecutionContext"].(map[string]any); ok {
-		defDB = first(qec, "Database")
-		catalog = first(qec, "Catalog")
+		defDB = spi.First(qec, "Database")
+		catalog = spi.First(qec, "Catalog")
 	}
 	cols, rows, state, reason := p.runQuery(ctx, req, sql, defDB, catalog)
 	status := map[string]any{"State": state}
@@ -50,7 +50,7 @@ func (p *runner) start(ctx context.Context, req *spi.Request) (*spi.Response, er
 	}
 	rec := map[string]any{
 		"QueryExecutionId": id, "Query": sql, "Status": status,
-		"WorkGroup": first(req.Input, "WorkGroup"), "columns": cols, "rows": rows,
+		"WorkGroup": spi.First(req.Input, "WorkGroup"), "columns": cols, "rows": rows,
 	}
 	b, _ := json.Marshal(rec)
 	_ = p.col(req, "atq").Put(ctx, id, b)
@@ -98,7 +98,7 @@ func (p *runner) scanTable(ctx context.Context, req *spi.Request, q sel) ([]any,
 	tbl, _ := tresp.Output["Table"].(map[string]any)
 	sd, _ := tbl["StorageDescriptor"].(map[string]any)
 	names := colNames(sd)
-	loc := first(sd, "Location")
+	loc := spi.First(sd, "Location")
 	bucket, prefix := splitS3(loc)
 	var records []map[string]string
 	if bucket != "" {
@@ -110,7 +110,7 @@ func (p *runner) scanTable(ctx context.Context, req *spi.Request, q sel) ([]any,
 		contents, _ := listed.Output["Contents"].([]any)
 		for _, c := range contents {
 			m, _ := c.(map[string]any)
-			key := first(m, "Key")
+			key := spi.First(m, "Key")
 			if key == "" || strings.HasSuffix(key, "/") {
 				continue
 			}
@@ -145,7 +145,7 @@ func (p *runner) scanTable(ctx context.Context, req *spi.Request, q sel) ([]any,
 		}
 		var row []any
 		for _, n := range proj {
-			row = append(row, recGet(rec, n))
+			row = append(row, spi.Fold(rec, n))
 		}
 		rows = append(rows, row)
 	}
@@ -163,7 +163,7 @@ func colNames(sd map[string]any) []string {
 	cols, _ := sd["Columns"].([]any)
 	for _, c := range cols {
 		m, _ := c.(map[string]any)
-		if n := first(m, "Name"); n != "" {
+		if n := spi.First(m, "Name"); n != "" {
 			names = append(names, n)
 		}
 	}
@@ -335,19 +335,7 @@ func parseJSONLines(raw []byte, names []string) ([]map[string]string, []string) 
 }
 
 func whereMatch(rec map[string]string, col, val string) bool {
-	return recGet(rec, col) == val
-}
-
-func recGet(rec map[string]string, col string) string {
-	if v, ok := rec[col]; ok {
-		return v
-	}
-	for k, v := range rec {
-		if strings.EqualFold(k, col) {
-			return v
-		}
-	}
-	return ""
+	return spi.Fold(rec, col) == val
 }
 
 // ponytail: no joins/aggregates/partitions; upgrade is Presto/Trino over Glue/S3.
@@ -366,16 +354,4 @@ func runSQL(q string) (cols []any, rows []any) {
 		}
 	}
 	return []any{}, []any{}
-}
-
-func first(in map[string]any, keys ...string) string {
-	if in == nil {
-		return ""
-	}
-	for _, k := range keys {
-		if s, ok := in[k].(string); ok && s != "" {
-			return s
-		}
-	}
-	return ""
 }

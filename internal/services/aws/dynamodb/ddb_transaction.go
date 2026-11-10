@@ -16,26 +16,25 @@ type transactionWrite struct {
 }
 
 func (p *Pack) transactGetItems(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	items := asSlice(req.Input["TransactItems"])
+	items := spi.Slice(req.Input["TransactItems"])
 	responses := make([]any, len(items))
 	err := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region).Txn(ctx, func(tx spi.ScopeTx) error {
 		for i, raw := range items {
-			get := asMap(asMap(raw)["Get"])
-			table := tableFromStreamARN(str(get["TableName"]))
+			get := spi.Object(spi.Object(raw)["Get"])
+			table := tableFromStreamARN(spi.Str(get["TableName"]))
 			definition, err := transactionTable(tx, table)
 			if err != nil {
 				return err
 			}
-			key := itemKeyFromDefinition(definition, asMap(get["Key"]))
+			key := itemKeyFromDefinition(definition, spi.Object(get["Key"]))
 			stored, ok, err := tx.Collection("items:" + table).Get(key)
 			if err != nil {
 				return err
 			}
 			response := map[string]any{}
 			if ok {
-				var item map[string]any
-				_ = json.Unmarshal(stored, &item)
-				response["Item"] = expr.Project(str(get["ProjectionExpression"]), item, asMap(get["ExpressionAttributeNames"]))
+				item := spi.JSONObject(stored)
+				response["Item"] = expr.Project(spi.Str(get["ProjectionExpression"]), item, spi.Object(get["ExpressionAttributeNames"]))
 			}
 			responses[i] = response
 		}
@@ -48,21 +47,20 @@ func (p *Pack) transactGetItems(ctx context.Context, req *spi.Request) (*spi.Res
 }
 
 func (p *Pack) transactWriteItems(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	items := asSlice(req.Input["TransactItems"])
+	items := spi.Slice(req.Input["TransactItems"])
 	writes := make([]transactionWrite, len(items))
 	replayed := false
 	scope := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region)
 	err := scope.Txn(ctx, func(tx spi.ScopeTx) error {
 		payload, _ := json.Marshal(items)
-		token := str(req.Input["ClientRequestToken"])
+		token := spi.Str(req.Input["ClientRequestToken"])
 		if token != "" {
 			if stored, ok, err := tx.Collection("ddbtx-tokens").Get(token); err != nil {
 				return err
 			} else if ok {
-				var record map[string]any
-				_ = json.Unmarshal(stored, &record)
-				if int64(asInt(record["Expires"])) > p.deps.Clock.Now().Unix() {
-					if str(record["Payload"]) != string(payload) {
+				record := spi.JSONObject(stored)
+				if int64(spi.Integer(record["Expires"])) > p.deps.Clock.Now().Unix() {
+					if spi.Str(record["Payload"]) != string(payload) {
 						return &spi.Fault{Code: "IdempotentParameterMismatchException", Message: "A client request token was reused with different parameters", HTTPStatus: 400, Fault: "client"}
 					}
 					replayed = true
@@ -75,18 +73,18 @@ func (p *Pack) transactWriteItems(ctx context.Context, req *spi.Request) (*spi.R
 		seen := map[string]bool{}
 		for i, raw := range items {
 			reasons[i] = map[string]any{"Code": "None"}
-			kind, input := transactionAction(asMap(raw))
+			kind, input := transactionAction(spi.Object(raw))
 			if input == nil {
 				return &spi.Fault{Code: "ValidationException", Message: "TransactItems must contain exactly one action", HTTPStatus: 400, Fault: "client"}
 			}
-			table := tableFromStreamARN(str(input["TableName"]))
+			table := tableFromStreamARN(spi.Str(input["TableName"]))
 			definition, err := transactionTable(tx, table)
 			if err != nil {
 				return err
 			}
-			attributes := asMap(input["Key"])
+			attributes := spi.Object(input["Key"])
 			if kind == "Put" {
-				attributes = asMap(input["Item"])
+				attributes = spi.Object(input["Item"])
 			}
 			if err := validateItemKeyDefinition(definition, attributes); err != nil {
 				return err
@@ -109,7 +107,7 @@ func (p *Pack) transactWriteItems(ctx context.Context, req *spi.Request) (*spi.R
 			}
 			if !ok {
 				reason := map[string]any{"Code": "ConditionalCheckFailed", "Message": "The conditional request failed"}
-				if str(input["ReturnValuesOnConditionCheckFailure"]) == "ALL_OLD" && old != nil {
+				if spi.Str(input["ReturnValuesOnConditionCheckFailure"]) == "ALL_OLD" && old != nil {
 					reason["Item"] = old
 				}
 				reasons[i], failed = reason, true
@@ -117,12 +115,12 @@ func (p *Pack) transactWriteItems(ctx context.Context, req *spi.Request) (*spi.R
 			item := cloneMap(old)
 			switch kind {
 			case "Put":
-				item = cloneMap(asMap(input["Item"]))
+				item = cloneMap(spi.Object(input["Item"]))
 			case "Update":
 				if item == nil {
-					item = cloneMap(asMap(input["Key"]))
+					item = cloneMap(spi.Object(input["Key"]))
 				}
-				if _, err := expr.ApplyUpdate(str(input["UpdateExpression"]), item, asMap(input["ExpressionAttributeNames"]), asMap(input["ExpressionAttributeValues"])); err != nil {
+				if _, err := expr.ApplyUpdate(spi.Str(input["UpdateExpression"]), item, spi.Object(input["ExpressionAttributeNames"]), spi.Object(input["ExpressionAttributeValues"])); err != nil {
 					return &spi.Fault{Code: "ValidationException", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
 				}
 			case "Delete", "ConditionCheck":
@@ -133,7 +131,7 @@ func (p *Pack) transactWriteItems(ctx context.Context, req *spi.Request) (*spi.R
 		if failed {
 			codes := make([]string, len(reasons))
 			for i, raw := range reasons {
-				codes[i] = str(asMap(raw)["Code"])
+				codes[i] = spi.Str(spi.Object(raw)["Code"])
 			}
 			return &spi.Fault{Code: "TransactionCanceledException", Message: "Transaction cancelled, please refer cancellation reasons for specific reasons [" + strings.Join(codes, ", ") + "]", HTTPStatus: 400, Fault: "client", Fields: map[string]any{"CancellationReasons": reasons}}
 		}
@@ -205,7 +203,6 @@ func transactionTable(tx spi.ScopeTx, table string) (map[string]any, error) {
 	if !ok {
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Requested resource not found", HTTPStatus: 400, Fault: "client"}
 	}
-	var definition map[string]any
-	_ = json.Unmarshal(stored, &definition)
+	definition := spi.JSONObject(stored)
 	return definition, nil
 }

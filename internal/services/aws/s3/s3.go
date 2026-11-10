@@ -3,6 +3,7 @@ package s3
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/md5"
 	"crypto/sha1"
@@ -17,6 +18,7 @@ import (
 	"hash/crc32"
 	"hash/crc64"
 	"io"
+	"maps"
 	"mime"
 	"net/http"
 	"net/url"
@@ -238,7 +240,7 @@ func (p *Pack) serve(ctx context.Context, req *spi.Request, next func(context.Co
 	}
 	if !slices.Contains(natives, req.Operation) {
 		// The natives find the home region themselves, in requireBucket.
-		if err := p.toHomeRegion(ctx, req, str(req.Input["Bucket"])); err != nil {
+		if err := p.toHomeRegion(ctx, req, spi.Str(req.Input["Bucket"])); err != nil {
 			return nil, err
 		}
 	}
@@ -260,7 +262,7 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.deleteBucket(ctx, req)
 	case "HeadBucket":
 		return p.headBucket(ctx, req)
-	case "ListBuckets":
+	case "ListBuckets", "ListDirectoryBuckets":
 		return p.listBuckets(ctx, req)
 	case "GetBucketLocation":
 		return p.getBucketLocation(ctx, req)
@@ -322,8 +324,6 @@ func (p *Pack) invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.renameObject(ctx, req)
 	case "SelectObjectContent":
 		return p.selectObject(ctx, req)
-	case "ListDirectoryBuckets":
-		return p.listBuckets(ctx, req)
 	case "WriteGetObjectResponse":
 		return p.writeGetObjectResponse(ctx, req)
 	case "UpdateObjectEncryption":
@@ -358,7 +358,7 @@ func (p *Pack) corsPreflight(ctx context.Context, req *spi.Request) (*spi.Respon
 		message = "CORSResponse: CORS is not enabled for this bucket."
 	}
 	resourceType := "BUCKET"
-	if str(req.Input["Key"]) != "" {
+	if spi.Str(req.Input["Key"]) != "" {
 		resourceType = "OBJECT"
 	}
 	return nil, &spi.Fault{Code: "AccessForbidden", Message: message, HTTPStatus: http.StatusForbidden, Fault: "client", Fields: map[string]any{"Method": method, "ResourceType": resourceType}}
@@ -386,17 +386,17 @@ func (p *Pack) corsHeaders(ctx context.Context, req *spi.Request, origin, method
 		return localstackCORSHeaders(req.HTTP, origin), false
 	}
 	requestedHeaders := splitCORSHeaders(requested)
-	for _, value := range asSlice(configuration["CORSRules"]) {
-		rule := asMap(value)
+	for _, value := range spi.Slice(configuration["CORSRules"]) {
+		rule := spi.Object(value)
 		allowedOrigin := ""
-		for _, candidate := range asSlice(rule["AllowedOrigins"]) {
-			pattern := str(candidate)
+		for _, candidate := range spi.Slice(rule["AllowedOrigins"]) {
+			pattern := spi.Str(candidate)
 			if corsPatternMatch(pattern, origin, false) {
 				allowedOrigin = pattern
 				break
 			}
 		}
-		if allowedOrigin == "" || !containsString(asSlice(rule["AllowedMethods"]), method, false) || !corsHeadersAllowed(asSlice(rule["AllowedHeaders"]), requestedHeaders) {
+		if allowedOrigin == "" || !containsString(spi.Slice(rule["AllowedMethods"]), method, false) || !corsHeadersAllowed(spi.Slice(rule["AllowedHeaders"]), requestedHeaders) {
 			continue
 		}
 		headers := http.Header{}
@@ -405,11 +405,11 @@ func (p *Pack) corsHeaders(ctx context.Context, req *spi.Request, origin, method
 			headers.Set("Access-Control-Allow-Origin", origin)
 			headers.Set("Access-Control-Allow-Credentials", "true")
 		}
-		headers.Set("Access-Control-Allow-Methods", joinStrings(asSlice(rule["AllowedMethods"])))
+		headers.Set("Access-Control-Allow-Methods", joinStrings(spi.Slice(rule["AllowedMethods"])))
 		if len(requestedHeaders) > 0 {
 			headers.Set("Access-Control-Allow-Headers", strings.Join(requestedHeaders, ", "))
 		}
-		if exposed := joinStrings(asSlice(rule["ExposeHeaders"])); exposed != "" {
+		if exposed := joinStrings(spi.Slice(rule["ExposeHeaders"])); exposed != "" {
 			headers.Set("Access-Control-Expose-Headers", exposed)
 		}
 		if age, exists := rule["MaxAgeSeconds"]; exists {
@@ -422,7 +422,7 @@ func (p *Pack) corsHeaders(ctx context.Context, req *spi.Request, origin, method
 }
 
 func (p *Pack) corsConfiguration(ctx context.Context, req *spi.Request) (map[string]any, bool) {
-	bucket := str(req.Input["Bucket"])
+	bucket := spi.Str(req.Input["Bucket"])
 	raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/cors")
 	if !ok {
 		location, exists, _ := p.deps.Store.Scope("_mirror", "global").Collection("s3buckets").Get(ctx, bucket)
@@ -444,7 +444,7 @@ func (p *Pack) corsConfiguration(ctx context.Context, req *spi.Request) (map[str
 	if json.Unmarshal(raw, &doc) != nil {
 		return nil, false
 	}
-	return asMap(doc["CORSConfiguration"]), true
+	return spi.Object(doc["CORSConfiguration"]), true
 }
 
 func splitCORSHeaders(value string) []string {
@@ -511,7 +511,7 @@ func corsHeadersAllowed(allowed []any, requested []string) bool {
 
 func containsString(values []any, target string, fold bool) bool {
 	for _, value := range values {
-		if corsPatternMatch(str(value), target, fold) {
+		if corsPatternMatch(spi.Str(value), target, fold) {
 			return true
 		}
 	}
@@ -532,7 +532,7 @@ func corsPatternMatch(pattern, value string, fold bool) bool {
 func joinStrings(values []any) string {
 	stringsOut := make([]string, 0, len(values))
 	for _, value := range values {
-		stringsOut = append(stringsOut, str(value))
+		stringsOut = append(stringsOut, spi.Str(value))
 	}
 	return strings.Join(stringsOut, ", ")
 }
@@ -795,10 +795,10 @@ func (p *Pack) col(req *spi.Request, name string) spi.Collection {
 }
 
 func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b := str(req.Input["Bucket"])
-	configuration := asMap(req.Input["CreateBucketConfiguration"])
+	b := spi.Str(req.Input["Bucket"])
+	configuration := spi.Object(req.Input["CreateBucketConfiguration"])
 	tagSet, tagsSet := configuration["Tags"]
-	tags := asSlice(tagSet)
+	tags := spi.Slice(tagSet)
 	if tagsSet && tagSet != nil {
 		if err := validateTagSet(tagSet, 50, "create-bucket"); err != nil {
 			return nil, err
@@ -808,7 +808,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	if len(tags) > 0 {
 		tagDocument, _ = json.Marshal(tags)
 	}
-	ownership := str(req.Input["ObjectOwnership"])
+	ownership := spi.Str(req.Input["ObjectOwnership"])
 	_, ownershipSet := req.Input["ObjectOwnership"]
 	if !ownershipSet && req.HTTP != nil {
 		if values := req.HTTP.Header.Values("x-amz-object-ownership"); len(values) > 0 {
@@ -835,7 +835,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	if req.HTTP != nil {
 		objectLock = objectLock || strings.EqualFold(req.HTTP.Header.Get("x-amz-bucket-object-lock-enabled"), "true")
 	}
-	namespace := str(req.Input["BucketNamespace"])
+	namespace := spi.Str(req.Input["BucketNamespace"])
 	if namespace != "" && namespace != "global" && namespace != "account-regional" {
 		return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid bucket namespace", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": "x-amz-bucket-namespace", "ArgumentValue": namespace}}
 	}
@@ -843,9 +843,9 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 	if !accountRegional && !validBucketName(b) {
 		return nil, &spi.Fault{Code: "InvalidBucketName", Message: "The specified bucket is not valid.", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"BucketName": b}}
 	}
-	constraint := str(req.Input["LocationConstraint"])
+	constraint := spi.Str(req.Input["LocationConstraint"])
 	if constraint == "" {
-		constraint = str(configuration["LocationConstraint"])
+		constraint = spi.Str(configuration["LocationConstraint"])
 	}
 	bucketRegion, err := createBucketRegion(req.Identity.Region, constraint, p.deps.S3AllowNonstandardRegions)
 	if err != nil {
@@ -887,8 +887,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		if err := validateOwnership(); err != nil {
 			return nil, err
 		}
-		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "namespace": namespace, "objectLockEnabled": objectLock, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")})
-		if err := buckets.Put(ctx, b, meta); err != nil {
+		if err := spi.PutJSON(ctx, buckets, b, map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "namespace": namespace, "objectLockEnabled": objectLock, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")}); err != nil {
 			return nil, err
 		}
 		if err := persistConfigurations(); err != nil {
@@ -926,8 +925,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 		if err := validateOwnership(); err != nil {
 			return nil, err
 		}
-		meta, _ := json.Marshal(map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "objectLockEnabled": objectLock, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")})
-		if err := buckets.Put(ctx, b, meta); err != nil {
+		if err := spi.PutJSON(ctx, buckets, b, map[string]any{"name": b, "region": bucketRegion, "locationConstraint": constraint, "objectLockEnabled": objectLock, "creationDate": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")}); err != nil {
 			return nil, err
 		}
 		location, _ := json.Marshal(map[string]any{"account": req.Identity.Account, "region": bucketRegion})
@@ -962,7 +960,7 @@ func (p *Pack) createBucket(ctx context.Context, req *spi.Request) (*spi.Respons
 }
 
 func (p *Pack) deleteBucket(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b := str(req.Input["Bucket"])
+	b := spi.Str(req.Input["Bucket"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
@@ -1020,7 +1018,7 @@ func (p *Pack) headBucket(ctx context.Context, req *spi.Request) (*spi.Response,
 	if req.Identity.Region == "aws-global" {
 		return nil, &spi.Fault{Code: "AuthorizationHeaderMalformed", Message: "The authorization header is malformed; the region 'aws-global' is wrong; expecting 'us-east-1'", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"Region": "us-east-1"}}
 	}
-	bucket := str(req.Input["Bucket"])
+	bucket := spi.Str(req.Input["Bucket"])
 	if err := p.requireBucket(ctx, req, bucket); err != nil {
 		return nil, err
 	}
@@ -1042,7 +1040,7 @@ func (p *Pack) listBuckets(ctx context.Context, req *spi.Request) (*spi.Response
 	_, maxSet := req.Input["MaxBuckets"]
 	maxBuckets := 0
 	if maxSet {
-		maxBuckets = asInt(req.Input["MaxBuckets"])
+		maxBuckets = spi.Integer(req.Input["MaxBuckets"])
 		if maxBuckets < 1 || maxBuckets > 10000 {
 			return nil, &spi.Fault{Code: "InvalidArgument", Message: "Invalid max-buckets value", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
@@ -1079,14 +1077,14 @@ func (p *Pack) listBuckets(ctx context.Context, req *spi.Request) (*spi.Response
 			if err := json.Unmarshal(kv.Value, &meta); err != nil {
 				return nil, err
 			}
-			bucketRegion := str(meta["region"])
+			bucketRegion := spi.Str(meta["region"])
 			if bucketRegion == "" {
 				bucketRegion = scope.Region
 			}
 			if (regionSet && bucketRegion != region) || kv.Key <= after {
 				continue
 			}
-			created := str(meta["creationDate"])
+			created := spi.Str(meta["creationDate"])
 			if created == "" {
 				created = p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 			}
@@ -1118,7 +1116,7 @@ func (p *Pack) listBuckets(ctx context.Context, req *spi.Request) (*spi.Response
 }
 
 func (p *Pack) getBucketLocation(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b := str(req.Input["Bucket"])
+	b := spi.Str(req.Input["Bucket"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
@@ -1130,11 +1128,11 @@ func (p *Pack) getBucketLocation(ctx context.Context, req *spi.Request) (*spi.Re
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		return nil, err
 	}
-	return &spi.Response{Output: map[string]any{"LocationConstraint": str(meta["locationConstraint"])}}, nil
+	return &spi.Response{Output: map[string]any{"LocationConstraint": spi.Str(meta["locationConstraint"])}}, nil
 }
 
 func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumType string, parts []any, lockDocs map[string][]byte) (*spi.Response, error) {
-	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	b, key := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
@@ -1164,7 +1162,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 	}
 	objectMetadata := requestObjectMetadata(req)
 	websiteRedirectLocation := requestCondition(req, "WebsiteRedirectLocation", "x-amz-website-redirect-location")
-	sseCustomerKeyMD5 := str(asMap(req.Input["_ObjectEncryption"])["sseCustomerKeyMD5"])
+	sseCustomerKeyMD5 := spi.Str(spi.Object(req.Input["_ObjectEncryption"])["sseCustomerKeyMD5"])
 	if sseCustomerKeyMD5 == "" {
 		sseCustomerKeyMD5, err = requestSSECustomerKey(req)
 		if err != nil {
@@ -1223,7 +1221,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 			}
 		}
 		versionOrder = append(versionOrder, vid)
-		deletedVersionNext = asMap(current["deletedVersionNext"])
+		deletedVersionNext = spi.Object(current["deletedVersionNext"])
 		_, _ = p.deps.Blobs.Put(ctx, blobKey(req, b, key)+"@"+vid, bytes.NewReader(body))
 		versionMeta := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "versionId": vid, "versionOrder": versionOrder, "mtime": mtime, "key": key, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled, "sseCustomerKeyMD5": sseCustomerKeyMD5}
 		if len(parts) > 0 {
@@ -1233,8 +1231,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 			versionMeta["checksums"] = provided
 			versionMeta["checksumType"] = checksumType
 		}
-		vm, _ := json.Marshal(versionMeta)
-		_ = p.col(req, "versions").Put(ctx, b+"/"+key+"/"+vid, vm)
+		_ = spi.PutJSON(ctx, p.col(req, "versions"), b+"/"+key+"/"+vid, versionMeta)
 	}
 	metaDoc := map[string]any{"etag": etag, "size": info.Size, "md5": info.MD5, "mtime": mtime, "versionId": vid, "deleteMarker": false, "storageClass": storageClass, "objectMetadata": objectMetadata, "websiteRedirectLocation": websiteRedirectLocation, "serverSideEncryption": serverSideEncryption, "ssekmsKeyId": sseKMSKeyID, "bucketKeyEnabled": bucketKeyEnabled, "sseCustomerKeyMD5": sseCustomerKeyMD5}
 	if versioned {
@@ -1322,7 +1319,7 @@ func (p *Pack) putObject(ctx context.Context, req *spi.Request, etag, checksumTy
 }
 
 func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	bucket := str(req.Input["Bucket"])
+	bucket := spi.Str(req.Input["Bucket"])
 	if err := p.requireBucket(ctx, req, bucket); err != nil {
 		return nil, err
 	}
@@ -1463,7 +1460,7 @@ func (p *Pack) postObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		query := redirect.Query()
 		query.Set("bucket", bucket)
 		query.Set("key", key)
-		query.Set("etag", str(response.Output["ETag"]))
+		query.Set("etag", spi.Str(response.Output["ETag"]))
 		redirect.RawQuery = query.Encode()
 		headers.Set("Location", redirect.String())
 		return &spi.Response{Status: http.StatusSeeOther, Headers: headers}, nil
@@ -1638,11 +1635,11 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if websiteRequest(req) && !truthy(req.Input["_websiteRaw"]) {
 		return p.websiteObject(ctx, req)
 	}
-	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	b, key := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
-	wantVer := str(req.Input["VersionId"])
+	wantVer := spi.Str(req.Input["VersionId"])
 	if p.versioningStatus(ctx, req, b) == "" {
 		if wantVer == "null" {
 			wantVer = ""
@@ -1660,7 +1657,7 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 	if err := validateStoredSSECustomerKey(req, meta); err != nil {
 		return nil, err
 	}
-	if keyID := str(meta["ssekmsKeyId"]); keyID != "" {
+	if keyID := spi.Str(meta["ssekmsKeyId"]); keyID != "" {
 		if _, err := p.validateKMSKey(ctx, req, keyID); err != nil {
 			return nil, err
 		}
@@ -1689,9 +1686,9 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 		{"ResponseContentType", "response-content-type", "Content-Type"},
 		{"ResponseExpires", "response-expires", "Expires"},
 	} {
-		value := str(req.Input[override.input])
+		value := spi.Str(req.Input[override.input])
 		if value == "" {
-			value = str(req.Input[override.query])
+			value = spi.Str(req.Input[override.query])
 		}
 		if value != "" {
 			if strings.IndexFunc(value, func(r rune) bool { return r > unicode.MaxLatin1 }) >= 0 {
@@ -1705,12 +1702,12 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 		h.Set("x-amz-restore", restore)
 	}
 	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
-	mtime := str(meta["mtime"])
+	mtime := spi.Str(meta["mtime"])
 	if mtime == "" {
 		mtime = p.deps.Clock.Now().UTC().Format(http.TimeFormat)
 	}
 	h.Set("Last-Modified", mtime)
-	if vid := str(meta["versionId"]); vid != "" {
+	if vid := spi.Str(meta["versionId"]); vid != "" {
 		h.Set("x-amz-version-id", vid)
 	}
 	tags := p.storedTags(ctx, req, b, key, wantVer)
@@ -1773,11 +1770,11 @@ func (p *Pack) getObject(ctx context.Context, req *spi.Request) (*spi.Response, 
 }
 
 func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	b, key := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
-	wantVer := str(req.Input["VersionId"])
+	wantVer := spi.Str(req.Input["VersionId"])
 	meta, exists := p.objectMetadata(ctx, req, b, key, wantVer)
 	if !exists {
 		return nil, &spi.Fault{Code: "NoSuchKey", HTTPStatus: 404, Fault: "client"}
@@ -1805,8 +1802,8 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		h.Set("x-amz-restore", restore)
 	}
 	h.Set("Content-Length", strconv.FormatInt(info.Size, 10))
-	h.Set("Last-Modified", str(meta["mtime"]))
-	if version := str(meta["versionId"]); version != "" {
+	h.Set("Last-Modified", spi.Str(meta["mtime"]))
+	if version := spi.Str(meta["versionId"]); version != "" {
 		h.Set("x-amz-version-id", version)
 	}
 	tags := p.storedTags(ctx, req, b, key, wantVer)
@@ -1814,7 +1811,7 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		h.Set("x-amz-tagging-count", strconv.Itoa(count))
 	}
 	if wantVer == "" {
-		p.setLifecycleExpirationHeader(ctx, req, b, key, info.Size, tags, str(meta["mtime"]), h)
+		p.setLifecycleExpirationHeader(ctx, req, b, key, info.Size, tags, spi.Str(meta["mtime"]), h)
 	}
 	if requestCondition(req, "ChecksumMode", "x-amz-checksum-mode") == "ENABLED" {
 		setChecksumHeaders(h, meta)
@@ -1857,7 +1854,7 @@ func (p *Pack) headObject(ctx context.Context, req *spi.Request) (*spi.Response,
 }
 
 func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	b, key := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
@@ -1875,11 +1872,11 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 	}
 	if match := requestCondition(req, "IfMatch", "If-Match"); match != "" {
 		current, exists := p.objectMetadata(ctx, req, b, key, "")
-		if !exists || truthy(current["deleteMarker"]) || !etagMatches(match, str(current["etag"])) {
+		if !exists || truthy(current["deleteMarker"]) || !etagMatches(match, spi.Str(current["etag"])) {
 			return nil, preconditionFailed("If-Match")
 		}
 	}
-	wantVer := str(req.Input["VersionId"])
+	wantVer := spi.Str(req.Input["VersionId"])
 	versioningStatus := p.versioningStatus(ctx, req, b)
 	versioned := versioningStatus != ""
 	if !versioned && wantVer == "null" {
@@ -1937,7 +1934,7 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		_ = p.col(req, "objlock").Delete(ctx, objectLockKey(b, key, wantVer, "legalhold"))
 		_ = p.col(req, "objlock").Delete(ctx, objectLockKey(b, key, wantVer, "retention"))
 		order := p.objectVersionOrder(ctx, req, b, key, current)
-		deletedVersionNext := asMap(current["deletedVersionNext"])
+		deletedVersionNext := spi.Object(current["deletedVersionNext"])
 		next := ""
 		for index, version := range order {
 			if version == wantVer && index > 0 {
@@ -1945,7 +1942,7 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 			}
 		}
 		for marker, version := range deletedVersionNext {
-			if str(version) == wantVer {
+			if spi.Str(version) == wantVer {
 				deletedVersionNext[marker] = next
 			}
 		}
@@ -1956,7 +1953,7 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 				kept = append(kept, version)
 			}
 		}
-		if currentExists && str(current["versionId"]) == wantVer {
+		if currentExists && spi.Str(current["versionId"]) == wantVer {
 			previous := ""
 			if len(kept) > 0 {
 				previous = kept[len(kept)-1]
@@ -1967,8 +1964,7 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 		} else if currentExists {
 			current["versionOrder"] = kept
 			current["deletedVersionNext"] = deletedVersionNext
-			raw, _ := json.Marshal(current)
-			_ = p.col(req, "objects").Put(ctx, b+"/"+key, raw)
+			_ = spi.PutJSON(ctx, p.col(req, "objects"), b+"/"+key, current)
 		}
 		h := http.Header{}
 		h.Set("x-amz-version-id", wantVer)
@@ -1989,7 +1985,7 @@ func (p *Pack) deleteObject(ctx context.Context, req *spi.Request) (*spi.Respons
 }
 
 func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b := str(req.Input["Bucket"])
+	b := spi.Str(req.Input["Bucket"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
@@ -2010,7 +2006,7 @@ func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Respon
 				return nil, &spi.Fault{Code: "InvalidRequest", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 			}
 		}
-		if err := validateChecksum(req, []byte(str(req.Input["_body"]))); err != nil {
+		if err := validateChecksum(req, []byte(spi.Str(req.Input["_body"]))); err != nil {
 			return nil, err
 		}
 	}
@@ -2032,14 +2028,14 @@ func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Respon
 	versioningStatus := p.versioningStatus(ctx, req, b)
 	for _, o := range objs {
 		m, _ := o.(map[string]any)
-		key := str(m["Key"])
+		key := spi.Str(m["Key"])
 		if key == "" {
 			continue
 		}
 		child := *req
-		child.Input = cloneMap(req.Input)
+		child.Input = spi.Clone(req.Input)
 		child.Input["Key"] = key
-		versionID := str(m["VersionId"])
+		versionID := spi.Str(m["VersionId"])
 		if versionID != "" {
 			child.Input["VersionId"] = versionID
 		} else {
@@ -2090,20 +2086,20 @@ func (p *Pack) deleteObjects(ctx context.Context, req *spi.Request) (*spi.Respon
 }
 
 func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b := str(req.Input["Bucket"])
+	b := spi.Str(req.Input["Bucket"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
 	if err := validateListEncodingType(req); err != nil {
 		return nil, err
 	}
-	prefix := str(req.Input["prefix"])
+	prefix := spi.Str(req.Input["prefix"])
 	if prefix == "" {
-		prefix = str(req.Input["Prefix"])
+		prefix = spi.Str(req.Input["Prefix"])
 	}
-	delim := str(req.Input["delimiter"])
+	delim := spi.Str(req.Input["delimiter"])
 	if delim == "" {
-		delim = str(req.Input["Delimiter"])
+		delim = spi.Str(req.Input["Delimiter"])
 	}
 	kvs, _, _ := p.col(req, "objects").List(ctx, b+"/"+prefix, "", 0)
 	type entry struct {
@@ -2126,9 +2122,8 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 				continue
 			}
 		}
-		var meta map[string]any
-		_ = json.Unmarshal(kv.Value, &meta)
-		modified := str(meta["mtime"])
+		meta := spi.JSONObject(kv.Value)
+		modified := spi.Str(meta["mtime"])
 		if parsed, err := http.ParseTime(modified); err == nil {
 			modified = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
 		}
@@ -2144,23 +2139,23 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 	})
 	maxKeys := 1000
 	if value, ok := req.Input["MaxKeys"]; ok {
-		if value := asInt(value); value != 0 {
+		if value := spi.Integer(value); value != 0 {
 			maxKeys = max(0, value)
 		}
 	} else if value, ok := req.Input["max-keys"]; ok {
-		if value := asInt(value); value != 0 {
+		if value := spi.Integer(value); value != 0 {
 			maxKeys = max(0, value)
 		}
 	}
-	marker := str(req.Input["marker"])
+	marker := spi.Str(req.Input["marker"])
 	if marker == "" {
-		marker = str(req.Input["Marker"])
+		marker = spi.Str(req.Input["Marker"])
 	}
 	continuationValue, continuationProvided := req.Input["continuation-token"]
 	if !continuationProvided {
 		continuationValue, continuationProvided = req.Input["ContinuationToken"]
 	}
-	continuation := str(continuationValue)
+	continuation := spi.Str(continuationValue)
 	decodedContinuation := ""
 	if req.Operation == "ListObjectsV2" && continuationProvided {
 		decoded, err := continuationEncoding.DecodeString(continuation)
@@ -2169,9 +2164,9 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 		decodedContinuation = string(decoded)
 	}
-	startAfter := str(req.Input["start-after"])
+	startAfter := spi.Str(req.Input["start-after"])
 	if startAfter == "" {
-		startAfter = str(req.Input["StartAfter"])
+		startAfter = spi.Str(req.Input["StartAfter"])
 	}
 	token := marker
 	inclusive := false
@@ -2230,13 +2225,13 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 			out["NextMarker"] = next
 		}
 	}
-	if str(req.Input["EncodingType"]) == "url" || str(req.Input["encoding-type"]) == "url" {
+	if spi.Str(req.Input["EncodingType"]) == "url" || spi.Str(req.Input["encoding-type"]) == "url" {
 		for _, c := range contents {
-			m := asMap(c)
+			m := spi.Object(c)
 			m["Key"] = s3URLEncode(m["Key"])
 		}
 		for _, p := range prefixes {
-			m := asMap(p)
+			m := spi.Object(p)
 			m["Prefix"] = s3URLEncode(m["Prefix"])
 		}
 		for _, field := range []string{"Prefix", "Delimiter", "StartAfter", "NextMarker"} {
@@ -2255,10 +2250,10 @@ func (p *Pack) listObjects(ctx context.Context, req *spi.Request) (*spi.Response
 }
 
 func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	if err := validateObjectKey(str(req.Input["Key"])); err != nil {
+	if err := validateObjectKey(spi.Str(req.Input["Key"])); err != nil {
 		return nil, err
 	}
-	if err := p.requireBucket(ctx, req, str(req.Input["Bucket"])); err != nil {
+	if err := p.requireBucket(ctx, req, spi.Str(req.Input["Bucket"])); err != nil {
 		return nil, err
 	}
 	source, err := p.openCopySource(ctx, req)
@@ -2266,12 +2261,12 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 		return nil, err
 	}
 	defer source.body.Close()
-	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"]), p.deps.Clock.Now()); err != nil {
+	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), spi.Str(source.meta["mtime"]), p.deps.Clock.Now()); err != nil {
 		return nil, err
 	}
 	_, bucketEncrypted, _ := p.col(req, "bktcfg").Get(ctx, source.bucket+"/encryption")
 	_, sourceRestored := p.restoreState(ctx, req, source.bucket, source.key, source.meta)
-	if source.bucket == str(req.Input["Bucket"]) && source.key == str(req.Input["Key"]) &&
+	if source.bucket == spi.Str(req.Input["Bucket"]) && source.key == spi.Str(req.Input["Key"]) &&
 		requestCondition(req, "StorageClass", "x-amz-storage-class") == "" &&
 		requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption") == "" &&
 		requestCondition(req, "SSECustomerKeyMD5", "x-amz-server-side-encryption-customer-key-MD5") == "" &&
@@ -2303,9 +2298,9 @@ func (p *Pack) copyObject(ctx context.Context, req *spi.Request) (*spi.Response,
 	}
 	algorithm := strings.ToUpper(requestCondition(req, "ChecksumAlgorithm", "x-amz-checksum-algorithm"))
 	if algorithm == "" {
-		stored := asMap(source.meta["checksums"])
+		stored := spi.Object(source.meta["checksums"])
 		for _, checksum := range checksums {
-			if str(stored[checksum.header]) != "" {
+			if spi.Str(stored[checksum.header]) != "" {
 				algorithm = checksum.algorithm
 				break
 			}
@@ -2341,7 +2336,7 @@ func copyDirective(req *spi.Request, input, header string) (string, error) {
 }
 
 func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	b, key := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
@@ -2390,8 +2385,7 @@ func (p *Pack) createMPU(ctx context.Context, req *spi.Request) (*spi.Response, 
 	}
 	id := p.deps.Rand.Hex(16)
 	raw, precondition, _ := p.col(req, "objects").Get(ctx, b+"/"+key)
-	var current map[string]any
-	_ = json.Unmarshal(raw, &current)
+	current := spi.JSONObject(raw)
 	precondition = precondition && !truthy(current["deleteMarker"])
 	p.mu.Lock()
 	p.mpu[id] = &mpu{bucket: b, key: key, uploadID: id, storageClass: storageClass, initiated: p.deps.Clock.Now().UTC().Format(time.RFC3339Nano), tagging: requestCondition(req, "Tagging", "x-amz-tagging"), checksumAlgorithm: algorithm, checksumType: checksumType, serverSideEncryption: serverSideEncryption, sseKMSKeyID: sseKMSKeyID, sseCustomerKeyMD5: sseCustomerKeyMD5, bucketKeyEnabled: bucketKeyEnabled, precondition: precondition, objectMetadata: requestObjectMetadata(req), websiteRedirectLocation: requestCondition(req, "WebsiteRedirectLocation", "x-amz-website-redirect-location"), initiator: map[string]any{"ID": req.Identity.Account, "DisplayName": "webfile"}, acl: acl, lockDocs: lockDocs, parts: map[int]multipartPart{}}
@@ -2416,7 +2410,7 @@ func (p *Pack) uploadPartCopy(ctx context.Context, req *spi.Request) (*spi.Respo
 		return nil, err
 	}
 	defer source.body.Close()
-	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), str(source.meta["mtime"]), p.deps.Clock.Now()); err != nil {
+	if err := checkCopySourcePreconditions(req, objectETag(source.meta, source.info.MD5), spi.Str(source.meta["mtime"]), p.deps.Clock.Now()); err != nil {
 		return nil, err
 	}
 	req.Body = source.body
@@ -2464,7 +2458,7 @@ func (p *Pack) uploadPart(ctx context.Context, req *spi.Request) (*spi.Response,
 			return nil, err
 		}
 	}
-	if stored, provided := str(encryption["sseCustomerKeyMD5"]), requestCondition(req, "SSECustomerKeyMD5", "x-amz-server-side-encryption-customer-key-MD5"); stored == "" && provided != "" || stored != "" && provided == "" {
+	if stored, provided := spi.Str(encryption["sseCustomerKeyMD5"]), requestCondition(req, "SSECustomerKeyMD5", "x-amz-server-side-encryption-customer-key-MD5"); stored == "" && provided != "" || stored != "" && provided == "" {
 		return nil, &spi.Fault{Code: "InvalidRequest", Message: "The multipart upload initiate requested encryption. Subsequent part requests must include the appropriate encryption parameters.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 	if err := validateStoredSSECustomerKey(req, encryption); err != nil {
@@ -2517,9 +2511,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	stored := map[int]multipartPart{}
 	if u != nil {
 		bucket, key = u.bucket, u.key
-		for number, part := range u.parts {
-			stored[number] = part
-		}
+		maps.Copy(stored, u.parts)
 	}
 	p.mu.Unlock()
 	if !matchesMultipartUpload(u, req) {
@@ -2535,8 +2527,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 	}
 	if noneMatch == "*" || match != "" {
 		raw, exists, _ := p.col(req, "objects").Get(ctx, bucket+"/"+key)
-		var current map[string]any
-		_ = json.Unmarshal(raw, &current)
+		current := spi.JSONObject(raw)
 		exists = exists && !truthy(current["deleteMarker"])
 		if noneMatch == "*" && exists {
 			return nil, &spi.Fault{Code: "PreconditionFailed", Message: "At least one of the pre-conditions you specified did not hold", HTTPStatus: http.StatusPreconditionFailed, Fault: "client", Fields: map[string]any{"Condition": "If-None-Match"}}
@@ -2544,15 +2535,15 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 			return nil, &spi.Fault{Code: "ConditionalRequestConflict", Message: "The conditional request cannot succeed due to a conflicting operation against this resource.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"Condition": "If-None-Match", "Key": key}}
 		} else if match != "" && !exists {
 			return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"Key": key}}
-		} else if match != "" && strings.Trim(match, "\"") != strings.Trim(str(current["etag"]), "\"") {
+		} else if match != "" && strings.Trim(match, "\"") != strings.Trim(spi.Str(current["etag"]), "\"") {
 			return nil, &spi.Fault{Code: "PreconditionFailed", Message: "At least one of the pre-conditions you specified did not hold", HTTPStatus: http.StatusPreconditionFailed, Fault: "client", Fields: map[string]any{"Condition": "If-Match"}}
 		} else if initiated, initiatedErr := time.Parse(time.RFC3339Nano, u.initiated); match != "" && initiatedErr == nil {
-			if modified, modifiedErr := http.ParseTime(str(current["mtime"])); modifiedErr == nil && initiated.Before(modified) {
+			if modified, modifiedErr := http.ParseTime(spi.Str(current["mtime"])); modifiedErr == nil && initiated.Before(modified) {
 				return nil, &spi.Fault{Code: "ConditionalRequestConflict", Message: "The conditional request cannot succeed due to a conflicting operation against this resource.", HTTPStatus: http.StatusConflict, Fault: "client", Fields: map[string]any{"Condition": "If-Match", "Key": key}}
 			}
 		}
 	}
-	parts := asSlice(asMap(req.Input["MultipartUpload"])["Parts"])
+	parts := spi.Slice(spi.Object(req.Input["MultipartUpload"])["Parts"])
 	if len(parts) == 0 {
 		return nil, &spi.Fault{Code: "InvalidRequest", Message: "You must specify at least one part", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
@@ -2567,9 +2558,9 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 		return nil, &spi.Fault{Code: "InvalidRequest", Message: fmt.Sprintf("The upload was created using the %s checksum mode. The complete request must use the same checksum mode.", u.checksumType), HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 	for index, completed := range parts {
-		item := asMap(completed)
-		number := asInt(item["PartNumber"])
-		etag := strings.Trim(strings.TrimSpace(str(item["ETag"])), `"`)
+		item := spi.Object(completed)
+		number := spi.Integer(item["PartNumber"])
+		etag := strings.Trim(strings.TrimSpace(spi.Str(item["ETag"])), `"`)
 		if number < 1 || number > 10000 {
 			return nil, invalidMultipartPart(id, etag, number)
 		}
@@ -2589,10 +2580,10 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 		}
 		if hasChecksum {
 			partChecksum := part.checksums[checksum.header]
-			supplied := str(item[checksum.input])
+			supplied := spi.Str(item[checksum.input])
 			if supplied == "" && u.checksumType == "COMPOSITE" {
 				for _, candidate := range checksums {
-					if str(item[candidate.input]) != "" {
+					if spi.Str(item[candidate.input]) != "" {
 						return nil, &spi.Fault{Code: "BadDigest", Message: fmt.Sprintf("The %s you specified for part %d did not match what we received.", strings.ToLower(candidate.algorithm), number), HTTPStatus: http.StatusBadRequest, Fault: "client"}
 					}
 				}
@@ -2605,7 +2596,7 @@ func (p *Pack) completeMPU(ctx context.Context, req *spi.Request) (*spi.Response
 			partChecksums = append(partChecksums, decoded...)
 		} else {
 			for _, candidate := range checksums {
-				if str(item[candidate.input]) != "" {
+				if spi.Str(item[candidate.input]) != "" {
 					return nil, invalidMultipartPart(id, etag, number)
 				}
 			}
@@ -2696,26 +2687,19 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 		return nil, err
 	}
 	id := mpuID(req)
-	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
-	marker := asInt(req.Input["PartNumberMarker"])
+	b, key := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"])
+	marker := spi.Integer(req.Input["PartNumberMarker"])
 	maxParts := 1000
-	if value := asInt(req.Input["MaxParts"]); value != 0 {
+	if value := spi.Integer(req.Input["MaxParts"]); value != 0 {
 		maxParts = value
 	}
-	if req.HTTP != nil {
-		if raw := str(req.Input["PartNumberMarker"]); raw != "" {
-			var err error
-			marker, err = strconv.Atoi(raw)
+	for member, into := range map[string]*int{"PartNumberMarker": &marker, "MaxParts": &maxParts} { // a REST request's text
+		if raw := spi.Str(req.Input[member]); raw != "" && req.HTTP != nil {
+			n, err := strconv.Atoi(raw)
 			if err != nil {
 				return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 			}
-		}
-		if raw := str(req.Input["MaxParts"]); raw != "" {
-			var err error
-			maxParts, err = strconv.Atoi(raw)
-			if err != nil {
-				return nil, &spi.Fault{Code: "InvalidArgument", HTTPStatus: http.StatusBadRequest, Fault: "client"}
-			}
+			*into = n
 		}
 	}
 	if maxParts == 0 {
@@ -2763,7 +2747,7 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 	out := map[string]any{
 		"Bucket": b, "Key": key, "UploadId": id, "PartNumberMarker": marker,
 		"MaxParts": maxParts, "IsTruncated": truncated, "Parts": parts, "StorageClass": u.storageClass,
-		"Initiator": cloneMap(u.initiator), "Owner": identity, "NextPartNumberMarker": 0,
+		"Initiator": spi.Clone(u.initiator), "Owner": identity, "NextPartNumberMarker": 0,
 	}
 	if u.checksumAlgorithm != "" {
 		out["ChecksumAlgorithm"], out["ChecksumType"] = u.checksumAlgorithm, u.checksumType
@@ -2775,7 +2759,7 @@ func (p *Pack) listParts(ctx context.Context, req *spi.Request) (*spi.Response, 
 }
 
 func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	bucket := str(req.Input["Bucket"])
+	bucket := spi.Str(req.Input["Bucket"])
 	if err := p.requireBucket(ctx, req, bucket); err != nil {
 		return nil, err
 	}
@@ -2787,11 +2771,11 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 	// fallback that used to sit here was reachable only for the members the
 	// hydration block did not list, and unreachable -- so untestable -- for
 	// the ones it did.
-	prefix := str(req.Input["Prefix"])
-	delimiter := str(req.Input["Delimiter"])
-	keyMarker := str(req.Input["KeyMarker"])
-	uploadMarker := str(req.Input["UploadIdMarker"])
-	encoding := str(req.Input["EncodingType"])
+	prefix := spi.Str(req.Input["Prefix"])
+	delimiter := spi.Str(req.Input["Delimiter"])
+	keyMarker := spi.Str(req.Input["KeyMarker"])
+	uploadMarker := spi.Str(req.Input["UploadIdMarker"])
+	encoding := spi.Str(req.Input["EncodingType"])
 	maxUploads := 1000
 	if raw, provided := req.Input["MaxUploads"]; provided {
 		// Two shapes reach this member and they are not interchangeable. A
@@ -2802,7 +2786,7 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 		// error. A request invoked directly carries a number, which asInt
 		// reads. Collapsing the two into one strict parse is what broke
 		// TestMultipartZeroLimitsUseDefaults: `str` here is a type assertion,
-		// so str(0) is "" and not "0".
+		// so spi.Str(0) is "" and not "0".
 		if text, isText := raw.(string); isText {
 			if text != "" {
 				parsed, err := strconv.Atoi(text)
@@ -2812,7 +2796,7 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 				maxUploads = parsed
 			}
 		} else {
-			maxUploads = asInt(raw)
+			maxUploads = spi.Integer(raw)
 		}
 	}
 	// Zero is deliberately still folded to the default rather than refused or
@@ -2840,7 +2824,7 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 	uploads := make([]uploadListing, 0, len(p.mpu))
 	for id, upload := range p.mpu {
 		if upload.bucket == bucket && strings.HasPrefix(upload.key, prefix) {
-			uploads = append(uploads, uploadListing{upload.key, id, upload.initiated, upload.storageClass, upload.checksumAlgorithm, upload.checksumType, cloneMap(upload.initiator)})
+			uploads = append(uploads, uploadListing{upload.key, id, upload.initiated, upload.storageClass, upload.checksumAlgorithm, upload.checksumType, spi.Clone(upload.initiator)})
 		}
 	}
 	p.mu.Unlock()
@@ -2933,21 +2917,21 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 		out["Delimiter"] = delimiter
 	}
 	if len(listed) > 0 {
-		last := asMap(listed[len(listed)-1])
+		last := spi.Object(listed[len(listed)-1])
 		out["NextKeyMarker"], out["NextUploadIdMarker"] = last["Key"], last["UploadId"]
 	}
 	if encoding == "url" {
 		encode := func(value string) string { return strings.ReplaceAll(url.QueryEscape(value), "+", "%20") }
 		for _, item := range append(listed, prefixes...) {
-			row := asMap(item)
+			row := spi.Object(item)
 			for _, field := range []string{"Key", "Prefix"} {
-				if value := str(row[field]); value != "" {
+				if value := spi.Str(row[field]); value != "" {
 					row[field] = encode(value)
 				}
 			}
 		}
 		for _, field := range []string{"Prefix", "Delimiter", "KeyMarker", "NextKeyMarker"} {
-			if value := str(out[field]); value != "" {
+			if value := spi.Str(out[field]); value != "" {
 				out[field] = encode(value)
 			}
 		}
@@ -2957,7 +2941,7 @@ func (p *Pack) listMultipartUploads(ctx context.Context, req *spi.Request) (*spi
 }
 
 func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b := str(req.Input["Bucket"])
+	b := spi.Str(req.Input["Bucket"])
 	if err := validateListEncodingType(req); err != nil {
 		return nil, err
 	}
@@ -2966,9 +2950,9 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 	}
 	p.versionMu.Lock()
 	defer p.versionMu.Unlock()
-	prefix, delimiter := str(req.Input["Prefix"]), str(req.Input["Delimiter"])
-	keyMarker, versionMarker := str(req.Input["KeyMarker"]), str(req.Input["VersionIdMarker"])
-	if str(req.Input["EncodingType"]) == "url" {
+	prefix, delimiter := spi.Str(req.Input["Prefix"]), spi.Str(req.Input["Delimiter"])
+	keyMarker, versionMarker := spi.Str(req.Input["KeyMarker"]), spi.Str(req.Input["VersionIdMarker"])
+	if spi.Str(req.Input["EncodingType"]) == "url" {
 		if decoded, err := url.PathUnescape(keyMarker); err == nil {
 			keyMarker = decoded
 		}
@@ -2978,17 +2962,15 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 	}
 	maxKeys := 1000
 	if value, ok := req.Input["MaxKeys"]; ok {
-		if value := asInt(value); value != 0 {
+		if value := spi.Integer(value); value != 0 {
 			maxKeys = max(0, value)
 		}
 	}
 
 	records := map[string][]map[string]any{}
-	kvs, _, _ := p.col(req, "versions").List(ctx, b+"/", "", 0)
-	for _, kv := range kvs {
-		var meta map[string]any
-		_ = json.Unmarshal(kv.Value, &meta)
-		key := str(meta["key"])
+	for _, kv := range spi.Entries(ctx, p.col(req, "versions"), b+"/", "", 0) {
+		meta := spi.JSONObject(kv.Value)
+		key := spi.Str(meta["key"])
 		if key == "" {
 			parts := strings.Split(strings.TrimPrefix(kv.Key, b+"/"), "/")
 			if len(parts) > 0 {
@@ -2999,14 +2981,12 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 			records[key] = append(records[key], meta)
 		}
 	}
-	objects, _, _ := p.col(req, "objects").List(ctx, b+"/"+prefix, "", 0)
-	for _, kv := range objects {
+	for _, kv := range spi.Entries(ctx, p.col(req, "objects"), b+"/"+prefix, "", 0) {
 		key := strings.TrimPrefix(kv.Key, b+"/")
 		if _, versioned := records[key]; versioned {
 			continue
 		}
-		var meta map[string]any
-		_ = json.Unmarshal(kv.Value, &meta)
+		meta := spi.JSONObject(kv.Value)
 		if !truthy(meta["deleteMarker"]) {
 			meta["key"], meta["versionId"] = key, "null"
 			records[key] = []map[string]any{meta}
@@ -3040,29 +3020,29 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 			}
 		}
 		current, _ := p.objectMetadata(ctx, req, b, key, "")
-		deletedVersionNext[key] = asMap(current["deletedVersionNext"])
+		deletedVersionNext[key] = spi.Object(current["deletedVersionNext"])
 		order := map[string]int{}
-		for index, value := range asSlice(current["versionOrder"]) {
-			order[str(value)] = index
+		for index, value := range spi.Slice(current["versionOrder"]) {
+			order[spi.Str(value)] = index
 		}
 		sort.Slice(records[key], func(i, j int) bool {
-			left, right := str(records[key][i]["versionId"]), str(records[key][j]["versionId"])
+			left, right := spi.Str(records[key][i]["versionId"]), spi.Str(records[key][j]["versionId"])
 			return order[left] > order[right]
 		})
 		for _, meta := range records[key] {
-			version := str(meta["versionId"])
-			modified := str(meta["mtime"])
+			version := spi.Str(meta["versionId"])
+			modified := spi.Str(meta["mtime"])
 			if parsed, err := http.ParseTime(modified); err == nil {
 				modified = parsed.UTC().Format("2006-01-02T15:04:05.000Z")
 			}
-			currentVersion := str(current["versionId"])
+			currentVersion := spi.Str(current["versionId"])
 			row := map[string]any{
 				"Key": key, "VersionId": version, "IsLatest": currentVersion == version || version == "null" && currentVersion == "",
 				"LastModified": modified, "Owner": map[string]any{"ID": req.Identity.Account},
 			}
 			deleteMarker := truthy(meta["deleteMarker"])
 			if !deleteMarker {
-				storageClass := str(meta["storageClass"])
+				storageClass := spi.Str(meta["storageClass"])
 				if storageClass == "" {
 					storageClass = "STANDARD"
 				}
@@ -3088,7 +3068,7 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 				filtered = append(filtered, item)
 			case item.version == versionMarker:
 				versionSeen = true
-			case deletedMarker && item.version == str(resumeVersion):
+			case deletedMarker && item.version == spi.Str(resumeVersion):
 				versionSeen = true
 				filtered = append(filtered, item)
 			}
@@ -3121,19 +3101,19 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 			out["NextVersionIdMarker"] = last.version
 		}
 	}
-	if str(req.Input["EncodingType"]) == "url" {
+	if spi.Str(req.Input["EncodingType"]) == "url" {
 		for _, collection := range [][]any{versions, markers, prefixes} {
 			for _, value := range collection {
-				row := asMap(value)
+				row := spi.Object(value)
 				for _, field := range []string{"Key", "Prefix"} {
-					if raw := str(row[field]); raw != "" {
+					if raw := spi.Str(row[field]); raw != "" {
 						row[field] = s3URLEncode(raw)
 					}
 				}
 			}
 		}
 		for _, field := range []string{"Prefix", "Delimiter", "KeyMarker", "NextKeyMarker"} {
-			if raw := str(out[field]); raw != "" {
+			if raw := spi.Str(out[field]); raw != "" {
 				out[field] = s3URLEncode(raw)
 			}
 		}
@@ -3143,7 +3123,7 @@ func (p *Pack) listObjectVersions(ctx context.Context, req *spi.Request) (*spi.R
 }
 
 func s3URLEncode(value any) string {
-	return strings.ReplaceAll(strings.ReplaceAll(url.QueryEscape(str(value)), "+", "%20"), "%2F", "/")
+	return strings.ReplaceAll(strings.ReplaceAll(url.QueryEscape(spi.Str(value)), "+", "%20"), "%2F", "/")
 }
 
 func validateListEncodingType(req *spi.Request) error {
@@ -3156,13 +3136,13 @@ func validateListEncodingType(req *spi.Request) error {
 		_, provided = values["encoding-type"]
 		value = values.Get("encoding-type")
 	}
-	if !provided || str(value) == "url" {
+	if !provided || spi.Str(value) == "url" {
 		return nil
 	}
 	return &spi.Fault{
 		Code: "InvalidArgument", Message: "Invalid Encoding Method specified in Request",
 		HTTPStatus: http.StatusBadRequest, Fault: "client",
-		Fields: map[string]any{"ArgumentName": "encoding-type", "ArgumentValue": str(value)},
+		Fields: map[string]any{"ArgumentName": "encoding-type", "ArgumentValue": spi.Str(value)},
 	}
 }
 
@@ -3182,7 +3162,7 @@ func (p *Pack) abortMPU(ctx context.Context, req *spi.Request) (*spi.Response, e
 }
 
 func matchesMultipartUpload(upload *mpu, req *spi.Request) bool {
-	bucket, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	bucket, key := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"])
 	return upload != nil && (bucket == "" || upload.bucket == bucket) && (key == "" || upload.key == key)
 }
 
@@ -3191,12 +3171,12 @@ func noSuchUpload(id string) *spi.Fault {
 }
 
 func (p *Pack) versioning(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b := str(req.Input["Bucket"])
+	b := spi.Str(req.Input["Bucket"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
 	if req.Operation == "PutBucketVersioning" {
-		st := str(req.Input["Status"])
+		st := spi.Str(req.Input["Status"])
 		if st == "" {
 			return nil, &spi.Fault{Code: "IllegalVersioningConfigurationException", Message: "The Versioning element must be specified", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
@@ -3213,9 +3193,8 @@ func (p *Pack) versioning(ctx context.Context, req *spi.Request) (*spi.Response,
 			objects, _, _ := p.col(req, "objects").List(ctx, b+"/", "", 0)
 			for _, object := range objects {
 				key := strings.TrimPrefix(object.Key, b+"/")
-				var meta map[string]any
-				_ = json.Unmarshal(object.Value, &meta)
-				if str(meta["versionId"]) != "" || truthy(meta["deleteMarker"]) {
+				meta := spi.JSONObject(object.Value)
+				if spi.Str(meta["versionId"]) != "" || truthy(meta["deleteMarker"]) {
 					continue
 				}
 				body, _, err := p.deps.Blobs.Get(ctx, blobKey(req, b, key))
@@ -3264,7 +3243,7 @@ func putGetDel(method, put, get, del string) string {
 }
 
 func (p *Pack) bucketLifecycle(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	bucket := str(req.Input["Bucket"])
+	bucket := spi.Str(req.Input["Bucket"])
 	if err := p.requireBucket(ctx, req, bucket); err != nil {
 		return nil, err
 	}
@@ -3280,7 +3259,7 @@ func (p *Pack) bucketLifecycle(ctx context.Context, req *spi.Request) (*spi.Resp
 			return nil, err
 		}
 		minimumValue, specified := req.Input["TransitionDefaultMinimumObjectSize"]
-		minimum := str(minimumValue)
+		minimum := spi.Str(minimumValue)
 		if !specified && req.HTTP != nil {
 			_, specified = req.HTTP.Header[http.CanonicalHeaderKey("x-amz-transition-default-minimum-object-size")]
 			minimum = req.HTTP.Header.Get("x-amz-transition-default-minimum-object-size")
@@ -3292,8 +3271,7 @@ func (p *Pack) bucketLifecycle(ctx context.Context, req *spi.Request) (*spi.Resp
 			return nil, &spi.Fault{Code: "InvalidRequest", Message: "Invalid TransitionDefaultMinimumObjectSize found: " + minimum, HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
 		document := map[string]any{"Rules": configuration["Rules"], "TransitionDefaultMinimumObjectSize": minimum}
-		raw, _ := json.Marshal(document)
-		_ = collection.Put(ctx, key, raw)
+		_ = spi.PutJSON(ctx, collection, key, document)
 		headers := http.Header{}
 		headers.Set("x-amz-transition-default-minimum-object-size", minimum)
 		return &spi.Response{Status: http.StatusOK, Headers: headers}, nil
@@ -3302,12 +3280,11 @@ func (p *Pack) bucketLifecycle(ctx context.Context, req *spi.Request) (*spi.Resp
 	if !exists {
 		return nil, &spi.Fault{Code: "NoSuchLifecycleConfiguration", Message: "The lifecycle configuration does not exist", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"BucketName": bucket}}
 	}
-	var document map[string]any
-	_ = json.Unmarshal(raw, &document)
-	minimum := str(document["TransitionDefaultMinimumObjectSize"])
+	document := spi.JSONObject(raw)
+	minimum := spi.Str(document["TransitionDefaultMinimumObjectSize"])
 	headers := http.Header{}
 	headers.Set("x-amz-transition-default-minimum-object-size", minimum)
-	return &spi.Response{Status: http.StatusOK, Headers: headers, Output: map[string]any{"Rules": asSlice(document["Rules"])}}, nil
+	return &spi.Response{Status: http.StatusOK, Headers: headers, Output: map[string]any{"Rules": spi.Slice(document["Rules"])}}, nil
 }
 
 func validateLifecycleConfiguration(value any) (map[string]any, error) {
@@ -3363,10 +3340,10 @@ func validateLifecycleConfiguration(value any) (map[string]any, error) {
 				}
 			}
 		}
-		and := asMap(filter["And"])
+		and := spi.Object(filter["And"])
 		seen := map[string]bool{}
-		for _, value := range asSlice(and["Tags"]) {
-			key := str(asMap(value)["Key"])
+		for _, value := range spi.Slice(and["Tags"]) {
+			key := spi.Str(spi.Object(value)["Key"])
 			if seen[key] {
 				return nil, &spi.Fault{Code: "InvalidRequest", Message: "Duplicate Tag Keys are not allowed.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 			}
@@ -3384,7 +3361,7 @@ func lifecycleDate(value any) (time.Time, bool) {
 	if date, ok := value.(time.Time); ok {
 		return date, true
 	}
-	date, err := time.Parse(time.RFC3339Nano, str(value))
+	date, err := time.Parse(time.RFC3339Nano, spi.Str(value))
 	return date, err == nil
 }
 
@@ -3393,16 +3370,15 @@ func (p *Pack) setLifecycleExpirationHeader(ctx context.Context, req *spi.Reques
 	if !exists {
 		return
 	}
-	var configuration map[string]any
-	_ = json.Unmarshal(raw, &configuration)
-	for _, value := range asSlice(configuration["Rules"]) {
-		rule := asMap(value)
+	configuration := spi.JSONObject(raw)
+	for _, value := range spi.Slice(configuration["Rules"]) {
+		rule := spi.Object(value)
 		expiration, configured := rule["Expiration"].(map[string]any)
-		if _, deleteMarker := expiration["ExpiredObjectDeleteMarker"]; !configured || deleteMarker || !lifecycleFilterMatches(asMap(rule["Filter"]), key, size, tags) {
+		if _, deleteMarker := expiration["ExpiredObjectDeleteMarker"]; !configured || deleteMarker || !lifecycleFilterMatches(spi.Object(rule["Filter"]), key, size, tags) {
 			continue
 		}
 		var expires time.Time
-		if days := asInt(expiration["Days"]); days != 0 {
+		if days := spi.Integer(expiration["Days"]); days != 0 {
 			lastModified, err := http.ParseTime(modified)
 			if err != nil {
 				return
@@ -3415,7 +3391,7 @@ func (p *Pack) setLifecycleExpirationHeader(ctx context.Context, req *spi.Reques
 				return
 			}
 		}
-		headers.Set("x-amz-expiration", fmt.Sprintf(`expiry-date="%s", rule-id="%s"`, expires.UTC().Format(http.TimeFormat), str(rule["ID"])))
+		headers.Set("x-amz-expiration", fmt.Sprintf(`expiry-date="%s", rule-id="%s"`, expires.UTC().Format(http.TimeFormat), spi.Str(rule["ID"])))
 		return
 	}
 }
@@ -3425,7 +3401,7 @@ func lifecycleFilterMatches(filter map[string]any, key string, size int64, tags 
 		return true
 	}
 	if value, exists := filter["And"]; exists {
-		and := asMap(value)
+		and := spi.Object(value)
 		if len(and) == 0 {
 			return false
 		}
@@ -3445,11 +3421,11 @@ func lifecycleFilterMatches(filter map[string]any, key string, size int64, tags 
 func lifecyclePredicateMatches(field string, value any, key string, size int64, tags map[string]string) bool {
 	switch field {
 	case "Prefix":
-		return strings.HasPrefix(key, str(value))
+		return strings.HasPrefix(key, spi.Str(value))
 	case "Tag":
-		tag := asMap(value)
-		actual, exists := tags[str(tag["Key"])]
-		return exists && actual == str(tag["Value"])
+		tag := spi.Object(value)
+		actual, exists := tags[spi.Str(tag["Key"])]
+		return exists && actual == spi.Str(tag["Value"])
 	case "ObjectSizeGreaterThan":
 		return size > lifecycleSize(value)
 	case "ObjectSizeLessThan":
@@ -3458,9 +3434,9 @@ func lifecyclePredicateMatches(field string, value any, key string, size int64, 
 		if len(tags) == 0 {
 			return false
 		}
-		for _, value := range asSlice(value) {
-			tag := asMap(value)
-			if tags[str(tag["Key"])] != str(tag["Value"]) {
+		for _, value := range spi.Slice(value) {
+			tag := spi.Object(value)
+			if tags[spi.Str(tag["Key"])] != spi.Str(tag["Value"]) {
 				return false
 			}
 		}
@@ -3489,26 +3465,26 @@ func (p *Pack) currentObjectVersion(ctx context.Context, req *spi.Request, bucke
 	if !exists {
 		return ""
 	}
-	return str(current["versionId"])
+	return spi.Str(current["versionId"])
 }
 
 func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b := str(req.Input["Bucket"])
+	b := spi.Str(req.Input["Bucket"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
 	kind, miss := cfgKind(req.Operation)
 	key := b + "/" + kind
 	var objectMeta map[string]any
-	if keyObj := str(req.Input["Key"]); keyObj != "" {
+	if keyObj := spi.Str(req.Input["Key"]); keyObj != "" {
 		if req.Operation == "GetObjectAcl" || req.Operation == "PutObjectAcl" {
 			var exists bool
-			objectMeta, exists = p.objectMetadata(ctx, req, b, keyObj, str(req.Input["VersionId"]))
+			objectMeta, exists = p.objectMetadata(ctx, req, b, keyObj, spi.Str(req.Input["VersionId"]))
 			if !exists {
 				return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client"}
 			}
 			if truthy(objectMeta["deleteMarker"]) {
-				explicit := str(req.Input["VersionId"]) != ""
+				explicit := spi.Str(req.Input["VersionId"]) != ""
 				if req.Operation == "PutObjectAcl" || explicit {
 					fault := deleteMarkerReadFault(objectMeta, true)
 					fault.Message = "The specified method is not allowed against this resource."
@@ -3519,7 +3495,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 				fault.Fields = map[string]any{"Key": keyObj}
 				return nil, fault
 			}
-			version := str(objectMeta["versionId"])
+			version := spi.Str(objectMeta["versionId"])
 			if version == "null" {
 				version = ""
 			}
@@ -3538,7 +3514,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 			raw, _ := json.Marshal(acl)
 			_ = col.Put(ctx, key, raw)
 			if req.Operation == "PutObjectAcl" {
-				p.notify(ctx, req, b, str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)
+				p.notify(ctx, req, b, spi.Str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)
 			}
 			return &spi.Response{Status: http.StatusOK}, nil
 		}
@@ -3566,10 +3542,9 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 			}
 			doc[k] = v
 		}
-		raw, _ := json.Marshal(doc)
-		_ = col.Put(ctx, key, raw)
+		_ = spi.PutJSON(ctx, col, key, doc)
 		if req.Operation == "PutObjectAcl" {
-			p.notify(ctx, req, b, str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)
+			p.notify(ctx, req, b, spi.Str(req.Input["Key"]), "ObjectAcl:Put", objectMeta)
 		}
 		return &spi.Response{Status: 200}, nil
 	}
@@ -3596,8 +3571,7 @@ func (p *Pack) bucketCfg(ctx context.Context, req *spi.Request) (*spi.Response, 
 		}
 		return &spi.Response{Output: map[string]any{}}, nil
 	}
-	var doc map[string]any
-	_ = json.Unmarshal(raw, &doc)
+	doc := spi.JSONObject(raw)
 	if req.Operation == "GetBucketAcl" || req.Operation == "GetObjectAcl" {
 		return &spi.Response{Status: http.StatusOK, Output: doc}, nil
 	}
@@ -3626,7 +3600,7 @@ func requestACL(req *spi.Request, required bool) (map[string]any, bool, error) {
 	}
 	policy, hasPolicy := req.Input["AccessControlPolicy"].(map[string]any)
 	if canned == "" && len(grants) == 0 && !hasPolicy {
-		if str(req.Input["_body"]) != "" {
+		if spi.Str(req.Input["_body"]) != "" {
 			return nil, false, malformedACL()
 		}
 		if required {
@@ -3646,7 +3620,7 @@ func requestACL(req *spi.Request, required bool) (map[string]any, bool, error) {
 		authenticated := map[string]any{"Type": "Group", "URI": "http://acs.amazonaws.com/groups/global/AuthenticatedUsers"}
 		logDelivery := map[string]any{"Type": "Group", "URI": "http://acs.amazonaws.com/groups/s3/LogDelivery"}
 		appendGrant := func(grantee map[string]any, permission string) {
-			acl["Grants"] = append(asSlice(acl["Grants"]), map[string]any{"Grantee": grantee, "Permission": permission})
+			acl["Grants"] = append(spi.Slice(acl["Grants"]), map[string]any{"Grantee": grantee, "Permission": permission})
 		}
 		switch canned {
 		case "private", "bucket-owner-read", "bucket-owner-full-control", "aws-exec-read":
@@ -3692,7 +3666,7 @@ func requestACL(req *spi.Request, required bool) (map[string]any, bool, error) {
 				default:
 					return nil, false, invalidACLArgument(header.header, serialized, "Argument format not recognized")
 				}
-				acl["Grants"] = append(asSlice(acl["Grants"]), map[string]any{"Grantee": grantee, "Permission": header.permission})
+				acl["Grants"] = append(spi.Slice(acl["Grants"]), map[string]any{"Grantee": grantee, "Permission": header.permission})
 			}
 		}
 		return acl, true, nil
@@ -3709,7 +3683,7 @@ func validateACLPolicy(policy map[string]any, account string) error {
 	if !ownerOK || !grantsOK {
 		return malformedACL()
 	}
-	if id := str(owner["ID"]); !validCanonicalID(id, account) {
+	if id := spi.Str(owner["ID"]); !validCanonicalID(id, account) {
 		return invalidACLArgument("CanonicalUser/ID", id, "Invalid id")
 	}
 	for _, value := range grants {
@@ -3717,7 +3691,7 @@ func validateACLPolicy(policy map[string]any, account string) error {
 		if !ok {
 			return malformedACL()
 		}
-		switch str(grant["Permission"]) {
+		switch spi.Str(grant["Permission"]) {
 		case "FULL_CONTROL", "READ", "WRITE", "READ_ACP", "WRITE_ACP":
 		default:
 			return malformedACL()
@@ -3726,13 +3700,13 @@ func validateACLPolicy(policy map[string]any, account string) error {
 		if !ok {
 			return malformedACL()
 		}
-		switch str(grantee["Type"]) {
+		switch spi.Str(grantee["Type"]) {
 		case "Group":
-			if uri := str(grantee["URI"]); !validACLGroup(uri) {
+			if uri := spi.Str(grantee["URI"]); !validACLGroup(uri) {
 				return invalidACLArgument("Group/URI", uri, "Invalid group uri")
 			}
 		case "CanonicalUser":
-			if id := str(grantee["ID"]); !validCanonicalID(id, account) {
+			if id := spi.Str(grantee["ID"]); !validCanonicalID(id, account) {
 				return invalidACLArgument("CanonicalUser/ID", id, "Invalid id")
 			}
 		case "AmazonCustomerByEmail":
@@ -3771,22 +3745,22 @@ func invalidACLArgument(name, value, message string) *spi.Fault {
 }
 
 func validateObjectLockConfiguration(value any) error {
-	configuration := asMap(value)
+	configuration := spi.Object(value)
 	malformed := func() error {
 		return &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
-	if str(configuration["ObjectLockEnabled"]) != "Enabled" {
+	if spi.Str(configuration["ObjectLockEnabled"]) != "Enabled" {
 		return malformed()
 	}
 	rule, exists := configuration["Rule"]
 	if !exists {
 		return nil
 	}
-	retention := asMap(asMap(rule)["DefaultRetention"])
-	mode := str(retention["Mode"])
+	retention := spi.Object(spi.Object(rule)["DefaultRetention"])
+	mode := spi.Str(retention["Mode"])
 	_, days := retention["Days"]
 	_, years := retention["Years"]
-	if (mode != "GOVERNANCE" && mode != "COMPLIANCE") || days == years || days && asInt(retention["Days"]) < 1 || years && asInt(retention["Years"]) < 1 {
+	if (mode != "GOVERNANCE" && mode != "COMPLIANCE") || days == years || days && spi.Integer(retention["Days"]) < 1 || years && spi.Integer(retention["Years"]) < 1 {
 		return malformed()
 	}
 	return nil
@@ -3812,16 +3786,16 @@ func cfgKind(op string) (string, *spi.Fault) {
 }
 
 func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	b, key := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
-	meta, ok := p.objectMetadata(ctx, req, b, key, str(req.Input["VersionId"]))
+	meta, ok := p.objectMetadata(ctx, req, b, key, spi.Str(req.Input["VersionId"]))
 	if !ok {
 		return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: 404, Fault: "client"}
 	}
 	if truthy(meta["deleteMarker"]) {
-		return nil, deleteMarkerReadFault(meta, str(req.Input["VersionId"]) != "")
+		return nil, deleteMarkerReadFault(meta, spi.Str(req.Input["VersionId"]) != "")
 	}
 	requested := map[string]bool{}
 	add := func(value string) {
@@ -3832,7 +3806,7 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 	switch attrs := req.Input["ObjectAttributes"].(type) {
 	case []any:
 		for _, attr := range attrs {
-			add(str(attr))
+			add(spi.Str(attr))
 		}
 	case []string:
 		for _, attr := range attrs {
@@ -3851,16 +3825,16 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 		out["ETag"] = meta["etag"]
 	}
 	if requested["OBJECTSIZE"] {
-		out["ObjectSize"] = asInt(meta["size"])
+		out["ObjectSize"] = spi.Integer(meta["size"])
 	}
 	if requested["STORAGECLASS"] {
 		out["StorageClass"] = meta["storageClass"]
 	}
-	parts := asSlice(meta["parts"])
-	if requested["CHECKSUM"] && len(asMap(meta["checksums"])) > 0 {
+	parts := spi.Slice(meta["parts"])
+	if requested["CHECKSUM"] && len(spi.Object(meta["checksums"])) > 0 {
 		values := map[string]any{"ChecksumType": meta["checksumType"]}
 		for _, checksum := range checksums {
-			if value := str(asMap(meta["checksums"])[checksum.header]); value != "" {
+			if value := spi.Str(spi.Object(meta["checksums"])[checksum.header]); value != "" {
 				if len(parts) > 0 {
 					value = strings.SplitN(value, "-", 2)[0]
 				}
@@ -3871,7 +3845,7 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 	}
 	if requested["OBJECTPARTS"] && len(parts) > 0 {
 		objectParts := map[string]any{"TotalPartsCount": len(parts)}
-		if str(meta["checksumType"]) == "COMPOSITE" {
+		if spi.Str(meta["checksumType"]) == "COMPOSITE" {
 			readInt := func(input, header string, fallback int) (int, error) {
 				value := ""
 				if raw, ok := req.Input[input]; ok {
@@ -3892,17 +3866,19 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 			if maxParts == 0 {
 				maxParts = 1000
 			}
-			sort.Slice(parts, func(i, j int) bool { return asInt(asMap(parts[i])["number"]) < asInt(asMap(parts[j])["number"]) })
+			sort.Slice(parts, func(i, j int) bool {
+				return spi.Integer(spi.Object(parts[i])["number"]) < spi.Integer(spi.Object(parts[j])["number"])
+			})
 			var listed []any
 			for _, raw := range parts {
-				part := asMap(raw)
-				number := asInt(part["number"])
+				part := spi.Object(raw)
+				number := spi.Integer(part["number"])
 				if number <= marker {
 					continue
 				}
-				item := map[string]any{"PartNumber": number, "Size": asInt(part["size"])}
+				item := map[string]any{"PartNumber": number, "Size": spi.Integer(part["size"])}
 				for _, checksum := range checksums {
-					if value := str(asMap(part["checksums"])[checksum.header]); value != "" {
+					if value := spi.Str(spi.Object(part["checksums"])[checksum.header]); value != "" {
 						item[checksum.input] = value
 					}
 				}
@@ -3915,17 +3891,17 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 			objectParts["IsTruncated"], objectParts["MaxParts"], objectParts["PartNumberMarker"], objectParts["NextPartNumberMarker"] = truncated, maxParts, strconv.Itoa(marker), "0"
 			if len(listed) > 0 {
 				objectParts["Parts"] = listed
-				objectParts["NextPartNumberMarker"] = strconv.Itoa(asInt(asMap(listed[len(listed)-1])["PartNumber"]))
+				objectParts["NextPartNumberMarker"] = strconv.Itoa(spi.Integer(spi.Object(listed[len(listed)-1])["PartNumber"]))
 			}
 		}
 		out["ObjectParts"] = objectParts
 	}
 	h := http.Header{}
-	h.Set("Last-Modified", str(meta["mtime"]))
-	if version := str(meta["versionId"]); version != "" {
+	h.Set("Last-Modified", spi.Str(meta["mtime"]))
+	if version := spi.Str(meta["versionId"]); version != "" {
 		h.Set("x-amz-version-id", version)
 	}
-	if notModified, err := checkReadPreconditions(req, str(meta["etag"]), str(meta["mtime"]), p.deps.Clock.Now()); err != nil {
+	if notModified, err := checkReadPreconditions(req, spi.Str(meta["etag"]), spi.Str(meta["mtime"]), p.deps.Clock.Now()); err != nil {
 		return nil, err
 	} else if notModified {
 		return &spi.Response{Status: http.StatusNotModified, Headers: h}, nil
@@ -3934,7 +3910,7 @@ func (p *Pack) objectAttributes(ctx context.Context, req *spi.Request) (*spi.Res
 }
 
 func (p *Pack) objectTagTarget(ctx context.Context, req *spi.Request) (string, string, error) {
-	b, key, version := str(req.Input["Bucket"]), str(req.Input["Key"]), str(req.Input["VersionId"])
+	b, key, version := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"]), spi.Str(req.Input["VersionId"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return "", "", err
 	}
@@ -3953,12 +3929,12 @@ func (p *Pack) objectTagTarget(ctx context.Context, req *spi.Request) (string, s
 		fault.Headers.Set("Allow", "DELETE")
 		return "", "", fault
 	}
-	return objectTagKey(b, key, version), str(meta["versionId"]), nil
+	return objectTagKey(b, key, version), spi.Str(meta["versionId"]), nil
 }
 
 func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b := str(req.Input["Bucket"])
-	key := str(req.Input["Key"])
+	b := spi.Str(req.Input["Bucket"])
+	key := spi.Str(req.Input["Key"])
 	switch req.Operation {
 	case "PutBucketTagging", "GetBucketTagging", "DeleteBucketTagging", "PutBucketNotificationConfiguration", "GetBucketNotificationConfiguration":
 		if err := p.requireBucket(ctx, req, b); err != nil {
@@ -3974,7 +3950,7 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 			if tagKey, objectVersion, err = p.objectTagTarget(ctx, req); err != nil {
 				return nil, err
 			}
-			if str(req.Input["VersionId"]) == "" && objectVersion != "" {
+			if spi.Str(req.Input["VersionId"]) == "" && objectVersion != "" {
 				_ = p.col(req, "tags").Delete(ctx, objectTagKey(b, key, objectVersion))
 			}
 		}
@@ -4011,13 +3987,13 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 		if len(raw) == 0 || string(raw) == "null" {
 			raw = []byte("[]")
 		}
-		if req.Operation == "PutBucketTagging" && len(asSlice(tagSet)) == 0 {
+		if req.Operation == "PutBucketTagging" && len(spi.Slice(tagSet)) == 0 {
 			_ = p.col(req, "tags").Delete(ctx, tagKey)
 		} else {
 			_ = p.col(req, "tags").Put(ctx, tagKey, raw)
 		}
 		if req.Operation == "PutObjectTagging" {
-			if str(req.Input["VersionId"]) == "" {
+			if spi.Str(req.Input["VersionId"]) == "" {
 				if objectVersion != "" {
 					_ = p.col(req, "tags").Put(ctx, objectTagKey(b, key, objectVersion), raw)
 				}
@@ -4067,16 +4043,14 @@ func (p *Pack) emptyOK(ctx context.Context, req *spi.Request) (*spi.Response, er
 		if err != nil {
 			return nil, err
 		}
-		raw, _ := json.Marshal(configuration)
-		_ = p.col(req, "notify").Put(ctx, b, raw)
+		_ = spi.PutJSON(ctx, p.col(req, "notify"), b, configuration)
 		return &spi.Response{Status: 200}, nil
 	case "GetBucketNotificationConfiguration":
 		raw, ok, _ := p.col(req, "notify").Get(ctx, b)
 		if !ok {
 			return &spi.Response{Status: 200, Output: map[string]any{}}, nil
 		}
-		var m map[string]any
-		_ = json.Unmarshal(raw, &m)
+		m := spi.JSONObject(raw)
 		return &spi.Response{Status: 200, Output: m}, nil
 	}
 	// Terraform refresh reads: empty document is the documented "not configured" response.
@@ -4098,7 +4072,7 @@ func (p *Pack) prepareNotificationConfiguration(ctx context.Context, req *spi.Re
 			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
 	} else {
-		if str(req.Input["_body"]) != "" {
+		if spi.Str(req.Input["_body"]) != "" {
 			return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 		}
 		for _, field := range []string{"QueueConfigurations", "TopicConfigurations", "LambdaFunctionConfigurations", "EventBridgeConfiguration"} {
@@ -4135,10 +4109,10 @@ func (p *Pack) prepareNotificationConfiguration(ctx context.Context, req *spi.Re
 		items := make([]any, 0, len(configurations))
 		for _, value := range configurations {
 			configuration, ok := value.(map[string]any)
-			if !ok || len(asSlice(configuration["Events"])) == 0 {
+			if !ok || len(spi.Slice(configuration["Events"])) == 0 {
 				return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 			}
-			arn := str(configuration[arnField])
+			arn := spi.Str(configuration[arnField])
 			parts := strings.SplitN(arn, ":", 4)
 			if len(parts) != 4 || parts[0] != "arn" || parts[2] != service {
 				return nil, &spi.Fault{Code: "InvalidArgument", Message: "The ARN could not be parsed", HTTPStatus: http.StatusBadRequest, Fault: "client", Fields: map[string]any{"ArgumentName": argumentName, "ArgumentValue": arn}}
@@ -4170,13 +4144,13 @@ func (p *Pack) prepareNotificationConfiguration(ctx context.Context, req *spi.Re
 					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 				}
 			}
-			item := map[string]any{arnField: arn, "Events": configuration["Events"], "Id": str(configuration["Id"])}
+			item := map[string]any{arnField: arn, "Events": configuration["Events"], "Id": spi.Str(configuration["Id"])}
 			if item["Id"] == "" {
 				item["Id"] = p.deps.Rand.Hex(8)
 			}
 			if value, exists := configuration["Filter"]; exists {
-				filter := asMap(value)
-				key := asMap(filter["Key"])
+				filter := spi.Object(value)
+				key := spi.Object(filter["Key"])
 				rules, ok := key["FilterRules"].([]any)
 				if !ok {
 					return nil, &spi.Fault{Code: "MalformedXML", HTTPStatus: http.StatusBadRequest, Fault: "client"}
@@ -4224,7 +4198,7 @@ func (p *Pack) verifyNotificationDestination(ctx context.Context, req *spi.Reque
 	}
 	payload, _ := json.Marshal(map[string]any{
 		"Service": "Amazon S3", "Event": "s3:TestEvent", "Time": p.deps.Clock.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
-		"Bucket": str(req.Input["Bucket"]), "RequestId": "mirror", "HostId": "eftixk72aD6Ap51TnqcoF8eFidJG9Z/2",
+		"Bucket": spi.Str(req.Input["Bucket"]), "RequestId": "mirror", "HostId": "eftixk72aD6Ap51TnqcoF8eFidJG9Z/2",
 	})
 	if service == "sqs" {
 		_, err := bundled.Handler("aws.sqs", p.deps).Invoke(ctx, &spi.Request{Identity: identity, Operation: "SendMessage", Input: map[string]any{"QueueName": name, "MessageBody": string(payload)}})
@@ -4287,8 +4261,8 @@ func validTagText(value string) bool {
 }
 
 func requestObjectMetadata(req *spi.Request) map[string]any {
-	if copied := asMap(req.Input["_ObjectMetadata"]); len(copied) > 0 {
-		return cloneMap(copied)
+	if copied := spi.Object(req.Input["_ObjectMetadata"]); len(copied) > 0 {
+		return spi.Clone(copied)
 	}
 	metadata := map[string]any{}
 	for _, field := range []struct{ key, input, header string }{
@@ -4303,12 +4277,12 @@ func requestObjectMetadata(req *spi.Request) map[string]any {
 			metadata[field.key] = value
 		}
 	}
-	if str(metadata["contentType"]) == "" {
+	if spi.Str(metadata["contentType"]) == "" {
 		metadata["contentType"] = "binary/octet-stream"
 	}
 	user := map[string]any{}
-	for key, value := range asMap(req.Input["Metadata"]) {
-		metadataValue := str(value)
+	for key, value := range spi.Object(req.Input["Metadata"]) {
+		metadataValue := spi.Str(value)
 		if req.Operation != "PostObject" {
 			metadataValue = decodeRFC2047Header(metadataValue)
 		}
@@ -4333,8 +4307,8 @@ func requestObjectMetadata(req *spi.Request) map[string]any {
 }
 
 func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket string) (string, string, bool, error) {
-	if resolved := asMap(req.Input["_ObjectEncryption"]); len(resolved) > 0 {
-		return str(resolved["serverSideEncryption"]), str(resolved["ssekmsKeyId"]), truthy(resolved["bucketKeyEnabled"]), nil
+	if resolved := spi.Object(req.Input["_ObjectEncryption"]); len(resolved) > 0 {
+		return spi.Str(resolved["serverSideEncryption"]), spi.Str(resolved["ssekmsKeyId"]), truthy(resolved["bucketKeyEnabled"]), nil
 	}
 	algorithm := requestCondition(req, "ServerSideEncryption", "x-amz-server-side-encryption")
 	keyID := requestCondition(req, "SSEKMSKeyId", "x-amz-server-side-encryption-aws-kms-key-id")
@@ -4343,17 +4317,16 @@ func (p *Pack) objectEncryption(ctx context.Context, req *spi.Request, bucket st
 	defaultBucketKey := false
 	raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/encryption")
 	if ok {
-		var document map[string]any
-		_ = json.Unmarshal(raw, &document)
-		configuration := asMap(document["ServerSideEncryptionConfiguration"])
+		document := spi.JSONObject(raw)
+		configuration := spi.Object(document["ServerSideEncryptionConfiguration"])
 		if len(configuration) == 0 {
 			configuration = document
 		}
-		if rules := asSlice(configuration["Rules"]); len(rules) > 0 {
-			rule := asMap(rules[0])
-			defaults := asMap(rule["ApplyServerSideEncryptionByDefault"])
-			defaultAlgorithm = str(defaults["SSEAlgorithm"])
-			defaultKeyID = str(defaults["KMSMasterKeyID"])
+		if rules := spi.Slice(configuration["Rules"]); len(rules) > 0 {
+			rule := spi.Object(rules[0])
+			defaults := spi.Object(rule["ApplyServerSideEncryptionByDefault"])
+			defaultAlgorithm = spi.Str(defaults["SSEAlgorithm"])
+			defaultKeyID = spi.Str(defaults["KMSMasterKeyID"])
 			defaultBucketKey = truthy(rule["BucketKeyEnabled"])
 		}
 	}
@@ -4393,9 +4366,8 @@ func (p *Pack) ensureAWSManagedS3Key(ctx context.Context, req *spi.Request) (str
 	scope := p.deps.Store.Scope(req.Identity.Account, req.Identity.Region)
 	aliases := scope.Collection("kmsalias")
 	if raw, ok, _ := aliases.Get(ctx, "alias/aws/s3"); ok {
-		var alias map[string]any
-		_ = json.Unmarshal(raw, &alias)
-		return p.validateKMSKey(ctx, req, str(alias["TargetKeyId"]))
+		alias := spi.JSONObject(raw)
+		return p.validateKMSKey(ctx, req, spi.Str(alias["TargetKeyId"]))
 	}
 	id := p.deps.Rand.Hex(16)
 	arn := fmt.Sprintf("arn:aws:kms:%s:%s:key/%s", req.Identity.Region, req.Identity.Account, id)
@@ -4430,9 +4402,8 @@ func (p *Pack) validateKMSKey(ctx context.Context, req *spi.Request, keyID strin
 	if strings.HasPrefix(keyID, "alias/") || strings.Contains(keyID, ":alias/") {
 		name := keyID[strings.Index(keyID, "alias/"):]
 		if raw, ok, _ := scope.Collection("kmsalias").Get(ctx, name); ok {
-			var alias map[string]any
-			_ = json.Unmarshal(raw, &alias)
-			keyID = str(alias["TargetKeyId"])
+			alias := spi.JSONObject(raw)
+			keyID = spi.Str(alias["TargetKeyId"])
 		}
 	}
 	if slash := strings.LastIndex(keyID, "/"); slash >= 0 {
@@ -4442,10 +4413,9 @@ func (p *Pack) validateKMSKey(ctx context.Context, req *spi.Request, keyID strin
 	if !ok {
 		return "", &spi.Fault{Code: "KMS.NotFoundException", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
-	var key map[string]any
-	_ = json.Unmarshal(raw, &key)
-	arn := str(key["Arn"])
-	switch str(key["KeyState"]) {
+	key := spi.JSONObject(raw)
+	arn := spi.Str(key["Arn"])
+	switch spi.Str(key["KeyState"]) {
 	case "Enabled":
 		return arn, nil
 	case "PendingDeletion":
@@ -4499,7 +4469,7 @@ func validateSSECustomerKey(algorithm, key, keyMD5, argument string) (string, er
 }
 
 func validateStoredSSECustomerKey(req *spi.Request, meta map[string]any) error {
-	stored := str(meta["sseCustomerKeyMD5"])
+	stored := spi.Str(meta["sseCustomerKeyMD5"])
 	provided := requestCondition(req, "SSECustomerKeyMD5", "x-amz-server-side-encryption-customer-key-MD5")
 	validated, err := requestSSECustomerKey(req)
 	if err != nil {
@@ -4523,14 +4493,14 @@ func validateCopySourceSSECustomerKey(req *spi.Request, meta map[string]any) err
 	if validated != "" {
 		provided = validated
 	}
-	if str(meta["sseCustomerKeyMD5"]) != provided {
+	if spi.Str(meta["sseCustomerKeyMD5"]) != provided {
 		return &spi.Fault{Code: "InvalidRequest", Message: "The provided encryption parameters did not match the ones used originally.", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
 	return nil
 }
 
 func setObjectMetadataHeaders(headers http.Header, meta map[string]any) {
-	metadata := asMap(meta["objectMetadata"])
+	metadata := spi.Object(meta["objectMetadata"])
 	for _, field := range []struct{ key, header string }{
 		{"cacheControl", "Cache-Control"},
 		{"contentDisposition", "Content-Disposition"},
@@ -4539,14 +4509,14 @@ func setObjectMetadataHeaders(headers http.Header, meta map[string]any) {
 		{"contentType", "Content-Type"},
 		{"expires", "Expires"},
 	} {
-		if value := str(metadata[field.key]); value != "" {
+		if value := spi.Str(metadata[field.key]); value != "" {
 			headers.Set(field.header, value)
 		}
 	}
-	for key, value := range asMap(metadata["user"]) {
-		headers.Set("x-amz-meta-"+key, encodeRFC2047Header(str(value)))
+	for key, value := range spi.Object(metadata["user"]) {
+		headers.Set("x-amz-meta-"+key, encodeRFC2047Header(spi.Str(value)))
 	}
-	if redirect := str(meta["websiteRedirectLocation"]); redirect != "" {
+	if redirect := spi.Str(meta["websiteRedirectLocation"]); redirect != "" {
 		headers.Set("x-amz-website-redirect-location", redirect)
 	}
 }
@@ -4634,12 +4604,12 @@ func encodeRFC2047Header(value string) string {
 }
 
 func setObjectEncryptionHeaders(headers http.Header, meta map[string]any) {
-	if keyMD5 := str(meta["sseCustomerKeyMD5"]); keyMD5 != "" {
+	if keyMD5 := spi.Str(meta["sseCustomerKeyMD5"]); keyMD5 != "" {
 		headers.Set("x-amz-server-side-encryption-customer-algorithm", "AES256")
 		headers.Set("x-amz-server-side-encryption-customer-key-MD5", keyMD5)
 		return
 	}
-	encryption := str(meta["serverSideEncryption"])
+	encryption := spi.Str(meta["serverSideEncryption"])
 	if encryption == "" {
 		return
 	}
@@ -4647,7 +4617,7 @@ func setObjectEncryptionHeaders(headers http.Header, meta map[string]any) {
 	if encryption != "aws:kms" {
 		return
 	}
-	if keyID := str(meta["ssekmsKeyId"]); keyID != "" {
+	if keyID := spi.Str(meta["ssekmsKeyId"]); keyID != "" {
 		headers.Set("x-amz-server-side-encryption-aws-kms-key-id", keyID)
 	}
 	if truthy(meta["bucketKeyEnabled"]) {
@@ -4656,14 +4626,14 @@ func setObjectEncryptionHeaders(headers http.Header, meta map[string]any) {
 }
 
 func (p *Pack) objectLockExtras(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	b, key := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
 	if !p.bucketObjectLockEnabled(ctx, req, b) {
 		return nil, &spi.Fault{Code: "InvalidRequest", Message: "Bucket is missing Object Lock Configuration", HTTPStatus: http.StatusBadRequest, Fault: "client"}
 	}
-	requestedVersion := str(req.Input["VersionId"])
+	requestedVersion := spi.Str(req.Input["VersionId"])
 	meta, ok := p.objectMetadata(ctx, req, b, key, requestedVersion)
 	if !ok {
 		return nil, &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client"}
@@ -4671,7 +4641,7 @@ func (p *Pack) objectLockExtras(ctx context.Context, req *spi.Request) (*spi.Res
 	if truthy(meta["deleteMarker"]) {
 		return nil, deleteMarkerReadFault(meta, requestedVersion != "")
 	}
-	version := str(meta["versionId"])
+	version := spi.Str(meta["versionId"])
 	if version == "null" {
 		version = ""
 	}
@@ -4690,8 +4660,7 @@ func (p *Pack) objectLockExtras(ctx context.Context, req *spi.Request) (*spi.Res
 	if !ok {
 		return &spi.Response{Status: 200, Output: map[string]any{}}, nil
 	}
-	var doc map[string]any
-	_ = json.Unmarshal(raw, &doc)
+	doc := spi.JSONObject(raw)
 	return &spi.Response{Status: 200, Output: doc}, nil
 }
 
@@ -4730,15 +4699,14 @@ func (p *Pack) objectLockForWrite(ctx context.Context, req *spi.Request, bucket 
 	if mode == "" {
 		raw, ok, _ := p.col(req, "bktcfg").Get(ctx, bucket+"/objectlock")
 		if ok {
-			var configuration map[string]any
-			_ = json.Unmarshal(raw, &configuration)
-			retention := asMap(asMap(asMap(configuration["ObjectLockConfiguration"])["Rule"])["DefaultRetention"])
-			mode = str(retention["Mode"])
+			configuration := spi.JSONObject(raw)
+			retention := spi.Object(spi.Object(spi.Object(configuration["ObjectLockConfiguration"])["Rule"])["DefaultRetention"])
+			mode = spi.Str(retention["Mode"])
 			if mode != "" {
 				now := p.deps.Clock.Now().UTC()
-				if days := asInt(retention["Days"]); days != 0 {
+				if days := spi.Integer(retention["Days"]); days != 0 {
 					until = now.AddDate(0, 0, days).Format(time.RFC3339)
-				} else if years := asInt(retention["Years"]); years != 0 {
+				} else if years := spi.Integer(retention["Years"]); years != 0 {
 					until = now.AddDate(years, 0, 0).Format(time.RFC3339)
 				}
 			}
@@ -4759,7 +4727,7 @@ func (p *Pack) objectVersionLocked(ctx context.Context, req *spi.Request, bucket
 	raw, ok, _ := p.col(req, "objlock").Get(ctx, objectLockKey(bucket, key, version, "legalhold"))
 	if ok {
 		_ = json.Unmarshal(raw, &doc)
-		if strings.EqualFold(str(asMap(doc["LegalHold"])["Status"]), "ON") {
+		if strings.EqualFold(spi.Str(spi.Object(doc["LegalHold"])["Status"]), "ON") {
 			return true
 		}
 	}
@@ -4769,8 +4737,8 @@ func (p *Pack) objectVersionLocked(ctx context.Context, req *spi.Request, bucket
 	}
 	doc = nil
 	_ = json.Unmarshal(raw, &doc)
-	retention := asMap(doc["Retention"])
-	until := str(retention["RetainUntilDate"])
+	retention := spi.Object(doc["Retention"])
+	until := spi.Str(retention["RetainUntilDate"])
 	if until == "" {
 		return false
 	}
@@ -4779,7 +4747,7 @@ func (p *Pack) objectVersionLocked(ctx context.Context, req *spi.Request, bucket
 		return false
 	}
 	_, bypass := governanceBypass(req)
-	return !bypass || !strings.EqualFold(str(retention["Mode"]), "GOVERNANCE")
+	return !bypass || !strings.EqualFold(spi.Str(retention["Mode"]), "GOVERNANCE")
 }
 
 func governanceBypass(req *spi.Request) (bool, bool) {
@@ -4806,8 +4774,7 @@ func (p *Pack) bucketObjectLockEnabled(ctx context.Context, req *spi.Request, bu
 	if !ok {
 		return false
 	}
-	var meta map[string]any
-	_ = json.Unmarshal(raw, &meta)
+	meta := spi.JSONObject(raw)
 	return truthy(meta["objectLockEnabled"])
 }
 
@@ -4816,21 +4783,20 @@ func (p *Pack) setBucketObjectLockEnabled(ctx context.Context, req *spi.Request,
 	if !ok {
 		return
 	}
-	var meta map[string]any
-	_ = json.Unmarshal(raw, &meta)
+	meta := spi.JSONObject(raw)
 	meta["objectLockEnabled"] = true
 	raw, _ = json.Marshal(meta)
 	_ = p.col(req, "buckets").Put(ctx, bucket, raw)
 }
 
 func (p *Pack) restoreObject(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	b, key := str(req.Input["Bucket"]), str(req.Input["Key"])
+	b, key := spi.Str(req.Input["Bucket"]), spi.Str(req.Input["Key"])
 	if err := p.requireBucket(ctx, req, b); err != nil {
 		return nil, err
 	}
-	version := str(req.Input["VersionId"])
+	version := spi.Str(req.Input["VersionId"])
 	if version == "" {
-		version = str(req.Input["versionId"])
+		version = spi.Str(req.Input["versionId"])
 	}
 	meta, exists := p.objectMetadata(ctx, req, b, key, version)
 	if !exists {
@@ -4841,11 +4807,11 @@ func (p *Pack) restoreObject(ctx context.Context, req *spi.Request) (*spi.Respon
 	}
 	storageClass := archiveStorageClass(meta)
 	if storageClass == "" {
-		return nil, &spi.Fault{Code: "InvalidObjectState", HTTPStatus: http.StatusForbidden, Fault: "client", Fields: map[string]any{"StorageClass": str(meta["storageClass"])}}
+		return nil, &spi.Fault{Code: "InvalidObjectState", HTTPStatus: http.StatusForbidden, Fault: "client", Fields: map[string]any{"StorageClass": spi.Str(meta["storageClass"])}}
 	}
-	days := asInt(req.Input["Days"])
+	days := spi.Integer(req.Input["Days"])
 	if days == 0 {
-		days = asInt(asMap(req.Input["RestoreRequest"])["Days"])
+		days = spi.Integer(spi.Object(req.Input["RestoreRequest"])["Days"])
 	}
 	if days == 0 {
 		return &spi.Response{Status: http.StatusOK, Output: map[string]any{}}, nil
@@ -4855,7 +4821,7 @@ func (p *Pack) restoreObject(ctx context.Context, req *spi.Request) (*spi.Respon
 	expires := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, days+1)
 	restore := fmt.Sprintf(`ongoing-request="false", expiry-date="%s"`, expires.Format(http.TimeFormat))
 	_ = p.col(req, "objlock").Put(ctx, objectRestoreKey(b, key, meta), []byte(restore))
-	notificationMeta := cloneMap(meta)
+	notificationMeta := spi.Clone(meta)
 	notificationMeta["restoreExpiry"] = expires.UTC().Format("2006-01-02T15:04:05.000Z")
 	p.notify(ctx, req, b, key, "ObjectRestore:Post", notificationMeta)
 	p.notify(ctx, req, b, key, "ObjectRestore:Completed", notificationMeta)
@@ -4872,7 +4838,7 @@ func (p *Pack) requireBucket(ctx context.Context, req *spi.Request, b string) er
 }
 
 func (p *Pack) requireMultipartBucket(ctx context.Context, req *spi.Request) error {
-	if bucket := str(req.Input["Bucket"]); bucket != "" {
+	if bucket := spi.Str(req.Input["Bucket"]); bucket != "" {
 		return p.requireBucket(ctx, req, bucket)
 	}
 	return nil
@@ -4935,7 +4901,7 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 	if len(metadata) > 0 {
 		meta = metadata[0]
 	} else {
-		meta, _ = p.objectMetadata(ctx, req, bucket, key, str(req.Input["VersionId"]))
+		meta, _ = p.objectMetadata(ctx, req, bucket, key, spi.Str(req.Input["VersionId"]))
 	}
 	payload := p.notificationPayload(req, bucket, key, event, "", meta)
 	_ = p.deps.Bus.Publish(ctx, "s3:"+bucket, payload)
@@ -4943,29 +4909,28 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 	if !ok {
 		return
 	}
-	var cfg map[string]any
-	_ = json.Unmarshal(raw, &cfg)
-	for _, dest := range append(asSlice(cfg["QueueConfigurations"]), asSlice(cfg["TopicConfigurations"])...) {
-		m := asMap(dest)
+	cfg := spi.JSONObject(raw)
+	for _, dest := range append(spi.Slice(cfg["QueueConfigurations"]), spi.Slice(cfg["TopicConfigurations"])...) {
+		m := spi.Object(dest)
 		if !notificationMatches(m, key, event) {
 			continue
 		}
-		arn := str(m["QueueArn"])
+		arn := spi.Str(m["QueueArn"])
 		if arn == "" {
-			arn = str(m["TopicArn"])
+			arn = spi.Str(m["TopicArn"])
 		}
 		if arn == "" {
-			arn = str(m["Queue"])
+			arn = spi.Str(m["Queue"])
 		}
 		if arn == "" {
 			continue
 		}
-		payload = p.notificationPayload(req, bucket, key, event, str(m["Id"]), meta)
+		payload = p.notificationPayload(req, bucket, key, event, spi.Str(m["Id"]), meta)
 		name := arn
 		if i := strings.LastIndex(arn, ":"); i >= 0 {
 			name = arn[i+1:]
 		}
-		if str(m["QueueArn"]) != "" || str(m["Queue"]) != "" || strings.Contains(arn, ":sqs:") {
+		if spi.Str(m["QueueArn"]) != "" || spi.Str(m["Queue"]) != "" || strings.Contains(arn, ":sqs:") {
 			input := map[string]any{"QueueName": name, "MessageBody": string(payload)}
 			if req.HTTP != nil && req.HTTP.Header.Get("X-Amzn-Trace-Id") != "" {
 				input["MessageSystemAttributes"] = map[string]any{"AWSTraceHeader": map[string]any{"DataType": "String", "StringValue": req.HTTP.Header.Get("X-Amzn-Trace-Id")}}
@@ -4981,13 +4946,13 @@ func (p *Pack) notify(ctx context.Context, req *spi.Request, bucket, key, event 
 			Input: map[string]any{"TopicArn": arn, "Message": string(payload), "Subject": "Amazon S3 Notification"},
 		})
 	}
-	for _, dest := range asSlice(cfg["LambdaFunctionConfigurations"]) {
-		configuration := asMap(dest)
+	for _, dest := range spi.Slice(cfg["LambdaFunctionConfigurations"]) {
+		configuration := spi.Object(dest)
 		if !notificationMatches(configuration, key, event) {
 			continue
 		}
-		arn := str(configuration["LambdaFunctionArn"])
-		payload = p.notificationPayload(req, bucket, key, event, str(configuration["Id"]), meta)
+		arn := spi.Str(configuration["LambdaFunctionArn"])
+		payload = p.notificationPayload(req, bucket, key, event, spi.Str(configuration["Id"]), meta)
 		_, name, found := strings.Cut(arn, ":function:")
 		if !found {
 			continue
@@ -5015,17 +4980,17 @@ func notificationTargetIdentity(identity spi.Identity, arn string) spi.Identity 
 
 func (p *Pack) notificationPayload(req *spi.Request, bucket, key, event, configurationID string, meta map[string]any) []byte {
 	object := map[string]any{"key": notificationKey(key), "sequencer": "0055AED6DCD90281E5"}
-	if version := str(meta["versionId"]); version != "" && version != "null" {
+	if version := spi.Str(meta["versionId"]); version != "" && version != "null" {
 		object["versionId"] = version
 	}
 	if strings.Contains(event, "ObjectCreated") || strings.Contains(event, "ObjectRestore") {
-		object["eTag"] = strings.Trim(str(meta["etag"]), `"`)
-		object["size"] = asInt(meta["size"])
+		object["eTag"] = strings.Trim(spi.Str(meta["etag"]), `"`)
+		object["size"] = spi.Integer(meta["size"])
 	}
 	eventVersion := "2.1"
 	if strings.Contains(event, "ObjectTagging") || strings.Contains(event, "ObjectAcl") {
 		eventVersion = "2.3"
-		object["eTag"] = strings.Trim(str(meta["etag"]), `"`)
+		object["eTag"] = strings.Trim(spi.Str(meta["etag"]), `"`)
 		delete(object, "sequencer")
 	}
 	eventTime := p.deps.Clock.Now().UTC()
@@ -5046,7 +5011,7 @@ func (p *Pack) notificationPayload(req *spi.Request, bucket, key, event, configu
 	}
 	if strings.HasSuffix(event, "ObjectRestore:Completed") {
 		record["glacierEventData"] = map[string]any{"restoreEventData": map[string]any{
-			"lifecycleRestorationExpiryTime": str(meta["restoreExpiry"]), "lifecycleRestoreStorageClass": str(meta["storageClass"]),
+			"lifecycleRestorationExpiryTime": spi.Str(meta["restoreExpiry"]), "lifecycleRestoreStorageClass": spi.Str(meta["storageClass"]),
 		}}
 	}
 	payload, _ := json.Marshal(map[string]any{"Records": []any{record}})
@@ -5055,10 +5020,10 @@ func (p *Pack) notificationPayload(req *spi.Request, bucket, key, event, configu
 
 func (p *Pack) eventBridgeEntry(req *spi.Request, bucket, key, event string, meta map[string]any) map[string]any {
 	object := map[string]any{
-		"key": notificationKey(key), "size": asInt(meta["size"]),
-		"etag": strings.Trim(str(meta["etag"]), `"`), "sequencer": "0062E99A88DC407460",
+		"key": notificationKey(key), "size": spi.Integer(meta["size"]),
+		"etag": strings.Trim(spi.Str(meta["etag"]), `"`), "sequencer": "0062E99A88DC407460",
 	}
-	if version := str(meta["versionId"]); version != "" && version != "null" {
+	if version := spi.Str(meta["versionId"]); version != "" && version != "null" {
 		object["version-id"] = version
 	}
 	detail := map[string]any{
@@ -5099,10 +5064,10 @@ func (p *Pack) eventBridgeEntry(req *spi.Request, bucket, key, event string, met
 		detailType = "Object Restore Initiated"
 		if strings.HasSuffix(event, ":Completed") {
 			detailType = "Object Restore Completed"
-			detail["restore-expiry-time"] = str(meta["restoreExpiry"])
+			detail["restore-expiry-time"] = spi.Str(meta["restoreExpiry"])
 			delete(detail, "source-ip-address")
 		}
-		detail["source-storage-class"] = str(meta["storageClass"])
+		detail["source-storage-class"] = spi.Str(meta["storageClass"])
 		delete(object, "sequencer")
 	}
 	detailJSON, _ := json.Marshal(detail)
@@ -5124,8 +5089,8 @@ func notificationMatches(configuration map[string]any, key, event string) bool {
 	event = "s3:" + event
 	wildcard := event[:strings.LastIndex(event, ":")+1] + "*"
 	matched := false
-	for _, value := range asSlice(configuration["Events"]) {
-		if configured := str(value); configured == event || configured == wildcard {
+	for _, value := range spi.Slice(configuration["Events"]) {
+		if configured := spi.Str(value); configured == event || configured == wildcard {
 			matched = true
 			break
 		}
@@ -5133,15 +5098,15 @@ func notificationMatches(configuration map[string]any, key, event string) bool {
 	if !matched {
 		return false
 	}
-	for _, value := range asSlice(asMap(asMap(configuration["Filter"])["Key"])["FilterRules"]) {
-		rule := asMap(value)
-		switch strings.ToLower(str(rule["Name"])) {
+	for _, value := range spi.Slice(spi.Object(spi.Object(configuration["Filter"])["Key"])["FilterRules"]) {
+		rule := spi.Object(value)
+		switch strings.ToLower(spi.Str(rule["Name"])) {
 		case "prefix":
-			if !strings.HasPrefix(key, str(rule["Value"])) {
+			if !strings.HasPrefix(key, spi.Str(rule["Value"])) {
 				return false
 			}
 		case "suffix":
-			if !strings.HasSuffix(key, str(rule["Value"])) {
+			if !strings.HasSuffix(key, spi.Str(rule["Value"])) {
 				return false
 			}
 		}
@@ -5153,13 +5118,8 @@ func blobKey(req *spi.Request, b, k string) string {
 	return req.Identity.Account + "/" + req.Identity.Region + "/" + b + "/" + k
 }
 
-func str(v any) string {
-	s, _ := v.(string)
-	return s
-}
-
 func requestCondition(req *spi.Request, input, header string) string {
-	if value := str(req.Input[input]); value != "" {
+	if value := spi.Str(req.Input[input]); value != "" {
 		return value
 	}
 	if req.HTTP != nil {
@@ -5194,7 +5154,7 @@ func validateObjectKey(key string) error {
 }
 
 func parseCopySource(req *spi.Request) (bucket, key, version string, err error) {
-	source := str(req.Input["CopySource"])
+	source := spi.Str(req.Input["CopySource"])
 	if source == "" && req.HTTP != nil {
 		source = req.HTTP.Header.Get("x-amz-copy-source")
 	}
@@ -5260,7 +5220,7 @@ func (p *Pack) openCopySource(ctx context.Context, req *spi.Request) (*copySourc
 }
 
 func archiveStorageClass(meta map[string]any) string {
-	storageClass := str(meta["storageClass"])
+	storageClass := spi.Str(meta["storageClass"])
 	if storageClass == "GLACIER" || storageClass == "DEEP_ARCHIVE" {
 		return storageClass
 	}
@@ -5268,7 +5228,7 @@ func archiveStorageClass(meta map[string]any) string {
 }
 
 func objectRestoreKey(bucket, key string, meta map[string]any) string {
-	if version := str(meta["versionId"]); version != "" {
+	if version := spi.Str(meta["versionId"]); version != "" {
 		return bucket + "/" + key + "/" + version + "/restore"
 	}
 	return bucket + "/" + key + "/restore"
@@ -5296,8 +5256,7 @@ func (p *Pack) objectMetadata(ctx context.Context, req *spi.Request, bucket, key
 		collection, metaKey = "versions", metaKey+"/"+version
 	}
 	raw, exists, _ := p.col(req, collection).Get(ctx, metaKey)
-	var meta map[string]any
-	_ = json.Unmarshal(raw, &meta)
+	meta := spi.JSONObject(raw)
 	return meta, exists
 }
 
@@ -5305,17 +5264,16 @@ func (p *Pack) objectVersionOrder(ctx context.Context, req *spi.Request, bucket,
 	if raw, recorded := current["versionOrder"].([]any); recorded {
 		order := make([]string, 0, len(raw))
 		for _, version := range raw {
-			order = append(order, str(version))
+			order = append(order, spi.Str(version))
 		}
 		return order
 	}
 	var order []string
 	kvs, _, _ := p.col(req, "versions").List(ctx, bucket+"/"+key+"/", "", 0)
-	currentID := str(current["versionId"])
+	currentID := spi.Str(current["versionId"])
 	for _, kv := range kvs {
-		var meta map[string]any
-		_ = json.Unmarshal(kv.Value, &meta)
-		if versionID := str(meta["versionId"]); versionID != "" && versionID != currentID {
+		meta := spi.JSONObject(kv.Value)
+		if versionID := spi.Str(meta["versionId"]); versionID != "" && versionID != currentID {
 			order = append(order, versionID)
 		}
 	}
@@ -5336,12 +5294,10 @@ func (p *Pack) restoreCurrentVersion(ctx context.Context, req *spi.Request, buck
 	if !exists {
 		return &spi.Fault{Code: "InternalError", HTTPStatus: http.StatusInternalServerError, Fault: "server"}
 	}
-	var meta map[string]any
-	_ = json.Unmarshal(raw, &meta)
+	meta := spi.JSONObject(raw)
 	meta["versionOrder"] = order
 	meta["deletedVersionNext"] = deletedVersionNext
-	current, _ := json.Marshal(meta)
-	_ = p.col(req, "objects").Put(ctx, currentKey, current)
+	_ = spi.PutJSON(ctx, p.col(req, "objects"), currentKey, meta)
 	if truthy(meta["deleteMarker"]) {
 		_ = p.deps.Blobs.Delete(ctx, blobKey(req, bucket, key))
 	} else {
@@ -5373,11 +5329,11 @@ func objectReadNotFound(key, version string) *spi.Fault {
 func deleteMarkerReadFault(meta map[string]any, explicit bool) *spi.Fault {
 	headers := http.Header{}
 	headers.Set("x-amz-delete-marker", "true")
-	if version := str(meta["versionId"]); version != "" {
+	if version := spi.Str(meta["versionId"]); version != "" {
 		headers.Set("x-amz-version-id", version)
 	}
 	if explicit {
-		headers.Set("Last-Modified", str(meta["mtime"]))
+		headers.Set("Last-Modified", spi.Str(meta["mtime"]))
 		return &spi.Fault{Code: "MethodNotAllowed", HTTPStatus: http.StatusMethodNotAllowed, Fault: "client", Headers: headers}
 	}
 	return &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client", Headers: headers}
@@ -5401,10 +5357,7 @@ func applyCopySourceRange(body []byte, value string) ([]byte, error) {
 }
 
 func objectETag(meta map[string]any, md5sum string) string {
-	if etag := str(meta["etag"]); etag != "" {
-		return etag
-	}
-	return `"` + md5sum + `"`
+	return cmp.Or(spi.Str(meta["etag"]), `"`+md5sum+`"`)
 }
 
 var (
@@ -5547,12 +5500,12 @@ func providedChecksums(req *spi.Request) map[string]string {
 }
 
 func setChecksumHeaders(headers http.Header, meta map[string]any) {
-	stored := asMap(meta["checksums"])
+	stored := spi.Object(meta["checksums"])
 	for header, value := range stored {
-		headers.Set(header, str(value))
+		headers.Set(header, spi.Str(value))
 	}
 	if len(stored) > 0 {
-		checksumType := str(meta["checksumType"])
+		checksumType := spi.Str(meta["checksumType"])
 		if checksumType == "" {
 			checksumType = "FULL_OBJECT"
 		}
@@ -5561,16 +5514,16 @@ func setChecksumHeaders(headers http.Header, meta map[string]any) {
 }
 
 func setListChecksumMetadata(row, meta map[string]any) {
-	stored := asMap(meta["checksums"])
+	stored := spi.Object(meta["checksums"])
 	var algorithms []any
 	for _, checksum := range checksums {
-		if str(stored[checksum.header]) != "" {
+		if spi.Str(stored[checksum.header]) != "" {
 			algorithms = append(algorithms, checksum.algorithm)
 		}
 	}
 	if len(algorithms) > 0 {
 		row["ChecksumAlgorithm"] = algorithms
-		row["ChecksumType"] = str(meta["checksumType"])
+		row["ChecksumType"] = spi.Str(meta["checksumType"])
 	}
 }
 
@@ -5618,10 +5571,9 @@ func (p *Pack) checkWritePreconditions(ctx context.Context, req *spi.Request, bu
 		return nil
 	}
 	raw, exists, _ := p.col(req, "objects").Get(ctx, bucket+"/"+key)
-	var meta map[string]any
-	_ = json.Unmarshal(raw, &meta)
+	meta := spi.JSONObject(raw)
 	exists = exists && !truthy(meta["deleteMarker"])
-	etag := str(meta["etag"])
+	etag := spi.Str(meta["etag"])
 	if !exists && match != "" {
 		return &spi.Fault{Code: "NoSuchKey", Message: "The specified key does not exist.", HTTPStatus: http.StatusNotFound, Fault: "client", Fields: map[string]any{"Key": key}}
 	}
@@ -5675,19 +5627,6 @@ func sourceModifiedAfter(modified string, condition time.Time) bool {
 	return err == nil && mtime.After(condition)
 }
 
-func asMap(v any) map[string]any {
-	m, _ := v.(map[string]any)
-	if m == nil {
-		return map[string]any{}
-	}
-	return m
-}
-
-func asSlice(v any) []any {
-	s, _ := v.([]any)
-	return s
-}
-
 func truthy(v any) bool {
 	switch t := v.(type) {
 	case bool:
@@ -5711,10 +5650,10 @@ func (p *Pack) versioningStatus(ctx context.Context, req *spi.Request, b string)
 }
 
 func mpuID(req *spi.Request) string {
-	if s := str(req.Input["UploadId"]); s != "" {
+	if s := spi.Str(req.Input["UploadId"]); s != "" {
 		return s
 	}
-	if s := str(req.Input["uploadId"]); s != "" {
+	if s := spi.Str(req.Input["uploadId"]); s != "" {
 		return s
 	}
 	if req.HTTP != nil {
@@ -5725,10 +5664,10 @@ func mpuID(req *spi.Request) string {
 
 func partNumber(req *spi.Request) int {
 	if value, ok := req.Input["PartNumber"]; ok {
-		return asInt(value)
+		return spi.Integer(value)
 	}
 	if value, ok := req.Input["partNumber"]; ok {
-		return asInt(value)
+		return spi.Integer(value)
 	}
 	if req.HTTP != nil {
 		n, _ := strconv.Atoi(req.HTTP.URL.Query().Get("partNumber"))
@@ -5751,7 +5690,7 @@ func objectPartRange(req *spi.Request, meta map[string]any, size int64) (start, 
 	if number < 1 || number > 10000 {
 		return 0, 0, 0, true, &spi.Fault{Code: "InvalidPartNumber", HTTPStatus: http.StatusRequestedRangeNotSatisfiable, Fault: "client"}
 	}
-	parts := asSlice(meta["parts"])
+	parts := spi.Slice(meta["parts"])
 	if len(parts) == 0 {
 		if number == 1 {
 			return 0, size, 0, true, nil
@@ -5759,9 +5698,9 @@ func objectPartRange(req *spi.Request, meta map[string]any, size int64) (start, 
 		return 0, 0, 0, true, &spi.Fault{Code: "InvalidPartNumber", HTTPStatus: http.StatusRequestedRangeNotSatisfiable, Fault: "client"}
 	}
 	for _, raw := range parts {
-		part := asMap(raw)
-		partSize := int64(asInt(part["size"]))
-		if asInt(part["number"]) == number {
+		part := spi.Object(raw)
+		partSize := int64(spi.Integer(part["size"]))
+		if spi.Integer(part["number"]) == number {
 			return start, partSize, len(parts), true, nil
 		}
 		start += partSize
@@ -5770,9 +5709,9 @@ func objectPartRange(req *spi.Request, meta map[string]any, size int64) (start, 
 }
 
 func partMetadata(meta map[string]any, number int) map[string]any {
-	for _, raw := range asSlice(meta["parts"]) {
-		part := asMap(raw)
-		if asInt(part["number"]) == number {
+	for _, raw := range spi.Slice(meta["parts"]) {
+		part := spi.Object(raw)
+		if spi.Integer(part["number"]) == number {
 			return part
 		}
 	}
@@ -5780,34 +5719,19 @@ func partMetadata(meta map[string]any, number int) map[string]any {
 }
 
 func setPartChecksumHeaders(headers http.Header, meta, part map[string]any, wholeObject bool) {
-	if part == nil && wholeObject || str(meta["checksumType"]) != "COMPOSITE" && wholeObject {
+	if part == nil && wholeObject || spi.Str(meta["checksumType"]) != "COMPOSITE" && wholeObject {
 		return
 	}
 	for _, checksum := range checksums {
 		headers.Del(checksum.header)
 	}
 	headers.Del("x-amz-checksum-type")
-	if part != nil && str(meta["checksumType"]) == "COMPOSITE" {
-		for header, value := range asMap(part["checksums"]) {
-			headers.Set(header, str(value))
+	if part != nil && spi.Str(meta["checksumType"]) == "COMPOSITE" {
+		for header, value := range spi.Object(part["checksums"]) {
+			headers.Set(header, spi.Str(value))
 		}
 		headers.Set("x-amz-checksum-type", "COMPOSITE")
 	}
-}
-
-func asInt(v any) int {
-	switch n := v.(type) {
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case float64:
-		return int(n)
-	case string:
-		i, _ := strconv.Atoi(n)
-		return i
-	}
-	return 0
 }
 
 func objectByteRange(value string, size int64) (start, length int64, requested bool, err error) {

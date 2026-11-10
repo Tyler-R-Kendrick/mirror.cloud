@@ -45,7 +45,7 @@ func (p *Pack) col(req *spi.Request, n string) spi.Collection {
 }
 
 func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	table := str(req.Input["TableName"])
+	table := spi.Str(req.Input["TableName"])
 	requireTable := func(name string) error {
 		_, ok, err := p.col(req, "tables").Get(ctx, name)
 		if err != nil {
@@ -65,9 +65,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 	switch req.Operation {
 	case "CreateTable":
 		b, _ := json.Marshal(req.Input)
-		var rec map[string]any
-		_ = json.Unmarshal(b, &rec)
-		if str(rec["BillingMode"]) == "PAY_PER_REQUEST" && len(asMap(rec["ProvisionedThroughput"])) > 0 {
+		rec := spi.JSONObject(b)
+		if spi.Str(rec["BillingMode"]) == "PAY_PER_REQUEST" && len(spi.Object(rec["ProvisionedThroughput"])) > 0 {
 			return nil, &spi.Fault{Code: "ValidationException", Message: "One or more parameter values were invalid: Neither ReadCapacityUnits nor WriteCapacityUnits can be specified when BillingMode is PAY_PER_REQUEST", HTTPStatus: 400, Fault: "client"}
 		}
 		arn := "arn:aws:dynamodb:" + req.Identity.Region + ":" + req.Identity.Account + ":table/" + table
@@ -82,7 +81,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if err := p.prepareTableMetadata(ctx, req, rec); err != nil {
 			return nil, err
 		}
-		if class := str(rec["TableClass"]); class != "" {
+		if class := spi.Str(rec["TableClass"]); class != "" {
 			rec["TableClassSummary"] = map[string]any{"TableClass": class}
 			delete(rec, "TableClass")
 		}
@@ -98,7 +97,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		}); err != nil {
 			return nil, err
 		}
-		if len(asSlice(tags)) > 0 {
+		if len(spi.Slice(tags)) > 0 {
 			_, _ = New(p.deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "TagResource", Input: map[string]any{"ResourceArn": arn, "Tags": tags}})
 		}
 		description := tableDescription(rec, "CREATING")
@@ -133,8 +132,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if !ok {
 			return nil, &spi.Fault{Code: "ResourceNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
-		var m map[string]any
-		_ = json.Unmarshal(b, &m)
+		m := spi.JSONObject(b)
 		return &spi.Response{Output: map[string]any{"Table": tableDescription(m, "ACTIVE")}}, nil
 	case "PutItem":
 		item, _ := req.Input["Item"].(map[string]any)
@@ -145,12 +143,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		b, _ := json.Marshal(item)
 		var old map[string]any
 		if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
-			if raw, ok, err := tx.Get(key); err != nil {
-				return err
-			} else if ok {
-				_ = json.Unmarshal(raw, &old)
-			}
-			if err := p.checkCond(req, old); err != nil {
+			cur, err := p.current(req, tx, key)
+			if old = cur; err != nil {
 				return err
 			}
 			return tx.Put(key, b)
@@ -164,70 +158,61 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		p.emitStream(ctx, req, table, ev, item, old)
 		return p.returnValues(req, old, item, nil), nil
 	case "GetItem":
-		key := p.itemKeyFrom(ctx, req, table, asMap(req.Input["Key"]))
+		key := p.itemKeyFrom(ctx, req, table, spi.Object(req.Input["Key"]))
 		item := p.loadItem(ctx, req, table, key)
 		if item == nil {
 			return &spi.Response{Output: map[string]any{}}, nil
 		}
-		item = expr.Project(str(req.Input["ProjectionExpression"]), item, asMap(req.Input["ExpressionAttributeNames"]))
+		item = expr.Project(spi.Str(req.Input["ProjectionExpression"]), item, spi.Object(req.Input["ExpressionAttributeNames"]))
 		return &spi.Response{Output: map[string]any{"Item": item}}, nil
 	case "DeleteItem":
-		key := p.itemKeyFrom(ctx, req, table, asMap(req.Input["Key"]))
+		key := p.itemKeyFrom(ctx, req, table, spi.Object(req.Input["Key"]))
 		var old map[string]any
 		if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
-			if raw, ok, err := tx.Get(key); err != nil {
-				return err
-			} else if ok {
-				_ = json.Unmarshal(raw, &old)
-			}
-			if err := p.checkCond(req, old); err != nil {
+			cur, err := p.current(req, tx, key)
+			if old = cur; err != nil {
 				return err
 			}
 			return tx.Delete(key)
 		}); err != nil {
 			return nil, err
 		}
-		p.emitStream(ctx, req, table, "REMOVE", asMap(req.Input["Key"]), old)
+		p.emitStream(ctx, req, table, "REMOVE", spi.Object(req.Input["Key"]), old)
 		return p.returnValues(req, old, nil, nil), nil
 	case "Scan":
-		return p.listItems(ctx, req, table, "", str(req.Input["FilterExpression"]))
+		return p.listItems(ctx, req, table, "", spi.Str(req.Input["FilterExpression"]))
 	case "Query":
-		if indexName := str(req.Input["IndexName"]); indexName != "" {
+		if indexName := spi.Str(req.Input["IndexName"]); indexName != "" {
 			index := indexSpec(p.tableDef(ctx, req, table), indexName)
 			if len(index) == 0 {
 				return nil, &spi.Fault{Code: "ValidationException", Message: "The table does not have the specified index: " + indexName, HTTPStatus: 400, Fault: "client"}
 			}
-			if str(req.Input["Select"]) == "ALL_ATTRIBUTES" && str(asMap(index["Projection"])["ProjectionType"]) != "ALL" {
+			if spi.Str(req.Input["Select"]) == "ALL_ATTRIBUTES" && spi.Str(spi.Object(index["Projection"])["ProjectionType"]) != "ALL" {
 				return nil, &spi.Fault{Code: "ValidationException", Message: "Select type ALL_ATTRIBUTES is not supported for global secondary index " + indexName + " because its projection type is not ALL", HTTPStatus: 400, Fault: "client"}
 			}
 		}
-		return p.listItems(ctx, req, table, str(req.Input["KeyConditionExpression"]), str(req.Input["FilterExpression"]))
+		return p.listItems(ctx, req, table, spi.Str(req.Input["KeyConditionExpression"]), spi.Str(req.Input["FilterExpression"]))
 	case "UpdateItem":
-		key := p.itemKeyFrom(ctx, req, table, asMap(req.Input["Key"]))
+		key := p.itemKeyFrom(ctx, req, table, spi.Object(req.Input["Key"]))
 		var old, item map[string]any
 		var touched []string
 		if err := p.col(req, "items:"+table).Txn(ctx, func(tx spi.Tx) error {
-			if raw, ok, err := tx.Get(key); err != nil {
-				return err
-			} else if ok {
-				_ = json.Unmarshal(raw, &old)
-			}
-			if err := p.checkCond(req, old); err != nil {
+			cur, err := p.current(req, tx, key)
+			if old = cur; err != nil {
 				return err
 			}
 			item = cloneMap(old)
 			if item == nil {
-				item = cloneMap(asMap(req.Input["Key"]))
+				item = cloneMap(spi.Object(req.Input["Key"]))
 			}
-			if ue := str(req.Input["UpdateExpression"]); ue != "" {
+			if ue := spi.Str(req.Input["UpdateExpression"]); ue != "" {
 				var err error
-				touched, err = expr.ApplyUpdate(ue, item, asMap(req.Input["ExpressionAttributeNames"]), asMap(req.Input["ExpressionAttributeValues"]))
+				touched, err = expr.ApplyUpdate(ue, item, spi.Object(req.Input["ExpressionAttributeNames"]), spi.Object(req.Input["ExpressionAttributeValues"]))
 				if err != nil {
 					return &spi.Fault{Code: "ValidationException", Message: err.Error(), HTTPStatus: 400, Fault: "client"}
 				}
 			}
-			raw, _ := json.Marshal(item)
-			return tx.Put(key, raw)
+			return tx.Put(key, []byte(spi.JSONText(item)))
 		}); err != nil {
 			return nil, err
 		}
@@ -238,36 +223,34 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		p.emitStream(ctx, req, table, ev, item, old)
 		return p.returnValues(req, old, item, touched), nil
 	case "CreateBackup":
-		name := first(req.Input, "BackupName")
+		name := spi.First(req.Input, "BackupName")
 		id := p.deps.Rand.Hex(8)
 		td, _, _ := p.col(req, "tables").Get(ctx, table)
 		items, _, _ := p.col(req, "items:"+table).List(ctx, "", "", 0)
 		rec := map[string]any{"BackupArn": "arn:aws:dynamodb:" + req.Identity.Region + ":" + req.Identity.Account + ":table/" + table + "/backup/" + id, "BackupName": name, "TableName": table, "BackupStatus": "AVAILABLE", "Table": string(td), "Items": itemsKV(items)}
-		raw, _ := json.Marshal(rec)
-		_ = p.col(req, "backups").Put(ctx, id, raw)
+		_ = spi.PutJSON(ctx, p.col(req, "backups"), id, rec)
 		return &spi.Response{Output: map[string]any{"BackupDetails": map[string]any{"BackupArn": rec["BackupArn"], "BackupName": name, "BackupStatus": "AVAILABLE"}}}, nil
 	case "RestoreTableFromBackup":
-		id := backupID(first(req.Input, "BackupArn"))
+		id := spi.LastSlash(spi.First(req.Input, "BackupArn"))
 		b, ok, _ := p.col(req, "backups").Get(ctx, id)
 		if !ok {
 			return nil, &spi.Fault{Code: "BackupNotFoundException", HTTPStatus: 400, Fault: "client"}
 		}
-		var m map[string]any
-		_ = json.Unmarshal(b, &m)
-		dst := first(req.Input, "TargetTableName")
-		if s := str(m["Table"]); s != "" {
+		m := spi.JSONObject(b)
+		dst := spi.First(req.Input, "TargetTableName")
+		if s := spi.Str(m["Table"]); s != "" {
 			_ = p.col(req, "tables").Put(ctx, dst, []byte(s))
 		}
 		if items, ok := m["Items"].([]any); ok {
 			for _, it := range items {
-				im := asMap(it)
-				if key := str(im["Key"]); key != "" {
-					_ = p.col(req, "items:"+dst).Put(ctx, key, []byte(str(im["Value"])))
+				im := spi.Object(it)
+				if key := spi.Str(im["Key"]); key != "" {
+					_ = p.col(req, "items:"+dst).Put(ctx, key, []byte(spi.Str(im["Value"])))
 				}
 			}
 		}
 		return &spi.Response{Output: map[string]any{"TableDescription": map[string]any{"TableName": dst, "TableStatus": "ACTIVE"}}}, nil
-	case "EnableKinesisStreamingDestination", "DisableKinesisStreamingDestination", "DescribeKinesisStreamingDestination":
+	case "EnableKinesisStreamingDestination", "DisableKinesisStreamingDestination", "DescribeKinesisStreamingDestination", "UpdateKinesisStreamingDestination":
 		return p.kinesisDestination(ctx, req)
 	case "BatchGetItem":
 		out := map[string]any{}
@@ -277,15 +260,14 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 					return nil, err
 				}
 				var items []any
-				keys, _ := asMap(spec)["Keys"].([]any)
+				keys, _ := spi.Object(spec)["Keys"].([]any)
 				for _, k := range keys {
-					key := p.itemKeyFrom(ctx, req, tbl, asMap(k))
+					key := p.itemKeyFrom(ctx, req, tbl, spi.Object(k))
 					b, ok, _ := p.col(req, "items:"+tbl).Get(ctx, key)
 					if !ok {
 						continue
 					}
-					var item map[string]any
-					_ = json.Unmarshal(b, &item)
+					item := spi.JSONObject(b)
 					items = append(items, item)
 				}
 				out[tbl] = items
@@ -300,9 +282,9 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 				}
 				reqs, _ := spec.([]any)
 				for _, r := range reqs {
-					m := asMap(r)
-					if put := asMap(m["PutRequest"]); len(put) > 0 {
-						item := asMap(put["Item"])
+					m := spi.Object(r)
+					if put := spi.Object(m["PutRequest"]); len(put) > 0 {
+						item := spi.Object(put["Item"])
 						if err := p.validateItemKey(ctx, req, tbl, item); err != nil {
 							return nil, err
 						}
@@ -316,8 +298,8 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 						}
 						p.emitStream(ctx, req, tbl, ev, item, old)
 					}
-					if del := asMap(m["DeleteRequest"]); len(del) > 0 {
-						dk := asMap(del["Key"])
+					if del := spi.Object(m["DeleteRequest"]); len(del) > 0 {
+						dk := spi.Object(del["Key"])
 						key := p.itemKeyFrom(ctx, req, tbl, dk)
 						old := p.loadItem(ctx, req, tbl, key)
 						_ = p.col(req, "items:"+tbl).Delete(ctx, key)
@@ -351,15 +333,15 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			indexes, _ := m["GlobalSecondaryIndexes"].([]any)
 			if ups, ok := gsi.([]any); ok {
 				for _, u := range ups {
-					um := asMap(u)
-					if cr := asMap(um["Create"]); len(cr) > 0 {
+					um := spi.Object(u)
+					if cr := spi.Object(um["Create"]); len(cr) > 0 {
 						indexes = append(indexes, cr)
 					}
-					if del := asMap(um["Delete"]); len(del) > 0 {
-						name := str(del["IndexName"])
+					if del := spi.Object(um["Delete"]); len(del) > 0 {
+						name := spi.Str(del["IndexName"])
 						var keep []any
 						for _, ix := range indexes {
-							if str(asMap(ix)["IndexName"]) != name {
+							if spi.Str(spi.Object(ix)["IndexName"]) != name {
 								keep = append(keep, ix)
 							}
 						}
@@ -373,7 +355,7 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 			m["StreamSpecification"] = spec
 			p.ensureStream(req, m, table)
 		}
-		if class := str(req.Input["TableClass"]); class != "" {
+		if class := spi.Str(req.Input["TableClass"]); class != "" {
 			m["TableClassSummary"] = map[string]any{"TableClass": class}
 		}
 		for _, key := range []string{"AttributeDefinitions", "BillingMode", "ProvisionedThroughput", "SSESpecification", "WarmThroughput"} {
@@ -384,11 +366,10 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		if err := p.prepareTableMetadata(ctx, req, m); err != nil {
 			return nil, err
 		}
-		nb, _ := json.Marshal(m)
-		_ = p.col(req, "tables").Put(ctx, table, nb)
+		_ = spi.PutJSON(ctx, p.col(req, "tables"), table, m)
 		description := tableDescription(m, "UPDATING")
-		if spec := asMap(req.Input["SSESpecification"]); spec["Enabled"] == false {
-			if sse := asMap(description["SSEDescription"]); len(sse) > 0 {
+		if spec := spi.Object(req.Input["SSESpecification"]); spec["Enabled"] == false {
+			if sse := spi.Object(description["SSEDescription"]); len(sse) > 0 {
 				sse["Status"] = "UPDATING"
 			}
 		}
@@ -406,8 +387,6 @@ func (p *Pack) Invoke(ctx context.Context, req *spi.Request) (*spi.Response, err
 		return p.restorePITR(ctx, req)
 	case "SearchVectors":
 		return p.searchVectors(ctx, req)
-	case "UpdateKinesisStreamingDestination":
-		return p.kinesisDestination(ctx, req)
 	case "ListStreams":
 		return p.listStreams(ctx, req)
 	case "DescribeStream":
@@ -426,9 +405,9 @@ func (p *Pack) validateItemKey(ctx context.Context, req *spi.Request, table stri
 }
 
 func validateItemKeyDefinition(definition, item map[string]any) error {
-	for _, key := range asSlice(definition["KeySchema"]) {
-		name := str(asMap(key)["AttributeName"])
-		if name != "" && len(asMap(item[name])) == 0 {
+	for _, key := range spi.Slice(definition["KeySchema"]) {
+		name := spi.Str(spi.Object(key)["AttributeName"])
+		if name != "" && len(spi.Object(item[name])) == 0 {
 			return &spi.Fault{Code: "ValidationException", Message: "One or more parameter values were invalid: Missing the key " + name + " in the item", HTTPStatus: 400, Fault: "client"}
 		}
 	}
@@ -438,12 +417,11 @@ func validateItemKeyDefinition(definition, item map[string]any) error {
 func (p *Pack) listItems(ctx context.Context, req *spi.Request, table, keyCond, filter string) (*spi.Response, error) {
 	td := p.tableDef(ctx, req, table)
 	kvs, _, _ := p.col(req, "items:"+table).List(ctx, "", "", 0)
-	names := asMap(req.Input["ExpressionAttributeNames"])
-	values := asMap(req.Input["ExpressionAttributeValues"])
+	names := spi.Object(req.Input["ExpressionAttributeNames"])
+	values := spi.Object(req.Input["ExpressionAttributeValues"])
 	var matched []map[string]any
 	for _, kv := range kvs {
-		var item map[string]any
-		_ = json.Unmarshal(kv.Value, &item)
+		item := spi.JSONObject(kv.Value)
 		if keyCond != "" {
 			ok, err := expr.EvalBool(keyCond, item, names, values)
 			if err != nil || !ok {
@@ -456,12 +434,12 @@ func (p *Pack) listItems(ctx context.Context, req *spi.Request, table, keyCond, 
 				continue
 			}
 		}
-		matched = append(matched, p.projectIndex(td, str(req.Input["IndexName"]), item))
+		matched = append(matched, p.projectIndex(td, spi.Str(req.Input["IndexName"]), item))
 	}
 	sort.Slice(matched, func(i, j int) bool {
 		return itemKey(matched[i]) < itemKey(matched[j])
 	})
-	start := asMap(req.Input["ExclusiveStartKey"])
+	start := spi.Object(req.Input["ExclusiveStartKey"])
 	if len(start) > 0 {
 		sk := itemKey(start)
 		var rest []map[string]any
@@ -477,13 +455,13 @@ func (p *Pack) listItems(ctx context.Context, req *spi.Request, table, keyCond, 
 		}
 		matched = rest
 	}
-	limit := asInt(req.Input["Limit"])
+	limit := spi.Integer(req.Input["Limit"])
 	var last map[string]any
 	if limit > 0 && len(matched) > limit {
 		last = p.tableKey(td, matched[limit-1])
 		matched = matched[:limit]
 	}
-	proj := str(req.Input["ProjectionExpression"])
+	proj := spi.Str(req.Input["ProjectionExpression"])
 	var items []any
 	for _, it := range matched {
 		if proj != "" {
@@ -498,25 +476,6 @@ func (p *Pack) listItems(ctx context.Context, req *spi.Request, table, keyCond, 
 	return &spi.Response{Output: map[string]any(out)}, nil
 }
 
-func asMap(v any) map[string]any {
-	m, _ := v.(map[string]any)
-	if m == nil {
-		return map[string]any{}
-	}
-	return m
-}
-
-func str(v any) string { s, _ := v.(string); return s }
-
-func first(in map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if s := str(in[k]); s != "" {
-			return s
-		}
-	}
-	return ""
-}
-
 func truthy(v any) bool {
 	switch t := v.(type) {
 	case bool:
@@ -529,13 +488,6 @@ func truthy(v any) bool {
 	return false
 }
 
-func backupID(arn string) string {
-	if i := strings.LastIndex(arn, "/"); i >= 0 {
-		return arn[i+1:]
-	}
-	return arn
-}
-
 func itemsKV(kvs []spi.KV) []any {
 	out := make([]any, 0, len(kvs))
 	for _, kv := range kvs {
@@ -544,41 +496,25 @@ func itemsKV(kvs []spi.KV) []any {
 	return out
 }
 
-func asInt(v any) int {
-	switch n := v.(type) {
-	case float64:
-		return int(n)
-	case int:
-		return n
-	case int64:
-		return int(n)
-	case string:
-		i, _ := strconv.Atoi(n)
-		return i
-	}
-	return 0
-}
-
 func cloneMap(m map[string]any) map[string]any {
 	if m == nil {
 		return nil
 	}
 	b, _ := json.Marshal(m)
-	var o map[string]any
-	_ = json.Unmarshal(b, &o)
+	o := spi.JSONObject(b)
 	return o
 }
 
 func (p *Pack) prepareTableMetadata(ctx context.Context, req *spi.Request, table map[string]any) error {
-	billing := str(table["BillingMode"])
+	billing := spi.Str(table["BillingMode"])
 	if billing == "" {
-		billing = str(asMap(table["BillingModeSummary"])["BillingMode"])
+		billing = spi.Str(spi.Object(table["BillingModeSummary"])["BillingMode"])
 	}
 	if billing == "PAY_PER_REQUEST" {
 		table["BillingModeSummary"] = map[string]any{"BillingMode": billing}
 	}
 	delete(table, "BillingMode")
-	throughput := cloneMap(asMap(table["ProvisionedThroughput"]))
+	throughput := cloneMap(spi.Object(table["ProvisionedThroughput"]))
 	if billing == "PAY_PER_REQUEST" {
 		throughput = map[string]any{"ReadCapacityUnits": 0, "WriteCapacityUnits": 0}
 	}
@@ -586,13 +522,13 @@ func (p *Pack) prepareTableMetadata(ctx context.Context, req *spi.Request, table
 		throughput["NumberOfDecreasesToday"] = 0
 		table["ProvisionedThroughput"] = throughput
 	}
-	arn := str(table["TableArn"])
-	for _, raw := range asSlice(table["GlobalSecondaryIndexes"]) {
-		index := asMap(raw)
-		index["IndexArn"] = arn + "/index/" + str(index["IndexName"])
+	arn := spi.Str(table["TableArn"])
+	for _, raw := range spi.Slice(table["GlobalSecondaryIndexes"]) {
+		index := spi.Object(raw)
+		index["IndexArn"] = arn + "/index/" + spi.Str(index["IndexName"])
 		index["IndexSizeBytes"] = 0
 		index["ItemCount"] = 0
-		indexThroughput := cloneMap(asMap(index["ProvisionedThroughput"]))
+		indexThroughput := cloneMap(spi.Object(index["ProvisionedThroughput"]))
 		if billing == "PAY_PER_REQUEST" {
 			indexThroughput = map[string]any{"ReadCapacityUnits": 0, "WriteCapacityUnits": 0}
 		}
@@ -601,9 +537,9 @@ func (p *Pack) prepareTableMetadata(ctx context.Context, req *spi.Request, table
 			index["ProvisionedThroughput"] = indexThroughput
 		}
 	}
-	if spec := asMap(table["SSESpecification"]); len(spec) > 0 {
+	if spec := spi.Object(table["SSESpecification"]); len(spec) > 0 {
 		if spec["Enabled"] == true {
-			key := str(spec["KMSMasterKeyId"])
+			key := spi.Str(spec["KMSMasterKeyId"])
 			if key == "" {
 				var err error
 				key, err = p.defaultDynamoDBKey(ctx, req)
@@ -629,13 +565,12 @@ func (p *Pack) defaultDynamoDBKey(ctx context.Context, req *spi.Request) (string
 		if raw, ok, err := aliases.Get(alias); err != nil {
 			return err
 		} else if ok {
-			var record map[string]any
-			_ = json.Unmarshal(raw, &record)
-			if raw, ok, err = keys.Get(str(record["TargetKeyId"])); err != nil {
+			record := spi.JSONObject(raw)
+			if raw, ok, err = keys.Get(spi.Str(record["TargetKeyId"])); err != nil {
 				return err
 			} else if ok {
 				_ = json.Unmarshal(raw, &record)
-				arn = str(record["Arn"])
+				arn = spi.Str(record["Arn"])
 				return nil
 			}
 		}
@@ -663,9 +598,9 @@ func (p *Pack) defaultDynamoDBKey(ctx context.Context, req *spi.Request) (string
 func tableDescription(table map[string]any, status string) map[string]any {
 	description := cloneMap(table)
 	description["TableStatus"] = status
-	warm := asMap(description["WarmThroughput"])
+	warm := spi.Object(description["WarmThroughput"])
 	if status == "ACTIVE" && len(warm) == 0 {
-		if throughput := asMap(description["ProvisionedThroughput"]); asInt(throughput["ReadCapacityUnits"]) > 0 || asInt(throughput["WriteCapacityUnits"]) > 0 {
+		if throughput := spi.Object(description["ProvisionedThroughput"]); spi.Integer(throughput["ReadCapacityUnits"]) > 0 || spi.Integer(throughput["WriteCapacityUnits"]) > 0 {
 			warm = map[string]any{"ReadUnitsPerSecond": throughput["ReadCapacityUnits"], "WriteUnitsPerSecond": throughput["WriteCapacityUnits"]}
 			description["WarmThroughput"] = warm
 		}
@@ -676,8 +611,8 @@ func tableDescription(table map[string]any, status string) map[string]any {
 			warm["Status"] = "UPDATING"
 		}
 	}
-	for _, raw := range asSlice(description["GlobalSecondaryIndexes"]) {
-		asMap(raw)["IndexStatus"] = status
+	for _, raw := range spi.Slice(description["GlobalSecondaryIndexes"]) {
+		spi.Object(raw)["IndexStatus"] = status
 	}
 	return description
 }
@@ -687,9 +622,19 @@ func (p *Pack) loadItem(ctx context.Context, req *spi.Request, table, key string
 	if !ok {
 		return nil
 	}
-	var item map[string]any
-	_ = json.Unmarshal(b, &item)
+	item := spi.JSONObject(b)
 	return item
+}
+
+// current reads the item tx holds under key, none when it holds none, and checks the request's condition
+// against it.
+func (p *Pack) current(req *spi.Request, tx spi.Tx, key string) (old map[string]any, err error) {
+	if raw, ok, err := tx.Get(key); err != nil {
+		return nil, err
+	} else if ok {
+		_ = json.Unmarshal(raw, &old)
+	}
+	return old, p.checkCond(req, old)
 }
 
 func (p *Pack) checkCond(req *spi.Request, item map[string]any) error {
@@ -699,7 +644,7 @@ func (p *Pack) checkCond(req *spi.Request, item map[string]any) error {
 	}
 	if !ok {
 		fields := map[string]any{}
-		if str(req.Input["ReturnValuesOnConditionCheckFailure"]) == "ALL_OLD" && item != nil {
+		if spi.Str(req.Input["ReturnValuesOnConditionCheckFailure"]) == "ALL_OLD" && item != nil {
 			fields["Item"] = item
 		}
 		return &spi.Fault{Code: "ConditionalCheckFailedException", Message: "The conditional request failed", HTTPStatus: 400, Fault: "client", Fields: fields}
@@ -708,18 +653,18 @@ func (p *Pack) checkCond(req *spi.Request, item map[string]any) error {
 }
 
 func conditionOK(input, item map[string]any) (bool, error) {
-	cond := str(input["ConditionExpression"])
+	cond := spi.Str(input["ConditionExpression"])
 	if cond == "" {
 		return true, nil
 	}
 	if item == nil {
 		item = map[string]any{}
 	}
-	return expr.EvalBool(cond, item, asMap(input["ExpressionAttributeNames"]), asMap(input["ExpressionAttributeValues"]))
+	return expr.EvalBool(cond, item, spi.Object(input["ExpressionAttributeNames"]), spi.Object(input["ExpressionAttributeValues"]))
 }
 
 func (p *Pack) returnValues(req *spi.Request, old, neu map[string]any, touched []string) *spi.Response {
-	mode := str(req.Input["ReturnValues"])
+	mode := spi.Str(req.Input["ReturnValues"])
 	if mode == "" || mode == "NONE" {
 		return &spi.Response{Output: map[string]any{}}
 	}
@@ -758,8 +703,7 @@ func (p *Pack) tableDef(ctx context.Context, req *spi.Request, table string) map
 	if !ok {
 		return map[string]any{}
 	}
-	var m map[string]any
-	_ = json.Unmarshal(b, &m)
+	m := spi.JSONObject(b)
 	return m
 }
 
@@ -767,7 +711,7 @@ func (p *Pack) tableKey(td, item map[string]any) map[string]any {
 	out := map[string]any{}
 	ks, _ := td["KeySchema"].([]any)
 	for _, e := range ks {
-		name := str(asMap(e)["AttributeName"])
+		name := spi.Str(spi.Object(e)["AttributeName"])
 		if value, ok := item[name]; name != "" && ok {
 			out[name] = value
 		}
@@ -786,20 +730,20 @@ func (p *Pack) projectIndex(td map[string]any, indexName string, item map[string
 	if len(spec) == 0 {
 		return item
 	}
-	proj := asMap(spec["Projection"])
-	pt := str(proj["ProjectionType"])
+	proj := spi.Object(spec["Projection"])
+	pt := spi.Str(proj["ProjectionType"])
 	if pt == "" || pt == "ALL" {
 		return item
 	}
 	keep := map[string]bool{}
-	for _, e := range append(asSlice(td["KeySchema"]), asSlice(spec["KeySchema"])...) {
-		if n := str(asMap(e)["AttributeName"]); n != "" {
+	for _, e := range append(spi.Slice(td["KeySchema"]), spi.Slice(spec["KeySchema"])...) {
+		if n := spi.Str(spi.Object(e)["AttributeName"]); n != "" {
 			keep[n] = true
 		}
 	}
 	if pt == "INCLUDE" {
-		for _, a := range asSlice(proj["NonKeyAttributes"]) {
-			keep[str(a)] = true
+		for _, a := range spi.Slice(proj["NonKeyAttributes"]) {
+			keep[spi.Str(a)] = true
 		}
 	}
 	out := map[string]any{}
@@ -813,19 +757,14 @@ func (p *Pack) projectIndex(td map[string]any, indexName string, item map[string
 
 func indexSpec(td map[string]any, indexName string) map[string]any {
 	for _, key := range []string{"GlobalSecondaryIndexes", "LocalSecondaryIndexes"} {
-		for _, ix := range asSlice(td[key]) {
-			m := asMap(ix)
-			if str(m["IndexName"]) == indexName {
+		for _, ix := range spi.Slice(td[key]) {
+			m := spi.Object(ix)
+			if spi.Str(m["IndexName"]) == indexName {
 				return m
 			}
 		}
 	}
 	return nil
-}
-
-func asSlice(v any) []any {
-	s, _ := v.([]any)
-	return s
 }
 
 func itemKey(m map[string]any) string {
@@ -836,18 +775,17 @@ func itemKey(m map[string]any) string {
 func (p *Pack) itemKeyFrom(ctx context.Context, req *spi.Request, table string, attrs map[string]any) string {
 	b, ok, _ := p.col(req, "tables").Get(ctx, table)
 	if ok {
-		var td map[string]any
-		_ = json.Unmarshal(b, &td)
+		td := spi.JSONObject(b)
 		return itemKeyFromDefinition(td, attrs)
 	}
 	return itemKey(attrs)
 }
 
 func itemKeyFromDefinition(definition, attrs map[string]any) string {
-	if keys := asSlice(definition["KeySchema"]); len(keys) > 0 {
+	if keys := spi.Slice(definition["KeySchema"]); len(keys) > 0 {
 		item := map[string]any{}
 		for _, key := range keys {
-			if name := str(asMap(key)["AttributeName"]); name != "" {
+			if name := spi.Str(spi.Object(key)["AttributeName"]); name != "" {
 				item[name] = attrs[name]
 			}
 		}
@@ -873,7 +811,7 @@ func ExpireItems(ctx context.Context, deps spi.Deps, id spi.Identity) (int, erro
 			return 0, err
 		}
 		var ttl map[string]any
-		if !ok || json.Unmarshal(rawTTL, &ttl) != nil || !truthy(ttl["Enabled"]) || str(ttl["AttributeName"]) == "" {
+		if !ok || json.Unmarshal(rawTTL, &ttl) != nil || !truthy(ttl["Enabled"]) || spi.Str(ttl["AttributeName"]) == "" {
 			continue
 		}
 		items, _, err := p.col(req, "items:"+table).List(ctx, "", "", 0)
@@ -882,9 +820,8 @@ func ExpireItems(ctx context.Context, deps spi.Deps, id spi.Identity) (int, erro
 		}
 		definition := p.tableDef(ctx, req, table)
 		for _, itemRecord := range items {
-			var item map[string]any
-			_ = json.Unmarshal(itemRecord.Value, &item)
-			expires, err := strconv.ParseInt(str(asMap(item[str(ttl["AttributeName"])])["N"]), 10, 64)
+			item := spi.JSONObject(itemRecord.Value)
+			expires, err := strconv.ParseInt(spi.Str(spi.Object(item[spi.Str(ttl["AttributeName"])])["N"]), 10, 64)
 			if err != nil || expires > p.deps.Clock.Now().Unix() {
 				continue
 			}

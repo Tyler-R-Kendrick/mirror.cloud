@@ -487,9 +487,6 @@
       "output": {
         "partSize": 5242880,
         "uploadId": "aa00000000000001"
-      },
-      "superseded_members": {
-        "partSize": "the pack answered a Go int 5242880; the recording round-trips through JSON as a float, and the two render differently though the wire value is identical"
       }
     },
     {

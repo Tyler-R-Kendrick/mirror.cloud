@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
 	"strings"
 
@@ -39,17 +40,14 @@ func Execute(ctx context.Context, deps spi.Deps, req *spi.Request) (*spi.Respons
 	if !ok {
 		return nil, &spi.Fault{Code: "NotFoundException", Message: "no integration", HTTPStatus: 404, Fault: "client"}
 	}
-	var integ map[string]any
-	_ = json.Unmarshal(ib, &integ)
-	fn := lambdaName(str(integ["uri"]))
+	integ := spi.JSONObject(ib)
+	fn := lambdaName(spi.Str(integ["uri"]))
 	if fn == "" {
 		return nil, &spi.Fault{Code: "NotFoundException", Message: "integration uri is not Lambda", HTTPStatus: 404, Fault: "client"}
 	}
 	event := proxyEvent(req, path, meth)
 	in := map[string]any{"FunctionName": fn}
-	for k, v := range event {
-		in[k] = v
-	}
+	maps.Copy(in, event)
 	resp, err := bundled.Handler("aws.lambda", deps).Invoke(ctx, &spi.Request{Identity: req.Identity, Operation: "Invoke", Input: in})
 	if err != nil {
 		return nil, err
@@ -72,11 +70,11 @@ func flattenLambda(resp *spi.Response) (*spi.Response, error) {
 			case int:
 				sc = t
 			}
-			body := []byte(str(proxy["body"]))
+			body := []byte(spi.Str(proxy["body"]))
 			h := http.Header{}
 			if hm, ok := proxy["headers"].(map[string]any); ok {
 				for k, v := range hm {
-					h.Set(k, str(v))
+					h.Set(k, spi.Str(v))
 				}
 			}
 			if h.Get("Content-Type") == "" {
@@ -123,12 +121,10 @@ func resourceForPath(ctx context.Context, deps spi.Deps, req *spi.Request, api, 
 	if path == "" || path == "/" {
 		return "root"
 	}
-	kvs, _, _ := col(deps, req, "apigwres:"+api).List(ctx, "", "", 0)
-	for _, kv := range kvs {
-		var rec map[string]any
-		_ = json.Unmarshal(kv.Value, &rec)
-		if str(rec["path"]) == path {
-			return str(rec["id"])
+	for _, kv := range spi.Entries(ctx, col(deps, req, "apigwres:"+api), "", "", 0) {
+		rec := spi.JSONObject(kv.Value)
+		if spi.Str(rec["path"]) == path {
+			return spi.Str(rec["id"])
 		}
 	}
 	return "root"
@@ -168,9 +164,4 @@ func lambdaName(uri string) string {
 		return rest
 	}
 	return ""
-}
-
-func str(v any) string {
-	s, _ := v.(string)
-	return s
 }

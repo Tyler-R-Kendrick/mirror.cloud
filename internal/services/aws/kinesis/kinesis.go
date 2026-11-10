@@ -6,6 +6,7 @@
 package kinesis
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -33,16 +34,16 @@ func (p records) col(req *spi.Request, n string) spi.Collection {
 }
 
 func (p records) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := first(req.Input, "StreamName", "StreamARN") // "you must use either the StreamARN or the StreamName parameter, or both"
-	name = name[strings.LastIndex(name, "/")+1:]        // an ARN's last segment is the stream's name, and no name holds a slash
+	arn := str(req.Input["StreamARN"])                                                // "you must use either the StreamARN or the StreamName parameter, or both"
+	name := cmp.Or(str(req.Input["StreamName"]), arn[strings.LastIndex(arn, "/")+1:]) // a name is taken whole; an ARN's last segment is the name
 	at, whole := "", true
 	if req.Operation == "GetRecords" { // whose stream is its iterator's, which is "stream|seq"
 		raw, _ := base64.StdEncoding.DecodeString(str(req.Input["ShardIterator"]))
 		name, at, whole = strings.Cut(string(raw), "|")
 	}
-	if _, found, _ := p.col(req, "kinesis").Get(ctx, name); !whole {
-		return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	} else if name == "" {
+	if _, found, _ := p.col(req, "kinesis").Get(ctx, name); !whole || req.Operation == "GetRecords" && strings.TrimSpace(name) == "" {
+		return nil, &spi.Fault{Code: "InvalidArgumentException", Message: "Invalid ShardIterator.", HTTPStatus: 400, Fault: "client"}
+	} else if strings.TrimSpace(name) == "" { // whitespace names nothing either
 		return nil, &spi.Fault{Code: "InvalidArgumentException", Message: "Either StreamName or StreamARN must be specified.", HTTPStatus: 400, Fault: "client"}
 	} else if !found { // never made, or deleted since the iterator was given
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Stream " + name + " under account " + req.Identity.Account + " not found.", HTTPStatus: 400, Fault: "client"}
@@ -158,15 +159,6 @@ func (p records) nextSeq(ctx context.Context, req *spi.Request, name string) int
 	rec["Seq"] = n + 1
 	_ = spi.PutJSON(ctx, p.col(req, "kinesis"), name, rec)
 	return n
-}
-
-func first(in map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if s := str(in[k]); s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 func str(v any) string {

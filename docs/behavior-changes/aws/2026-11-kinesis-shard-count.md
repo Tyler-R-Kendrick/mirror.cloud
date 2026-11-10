@@ -78,6 +78,11 @@
 | `DescribeStream`, `DescribeStreamSummary`, `DeleteStream`, `PutRecord`, `PutRecords` or `GetShardIterator` of a stream that exists, addressed by `StreamARN` alone | `ResourceNotFoundException`, with no name in its message | The stream, as by its name |
 | `DescribeStreamConsumer` or `DeregisterStreamConsumer` by `StreamARN` and `ConsumerName` | Not found, with no name in its message | The consumer, as by its ARN |
 | An operation that takes a `StreamName` or a `StreamARN`, given neither | `ResourceNotFoundException`, "Stream  under account ..." | `InvalidArgumentException`, "Either StreamName or StreamARN must be specified." (for a consumer: "Either ConsumerARN, or StreamARN and ConsumerName, must be specified.") |
+| An address that names nothing: an empty string, whitespace, or a `StreamARN` that ends at `stream/` or in a slash | "Stream  under account ... not found." with no name; `RegisterStreamConsumer` made a consumer `arn:...:stream//consumer/<name>` | As an address not given: "<Member> is required" where the member is required, `InvalidArgumentException` where it is one of several; nothing is written |
+| `GetRecords` with an iterator that names no stream | `InvalidArgumentException`, "Either StreamName or StreamARN must be specified." | `InvalidArgumentException`, "Invalid ShardIterator.", as for any value that is no iterator |
+| `CreateStream` with a `StreamName` outside `[a-zA-Z0-9_.-]+`, or longer than 128 | Accepted | `ValidationException` |
+| `PutRecord`, `PutRecords` or `GetShardIterator` with a `StreamName` that holds a slash | The name cut at its last slash, so `a/b` was the stream `b` | The name whole: only an ARN is cut |
+| A pipe made before its Kinesis stream, with `StartingPosition` `LATEST` | The first record put to the stream once it existed was never delivered | The pipe reads the stream from its beginning once it exists |
 | `UpdateStreamMode` with no `StreamModeDetails`, or a null one | `ValidationException`, "StreamModeDetails is required" | The same (it was `InternalFailure`, 500, between the two changes of this note) |
 | `CreateStream` or `UpdateStreamMode` with a `StreamModeDetails` that is `{}`, holds a null `StreamMode`, or is no structure | Taken as provisioned, or `InternalFailure` | `ValidationException` |
 | `UpdateStreamMode` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException` |
@@ -262,6 +267,32 @@
   stream's ARN is reported as a stream not found, are readings. A
   CloudFormation stack whose stream is gone still deletes: a delete that
   finds its resource gone is done.
+- An address that names nothing is one not given. The reference gives
+  each of these members a minimum length of 1 and an ARN a pattern, and
+  says no more; that an empty or blank one is answered as a missing one,
+  rather than as its own validation error, is a reading. An ARN's account
+  and Region are not checked, and a name wins over an ARN that disagrees
+  with it, as before.
+- An iterator that is not one is `InvalidArgumentException`, "A specified
+  parameter exceeds its restrictions, is not supported, or can't be used",
+  which `GetRecords` lists; `ExpiredIteratorException` is "The provided
+  iterator exceeds the maximum age allowed", which a malformed one does
+  not. The message, "Invalid ShardIterator.", is a reading.
+- A stream's name: "Length Constraints: Minimum length of 1. Maximum
+  length of 128. Pattern: `[a-zA-Z0-9_.-]+`" (`CreateStream`). A name
+  outside it is `ValidationException` when the stream is made; the two
+  messages are readings in the service's form for a constraint. No test,
+  recorded step or other service's fixture in this repository made a
+  stream with such a name. The other operations do not judge a name's
+  form: a name that no stream has is not found, whole.
+- A pipe whose Kinesis stream does not exist: the `CreatePipe` page lists
+  `NotFoundException`, "An entity that you specified does not exist", and
+  does not say whether a source that does not exist is one. The emulator
+  keeps what it did: the pipe is made, and reads the stream from its
+  beginning (`TRIM_HORIZON`) once there is one, whatever its
+  `StartingPosition`; a pipe whose stream was there when it first asked
+  starts where it was told. All of that is a reading. The same holds for
+  a DynamoDB stream source, which shares the code.
 - `CreateStream` over a name that exists replaces the record, as the pack
   did (the service lists `ResourceInUseException` for `CreateStream`; that
   a name in use is what it answers is a reading); so the stream's

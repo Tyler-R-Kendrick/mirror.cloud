@@ -18,7 +18,7 @@ internal/execution/cicd/codepipeline [test]: aws/codebuild aws/codepipeline
 internal/execution/cicd/delivery [test]: digitalocean/v2 fly/machines hetzner/v1 hostinger/api railway/graphql
 internal/execution/cicd/vercel [test]: vercel/api
 internal/journal [test]: aws/s3 aws/sqs
-internal/mutation [test]: aws/apigateway aws/es aws/firehose aws/logs aws/s3 aws/sqs azure/blobs azure/queue cloudflare/api digitalocean/v2 fly/machines hetzner/v1 hostinger/api vercel/kv
+internal/mutation [test]: aws/apigateway aws/dynamodb aws/es aws/firehose aws/logs aws/s3 aws/sqs azure/blobs azure/queue cloudflare/api digitalocean/v2 fly/machines hetzner/v1 hostinger/api vercel/kv
 internal/proto/aws/awsjson [test]: aws/dynamodb
 internal/proto/aws/awsquery [test]: aws/sqs
 internal/proto/aws/httpuri [test]: aws/apigatewayv2 aws/backup aws/guardduty aws/location aws/mq

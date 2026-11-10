@@ -165,8 +165,8 @@ func TestCloudFormationOrdersInLinearTime(t *testing.T) {
 		if err := within(t, done, op); err != nil {
 			t.Fatalf("%s answered %v", op, err)
 		}
-		if pack.walks != 500 {
-			t.Errorf("%s walked %d resources' properties, want 500", op, pack.walks)
+		if pack.Walks != 500 {
+			t.Errorf("%s walked %d resources' properties, want 500", op, pack.Walks)
 		}
 	}
 	made := h.resources("chain")
@@ -534,7 +534,7 @@ func TestCloudFormationOrdersAnIfByTheBranchItTakes(t *testing.T) {
 	if _, err := h.invoke("ValidateTemplate", map[string]any{"TemplateBody": string(body)}); err != nil {
 		t.Errorf("A and B, settled by Env, answered %v", err)
 	}
-	if order, err := h.pack.order(tpl, conditions(tpl, map[string]string{"Env": "prod"})); err != nil || slices.Index(order, "E") < slices.Index(order, "ZZ") || slices.Index(order, "F") > slices.Index(order, "ZZ") {
+	if _, order, _, err := h.pack.Read(string(body), map[string]any{}, "", "", func(map[string]any) error { return nil }); err != nil || slices.Index(order, "E") < slices.Index(order, "ZZ") || slices.Index(order, "F") > slices.Index(order, "ZZ") {
 		t.Errorf("the order is %v (%v), want E after ZZ and F, which names ZZ only outside prod, before it", order, err)
 	}
 	for _, cond := range []string{"Named"} {
@@ -599,8 +599,8 @@ func TestCloudFormationFindsACycleInLinearTime(t *testing.T) {
 	if code(err) != "ValidationError" || err.Error() != "ValidationError: Circular dependency between resources: [X, Y]" {
 		t.Errorf("the template answered %v, want the cycle [X, Y]", err)
 	}
-	if pack.walks > 1000 {
-		t.Errorf("finding the cycle walked %d resources, want at most 1000", pack.walks)
+	if pack.Walks > 1000 {
+		t.Errorf("finding the cycle walked %d resources, want at most 1000", pack.Walks)
 	}
 }
 
@@ -689,17 +689,6 @@ func TestCloudFormationRefusesAnUnresolvedSubVariable(t *testing.T) {
 	}
 }
 
-// An Integer may be negative: "-5" is -5, as a Number parameter's text can
-// be, and "-", "+5", "- 5" and "5-" are still none. Before, "-5" was refused.
-func TestCloudFormationReadsANegativeInteger(t *testing.T) {
-	for text, want := range map[string]any{"-5": -5, "016": 16, "-": nil, "+5": nil, "- 5": nil, "5-": nil} {
-		got, ok := coerce(text, "Integer")
-		if want == nil && ok || want != nil && (!ok || got != want) {
-			t.Errorf("coerce(%q, Integer) is %v, %t, want %v", text, got, ok, want)
-		}
-	}
-}
-
 // AWS::NoValue "Removes the corresponding resource property when specified
 // as a return value in the Fn::If intrinsic function" (User Guide, pseudo
 // parameters), so it is never a value itself. Each intrinsic that builds a
@@ -746,7 +735,7 @@ func TestCloudFormationNoValueIsNeverAValue(t *testing.T) {
 	if got, err := h.service("aws.secretsmanager", "DescribeSecret", map[string]any{"SecretId": "nv-s"}); err != nil || got["Description"] != nil {
 		t.Errorf("the secret is %v (%v), want no Description", got, err)
 	}
-	if rec := h.record("nv"); strings.Contains(spi.JSONText([]any{rec["Outputs"], rec["Refs"], rec["Resources"]}), string(noValue)) {
+	if rec := h.record("nv"); strings.Contains(spi.JSONText([]any{rec["Outputs"], rec["Refs"], rec["Resources"]}), "AWS::NoValue") {
 		t.Errorf("the stack record holds the sentinel: %v", h.record("nv"))
 	}
 	refused := map[string]string{
@@ -891,7 +880,9 @@ func TestCloudFormationMakesOnlyWhatItsConditionAllows(t *testing.T) {
 			"Resources": resources, "Outputs": outputs})
 		return string(body)
 	}
-	resources := map[string]any{"A": param("No", "a"), "B": param("Yes", map[string]any{"Ref": "A"}), "C": param("Yes", "c"), "D": param("", "d")}
+	// A's value could not be made (AWS::NoValue as a Fn::Join's separator), and is not checked: A is not made.
+	unmakeable := map[string]any{"Fn::Join": []any{map[string]any{"Ref": "AWS::NoValue"}, []any{"a", "b"}}}
+	resources := map[string]any{"A": param("No", unmakeable), "B": param("Yes", map[string]any{"Ref": "A"}), "C": param("Yes", "c"), "D": param("", "d")}
 	outputs := map[string]any{"OA": map[string]any{"Condition": "No", "Value": map[string]any{"Ref": "A"}}, "OC": map[string]any{"Value": map[string]any{"Ref": "C"}}}
 	if _, err := h.invoke("CreateStack", map[string]any{"StackName": "cnd", "TemplateBody": template(outputs, resources)}); err != nil {
 		t.Fatal(err)

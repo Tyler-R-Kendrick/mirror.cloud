@@ -1,8 +1,8 @@
 {
   "packs": 0,
-  "case_labels": 478,
-  "services_files": 36,
-  "services_loc": 33039,
+  "case_labels": 470,
+  "services_files": 35,
+  "services_loc": 32596,
   "fault_sites": 593,
   "register_sites": 0,
   "pack_dirs": [],

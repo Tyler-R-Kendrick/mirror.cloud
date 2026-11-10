@@ -15752,8 +15752,8 @@ var mutants = []mutant{
 	{
 		name: "kinesis-update-stream-mode-makes-a-stream",
 		file: filepath.Join("behavior", "aws", "kinesis", "service.yaml"),
-		old:  "      mode: \"string(input.StreamModeDetails.StreamMode)\"\n    require:\n      - { cond: s_found, error: NotFound }\n",
-		new:  "      mode: \"string(input.StreamModeDetails.StreamMode)\"\n    require:\n",
+		old:  "      - { cond: s_found, error: NotFound }\n      - cond: \"mode != 'ON_DEMAND' || size(others",
+		new:  "      - cond: \"mode != 'ON_DEMAND' || size(others",
 		pkg:  "./internal/services/aws/kinesis",
 		run:  "TestKinesisAStreamThatChangesModeIsHeldToItsLimit",
 	},
@@ -15796,6 +15796,22 @@ var mutants = []mutant{
 		new:  `mode != 'PROVISIONED' || sum(others.filter(o, true || !(`,
 		pkg:  "./internal/services/aws/kinesis",
 		run:  "TestKinesisAStreamThatChangesModeIsHeldToItsLimit",
+	},
+	{
+		name: "kinesis-create-stream-takes-any-stream-mode",
+		file: filepath.Join("behavior", "aws", "kinesis", "service.yaml"),
+		old:  "(mode == 'ON_DEMAND' ? 4 : 1)\"\n    require:\n      - cond: \"mode in ['PROVISIONED', 'ON_DEMAND']\"",
+		new:  "(mode == 'ON_DEMAND' ? 4 : 1)\"\n    require:\n      - cond: \"true\"",
+		pkg:  "./internal/services/aws/kinesis",
+		run:  "TestKinesisAStreamModeIsOneOfTheTwo",
+	},
+	{
+		name: "kinesis-update-stream-mode-takes-any-stream-mode",
+		file: filepath.Join("behavior", "aws", "kinesis", "service.yaml"),
+		old:  "      mode: \"string(input.StreamModeDetails.StreamMode)\"\n    require:\n      - cond: \"mode in ['PROVISIONED', 'ON_DEMAND']\"",
+		new:  "      mode: \"string(input.StreamModeDetails.StreamMode)\"\n    require:\n      - cond: \"true\"",
+		pkg:  "./internal/services/aws/kinesis",
+		run:  "TestKinesisAStreamModeIsOneOfTheTwo",
 	},
 	{
 		name: "kinesis-reverse-at-timestamp-selection",

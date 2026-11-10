@@ -424,3 +424,32 @@ func TestKinesisAStreamThatChangesModeIsHeldToItsLimit(t *testing.T) {
 		t.Errorf("with one of the fifty deleted the change of mode answered %s", got)
 	}
 }
+
+// A stream's mode is PROVISIONED or ON_DEMAND ("Valid Values: PROVISIONED | ON_DEMAND", API reference,
+// StreamModeDetails). Any other was recorded as given. It is ValidationException, in the words the
+// service's request validation uses for an enum; that those are the words here, and the order of the
+// values in them, is a reading.
+func TestKinesisAStreamModeIsOneOfTheTwo(t *testing.T) {
+	answer := kinesisAnswers(t)
+	refused := func(value string) string {
+		return "400 ValidationException: 1 validation error detected: Value '" + value + "' at 'streamModeDetails.streamMode' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]"
+	}
+	for _, value := range []string{"BOGUS", "on_demand", ""} {
+		if got := answer("CreateStream", `{"StreamName":"n","StreamModeDetails":{"StreamMode":"`+value+`"}}`); got != refused(value) {
+			t.Errorf("CreateStream with the mode %q answered %s", value, got)
+		}
+	}
+	if got := answer("DescribeStreamSummary", `{"StreamName":"n"}`); !strings.HasPrefix(got, "400 ResourceNotFoundException") {
+		t.Errorf("a stream refused for its mode is described: %s", got)
+	}
+	answer("CreateStream", `{"StreamName":"s","ShardCount":2}`)
+	arn := `"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/s"`
+	if got := answer("UpdateStreamMode", `{`+arn+`,"StreamModeDetails":{"StreamMode":"BOGUS"}}`); got != refused("BOGUS") {
+		t.Errorf("UpdateStreamMode with the mode BOGUS answered %s", got)
+	}
+	for _, value := range []string{"ON_DEMAND", "PROVISIONED"} {
+		if got := answer("UpdateStreamMode", `{`+arn+`,"StreamModeDetails":{"StreamMode":"`+value+`"}}`) + " " + answer("CreateStream", `{"StreamName":"c`+value+`","StreamModeDetails":{"StreamMode":"`+value+`"}}`); got != "200 200" {
+			t.Errorf("the mode %s answered %s to a change and a create", value, got)
+		}
+	}
+}

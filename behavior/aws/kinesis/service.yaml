@@ -85,6 +85,9 @@ operations:
       mode: "'StreamModeDetails' in input && type(input.StreamModeDetails) == map && 'StreamMode' in input.StreamModeDetails ? string(input.StreamModeDetails.StreamMode) : 'PROVISIONED'"
       shards: "'ShardCount' in input && int(input.ShardCount) > 0 ? int(input.ShardCount) : (mode == 'ON_DEMAND' ? 4 : 1)"
     require:
+      - cond: "mode in ['PROVISIONED', 'ON_DEMAND']"
+        error: Validation
+        message_expr: "'1 validation error detected: Value \\'' + mode + '\\' at \\'streamModeDetails.streamMode\\' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]'"
       - cond: "mode == 'ON_DEMAND' || sum(streams.filter(s, !('StreamModeDetails' in s && 'StreamMode' in s.StreamModeDetails && string(s.StreamModeDetails.StreamMode) == 'ON_DEMAND')).map(s, 'OpenShardCount' in s && int(s.OpenShardCount) > 0 ? int(s.OpenShardCount) : 1)) + shards <= 500"
         error: LimitExceeded
         message: This request would exceed the shard limit for the account.
@@ -435,6 +438,9 @@ operations:
     let:
       mode: "string(input.StreamModeDetails.StreamMode)"
     require:
+      - cond: "mode in ['PROVISIONED', 'ON_DEMAND']"
+        error: Validation
+        message_expr: "'1 validation error detected: Value \\'' + mode + '\\' at \\'streamModeDetails.streamMode\\' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]'"
       - { cond: s_found, error: NotFound }
       - cond: "mode != 'ON_DEMAND' || size(others.filter(o, 'StreamModeDetails' in o && 'StreamMode' in o.StreamModeDetails && string(o.StreamModeDetails.StreamMode) == 'ON_DEMAND')) < 50"
         error: LimitExceeded

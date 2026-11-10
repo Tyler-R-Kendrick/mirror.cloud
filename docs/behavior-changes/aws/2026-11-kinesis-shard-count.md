@@ -61,6 +61,7 @@
 | `DescribeLimits.OpenShardCount` with on-demand streams | 1 | The provisioned streams' shards; an on-demand stream's are not counted |
 | A 51st on-demand stream (`OnDemandStreamCountLimit` 50) | Accepted | `LimitExceededException` |
 | `UpdateShardCount` on an on-demand stream | The count set | `ValidationException` |
+| `CreateStream` or `UpdateStreamMode` with a `StreamMode` that is not `PROVISIONED` or `ON_DEMAND` | Recorded as given | `ValidationException`, "1 validation error detected: Value 'X' at 'streamModeDetails.streamMode' failed to satisfy constraint: Member must satisfy enum value set: [PROVISIONED, ON_DEMAND]" |
 | `UpdateStreamMode` on a stream that does not exist | 200, and a stream record | `ResourceNotFoundException` |
 | `UpdateStreamMode` to `ON_DEMAND` with 50 other on-demand streams, or to `PROVISIONED` when the stream's shards would take the provisioned shards past `ShardLimit` | Accepted | `LimitExceededException` |
 
@@ -82,6 +83,10 @@
   and leaves on-demand shards out, is a reading. The messages of both
   `LimitExceededException`s are this emulator's, and so is the limit of 500
   (the guide's defaults are 1,000, 6,000 or 20,000 by Region).
+- `StreamMode` has "Valid Values: `PROVISIONED | ON_DEMAND`" (API reference,
+  StreamModeDetails). The message for any other is the form the service's
+  request validation gives an enum; that it is these words, and the order of
+  the values in them, is a reading.
 - `UpdateShardCount` "is only supported for the data streams with the
   provisioned capacity mode" (API reference). Which of its errors answers an
   on-demand stream is not stated: `ValidationException` ("The request failed

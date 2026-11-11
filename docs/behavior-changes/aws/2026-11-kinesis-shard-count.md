@@ -78,7 +78,7 @@
 | `DescribeStream`, `DescribeStreamSummary`, `DeleteStream`, `PutRecord`, `PutRecords` or `GetShardIterator` of a stream that exists, addressed by `StreamARN` alone | `ResourceNotFoundException`, with no name in its message | The stream, as by its name |
 | `DescribeStreamConsumer` or `DeregisterStreamConsumer` by `StreamARN` and `ConsumerName` | Not found, with no name in its message | The consumer, as by its ARN |
 | An operation that takes a `StreamName` or a `StreamARN`, given neither | `ResourceNotFoundException`, "Stream  under account ..." | `InvalidArgumentException`, "Either StreamName or StreamARN must be specified." (for a consumer: "Either ConsumerARN, or StreamARN and ConsumerName, must be specified.") |
-| An address that names nothing: an empty string, whitespace, or a `StreamARN` that ends at `stream/` or in a slash | "Stream  under account ... not found." with no name; `RegisterStreamConsumer` made a consumer `arn:...:stream//consumer/<name>` | As an address not given: "<Member> is required" where the member is required, `InvalidArgumentException` where it is one of several; nothing is written |
+| An address that names nothing: an empty string, a blank name or ARN segment that no stream has, or a `StreamARN` that ends at `stream/` or in a slash | "Stream  under account ... not found." with no name; `RegisterStreamConsumer` made a consumer `arn:...:stream//consumer/<name>` | As an address not given: "<Member> is required" where the member is required, `InvalidArgumentException` where it is one of several; nothing is written |
 | `GetRecords` with an iterator that names no stream | `InvalidArgumentException`, "Either StreamName or StreamARN must be specified." | `InvalidArgumentException`, "Invalid ShardIterator.", as for any value that is no iterator |
 | `CreateStream` with a `StreamName` outside `[a-zA-Z0-9_.-]+`, or longer than 128 | Accepted | `ValidationException` |
 | `PutRecord`, `PutRecords` or `GetShardIterator` with a `StreamName` that holds a slash | The name cut at its last slash, so `a/b` was the stream `b` | The name whole: only an ARN is cut |
@@ -273,18 +273,37 @@
   rather than as its own validation error, is a reading. An ARN's account
   and Region are not checked, and a name wins over an ARN that disagrees
   with it, as before.
+- A name is never judged or altered before it is looked for. A stream
+  that is stored is reached by its exact name, whatever the name: a store
+  written before names were held to the pattern may hold one named with
+  whitespace, a slash or 200 characters, and it is read, written, tagged
+  and deleted by that name (and by an ARN whose last segment is the
+  name). Only an empty name is "not given" before the lookup. A blank
+  (whitespace-only) name that no stream has is then answered as no
+  address, rather than as "Stream   under account ... not found.", which
+  would name nothing. So `{"StreamName": " ", "StreamARN": <a stream's>}`
+  is answered as no address when no stream is named " ": the name wins
+  over the ARN, as any name does, where an empty name leaves the ARN to
+  speak. A consumer named by a stream ARN whose name is blank is not
+  named either, unless that consumer exists. All of this is a reading.
 - An iterator that is not one is `InvalidArgumentException`, "A specified
   parameter exceeds its restrictions, is not supported, or can't be used",
   which `GetRecords` lists; `ExpiredIteratorException` is "The provided
   iterator exceeds the maximum age allowed", which a malformed one does
-  not. The message, "Invalid ShardIterator.", is a reading.
+  not. The message, "Invalid ShardIterator.", is a reading. The part of
+  the emulator's iterator after its stream is a count from 0; one that is
+  anything else (text, a negative number, digits with more after them) is
+  no iterator, where it was read as 0.
 - A stream's name: "Length Constraints: Minimum length of 1. Maximum
   length of 128. Pattern: `[a-zA-Z0-9_.-]+`" (`CreateStream`). A name
   outside it is `ValidationException` when the stream is made; the two
-  messages are readings in the service's form for a constraint. No test,
-  recorded step or other service's fixture in this repository made a
-  stream with such a name. The other operations do not judge a name's
-  form: a name that no stream has is not found, whole.
+  messages are readings in the service's form for a constraint. One test
+  in this repository made a stream with such a name (a CloudFormation
+  stream named with the words of a refusal, spaces and all); it now
+  asserts the name is refused and uses the nearest name that can exist.
+  No recorded step and no other service's fixture did. The other
+  operations do not judge a name's form: a name that no stream has is not
+  found, whole.
 - A pipe whose Kinesis stream does not exist: the `CreatePipe` page lists
   `NotFoundException`, "An entity that you specified does not exist", and
   does not say whether a source that does not exist is one. The emulator
@@ -292,7 +311,11 @@
   beginning (`TRIM_HORIZON`) once there is one, whatever its
   `StartingPosition`; a pipe whose stream was there when it first asked
   starts where it was told. All of that is a reading. The same holds for
-  a DynamoDB stream source, which shares the code.
+  a DynamoDB stream source, which shares the code. Left as it was, and
+  the same on the build before: a pipe keeps its checkpoint when its
+  stream is deleted and made again, so it resumes at the old sequence
+  number and the new stream's records below it (the first, at 0, among
+  them) are not delivered.
 - `CreateStream` over a name that exists replaces the record, as the pack
   did (the service lists `ResourceInUseException` for `CreateStream`; that
   a name in use is what it answers is a reading); so the stream's

@@ -36,14 +36,16 @@ func (p records) col(req *spi.Request, n string) spi.Collection {
 func (p records) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
 	arn := str(req.Input["StreamARN"])                                                // "you must use either the StreamARN or the StreamName parameter, or both"
 	name := cmp.Or(str(req.Input["StreamName"]), arn[strings.LastIndex(arn, "/")+1:]) // a name is taken whole; an ARN's last segment is the name
-	at, whole := "", true
-	if req.Operation == "GetRecords" { // whose stream is its iterator's, which is "stream|seq"
+	start, whole := 0, true
+	if req.Operation == "GetRecords" { // whose stream is its iterator's, which is "stream|seq", seq a count from 0
 		raw, _ := base64.StdEncoding.DecodeString(str(req.Input["ShardIterator"]))
-		name, at, whole = strings.Cut(string(raw), "|")
+		stream, seq, _ := strings.Cut(string(raw), "|")
+		start, _ = strconv.Atoi(seq)
+		name, whole = stream, seq == strconv.Itoa(start) && start >= 0 // so one with no separator is none
 	}
-	if _, found, _ := p.col(req, "kinesis").Get(ctx, name); !whole || req.Operation == "GetRecords" && strings.TrimSpace(name) == "" {
+	if _, found, _ := p.col(req, "kinesis").Get(ctx, name); !whole || req.Operation == "GetRecords" && !found && strings.TrimSpace(name) == "" {
 		return nil, &spi.Fault{Code: "InvalidArgumentException", Message: "Invalid ShardIterator.", HTTPStatus: 400, Fault: "client"}
-	} else if strings.TrimSpace(name) == "" { // whitespace names nothing either
+	} else if !found && strings.TrimSpace(name) == "" { // a name is looked for as it is; blank, and no stream's, it names nothing
 		return nil, &spi.Fault{Code: "InvalidArgumentException", Message: "Either StreamName or StreamARN must be specified.", HTTPStatus: 400, Fault: "client"}
 	} else if !found { // never made, or deleted since the iterator was given
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Stream " + name + " under account " + req.Identity.Account + " not found.", HTTPStatus: 400, Fault: "client"}
@@ -78,7 +80,6 @@ func (p records) invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		it := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s|%d", name, seq)))
 		return &spi.Response{Output: map[string]any{"ShardIterator": it}}, nil
 	default: // GetRecords
-		start, _ := strconv.Atoi(at)
 		limit := asInt(req.Input["Limit"])
 		if limit <= 0 {
 			limit = 1000

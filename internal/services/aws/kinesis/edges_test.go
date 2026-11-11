@@ -93,6 +93,12 @@ func TestKinesisAnEmptyAddressByName(t *testing.T) {
 		{"PutRecord", `{"StreamName":" ","PartitionKey":"k","Data":"aGk="}`, either},
 		{"PutRecord", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/","PartitionKey":"k","Data":"aGk="}`, either},
 		{"DescribeStreamConsumer", `{"ConsumerARN":" "}`, "400 InvalidArgumentException: Either ConsumerARN, or StreamARN and ConsumerName, must be specified."},
+		{"DescribeStreamConsumer", `{"StreamARN":" ","ConsumerName":"c"}`, "400 InvalidArgumentException: Either ConsumerARN, or StreamARN and ConsumerName, must be specified."},
+		{"DeregisterStreamConsumer", `{"StreamARN":"arn:aws:kinesis:us-east-1:000000000000:stream/ ","ConsumerName":"c"}`, "400 InvalidArgumentException: Either ConsumerARN, or StreamARN and ConsumerName, must be specified."},
+		// A name wins over an ARN, as it always did, and a blank name is still a name: one no stream has
+		// names nothing, whatever ARN is beside it. Only an empty name leaves the ARN to speak.
+		{"DescribeStream", `{"StreamName":" ","StreamARN":"` + kinesisARN + `"}`, either},
+		{"DescribeStream", `{"StreamName":"","StreamARN":"` + kinesisARN + `"}`, "200"},
 		// What names something is still found, or not found by its name.
 		{"UpdateStreamMode", `{"StreamARN":"` + kinesisARN + `","StreamModeDetails":{"StreamMode":"ON_DEMAND"}}`, "200"},
 		{"RegisterStreamConsumer", `{"StreamARN":"` + kinesisARN + `","ConsumerName":"z"}`, "200"},
@@ -128,6 +134,16 @@ func TestKinesisWhatIsNoIteratorIsRefusedAsOne(t *testing.T) {
 				t.Errorf("GetRecords with the iterator %q (%q) answered %s", encoded, iterator, got)
 			}
 		}
+	}
+	// The part after the stream is a count from 0, and nothing else: it was read as 0 when it was not one.
+	for _, iterator := range []string{"s|x", "s|-1", "s|1x", "s|+1", "s| 1", "s|1|2", "s|", "s|1.0", "s|01"} {
+		status, out := try("GetRecords", `{"ShardIterator":"`+base64.StdEncoding.EncodeToString([]byte(iterator))+`"}`)
+		if got := fmt.Sprint(status, " ", out["__type"], ": ", out["message"]); got != "400 InvalidArgumentException: Invalid ShardIterator." {
+			t.Errorf("GetRecords with the iterator %q answered %s", iterator, got)
+		}
+	}
+	if status, out := try("GetRecords", `{"ShardIterator":"`+base64.StdEncoding.EncodeToString([]byte("s|12"))+`"}`); status != 200 {
+		t.Errorf("an iterator past the stream's last record answered %d %v", status, out)
 	}
 	if status, out := try("GetRecords", `{"ShardIterator":"`+base64.StdEncoding.EncodeToString([]byte("ghost|0"))+`"}`); status != 400 || out["__type"] != "ResourceNotFoundException" {
 		t.Errorf("an iterator of a stream that does not exist answered %d %v", status, out)

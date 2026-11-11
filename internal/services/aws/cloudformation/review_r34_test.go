@@ -404,7 +404,15 @@ func TestCloudFormationARollbackWaitsForAStreamsNextChangeOfMode(t *testing.T) {
 // stream. The sentence is Kinesis's own, so it is compared with what Kinesis answers.
 func TestCloudFormationARestorePassesOnlyTheCountCallsRefusal(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"plain-name", "UpdateShardCount is only supported"} {
+	// The name that carried the refusal's words can no longer be a stream's: a name is of [a-zA-Z0-9_.-]+,
+	// so Kinesis refuses the create, and the stack with it. The nearest name that can exist stands in. It
+	// cannot hold the words as the refusal has them (they are spaced), so it no longer tells a match by
+	// what an error contains from a match of the whole: the stored mode of
+	// TestCloudFormationAStreamsRestoreThatFailsIsAFailedRollback, which Kinesis echoes as given, does.
+	if err := rveCreate(newStacks(t), "nm", map[string]any{"R": map[string]any{"Type": "AWS::Kinesis::Stream", "Properties": map[string]any{"Name": "UpdateShardCount is only supported"}}}); err == nil || !strings.Contains(err.Error(), "regular expression pattern") {
+		t.Errorf("a stream named with spaces was created: %v", err)
+	}
+	for _, name := range []string{"plain-name", "UpdateShardCount.is.only.supported"} {
 		for _, continued := range []bool{false, true} {
 			h := newStacks(t)
 			stream := func(properties map[string]any) map[string]any {

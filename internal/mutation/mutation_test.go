@@ -5672,7 +5672,7 @@ var mutants = []mutant{
 		old:  `err.Error() == countRefused) {`,
 		new:  `strings.Contains(err.Error(), countRefused[21:55])) {`,
 		pkg:  "./internal/services/aws/cloudformation",
-		run:  "TestCloudFormationARestorePassesOnlyTheCountCallsRefusal|TestCloudFormationAStreamsRestoreThatFailsIsAFailedRollback",
+		run:  "TestCloudFormationAStreamsRestoreThatFailsIsAFailedRollback",
 	},
 	{
 		name: "cloudformation-a-continued-rollback-passes-what-contains-the-counts-refusal",
@@ -5680,7 +5680,7 @@ var mutants = []mutant{
 		old:  `err.Error() == countRefused]`,
 		new:  `strings.Contains(err.Error(), countRefused[21:55])]`,
 		pkg:  "./internal/services/aws/cloudformation",
-		run:  "TestCloudFormationARestorePassesOnlyTheCountCallsRefusal|TestCloudFormationAStreamsRestoreThatFailsIsAFailedRollback",
+		run:  "TestCloudFormationAStreamsRestoreThatFailsIsAFailedRollback",
 	},
 	{
 		// Nor is it matched by how it starts: the enum refusal of a stored mode is a ValidationException too.

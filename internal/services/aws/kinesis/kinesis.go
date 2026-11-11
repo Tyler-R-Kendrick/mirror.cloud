@@ -6,6 +6,7 @@
 package kinesis
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -33,16 +34,18 @@ func (p records) col(req *spi.Request, n string) spi.Collection {
 }
 
 func (p records) invoke(ctx context.Context, req *spi.Request) (*spi.Response, error) {
-	name := first(req.Input, "StreamName", "StreamARN") // "you must use either the StreamARN or the StreamName parameter, or both"
-	name = name[strings.LastIndex(name, "/")+1:]        // an ARN's last segment is the stream's name, and no name holds a slash
-	at, whole := "", true
-	if req.Operation == "GetRecords" { // whose stream is its iterator's, which is "stream|seq"
+	arn := str(req.Input["StreamARN"])                                                // "you must use either the StreamARN or the StreamName parameter, or both"
+	name := cmp.Or(str(req.Input["StreamName"]), arn[strings.LastIndex(arn, "/")+1:]) // a name is taken whole; an ARN's last segment is the name
+	start, whole := 0, true
+	if req.Operation == "GetRecords" { // whose stream is its iterator's, which is "stream|seq", seq a count from 0
 		raw, _ := base64.StdEncoding.DecodeString(str(req.Input["ShardIterator"]))
-		name, at, whole = strings.Cut(string(raw), "|")
+		stream, seq, _ := strings.Cut(string(raw), "|")
+		start, _ = strconv.Atoi(seq)
+		name, whole = stream, seq == strconv.Itoa(start) && start >= 0 // so one with no separator is none
 	}
-	if _, found, _ := p.col(req, "kinesis").Get(ctx, name); !whole {
-		return nil, &spi.Fault{Code: "InvalidArgumentException", HTTPStatus: 400, Fault: "client"}
-	} else if name == "" {
+	if _, found, _ := p.col(req, "kinesis").Get(ctx, name); !whole || req.Operation == "GetRecords" && !found && strings.TrimSpace(name) == "" {
+		return nil, &spi.Fault{Code: "InvalidArgumentException", Message: "Invalid ShardIterator.", HTTPStatus: 400, Fault: "client"}
+	} else if !found && strings.TrimSpace(name) == "" { // a name is looked for as it is; blank, and no stream's, it names nothing
 		return nil, &spi.Fault{Code: "InvalidArgumentException", Message: "Either StreamName or StreamARN must be specified.", HTTPStatus: 400, Fault: "client"}
 	} else if !found { // never made, or deleted since the iterator was given
 		return nil, &spi.Fault{Code: "ResourceNotFoundException", Message: "Stream " + name + " under account " + req.Identity.Account + " not found.", HTTPStatus: 400, Fault: "client"}
@@ -77,7 +80,6 @@ func (p records) invoke(ctx context.Context, req *spi.Request) (*spi.Response, e
 		it := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s|%d", name, seq)))
 		return &spi.Response{Output: map[string]any{"ShardIterator": it}}, nil
 	default: // GetRecords
-		start, _ := strconv.Atoi(at)
 		limit := asInt(req.Input["Limit"])
 		if limit <= 0 {
 			limit = 1000
@@ -158,15 +160,6 @@ func (p records) nextSeq(ctx context.Context, req *spi.Request, name string) int
 	rec["Seq"] = n + 1
 	_ = spi.PutJSON(ctx, p.col(req, "kinesis"), name, rec)
 	return n
-}
-
-func first(in map[string]any, keys ...string) string {
-	for _, k := range keys {
-		if s := str(in[k]); s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 func str(v any) string {

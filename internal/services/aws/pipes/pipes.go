@@ -5,10 +5,12 @@ package pipes
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -197,11 +199,14 @@ func (p *worker) drainStream(ctx context.Context, identity spi.Identity, pipe ma
 		return false
 	}
 	streamParameters := sourceParameters(pipe, parameterName)
-	if !ok {
+	if !ok || len(iterator) == 0 { // none yet; or an empty one, left when the source was not there: read it from its beginning once it is
 		request.Operation = "GetShardIterator"
-		request.Input["ShardIteratorType"] = spi.Str(streamParameters["StartingPosition"])
+		request.Input["ShardIteratorType"] = cmp.Or(map[bool]string{true: "TRIM_HORIZON"}[ok], spi.Str(streamParameters["StartingPosition"]))
 		request.Input["Timestamp"] = streamParameters["StartingPositionTimestamp"]
 		response, invokeErr := client.Invoke(ctx, request)
+		if f := (*spi.Fault)(nil); errors.As(invokeErr, &f) && strings.Contains(f.Code, "NotFound") {
+			_ = checkpoint.Put(ctx, name, nil) // a record that arrives with the source must not be behind where the pipe starts
+		}
 		if invokeErr != nil {
 			return false
 		}

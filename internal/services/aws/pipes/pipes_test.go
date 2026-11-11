@@ -1098,3 +1098,54 @@ func (c *delayedSecondWaitClock) blockSecondWait() {
 		<-c.release
 	}
 }
+
+// A pipe made before its Kinesis stream exists loses nothing once the stream does. The CreatePipe page
+// does not say what the service does with a source that does not exist (it lists NotFoundException, "An
+// entity that you specified does not exist", and no more), so the emulator keeps what it did: the pipe is
+// made, and reads the stream from its beginning once there is one. When Kinesis began to refuse an
+// iterator for a stream that does not exist, the pipe asked again on each poll, and with LATEST the
+// first poll to succeed was the one the first record's arrival started: that record was behind the
+// iterator and never delivered. A pipe whose stream was not there when it first asked reads from
+// TRIM_HORIZON when it is; one whose stream was there starts where it was told, as before.
+func TestPipesAKinesisSourceMadeAfterItsPipeLosesNoRecord(t *testing.T) {
+	id := spi.Identity{Account: "123456789012", Region: "us-east-1"}
+	for _, position := range []string{"LATEST", "TRIM_HORIZON"} {
+		deps := spitest.Deps(t)
+		p := New(deps)
+		stream, queue := bundled.Handler("aws.kinesis", deps), bundled.Handler("aws.sqs", deps)
+		invoke(t, queue, id, "CreateQueue", map[string]any{"QueueName": "target"})
+		input := pipeInput("early", "unused", "target")
+		input["Source"] = "arn:aws:kinesis:us-east-1:123456789012:stream/later"
+		input["SourceParameters"] = map[string]any{"KinesisStreamParameters": map[string]any{"StartingPosition": position}}
+		invoke(t, p, id, "CreatePipe", input)
+		p.drain(context.Background()) // the pipe asks, and there is no stream
+		p.drain(context.Background())
+		invoke(t, stream, id, "CreateStream", map[string]any{"StreamName": "later"})
+		invoke(t, stream, id, "PutRecord", map[string]any{"StreamName": "later", "PartitionKey": "k", "Data": []byte("first")})
+		delivered := func(want int) { // polled here, not awaited: a pipe that never delivers fails in seconds
+			t.Helper()
+			for range 150 {
+				if p.drain(context.Background()); len(storedMessages(t, deps, id, "target")) >= want {
+					return
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			t.Fatalf("%s: %d records delivered; want %d", position, len(storedMessages(t, deps, id, "target")), want)
+		}
+		delivered(1)
+		var event map[string]any
+		if err := json.Unmarshal([]byte(storedMessages(t, deps, id, "target")[0]["body"].(string)), &event); err != nil {
+			t.Fatal(err)
+		}
+		if event["data"] != base64.StdEncoding.EncodeToString([]byte("first")) {
+			t.Errorf("%s: the first record of a stream made after its pipe was delivered as %v", position, event)
+		}
+		invoke(t, stream, id, "PutRecord", map[string]any{"StreamName": "later", "PartitionKey": "k", "Data": []byte("second")})
+		delivered(2)
+		p.drain(context.Background())
+		if got := len(storedMessages(t, deps, id, "target")); got != 2 {
+			t.Errorf("%s: %d records delivered; want the two, once each", position, got)
+		}
+		p.Close()
+	}
+}
